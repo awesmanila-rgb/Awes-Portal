@@ -1,0 +1,14419 @@
+(function(){
+  "use strict";
+
+  // ---------- helpers ----------
+  const domCache = Object.create(null);
+  const $ = (id) => domCache[id] || (domCache[id] = document.getElementById(id));
+  const $$ = (selector, root=document) => Array.from(root.querySelectorAll(selector));
+
+  // Shared HTML escaping helper. Keep this in one place so modules do not each
+  // maintain their own copy.
+  function escapeHtml(s){
+    return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function toast(msg){
+    const t = $('toast'); t.textContent = msg; t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), 2200);
+  }
+  // IMPORTANT: must return the device's LOCAL calendar date, not UTC.
+  // toISOString() always converts to UTC first — for Philippine time (UTC+8),
+  // that meant anyone clocking in before 8:00 AM local time got their DTR
+  // entry filed under YESTERDAY's date, while clocking out later the same
+  // local day (after the UTC rollover) looked up TODAY's date instead and
+  // found no matching record — blocking Time Out or creating a duplicate,
+  // separate entry. Using local getters instead avoids this entirely.
+  function todayISO(){
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+day;
+  }
+  function fmtDate(iso){
+    if(!iso) return '—';
+    const d = new Date(iso+'T00:00:00');
+    return d.toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'});
+  }
+  // For full timestamptz values (e.g. created_at) — NOT plain date columns.
+  // fmtDate() above assumes a bare "YYYY-MM-DD" string and appends
+  // 'T00:00:00' itself; feeding it an already-complete ISO timestamp (with
+  // its own time + offset, e.g. "2026-09-10T09:23:45.123+00:00") produces
+  // a malformed "...+00:00T00:00:00" string that new Date() can't parse,
+  // which is why service-requests.js's "created" timestamps were showing
+  // as Invalid Date before this existed.
+  function fmtDateTime(iso){
+    if(!iso) return '—';
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'})
+      +' '+d.toLocaleTimeString('en-PH', {hour:'numeric', minute:'2-digit'});
+  }
+  // Matches a piece of equipment to its own service-report visit history out
+  // of a customer's full report list. Shared by the customer portal's
+  // equipment detail screen (customer-equipment-history.js) and the admin
+  // "Manage Equipment List" detail overlay (admin.js) so both show the
+  // identical history for the same unit rather than two independently
+  // maintained copies of this logic drifting apart.
+  // Matched by equipment_id first when a report has one (set at save time —
+  // see saveReport() in ui.js and reportToRow() above) — a stable link that
+  // survives later edits to the equipment record's own fields entirely.
+  // Falls back to serial number (serial_cu / serial_fcu) when the report
+  // predates equipment_id, and to location+type text only when the
+  // equipment record has no serial on file either. Returns newest first.
+  function matchReportHistoryForEquipment(reports, eq){
+    const hasSerial = !!(eq.serialCU || eq.serialFCU);
+    return (reports||[]).filter(r=>{
+      if(eq.id && r.equipment_id) return r.equipment_id === eq.id;
+      if(hasSerial){
+        return (eq.serialCU && r.serial_cu === eq.serialCU) ||
+               (eq.serialFCU && r.serial_fcu === eq.serialFCU);
+      }
+      return (r.equip_location||'') === (eq.equipLocation||'') &&
+             (r.equip_type||'') === (eq.equipType||'');
+    }).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  }
+
+  // Human-readable form of a customer_equipment row's fixed id — the same
+  // uuid service_reports.equipment_id matches against (see
+  // matchReportHistoryForEquipment above), just shortened for display: a
+  // full 36-character uuid is unreadable inline in a list row. Always
+  // reflects the actual id, never the customer-assigned label — use this
+  // specifically where the raw, permanent identifier itself needs to be
+  // shown (e.g. an "Equipment ID" detail row), not as a friendly title.
+  function equipShortId(eq){
+    if(!eq || !eq.id) return '—';
+    const id = String(eq.id);
+    return 'EQ-' + (id.length>8 ? id.slice(0,8) : id).toUpperCase();
+  }
+  // The name to show for a unit wherever an equipment list or title needs
+  // ONE identifying string. Prefers the admin-set customer_equipment.label
+  // (see 20260909_02_customer_equipment_label.sql and the "Customer Label"
+  // field in admin.js's equipment detail overlay) — once a customer's unit
+  // has a plain-language label, that's what should appear everywhere
+  // instead of a meaningless id. Falls back to equipShortId() when no
+  // label has been set yet, so every list row still shows *some* stable
+  // identifier rather than nothing.
+  function equipDisplayName(eq){
+    if(!eq) return '';
+    const label = (eq.label||'').trim();
+    return label || equipShortId(eq);
+  }
+
+  // ---------- shared cloud (Supabase) ----------
+  let cloudReady = false;
+  let cloudInitPromise = null;
+  let db = null; // Supabase client (supabase-js), was a Firestore ref before
+
+  // The app now connects automatically using AWES's Supabase project — no
+  // manual setup needed for day-to-day use. (Recovery path: the "tap to set
+  // up Shared Cloud" link on the login screen still opens the config screen,
+  // in case this project ever needs to change.)
+  const DEFAULT_CLOUD_CONFIG = {
+    url: 'https://ugxrrgocjpkzumhghzat.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVneHJyZ29janBrenVtaGdoemF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY5NjA3NjEsImV4cCI6MjEwMjUzNjc2MX0.y6Q9rCb_pKretcptgHwcGb0-YpUYC3_JQhY2PGJqGWk'
+  };
+  function getCloudConfig(){
+    try{
+      const raw = localStorage.getItem('cloud-config');
+      if(raw) return JSON.parse(raw); // {url, anonKey}
+    }catch(e){
+      // A corrupt override used to fail completely silently, so the app would
+      // quietly fall back to the built-in project with no clue why the custom
+      // one was ignored. Log it and clear the bad value so it stops happening.
+      console.warn('Ignoring unreadable cloud-config override, using defaults', e);
+      try{ localStorage.removeItem('cloud-config'); }catch(_){}
+    }
+    return DEFAULT_CLOUD_CONFIG;
+  }
+  function setCloudStatusUI(connected){
+    const btn = $('cloudBtn');
+    if(btn){ btn.textContent = connected ? '☁ Connected' : '☁ Not Connected'; btn.classList.toggle('cloud-connected', connected); }
+  }
+  async function doCloudInit(){
+    const cfg = getCloudConfig();
+    if(!cfg || !cfg.url || !cfg.anonKey){ setCloudStatusUI(false); return false; }
+    if(!window.supabase){
+      try{ await loadAwesScript('supabase', awesLibs.supabase); }
+      catch(e){ setCloudStatusUI(false); return false; }
+    }
+    try{
+      // A custom fetch that forces cache:'no-store' on every request the
+      // Supabase client makes. Without this, the browser's own HTTP cache
+      // can serve an identical earlier GET request's response instead of
+      // hitting the network fresh — which was causing screens (Today's DTR
+      // status, History, etc.) to intermittently show stale data right
+      // after a save, until the user navigated away and back.
+      const noCacheFetch = (url, options) => fetch(url, { ...options, cache: 'no-store' });
+      db = window.supabase.createClient(cfg.url, cfg.anonKey, { global: { fetch: noCacheFetch } });
+      cloudReady = true;
+      setCloudStatusUI(true);
+      return true;
+    }catch(e){
+      console.error('Cloud connect failed', describeCloudError(e));
+      cloudReady = false;
+      setCloudStatusUI(false);
+      return false;
+    }
+  }
+  function initCloud(){
+    if(!cloudInitPromise){
+      // If this attempt fails (e.g. a brief signal drop while the Supabase
+      // library was loading), don't permanently cache the failure — clear
+      // the promise so the NEXT call retries fresh instead of silently
+      // falling back to this device's local-only data for the rest of the
+      // session (which is how technicians ended up seeing an incomplete
+      // list, or just themselves, on flaky field connections).
+      cloudInitPromise = doCloudInit().then(ok=>{
+        if(!ok) cloudInitPromise = null;
+        return ok;
+      });
+    }
+    return cloudInitPromise;
+  }
+  async function ensureCloud(){
+    if(cloudReady) return true;
+    return await initCloud();
+  }
+
+  // Supabase errors (PostgrestError) are plain objects, so console.error(...e)
+  // just prints "[object Object]" in some console viewers. Pull out the
+  // fields that actually explain what went wrong (message/code/details/hint
+  // for Postgrest errors, or message/name for anything else) so failures are
+  // debuggable instead of opaque.
+  function describeCloudError(e){
+    if(!e) return 'unknown error';
+    if(e.message || e.code || e.details || e.hint){
+      return [e.code, e.message, e.details, e.hint].filter(Boolean).join(' | ');
+    }
+    try{ return JSON.stringify(e); }catch(_){ return String(e); }
+  }
+
+  // ---- Generic settings key-value store (table: app_settings) ----
+  // Used for things like field-lists dropdowns and EmailJS config.
+  // NOTE: admin password is no longer stored here — see loginAdmin/changeAdminPassword,
+  // which now use real Supabase Auth instead of a settings/adminPin document.
+  async function cloudGetDoc(key){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.from('app_settings').select('value').eq('key', key).maybeSingle();
+      if(error) throw error;
+      return data ? data.value : null;
+    }catch(e){ console.error('cloud get failed', key, describeCloudError(e)); return null; }
+  }
+  async function cloudSetDoc(key, value){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('app_settings').upsert({ key, value }, { onConflict: 'key' });
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('cloud set failed', key, describeCloudError(e)); return false; }
+  }
+
+  // ---- Service Reports (table: service_reports) ----
+  // Maps the report object built by gatherData() <-> the Postgres snake_case
+  // columns.
+  //
+  // IMPORTANT: the key names below MUST match what gatherData() in ui.js
+  // actually produces, and what pdf.js / history.js actually read back. They
+  // previously did not: reportToRow looked for data.recommendations,
+  // data.installation, data.customerSignature, data.customerPrintedName and
+  // data.technicianName, while gatherData emits recs, install, sigCustomer,
+  // custPrintedName and techName. The result was that on EVERY cloud save the
+  // recommendations, both signatures, both printed names and all installation
+  // data were written as empty and permanently lost — invisible on the
+  // technician's own phone because the local copy keeps the correct shape.
+  // Do not "tidy" these names without changing gatherData/pdf.js to match.
+  const REPORT_STRING_FIELDS = [
+    ['sr_no','srNo'], ['technician_id','technicianId'], ['date','date'],
+    ['cust_name','custName'], ['cust_address','custAddress'], ['contact_no','contactNo'],
+    ['contact_person','contactPerson'], ['cust_email','custEmail'], ['equip_type','equipType'],
+    ['model_cu','modelCU'], ['serial_cu','serialCU'], ['model_fcu','modelFCU'], ['serial_fcu','serialFCU'],
+    ['cool_cap','coolCap'], ['mount_type','mountType'], ['brand','brand'], ['refrigerant_type','refrigerantType'],
+    ['compressor_type','compressorType'], ['equip_location','equipLocation'], ['trouble_call','troubleCall'],
+    ['time_in','timeIn'], ['time_out','timeOut'], ['remarks','remarks'],
+    ['customer_printed_name','custPrintedName'], ['technician_name','techName']
+  ];
+  function reportToRow(data){
+    const row = {};
+    REPORT_STRING_FIELDS.forEach(([col, key])=>{ row[col] = data[key] != null ? data[key] : null; });
+    // Resolves this report's cust_name (free text, typed/picked at filing
+    // time) to a customers.id. This matters because the customer portal's
+    // RLS read policy (supabase/migrations/20260904_01_customer_portal.sql,
+    // widened in 20260905_customer_portal_multi_link.sql) filters on
+    // service_reports.customer_id — NOT cust_name. Without this line every
+    // report ever saved left customer_id null (20260904's own migration
+    // only backfilled rows that already existed at that moment), so no
+    // report filed since has ever been visible in a customer's "Recent
+    // Service Reports". See supabase/migrations/20260908_02_backfill_
+    // report_customer_id.sql for the one-time fix to reports already saved
+    // before this line existed. Left null (same as before) when the name
+    // doesn't match anything in customersCache — e.g. a typo'd/one-off
+    // customer not in Manage Customers — same "spot-check and fix by hand"
+    // case 20260904's own backfill comment already called out.
+    const custMatch = (customersCache||[])
+      .find(c=> (c.name||'').trim().toLowerCase() === (data.custName||'').trim().toLowerCase());
+    row.customer_id = custMatch ? custMatch.id : null;
+    // Stable link to the specific customer_equipment row this visit was
+    // for — resolved in saveReport() (ui.js) via cloudAddCustomerEquipment()
+    // before the report is saved. Preferred over serial/location+type
+    // matching wherever it's present; see matchReportHistoryForEquipment()
+    // below and its comment for why. Left null for reports saved before
+    // this existed, or saved fully offline (no durable id available yet) —
+    // those still fall back to the legacy matching for this same reason.
+    row.equipment_id = data.equipmentId || null;
+    row.findings      = data.findings || [];
+    row.recommendations = data.recs || [];
+    row.materials     = data.materials || [];
+    row.services_done = data.servicesDone || [];
+    row.before_data   = data.before || {};
+    row.after_data    = data.after || {};
+    row.is_install    = !!data.isInstall;
+    row.installation  = data.install || {};
+    // Signatures are PNG data-URL strings. Default to null, never {} — an
+    // empty object is indistinguishable from "signature was lost in transit".
+    row.customer_signature   = data.sigCustomer || null;
+    row.technician_signature = data.sigTech || null;
+    row.completed = !!data.completed;
+    return row;
+  }
+  function rowToReport(row){
+    if(!row) return null;
+    const data = {};
+    REPORT_STRING_FIELDS.forEach(([col, key])=>{ data[key] = row[col]; });
+    data.findings     = row.findings || [];
+    data.recs         = row.recommendations || [];
+    data.materials    = row.materials || [];
+    data.servicesDone = row.services_done || [];
+    data.before       = normalizeOperatingData(row.before_data);
+    data.after        = normalizeOperatingData(row.after_data);
+    data.isInstall    = !!row.is_install;
+    data.install      = normalizeInstallData(row.installation);
+    data.sigCustomer  = asSignature(row.customer_signature);
+    data.sigTech      = asSignature(row.technician_signature);
+    data.completed    = !!row.completed;
+    data.equipmentId  = row.equipment_id || null;
+    return data;
+  }
+  // Legacy rows may hold {} (or a stray object) where a data-URL string was
+  // expected, because of the field-name bug described above. Treat anything
+  // that is not a data URL as "no signature" rather than handing jsPDF a
+  // value it will throw on.
+  function asSignature(v){
+    return (typeof v === 'string' && v.indexOf('data:image') === 0) ? v : null;
+  }
+  // pdf.js calls .join() on these arrays, so guarantee their shape even for
+  // rows written by older versions of the app.
+  function normalizeOperatingData(d){
+    d = d || {};
+    return {
+      amp:      Array.isArray(d.amp) ? d.amp : ['','',''],
+      volt:     Array.isArray(d.volt) ? d.volt : ['','',''],
+      pressure: Array.isArray(d.pressure) ? d.pressure : ['',''],
+      temp:     d.temp || '',
+      airflow:  d.airflow || ''
+    };
+  }
+  function normalizeInstallData(d){
+    d = d || {};
+    return {
+      pd: Array.isArray(d.pd) ? d.pd : ['','',''],
+      pl: Array.isArray(d.pl) ? d.pl : ['',''],
+      ws: Array.isArray(d.ws) ? d.ws : ['',''],
+      pi: Array.isArray(d.pi) ? d.pi : ['',''],
+      breaker: d.breaker || '', riser: d.riser || '',
+      ptrap: d.ptrap || '', bracketType: d.bracketType || ''
+    };
+  }
+  async function cloudSaveReport(srNo, data){
+    if(!(await ensureCloud())) return false;
+    try{
+      data.srNo = srNo;
+      const { error } = await db.from('service_reports').upsert(reportToRow(data), { onConflict: 'sr_no' });
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('cloud save report failed', describeCloudError(e)); return false; }
+  }
+  // Reports store the customer's name as free text captured at filing time,
+  // not a reference to the customers row — so renaming a customer in Manage
+  // Customers leaves every past report under the old name, and they silently
+  // drop out of that customer's History tab (its equipment-history match is
+  // keyed on name). Called from the customer-edit save handler whenever the
+  // name actually changes, so renames stay self-healing instead of quietly
+  // orphaning history. Matches case/whitespace-insensitively client-side
+  // (rather than via .ilike, which would misfire on names containing SQL
+  // wildcard characters like % or _) and returns how many rows were updated.
+  async function cloudRenameReportsCustomer(oldName, newName){
+    if(!(await ensureCloud())) return 0;
+    const target = (oldName||'').trim().toLowerCase();
+    if(!target) return 0;
+    try{
+      const { data, error } = await db.from('service_reports').select('sr_no, cust_name');
+      if(error) throw error;
+      const srNos = (data||[])
+        .filter(r=> (r.cust_name||'').trim().toLowerCase() === target)
+        .map(r=> r.sr_no);
+      if(srNos.length===0) return 0;
+      const { error: updErr } = await db.from('service_reports').update({ cust_name: newName }).in('sr_no', srNos);
+      if(updErr) throw updErr;
+      return srNos.length;
+    }catch(e){ console.error('rename reports customer failed', describeCloudError(e)); return 0; }
+  }
+  async function cloudDeleteReport(srNo){
+    if(!(await ensureCloud())) return false;
+    try{
+      // .select() makes Postgrest return the rows it actually deleted. Without
+      // it, a delete blocked by RLS (or a srNo that doesn't exist) comes back
+      // with no error and looks identical to a real delete — the row silently
+      // survives and reappears the next time the list reloads from the cloud.
+      const { data, error } = await db.from('service_reports').delete().eq('sr_no', srNo).select('sr_no');
+      if(error) throw error;
+      return !!(data && data.length > 0);
+    }catch(e){ console.error('cloud delete report failed', srNo, describeCloudError(e)); return false; }
+  }
+  async function cloudGetReport(srNo){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.from('service_reports').select('*').eq('sr_no', srNo).maybeSingle();
+      if(error) throw error;
+      return rowToReport(data);
+    }catch(e){ console.error('cloud get report failed', srNo, describeCloudError(e)); return null; }
+  }
+  // Fallback lookup by primary key — used by the customer portal's
+  // "Recent Service Reports" tile when a row's sr_no didn't resolve a
+  // match via cloudGetReport (e.g. a duplicate/edited sr_no elsewhere in
+  // the table breaking maybeSingle()'s single-row assumption). id is
+  // always present and unique, so this path always finds the row if it
+  // still exists.
+  async function cloudGetReportById(id){
+    if(!id || !(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.from('service_reports').select('*').eq('id', id).maybeSingle();
+      if(error) throw error;
+      return rowToReport(data);
+    }catch(e){ console.error('cloud get report by id failed', id, describeCloudError(e)); return null; }
+  }
+  // History used to be hard-capped at the newest 150 reports with no indication
+  // that anything had been cut off, so older jobs simply became invisible in the
+  // app even though they were sitting in the database. Page through instead.
+  const REPORT_PAGE = 200;      // Supabase caps a single response at 1000 rows
+  const REPORT_MAX_ROWS = 5000; // hard stop so a huge table can't exhaust memory
+  async function cloudListReports(){
+    if(!(await ensureCloud())) return null;
+    try{
+      const rows = [];
+      for(let from = 0; from < REPORT_MAX_ROWS; from += REPORT_PAGE){
+        const { data, error } = await db.from('service_reports')
+          .select('*')
+          .order('date',{ascending:false})
+          .order('sr_no',{ascending:false})   // stable tiebreak: without it, rows
+                                              // sharing a date can repeat or be
+                                              // skipped across page boundaries
+          .range(from, from + REPORT_PAGE - 1);
+        if(error) throw error;
+        const batch = data || [];
+        rows.push(...batch);
+        if(batch.length < REPORT_PAGE) break;
+      }
+      return rows.map(rowToReport);
+    }catch(e){ console.error('cloud list failed', describeCloudError(e)); return null; }
+  }
+  async function cloudNextSrNo(dateStr){
+    if(!(await ensureCloud())) return null;
+    try{
+      // dateStr comes in as 'YYYYMMDD'; the Postgres function takes a real date.
+      const iso = dateStr.slice(0,4)+'-'+dateStr.slice(4,6)+'-'+dateStr.slice(6,8);
+      const { data, error } = await db.rpc('next_sr_no', { p_date: iso });
+      if(error) throw error;
+      return data;
+    }catch(e){ console.error('cloud SR counter failed', describeCloudError(e)); return null; }
+  }
+
+  // ---------- password prompt ----------
+  // window.prompt() was used for every admin-password gate. On iOS Safari that
+  // dialog shows the typed password in clear text (and in screenshots), it can't
+  // be styled to match the app, and several in-app browsers (Facebook, Messenger,
+  // Gmail) block it outright — in which case prompt() returns null and the admin
+  // could never get past the gate. This overlay is a proper masked input.
+  function askPassword(opts){
+    opts = opts || {};
+    const overlay = $('adminPwOverlay');
+    if(!overlay){
+      // Extremely defensive: if the markup is missing, fall back rather than
+      // leaving the caller hanging on a promise that never settles.
+      return Promise.resolve(window.prompt(opts.label || 'Enter Admin Password') || null);
+    }
+    const input = $('adminPwInput'), msg = $('adminPwMsg');
+    $('adminPwTitle').textContent = opts.title || 'Admin Password';
+    $('adminPwLabel').textContent = opts.label || 'Enter Admin Password';
+    input.placeholder = opts.placeholder || 'Password';
+    input.value = '';
+    msg.textContent = opts.message || '';
+    overlay.classList.add('open');
+    setTimeout(()=>{ try{ input.focus(); }catch(e){} }, 60);
+
+    return new Promise(resolve=>{
+      let done = false;
+      function finish(value){
+        if(done) return;
+        done = true;
+        overlay.classList.remove('open');
+        input.value = '';   // never leave the password sitting in the DOM
+        msg.textContent = '';
+        cleanup();
+        resolve(value);
+      }
+      const onOk = ()=> finish(input.value ? input.value : null);
+      const onCancel = ()=> finish(null);
+      const onKey = (e)=>{
+        if(e.key==='Enter'){ e.preventDefault(); onOk(); }
+        else if(e.key==='Escape'){ e.preventDefault(); onCancel(); }
+      };
+      const onBackdrop = (e)=>{ if(e.target===overlay) onCancel(); };
+      function cleanup(){
+        $('adminPwOk').removeEventListener('click', onOk);
+        $('adminPwCancel').removeEventListener('click', onCancel);
+        $('adminPwCancel2').removeEventListener('click', onCancel);
+        input.removeEventListener('keydown', onKey);
+        overlay.removeEventListener('click', onBackdrop);
+      }
+      $('adminPwOk').addEventListener('click', onOk);
+      $('adminPwCancel').addEventListener('click', onCancel);
+      $('adminPwCancel2').addEventListener('click', onCancel);
+      input.addEventListener('keydown', onKey);
+      overlay.addEventListener('click', onBackdrop);
+    });
+  }
+
+  // ---------- outbox: pending cloud writes ----------
+  // Anything saved while the phone has no usable connection used to be written
+  // to local storage only and then forgotten: History falls back to local data
+  // ONLY while still offline, so as soon as signal returned the offline work
+  // became invisible and was never uploaded. The only recovery was the manual
+  // "upload this device's data" button, which covered reports and field lists
+  // but not DTR, customers, leave, cash advances or dispatch tickets.
+  //
+  // Every save helper now queues a pending operation instead, and the outbox is
+  // flushed on app start, whenever the browser fires 'online', and after any
+  // successful cloud call.
+  const OUTBOX_PREFIX = 'outbox:';
+  const SAVE_CLOUD  = 'cloud';   // written straight to the shared cloud
+  const SAVE_QUEUED = 'queued';  // saved on this device, queued for upload
+  const SAVE_FAILED = 'failed';  // could not be stored at all
+  const outboxHandlers = Object.create(null);
+
+  // Each module registers how to replay its own kind of pending write.
+  // handler(id, payload) must throw if the cloud rejected the write; returning
+  // normally is treated as success.
+  function registerOutboxHandler(kind, handler){ outboxHandlers[kind] = handler; }
+
+  function outboxKey(kind, id){
+    // ':' is used as the separator, so keep ids from splitting the key.
+    return OUTBOX_PREFIX + kind + ':' + String(id).replace(/:/g, '_');
+  }
+  async function outboxQueue(kind, id, payload){
+    try{
+      await window.storage.set(outboxKey(kind, id), JSON.stringify({
+        kind, id, payload, queuedAt: new Date().toISOString()
+      }), false);
+      updateOutboxBadge();
+      return true;
+    }catch(e){ console.error('could not queue pending write', kind, id, describeCloudError(e)); return false; }
+  }
+  async function outboxList(){
+    try{
+      const res = await window.storage.list(OUTBOX_PREFIX, false);
+      const items = [];
+      for(const key of (res.keys||[])){
+        try{
+          const item = await window.storage.get(key, false);
+          if(item) items.push(Object.assign(JSON.parse(item.value), {storageKey: key}));
+        }catch(e){ /* skip an unreadable entry rather than stalling the queue */ }
+      }
+      // Oldest first, so work reaches the cloud in the order it was done.
+      // String() matters: an entry written by an older build (or hand-edited)
+      // could carry a numeric timestamp, and calling localeCompare on a number
+      // throws — which the catch below would turn into an empty queue, hiding
+      // the pending-sync banner and silently abandoning the user's offline work.
+      items.sort((a,b)=> String(a.queuedAt||'').localeCompare(String(b.queuedAt||'')));
+      return items;
+    }catch(e){
+      console.error('could not read the pending-sync queue', e);
+      return [];
+    }
+  }
+  async function outboxCount(){ return (await outboxList()).length; }
+
+  // Wraps a single outbox handler call with a hard deadline. Without this, a
+  // request that hangs instead of failing cleanly (common on mobile: a
+  // WiFi->cellular handoff mid-request, a weak signal, a captive portal that
+  // silently swallows HTTPS) never resolves AND never rejects — which used to
+  // leave outboxFlushing stuck at true forever, since the surrounding
+  // try/finally never gets to run. Every future call (the 30s timer, the
+  // 'online' event, coming back to the foreground, and the Sync now button)
+  // would then hit the very first line of outboxFlush and bail out silently,
+  // making the button look like it had stopped working — with no way to
+  // recover short of fully restarting the app. Racing each call against a
+  // timeout guarantees the loop always moves on and the lock always clears.
+  const OUTBOX_ITEM_TIMEOUT_MS = 20000;
+  function withTimeout(promise, ms){
+    return new Promise((resolve, reject)=>{
+      const t = setTimeout(()=> reject(new Error('Timed out waiting for a response ('+Math.round(ms/1000)+'s)')), ms);
+      promise.then(
+        (v)=>{ clearTimeout(t); resolve(v); },
+        (e)=>{ clearTimeout(t); reject(e); }
+      );
+    });
+  }
+
+  let outboxFlushing = false;
+  async function outboxFlush(opts){
+    opts = opts || {};
+    if(outboxFlushing) return {sent:0, left:await outboxCount(), stuck:true};
+    if(!(await ensureCloud())) return {sent:0, left:await outboxCount()};
+    outboxFlushing = true;
+    // A phone that's been asleep or backgrounded for a while can wake up with
+    // a stale access token — supabase-js only auto-refreshes on a timer that
+    // needs the tab to stay alive, so a long suspension can outlast it. Force
+    // a refresh now, while we know we're online, before replaying anything —
+    // otherwise every item in the queue fails with what looks like a
+    // permissions error (RLS treats an expired token as unauthenticated) even
+    // though the actual problem is just an out-of-date token.
+    try{ await db.auth.refreshSession(); }catch(e){ /* fall through — the per-item attempts below will surface any real auth problem */ }
+    let sent = 0, left = 0, lastError = null;
+    try{
+      const items = await outboxList();
+      for(const item of items){
+        const handler = outboxHandlers[item.kind];
+        if(!handler){ left++; continue; }
+        let ok = false, errMsg = null;
+        try{ await withTimeout(handler(item.id, item.payload), OUTBOX_ITEM_TIMEOUT_MS); ok = true; }
+        catch(e){ errMsg = describeCloudError(e); console.error('outbox replay failed', item.kind, item.id, errMsg); }
+        if(ok){
+          sent++;
+          try{ await window.storage.delete(item.storageKey); }catch(e){}
+        }else{
+          left++;
+          lastError = errMsg;
+          // Record the failure reason on the item itself (surfaced in the
+          // "View" list) instead of only logging it to the console, since a
+          // technician in the field has no way to open devtools. Previously
+          // this loop also stopped at the very first failure on the
+          // assumption that any failure meant the connection had dropped —
+          // but a failure can just as easily be that ONE item's data being
+          // rejected (e.g. a validation or permissions error on the server),
+          // which used to permanently block every other, perfectly fine,
+          // item queued behind it. Now every item gets its own attempt.
+          try{
+            await window.storage.set(item.storageKey, JSON.stringify(Object.assign(
+              {}, item, {lastError: errMsg, lastTriedAt: new Date().toISOString()}
+            )), false);
+          }catch(e){}
+        }
+      }
+    }finally{
+      outboxFlushing = false;
+    }
+    if(sent && !opts.quiet) toast('Uploaded '+sent+' pending item'+(sent===1?'':'s')+' to the shared cloud');
+    updateOutboxBadge();
+    return {sent, left, lastError};
+  }
+  async function updateOutboxBadge(){
+    const el = $('pendingSyncBanner');
+    if(!el) return;
+    const items = await outboxList();
+    const n = items.length;
+    el.style.display = n ? 'flex' : 'none';
+    const label = $('pendingSyncText');
+    if(label){
+      const failing = items.some(it=> it.lastError);
+      label.textContent = failing
+        ? n+' item'+(n===1?'':'s')+' failed to sync — tap View for the reason'
+        : n+' item'+(n===1?'':'s')+' saved on this device only — waiting for a connection';
+      el.style.background = failing ? '#8A2020' : '#8A5A00';
+    }
+  }
+  window.addEventListener('online', ()=>{ outboxFlush(); });
+  // Also retry when the app is brought back to the foreground, since phones
+  // often reconnect while the screen is off and never fire 'online' again.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible') outboxFlush({quiet:true});
+  });
+  // Safety net: the 'online' event is not reliable on mobile — a phone can
+  // reconnect to wifi (especially waking from sleep, or switching between
+  // wifi and cellular) without the browser ever firing it, which is what
+  // made syncing look like it depended on manually tapping "Sync now".
+  // Retry quietly in the background on a timer whenever something is
+  // actually pending, so a restored connection gets picked up on its own.
+  setInterval(()=>{
+    outboxCount().then(n=>{ if(n) outboxFlush({quiet:true}); });
+  }, 30000);
+  // Reveal stranded offline work as soon as the bundle runs. This deliberately
+  // does NOT wait for the startup data load: that chain can block for up to 12
+  // seconds behind the CDN script timeout, and a technician who opens the app to
+  // check whether yesterday's report went through should not stare at a screen
+  // that says nothing for 12 seconds.
+  updateOutboxBadge();
+
+  const pendingSyncBtn = $('pendingSyncBtn');
+  if(pendingSyncBtn) pendingSyncBtn.addEventListener('click', async ()=>{
+    const res = await outboxFlush();
+    if(!res.sent){
+      if(res.stuck) toast('Still working on a previous sync — try again in a moment');
+      else toast(res.left ? (res.lastError ? 'Upload failed: '+res.lastError : 'Still no connection — will keep trying') : 'Nothing pending');
+    }
+  });
+
+  // Human-readable labels for each outbox "kind" — used only in the list below.
+  const OUTBOX_KIND_LABELS = {
+    'report': 'Service Report', 'dtr': 'DTR', 'leave': 'Leave Request',
+    'cash-advance': 'Cash Advance', 'dispatch': 'Dispatch Ticket',
+    'geo': 'Location Point'
+  };
+  async function renderPendingSyncList(){
+    const listEl = $('pendingSyncList');
+    if(!listEl) return;
+    const items = await outboxList();
+    if(!items.length){
+      listEl.innerHTML = '<div class="empty-state">Nothing pending — everything on this device has synced.</div>';
+      $('pendingSyncClearAllBtn').style.display = 'none';
+      return;
+    }
+    $('pendingSyncClearAllBtn').style.display = '';
+    listEl.innerHTML = items.map(item=>{
+      const label = OUTBOX_KIND_LABELS[item.kind] || item.kind;
+      const when = item.queuedAt ? new Date(item.queuedAt).toLocaleString() : '';
+      const errorLine = item.lastError
+        ? '<div style="font-size:12px; color:var(--danger); margin-top:2px;">Last try failed: '+escapeHtml(item.lastError)+'</div>'
+        : '';
+      return '<div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">'
+        + '<div><div style="font-weight:700; font-size:13.5px;">'+escapeHtml(label)+'</div>'
+        + '<div style="font-size:12px; color:var(--text-muted);">'+escapeHtml(String(item.id))+(when?' · '+escapeHtml(when):'')+'</div>'
+        + errorLine + '</div>'
+        + '<button type="button" class="btn pendingSyncDeleteBtn" data-key="'+escapeHtml(item.storageKey)+'" style="flex:0 0 auto; padding:6px 10px; font-size:12.5px; background:#fdeceb; color:var(--danger);">Discard</button>'
+        + '</div>';
+    }).join('');
+  }
+  const pendingSyncViewBtn = $('pendingSyncViewBtn');
+  if(pendingSyncViewBtn) pendingSyncViewBtn.addEventListener('click', async ()=>{
+    await renderPendingSyncList();
+    $('pendingSyncOverlay').classList.add('open');
+  });
+  const closePendingSyncBtn = $('closePendingSync');
+  if(closePendingSyncBtn) closePendingSyncBtn.addEventListener('click', ()=> $('pendingSyncOverlay').classList.remove('open'));
+  const pendingSyncOverlayEl = $('pendingSyncOverlay');
+  if(pendingSyncOverlayEl) pendingSyncOverlayEl.addEventListener('click', (e)=>{
+    if(e.target.id==='pendingSyncOverlay') pendingSyncOverlayEl.classList.remove('open');
+  });
+  const pendingSyncListEl = $('pendingSyncList');
+  if(pendingSyncListEl) pendingSyncListEl.addEventListener('click', async (e)=>{
+    const btn = e.target.closest('.pendingSyncDeleteBtn');
+    if(!btn) return;
+    if(!confirm('Discard this item? It will NOT be uploaded and cannot be recovered.')) return;
+    try{ await window.storage.delete(btn.dataset.key); }catch(err){}
+    await renderPendingSyncList();
+    updateOutboxBadge();
+  });
+  const pendingSyncClearAllBtn = $('pendingSyncClearAllBtn');
+  if(pendingSyncClearAllBtn) pendingSyncClearAllBtn.addEventListener('click', async ()=>{
+    const items = await outboxList();
+    if(!items.length) return;
+    if(!confirm('Discard all '+items.length+' pending item'+(items.length===1?'':'s')+'? None of it will be uploaded, and this cannot be undone.')) return;
+    for(const item of items){ try{ await window.storage.delete(item.storageKey); }catch(err){} }
+    await renderPendingSyncList();
+    updateOutboxBadge();
+  });
+
+
+// ---------- Equipment Photos ----------
+// Storage: private bucket 'equipment-photos', private because every other
+// table in this app is scoped per-customer via RLS (see
+// 20260910_01_equipment_photos.sql) — a public bucket would break that
+// model. Photos are shown via short-lived signed URLs (equipPhotoSignedUrls
+// below), generated on demand, never a permanent public link.
+//
+// Design: ADMIN uploads/organizes (folder, cover photo, delete); the
+// linked CUSTOMER can only view. See admin.js (upload UI, inside the
+// equipment detail overlay) and customer-equipment-history.js (read-only
+// gallery). This module holds the shared cloud calls + the compression
+// step both sides' counts rely on — neither UI talks to Storage directly.
+
+  const EQUIP_PHOTO_BUCKET = 'equipment-photos';
+
+  // ---------- Client-side compression ----------
+  // Runs before every upload so storage cost stays bounded no matter what
+  // a phone camera produces (a raw shot can be 5-10MB). Downscales to
+  // maxDim on the longer side, then re-encodes as JPEG, stepping quality
+  // down until the result is at or under targetBytes — or, if quality
+  // alone can't get there, shrinking the dimensions further and repeating.
+  // Always returns SOME blob (best effort) rather than throwing just
+  // because an unusually busy/detailed photo won't quite hit the target.
+  function loadImageBitmapFromFile(file){
+    if(window.createImageBitmap){
+      return createImageBitmap(file).catch(()=> loadImageViaElement(file));
+    }
+    return loadImageViaElement(file);
+  }
+  function loadImageViaElement(file){
+    return new Promise((resolve, reject)=>{
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = ()=>{ URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = (e)=>{ URL.revokeObjectURL(url); reject(e); };
+      img.src = url;
+    });
+  }
+  function canvasToBlob(canvas, quality){
+    return new Promise(resolve=> canvas.toBlob(resolve, 'image/jpeg', quality));
+  }
+  async function compressImageForUpload(file, opts){
+    const targetBytes = (opts && opts.targetBytes) || 150*1024; // ~150KB
+    let maxDim = (opts && opts.maxDim) || 1600;
+    const bitmap = await loadImageBitmapFromFile(file);
+    const srcW = bitmap.width, srcH = bitmap.height;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    let blob = null;
+    for(let resizeRound=0; resizeRound<4; resizeRound++){
+      const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
+      canvas.width = Math.max(1, Math.round(srcW*scale));
+      canvas.height = Math.max(1, Math.round(srcH*scale));
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const qualitySteps = [0.82, 0.72, 0.62, 0.52, 0.42, 0.35];
+      for(const q of qualitySteps){
+        blob = await canvasToBlob(canvas, q);
+        if(blob && blob.size <= targetBytes) return blob;
+      }
+      maxDim = Math.round(maxDim * 0.8); // still too big — shrink and retry
+    }
+    if(bitmap.close) bitmap.close();
+    return blob; // best effort — smaller than the original either way
+  }
+
+  // ---------- Upload / list / manage ----------
+  // Path convention enforced by the storage INSERT policy:
+  // {customer_id}/{equipment_id}/{timestamp}-{filename} — see the
+  // migration's comments for why this layout matters for RLS.
+  async function cloudUploadEquipmentPhoto(equipmentId, customerId, file, folder){
+    if(!equipmentId || !customerId || !file || !(await ensureCloud())) return null;
+    let blob;
+    try{ blob = await compressImageForUpload(file); }
+    catch(e){ console.error('compress photo failed', e); return null; }
+    if(!blob) return null;
+    const safeName = (file.name||'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = customerId+'/'+equipmentId+'/'+Date.now()+'-'+safeName;
+    try{
+      const { error: upErr } = await db.storage.from(EQUIP_PHOTO_BUCKET).upload(path, blob, {
+        contentType: 'image/jpeg', upsert: false
+      });
+      if(upErr) throw upErr;
+      const { data, error } = await db.from('equipment_photos').insert({
+        equipment_id: equipmentId, customer_id: customerId, storage_path: path,
+        folder: (folder||'').trim() || 'Uncategorized', file_size_bytes: blob.size,
+        uploaded_by: currentUser ? currentUser.id : null
+      }).select('*').single();
+      if(error) throw error;
+      return data;
+    }catch(e){
+      console.error('upload equipment photo failed', describeCloudError(e));
+      // Best-effort cleanup: don't leave an orphaned Storage object behind
+      // if the metadata insert failed after a successful upload.
+      try{ await db.storage.from(EQUIP_PHOTO_BUCKET).remove([path]); }catch(e2){}
+      return null;
+    }
+  }
+  async function cloudListEquipmentPhotos(equipmentId){
+    if(!equipmentId || !(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('equipment_photos')
+        .select('*').eq('equipment_id', equipmentId).order('created_at', {ascending:false});
+      if(error) throw error;
+      const rows = data || [];
+      const urls = await equipPhotoSignedUrls(rows.map(r=>r.storage_path));
+      rows.forEach(r=> r.signedUrl = urls[r.storage_path] || null);
+      return rows;
+    }catch(e){ console.error('list equipment photos failed', describeCloudError(e)); return []; }
+  }
+  // Per-customer photo counts, keyed by equipment_id — powers the small
+  // "📷 N" badge on equipment list cards (admin master list, customer
+  // portal grid) without those views having to load full photo rows just
+  // to know whether a unit has any.
+  async function cloudGetEquipmentPhotoCounts(customerId){
+    if(!customerId || !(await ensureCloud())) return {};
+    try{
+      const { data, error } = await db.from('equipment_photos')
+        .select('equipment_id').eq('customer_id', customerId);
+      if(error) throw error;
+      const counts = {};
+      (data||[]).forEach(r=> counts[r.equipment_id] = (counts[r.equipment_id]||0)+1);
+      return counts;
+    }catch(e){ console.error('load equipment photo counts failed', describeCloudError(e)); return {}; }
+  }
+  // Distinct folder names already in use — populates the admin upload
+  // form's datalist so folders get reused ("2026 Site Survey") instead of
+  // drifting into near-duplicate one-off names.
+  async function cloudListEquipmentPhotoFolders(){
+    if(!(await ensureCloud())) return ['Uncategorized'];
+    try{
+      const { data, error } = await db.from('equipment_photos').select('folder');
+      if(error) throw error;
+      const set = new Set(['Uncategorized']);
+      (data||[]).forEach(r=> { if(r.folder) set.add(r.folder); });
+      return Array.from(set).sort();
+    }catch(e){ console.error('load photo folders failed', describeCloudError(e)); return ['Uncategorized']; }
+  }
+  async function cloudSetEquipmentPhotoFolder(photoId, folder){
+    if(!photoId || !(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('equipment_photos').update({ folder: (folder||'').trim() || 'Uncategorized' }).eq('id', photoId);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('set photo folder failed', describeCloudError(e)); return false; }
+  }
+  // Renames a folder tag in one query, scoped to a single equipment unit —
+  // NOT a global rename across every unit that happens to share the same
+  // folder name. Folder tags are meant to be reused across units ("2026
+  // Site Survey"), so a rename triggered from one unit's photo gallery
+  // (admin.js) should only ever touch that unit's own photos, never
+  // silently relabel unrelated equipment elsewhere in the system.
+  async function cloudRenameEquipmentPhotoFolder(equipmentId, oldFolder, newFolder){
+    const next = (newFolder||'').trim() || 'Uncategorized';
+    if(!equipmentId || !oldFolder || !(await ensureCloud())) return false;
+    if(next === oldFolder) return true; // no-op
+    try{
+      const { error } = await db.from('equipment_photos')
+        .update({ folder: next })
+        .eq('equipment_id', equipmentId)
+        .eq('folder', oldFolder);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('rename equipment photo folder failed', describeCloudError(e)); return false; }
+  }
+  // Only one cover photo per unit — clear the others first, then set the
+  // chosen one. Two round-trips rather than a DB trigger/partial-unique-
+  // index: simple, and a photo count small enough per unit that the race
+  // window (two admins re-covering the same unit at the same instant)
+  // isn't worth the extra migration complexity.
+  async function cloudSetEquipmentPhotoCover(equipmentId, photoId){
+    if(!equipmentId || !photoId || !(await ensureCloud())) return false;
+    try{
+      const { error: clearErr } = await db.from('equipment_photos').update({ is_cover:false }).eq('equipment_id', equipmentId);
+      if(clearErr) throw clearErr;
+      const { error } = await db.from('equipment_photos').update({ is_cover:true }).eq('id', photoId);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('set cover photo failed', describeCloudError(e)); return false; }
+  }
+  async function cloudDeleteEquipmentPhoto(photo){
+    if(!photo || !(await ensureCloud())) return false;
+    try{
+      const { error: rmErr } = await db.storage.from(EQUIP_PHOTO_BUCKET).remove([photo.storage_path]);
+      if(rmErr) throw rmErr;
+      const { error } = await db.from('equipment_photos').delete().eq('id', photo.id);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('delete equipment photo failed', describeCloudError(e)); return false; }
+  }
+  // Batch signed-URL fetch — one round trip per gallery render instead of
+  // one per photo. Returns a { storage_path: url } map; a path that fails
+  // to sign (e.g. the object was removed out from under us) is simply
+  // absent from the map rather than failing the whole batch.
+  // Batch signed-URL fetch — one round trip per gallery render instead of
+  // one per photo. Returns a { storage_path: url } map; a path that fails
+  // to sign (e.g. the object was removed out from under us) is simply
+  // absent from the map rather than failing the whole batch.
+  async function equipPhotoSignedUrls(paths, expiresInSeconds){
+    const list = (paths||[]).filter(Boolean);
+    if(list.length===0 || !(await ensureCloud())) return {};
+    try{
+      const { data, error } = await db.storage.from(EQUIP_PHOTO_BUCKET).createSignedUrls(list, expiresInSeconds||3600);
+      if(error) throw error;
+      const map = {};
+      (data||[]).forEach(d=> { if(d && d.signedUrl && !d.error) map[d.path] = d.signedUrl; });
+      return map;
+    }catch(e){ console.error('sign equipment photo urls failed', describeCloudError(e)); return {}; }
+  }
+
+  // Cover photo (if any) for a batch of units at once — one round trip
+  // for a whole equipment list, rather than one query per unit. Powers
+  // the photo-based unit cards on the customer portal's Home/Units
+  // screens; falls back to the generic unit icon when nothing comes back
+  // for a given id (either no cover was ever set, or the customer simply
+  // has no photos yet).
+  async function cpFetchCoverPhotoMap(equipmentIds){
+    const ids = (equipmentIds||[]).filter(Boolean);
+    if(ids.length===0 || !(await ensureCloud())) return {};
+    try{
+      const { data, error } = await db.from('equipment_photos')
+        .select('equipment_id, storage_path').eq('is_cover', true).in('equipment_id', ids);
+      if(error) throw error;
+      const rows = data || [];
+      const urls = await equipPhotoSignedUrls(rows.map(r=>r.storage_path));
+      const map = {};
+      rows.forEach(r=>{ const u = urls[r.storage_path]; if(u) map[r.equipment_id] = u; });
+      return map;
+    }catch(e){ console.error('load cover photos failed', describeCloudError(e)); return {}; }
+  }
+
+
+// ---------- customer portal login helpers (table: customer_login_links) ----------
+// A customer login can be linked to more than one customers row (an account
+// holder managing several sites/branches) — see
+// supabase/migrations/20260905_customer_portal_multi_link.sql. These two
+// helpers are shared by the login flow below and by session restore.
+  async function fetchCustomerLinks(profileId){
+    try{
+      const { data: links, error } = await db.from('customer_login_links').select('customer_id').eq('profile_id', profileId);
+      if(error) throw error;
+      const ids = (links||[]).map(l=> l.customer_id);
+      if(!ids.length) return [];
+      const { data: custs, error: custErr } = await db.from('customers').select('id, name').in('id', ids);
+      if(custErr) throw custErr;
+      return (custs||[]).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+    }catch(e){ console.error('fetch customer links failed', describeCloudError(e)); return []; }
+  }
+  // Remembers which of a multi-customer login's customers was last being
+  // viewed, per device (see the switcher in customer-portal.js) — falls
+  // back to the first customer (alphabetical) if nothing saved, or if the
+  // saved id is no longer one this login can see.
+  function pickActiveCustomerId(custList, profileId){
+    const ids = custList.map(c=> c.id);
+    let saved = null;
+    try{ saved = localStorage.getItem('cust-active-customer:'+profileId); }catch(e){}
+    return (saved && ids.includes(saved)) ? saved : (ids[0] || null);
+  }
+
+// ---------- technician user accounts (table: profiles, role='technician') ----------
+  // Real account creation/password changes go through the admin-create-technician
+  // Edge Function (see cloudSetUser callers) — these functions only manage the
+  // non-auth profile fields (name, active, restrictions).
+  function profileToUser(row){
+    if(!row) return null;
+    return {
+      id: row.id, name: row.name, username: row.username || '', active: row.active,
+      restrictions: { noHistory: row.no_history, noReport: row.no_report, readOnly: row.read_only },
+      mustChangePassword: !!row.must_change_password
+    };
+  }
+  async function localListUsers(){
+    try{
+      const res = await window.storage.get('local-users', false);
+      return res ? JSON.parse(res.value) : [];
+    }catch(e){ return []; }
+  }
+  async function localSaveUsers(users){
+    try{ await window.storage.set('local-users', JSON.stringify(users), false); return true; }
+    catch(e){ return false; }
+  }
+  async function cloudListUsers(){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('profiles').select('*').eq('role','technician');
+        if(error) throw error;
+        return (data||[]).map(profileToUser);
+      }catch(e){ console.error('list users failed', describeCloudError(e)); }
+    }
+    return await localListUsers();
+  }
+  // Customer portal logins (table: profiles, role='customer') — kept
+  // separate from cloudListUsers() above rather than folded in, since their
+  // shape is different (no restrictions/DTR fields, but a set of linked
+  // customer records instead) and mixing the two would make both list
+  // renderers messier for no benefit.
+  async function cloudListCustomerLogins(){
+    if(await ensureCloud()){
+      try{
+        const { data: profs, error } = await db.from('profiles').select('id, name, active').eq('role','customer');
+        if(error) throw error;
+        if(!profs || !profs.length) return [];
+        if(!customersCache || customersCache.length===0) await loadCustomers();
+        const ids = profs.map(p=> p.id);
+        const { data: links, error: linkErr } = await db.from('customer_login_links').select('profile_id, customer_id').in('profile_id', ids);
+        if(linkErr) throw linkErr;
+        // Email lives in Supabase Auth (auth.users), not this profiles row —
+        // the anon key can't read auth.users directly, so it's fetched
+        // through the same admin-create-customer Edge Function that already
+        // handles customer-login writes (action: 'list_emails', which uses
+        // its service-role client). Best-effort: if this call fails, logins
+        // still render — just without an email shown — rather than the
+        // whole list breaking.
+        let emails = {};
+        try{
+          const { data: emailData, error: emailErr } = await db.functions.invoke('admin-create-customer', {
+            body: { action:'list_emails', ids }
+          });
+          if(!emailErr && emailData && emailData.emails) emails = emailData.emails;
+        }catch(e){ console.error('list customer emails failed', describeCloudError(e)); }
+        const nameOf = (cid)=>{ const c = customersCache.find(x=> String(x.id)===String(cid)); return c ? c.name : '(deleted customer)'; };
+        return profs.map(p=>{
+          const custIds = (links||[]).filter(l=> l.profile_id===p.id).map(l=> l.customer_id);
+          return { id: p.id, name: p.name, active: p.active, email: emails[p.id] || '', customerIds: custIds, customerNames: custIds.map(nameOf) };
+        });
+      }catch(e){ console.error('list customer logins failed', describeCloudError(e)); }
+    }
+    return [];
+  }
+  // Used behind the scenes (not rendered as a picker — see
+  // renderTechnicianLoginForm) purely to resolve a typed username to a
+  // technician id, since Supabase Auth needs an email, not a username.
+  // It used to call cloudListUsers() directly, which required the `profiles`
+  // table to be readable by the anonymous key — meaning anyone holding the
+  // public key shipped in this app could dump every staff row, restrictions and
+  // must-change-password flags included. This goes through an Edge Function that
+  // returns only {id, username} for active technicians, so anon SELECT on
+  // `profiles` can be revoked (see the migration in supabase/ in this package).
+  //
+  // As of 20260905_02_technician_username.sql, real names are kept out of this
+  // list entirely. The row shape returned here deliberately has no `name`
+  // field; anywhere downstream that needs the real name (after sign-in)
+  // re-fetches it from the authenticated session instead — see doSubmit() in
+  // renderTechnicianLoginForm().
+  async function publicListTechnicians(){
+    const cfg = getCloudConfig();
+    if(cfg && navigator.onLine){
+      try{
+        const res = await fetch(cfg.url.replace(/\/$/,'')+'/functions/v1/list-technicians', {
+          method: 'GET',
+          headers: { 'Authorization': 'Bearer '+cfg.anonKey, 'apikey': cfg.anonKey }
+        });
+        if(res.ok){
+          const body = await res.json();
+          const rows = Array.isArray(body) ? body : (body.technicians || []);
+          // Cache so the login screen still works on a phone with no signal.
+          try{ await window.storage.set('tech-roster', JSON.stringify(rows), false); }catch(e){}
+          return rows.map(r=>({ id: r.id, username: r.username, active: true, restrictions: {}, mustChangePassword: false }));
+        }
+        console.error('list-technicians failed', res.status);
+      }catch(e){ console.error('list-technicians request failed', e); }
+    }
+    // Offline / function unavailable: fall back to the last roster we saw, then
+    // to any locally provisioned users.
+    try{
+      const cached = await window.storage.get('tech-roster', false);
+      if(cached){
+        const rows = JSON.parse(cached.value) || [];
+        if(rows.length) return rows.map(r=>({ id: r.id, username: r.username, active: true, restrictions: {}, mustChangePassword: false }));
+      }
+    }catch(e){}
+    // Local device-only fallback predates usernames entirely, so it has no
+    // username field to show — fall back to whatever name it has rather
+    // than an empty button label. This path is only ever reached with no
+    // cloud configured at all, i.e. never in the shared-cloud setup this
+    // app is built around.
+    const local = await localListUsers();
+    return local.map(u=> ({ ...u, username: u.username || u.name }));
+  }
+  async function cloudGetUser(id){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('profiles').select('*').eq('id', id).maybeSingle();
+        if(error) throw error;
+        return profileToUser(data);
+      }catch(e){}
+    }
+    const users = await localListUsers();
+    return users.find(u=>u.id===id) || null;
+  }
+  // Updates name/username/active/restrictions only — never password (see admin-create-technician).
+  async function cloudSetUser(id, data){
+    if(await ensureCloud()){
+      try{
+        const patch = {};
+        if('name' in data) patch.name = data.name;
+        if('username' in data) patch.username = data.username;
+        if('active' in data) patch.active = data.active;
+        if(data.restrictions){
+          patch.no_history = !!data.restrictions.noHistory;
+          patch.no_report = !!data.restrictions.noReport;
+          patch.read_only = !!data.restrictions.readOnly;
+        }
+        const { data: rows, error } = await db.from('profiles').update(patch).eq('id', id).select('id');
+        if(error) throw error;
+        if(!rows || !rows.length) throw new Error('no profile row was updated');
+        return true;
+      }catch(e){ console.error('save user failed', describeCloudError(e)); return false; }
+    }
+    // Admin account changes are NOT written to a local fallback any more. The
+    // old code wrote them into this device's `local-users` list and returned
+    // success, so deactivating a technician or changing their access looked like
+    // it worked while the real account on the server was untouched.
+    return false;
+  }
+  async function cloudDeleteUser(id){
+    if(await ensureCloud()){
+      try{
+        // Deletes the profile row; the Auth account itself is left intact (Postgres
+        // has no client-side "delete another user's login" — that would need the
+        // same Edge Function pattern as account creation, if fully removing the
+        // login is ever needed rather than just deactivating).
+        //
+        // .select('id') is required here, not cosmetic: without it, PostgREST
+        // returns 204 with no error even when RLS silently matched zero rows
+        // (e.g. the missing profiles_admin_delete policy, or the row already
+        // being gone) — so the old code always reported success. Checking the
+        // returned rows is the same pattern cloudSetUser already uses.
+        const { data: rows, error } = await db.from('profiles').delete().eq('id', id).select('id');
+        if(error) throw error;
+        if(!rows || !rows.length) throw new Error('no profile row was deleted (blocked by RLS, or already removed)');
+        return true;
+      }catch(e){ console.error('delete user failed', describeCloudError(e)); return false; }
+    }
+    // Same reasoning as cloudSetUser: never report a deletion that only
+    // happened in this phone's local list.
+    return false;
+  }
+  // Clears the caller's OWN must_change_password flag via a narrow RPC
+  // (see clear_my_must_change_password in the schema) — deliberately not a
+  // direct table update, so a technician can't rewrite other columns on
+  // their own profile row (like role) through the same code path.
+  async function cloudClearMustChangePassword(){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.rpc('clear_my_must_change_password');
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('clear must_change_password failed', describeCloudError(e)); return false; }
+  }
+  // Shared Change Password screen — used both for the forced first-login
+  // change (forced=true, no Cancel, resolves only once actually saved) and
+  // the voluntary "Change My Password" homepage tile (forced=false, has
+  // Cancel). Returns a Promise resolving true if the password was changed.
+  function showChangePasswordScreen(forced){
+    return new Promise((resolve)=>{
+      $('cpTitle').textContent = forced ? 'Set a New Password' : 'Change Password';
+      $('cpMessage').textContent = forced
+        ? 'For your security, set your own password before continuing.'
+        : '';
+      $('cpCancelBtn').style.display = forced ? 'none' : '';
+      $('cpNew').value = ''; $('cpConfirm').value = '';
+      $('changePasswordOverlay').classList.add('open');
+      setTimeout(()=> $('cpNew').focus(), 50);
+
+      $('cpCancelBtn').onclick = ()=>{
+        $('changePasswordOverlay').classList.remove('open');
+        resolve(false);
+      };
+      $('cpSaveBtn').onclick = async ()=>{
+        const p1 = $('cpNew').value, p2 = $('cpConfirm').value;
+        if(!p1 || p1.length < 4){ toast('Password must be at least 4 characters'); return; }
+        if(p1 !== p2){ toast('Passwords do not match'); return; }
+        if(!(await ensureCloud())){ toast('Not connected to the cloud'); return; }
+        $('cpSaveBtn').disabled = true;
+        try{
+          const { error } = await db.auth.updateUser({ password: p1 });
+          if(error){ toast('Could not update password: '+error.message); return; }
+          await cloudClearMustChangePassword();
+          if(currentUser) currentUser.mustChangePassword = false;
+          $('changePasswordOverlay').classList.remove('open');
+          toast('Password updated');
+          resolve(true);
+        } finally { $('cpSaveBtn').disabled = false; }
+      };
+    });
+  }
+
+  let currentUser = null; // {id, name, role: 'tech'|'admin'}
+
+  // ---------- Idle timeout — Admin only, 30 minutes ----------
+  // A shared/unattended device left signed in is the risk being guarded
+  // against; Admin is the only role with an auto sign-out because of its far
+  // more sensitive surface (Manage Users, approvals, password changes,
+  // dropdown list editing). Technician and customer sessions no longer
+  // auto-expire from inactivity — they only end when the person taps
+  // "Logout". Implemented as "last activity timestamp + periodic check"
+  // rather than clearTimeout/setTimeout on every event — mousemove alone can
+  // fire dozens of times a second, and resetting a real timer that often is
+  // wasted work for no behavioral difference.
+  //
+  // This (and the explicit Logout button) are the ONLY things that sign
+  // anyone out. Reloading or refreshing the page never does — see
+  // getVerifiedSession/checkLoginGate below, which restore the saved session
+  // from cache whenever the cloud can't be reached to re-verify it (e.g. a
+  // brief signal drop on a field connection), instead of treating "couldn't
+  // check" as "log them out".
+  const ADMIN_IDLE_MS = 30 * 60 * 1000;
+  const IDLE_CHECK_MS = 15 * 1000;     // how often we check the clock
+  let lastActivity = Date.now();
+  let idleInterval = null;
+
+  function markActivity(){
+    if(currentUser) lastActivity = Date.now();
+  }
+  ['mousemove','mousedown','keydown','touchstart','scroll','wheel'].forEach(evt=>{
+    document.addEventListener(evt, markActivity, {passive:true});
+  });
+
+  function startIdleWatch(){
+    // Only admin sessions are watched — tech/customer sign out on explicit
+    // Logout tap only.
+    if(!currentUser || currentUser.role!=='admin'){ stopIdleWatch(); return; }
+    lastActivity = Date.now();
+    if(idleInterval) clearInterval(idleInterval);
+    idleInterval = setInterval(async ()=>{
+      if(!currentUser || currentUser.role!=='admin'){ stopIdleWatch(); return; }
+      if(Date.now() - lastActivity >= ADMIN_IDLE_MS){
+        stopIdleWatch();
+        await doLogout();
+        toast('Signed out after 30 minutes of inactivity');
+      }
+    }, IDLE_CHECK_MS);
+  }
+  function stopIdleWatch(){
+    if(idleInterval){ clearInterval(idleInterval); idleInterval = null; }
+  }
+
+  function updateUserBadge(){
+    const el = $('metaUser');
+    if(!el) return;
+    if(currentUser && currentUser.role==='admin'){ el.style.display=''; el.textContent = 'Admin'; }
+    else if(currentUser && currentUser.role==='customer'){ el.style.display=''; el.textContent = 'Customer: '+currentUser.name; }
+    else if(currentUser){ el.style.display=''; el.textContent = 'Tech: '+currentUser.name; }
+    else{ el.style.display='none'; }
+    const menuLogoutEl = $('menuLogout');
+    if(menuLogoutEl) menuLogoutEl.style.display = currentUser ? '' : 'none';
+  }
+
+  // Shrinks sidebar row sizing just enough that the whole menu fits within
+  // the sidebar's actual available height without needing to scroll — the
+  // alternative (leaving rows at full size and letting .admin-sidebar's own
+  // overflow-y:auto kick in) buries the account footer behind a scroll the
+  // person has no reason to expect. Only the longer list (currently admin's
+  // 11 links + 2 section labels) tends to need this; the shorter one
+  // (technician's 8 links + 1 label) keeps full-size rows and just leaves
+  // extra space at the bottom, which is fine.
+  // Continuously shrinks the sidebar nav (via the --nav-scale custom
+  // property that css/app.css's .sidebar-nav/.sidebar-link/.sidebar-
+  // section-label rules key off of) until every item fits the available
+  // height with no scrolling — rather than a binary full/compact toggle,
+  // which can't guarantee a fit for every combination of item count and
+  // screen height. Only the permanent desktop sidebar needs this (the
+  // mobile drawer is a full-height off-canvas panel with room to spare);
+  // .sidebar-nav has overflow-y:hidden either way so nothing scrolls.
+  function fitSidebarNav(){
+    const nav = document.querySelector('.sidebar-nav');
+    if(!nav) return;
+    const FLOOR = 0.55;
+    let scale = 1;
+    nav.style.setProperty('--nav-scale', scale);
+    // A handful of iterations is enough: each pass measures the real
+    // overflow at the current scale and steps down proportionally, so it
+    // converges in 2-3 passes rather than needing a fine-grained loop.
+    for(let i=0; i<6; i++){
+      const overflow = nav.scrollHeight - nav.clientHeight;
+      if(overflow <= 1) break;
+      // Scale down by roughly the fraction we're overflowing by, with a
+      // minimum step so tiny remaining overflows still make progress.
+      const ratio = nav.clientHeight / nav.scrollHeight;
+      scale = Math.max(FLOOR, scale * Math.min(ratio, 0.97));
+      nav.style.setProperty('--nav-scale', scale);
+      if(scale <= FLOOR) break;
+    }
+  }
+  window.addEventListener('resize', fitSidebarNav);
+
+  // Applies per-user access restrictions set by the admin. Admins bypass all restrictions.
+  function applyUserRestrictions(){
+    const r = (currentUser && currentUser.role!=='admin' && currentUser.restrictions) || {};
+    const setVis = (id, show)=>{ const el = $(id); if(el) el.style.display = show ? '' : 'none'; };
+    const setDisabled = (id, dis)=>{
+      const el = $(id); if(!el) return;
+      el.disabled = !!dis;
+      el.style.opacity = dis ? '0.45' : '';
+      el.style.pointerEvents = dis ? 'none' : '';
+    };
+    // Technician accounts: hide the Menu (admin-only tools live there), and
+    // surface Email Setup + Logout directly instead of tucked in the menu.
+    // (Was `role!=='admin'` back when only admin/tech existed — tightened to
+    // an exact match now that a third role, customer, exists too, so
+    // customers don't get treated as technicians below. No behavior change
+    // for admin or tech: both still resolve exactly as before.)
+    const isTech = !!(currentUser && currentUser.role==='tech');
+    const isAdmin = !!(currentUser && currentUser.role==='admin');
+    const isCustomer = !!(currentUser && currentUser.role==='customer');
+    // Switches on the desktop/tablet sidebar dashboard shell (see the
+    // admin-sidebar / dashboard-topbar rules in css/app.css) — off before
+    // login, and now shared by all three roles (role-customer mirrors
+    // role-admin/role-tech; the shell layout itself is identical, only its
+    // contents differ).
+    document.body.classList.toggle('role-admin', isAdmin);
+    document.body.classList.toggle('role-tech', isTech);
+    document.body.classList.toggle('role-customer', isCustomer);
+    if(!currentUser) document.body.classList.remove('dashboard-active');
+    // Sidebar nav: each role only sees its own group of links (My Work vs.
+    // Operations/Management vs. My Account) — see the #sidebarTechGroup /
+    // #sidebarAdminGroup / #sidebarCustomerGroup wrappers in index.html.
+    setVis('sidebarTechGroup', isTech);
+    setVis('sidebarAdminGroup', isAdmin);
+    setVis('sidebarCustomerGroup', isCustomer);
+    fitSidebarNav();
+    if(currentUser){
+      const brandNameEl = $('sidebarBrandName'); if(brandNameEl) brandNameEl.textContent = isAdmin ? 'Field Operations Portal' : isCustomer ? 'Customer Portal' : "Technician's Homepage";
+      const brandSubEl = $('sidebarBrandSub'); if(brandSubEl) brandSubEl.textContent = isAdmin ? 'Management & Administration' : isCustomer ? 'Your equipment & service history' : 'Field digital form';
+      const initial = (currentUser.name||'?').trim().charAt(0).toUpperCase() || '?';
+      const avatarEl = $('sidebarAvatar'); if(avatarEl) avatarEl.textContent = initial;
+      const acctNameEl = $('sidebarAccountName'); if(acctNameEl) acctNameEl.textContent = currentUser.name || '—';
+      const acctRoleEl = $('sidebarAccountRole'); if(acctRoleEl) acctRoleEl.textContent = isAdmin ? 'Super Administrator' : isCustomer ? 'Customer' : 'Technician';
+      // The dashboard top bar's greeting was left as static placeholder HTML
+      // ("Good day, Admin! 👋") — nothing ever wrote the real signed-in
+      // name into it, so every role (including technicians and customers)
+      // saw the literal word "Admin" here regardless of who was actually
+      // logged in.
+      const greetTitleEl = $('dtGreetingTitle'); if(greetTitleEl) greetTitleEl.textContent = 'Good day, '+(currentUser.name||'there')+'! 👋';
+    }
+    // "New" (header shortcut for a blank report) and "Create New" (Service
+    // Report tab) both start a fresh, blank report. Technicians already
+    // never saw the header button; admins can only view/edit existing
+    // reports, not author new ones, so neither role gets either control now.
+    // (srTabNewBtn was `!isAdmin`, which — now that isTech is an exact
+    // match — would incorrectly show for customers too; switched to isTech
+    // directly. Admin and tech both still resolve exactly as before.)
+    setVis('newBtn', false);
+    setVis('srTabNewBtn', isTech);
+    // Logout is now a direct, always-visible top-right button for EVERY
+    // logged-in role, not just technicians — admin's only path used to be
+    // buried inside "☰ Menu", which read as "there's no logout button in
+    // the corner" even though one technically existed one tap deeper.
+    setVis('userLogoutBtn', !!currentUser);
+    setVis('tile_changePassword', isTech);
+    applyTechNameDefault();
+    // History access
+    setVis('menuManageReports', !r.noHistory);
+    // Report generation / preview
+    setVis('previewBtn', !r.noReport);
+    setVis('genPdfBtn', !r.noReport);
+    // Read-only: cannot save drafts and cannot generate reports
+    if(r.readOnly){
+      setDisabled('saveDraftBtn', true);
+      setDisabled('genPdfBtn', true);
+      setDisabled('previewBtn', true);
+      setDisabled('newBtn', true);
+    }else{
+      setDisabled('saveDraftBtn', false);
+      setDisabled('genPdfBtn', false);
+      setDisabled('previewBtn', false);
+      setDisabled('newBtn', false);
+    }
+  }
+
+  function enterAdminMode(){
+    adminMode = true;
+    $('adminBtn').textContent = 'Admin: ON';
+    $('adminBtn').classList.add('admin-badge');
+    const menuBtnEl = $('menuBtn');
+    if(menuBtnEl){ menuBtnEl.textContent = '☰ Menu • Admin ON'; menuBtnEl.classList.add('admin-badge'); }
+  }
+  function exitAdminModeUI(){
+    adminMode = false;
+    $('adminBtn').textContent = 'Admin';
+    $('adminBtn').classList.remove('admin-badge');
+    const menuBtnEl = $('menuBtn');
+    if(menuBtnEl){ menuBtnEl.textContent = '☰ Menu'; menuBtnEl.classList.remove('admin-badge'); }
+  }
+
+  // Small inline icon set (Feather-style, stroke=currentColor) shared by the
+  // sign-in form's input fields. Kept as plain SVG markup strings rather than
+  // an icon font/library so the login screen still renders with zero network
+  // dependency on a weak field connection.
+  const LOGIN_ICON_MAIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 6 10-6"></path></svg>';
+  const LOGIN_ICON_LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>';
+  const LOGIN_ICON_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  const LOGIN_ICON_EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.62 21.62 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.6 21.6 0 0 1-2.16 3.19"></path><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+
+  // Wraps a text/email/password input with a left-side icon (and, for
+  // passwords, a show/hide toggle on the right) inside a .field.
+  function loginFieldWithIcon({label, id, type, placeholder, iconHtml, toggleable}){
+    const field = document.createElement('div');
+    field.className = 'field';
+    const labelEl = document.createElement('label');
+    labelEl.textContent = label;
+    field.appendChild(labelEl);
+    const wrap = document.createElement('div');
+    wrap.className = 'login-input-wrap';
+    const icon = document.createElement('span');
+    icon.className = 'li-icon';
+    icon.innerHTML = iconHtml;
+    wrap.appendChild(icon);
+    const input = document.createElement('input');
+    input.type = type; input.id = id; input.placeholder = placeholder;
+    if(toggleable) input.classList.add('has-toggle');
+    wrap.appendChild(input);
+    if(toggleable){
+      const toggle = document.createElement('button');
+      toggle.type = 'button'; toggle.className = 'li-toggle';
+      toggle.innerHTML = LOGIN_ICON_EYE;
+      toggle.setAttribute('aria-label','Show password');
+      toggle.addEventListener('click', ()=>{
+        const showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        toggle.innerHTML = showing ? LOGIN_ICON_EYE : LOGIN_ICON_EYE_OFF;
+        toggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      });
+      wrap.appendChild(toggle);
+    }
+    field.appendChild(wrap);
+    return {field, input};
+  }
+
+  // The login gate's default screen. Customer sign-in is the primary path —
+  // its form renders directly here, front and center. Technician access and
+  // Admin panel are one tap away via the static top-bar "Staff Access" link
+  // (see the #loginStaffTopBtn wiring below), which opens a role chooser
+  // rather than either form directly; this function only owns the
+  // credentials card itself.
+  function showRoleChooser(message){
+    const container = $('loginList');
+    container.innerHTML = '';
+
+    if(message){
+      const m = document.createElement('div');
+      m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
+      m.textContent = message;
+      container.appendChild(m);
+    }
+
+    const { field: emailField, input: emailInput } = loginFieldWithIcon({
+      label:'Email', id:'loginCustEmail', type:'email', placeholder:'you@example.com', iconHtml: LOGIN_ICON_MAIL
+    });
+    container.appendChild(emailField);
+
+    const { field: pwField, input: pwInput } = loginFieldWithIcon({
+      label:'Password', id:'loginCustPw', type:'password', placeholder:'Enter your password',
+      iconHtml: LOGIN_ICON_LOCK, toggleable:true
+    });
+    container.appendChild(pwField);
+
+    const submit = document.createElement('button');
+    submit.type = 'button'; submit.className = 'btn btn-primary';
+    submit.style.cssText = 'width:100%; margin-bottom:16px;';
+    submit.textContent = 'Sign In to Portal';
+    const doSubmit = async ()=>{
+      const email = (emailInput.value||'').trim();
+      const pw = pwInput.value;
+      if(!email || !pw){ toast('Enter your email and password'); return; }
+      if(!(await ensureCloud())){ showRoleChooser('Not connected to the cloud — check Shared Cloud Setup.'); return; }
+      submit.disabled = true;
+      const { data, error } = await db.auth.signInWithPassword({ email, password: pw });
+      if(error){ submit.disabled = false; showRoleChooser('Incorrect email or password — try again.'); return; }
+      let prof = null;
+      try{
+        const res = await db.from('profiles').select('role, name, active').eq('id', data.user.id).maybeSingle();
+        prof = res.data;
+      }catch(e){}
+      if(!prof || prof.role !== 'customer'){
+        submit.disabled = false;
+        await db.auth.signOut();
+        showRoleChooser('This account is not set up as a customer portal login.');
+        return;
+      }
+      if(prof.active===false){
+        submit.disabled = false;
+        await db.auth.signOut();
+        showRoleChooser('This account has been deactivated. Contact your service provider.');
+        return;
+      }
+      const custList = await fetchCustomerLinks(data.user.id);
+      if(!custList.length){
+        submit.disabled = false;
+        await db.auth.signOut();
+        showRoleChooser('This account is not linked to any customer records yet. Contact your service provider.');
+        return;
+      }
+      const activeId = pickActiveCustomerId(custList, data.user.id);
+      submit.disabled = false;
+      currentUser = {
+        id: data.user.id, name: prof.name || 'there', role:'customer',
+        customerId: activeId, customerIds: custList.map(c=> c.id), customerList: custList
+      };
+      localStorage.setItem('current-user', JSON.stringify(currentUser));
+      updateUserBadge();
+      applyUserRestrictions();
+      $('loginOverlay').classList.remove('open');
+      enterApp({freshLogin:true});
+      toast('Welcome, '+currentUser.name);
+    };
+    submit.addEventListener('click', doSubmit);
+    pwInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSubmit(); });
+    container.appendChild(submit);
+
+    const cloudLink = document.createElement('button');
+    cloudLink.type='button';
+    cloudLink.className = 'login-cloud-link';
+    cloudLink.textContent = cloudReady ? '☁ Connected — Cloud Setup' : '☁ Not connected — tap to set up Shared Cloud';
+    cloudLink.addEventListener('click', ()=>{
+      const cfg = getCloudConfig();
+      if(cfg){ $('cfgSupabaseUrl').value = cfg.url || ''; $('cfgSupabaseKey').value = cfg.anonKey || ''; }
+      $('cloudStatusMsg').textContent = cloudReady ? 'Currently connected.' : '';
+      $('cloudOverlay').classList.add('open');
+    });
+    container.appendChild(cloudLink);
+
+    setTimeout(()=> emailInput.focus(), 50);
+  }
+
+  function loginBackButton(){
+    const back = document.createElement('button');
+    back.type='button'; back.className='login-user-btn';
+    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
+    back.textContent = '← Back';
+    back.addEventListener('click', ()=> showRoleChooser());
+    return back;
+  }
+
+  function renderAdminLoginForm(message){
+    const container = $('loginList');
+    container.innerHTML = '';
+    container.appendChild(loginStaffBackButton());
+    if(message){
+      const m = document.createElement('div');
+      m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
+      m.textContent = message;
+      container.appendChild(m);
+    }
+    const field = document.createElement('div');
+    field.className = 'field';
+    field.innerHTML = '<label>Admin Password</label>';
+    const input = document.createElement('input');
+    input.type = 'password'; input.inputMode = 'numeric'; input.id = 'loginAdminPw';
+    input.placeholder = 'Enter password';
+    field.appendChild(input);
+    container.appendChild(field);
+
+    const submit = document.createElement('button');
+    submit.type = 'button'; submit.className = 'btn btn-primary'; submit.style.width = '100%';
+    submit.textContent = 'Sign In';
+    const doSubmit = async ()=>{
+      const pw = input.value;
+      if(!pw){ toast('Enter the admin password'); return; }
+      if(!(await ensureCloud())){ renderAdminLoginForm('Not connected to the cloud — check Shared Cloud Setup.'); return; }
+      submit.disabled = true;
+      const { data, error } = await db.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
+      submit.disabled = false;
+      if(error){ renderAdminLoginForm('Incorrect password — try again.'); return; }
+      currentUser = {id: data.user.id, name:'Admin', role:'admin'};
+      localStorage.setItem('current-user', JSON.stringify(currentUser));
+      enterAdminMode();
+      updateUserBadge();
+      applyUserRestrictions();
+      $('loginOverlay').classList.remove('open');
+      enterApp({freshLogin:true});
+      toast('Welcome, Admin');
+    };
+    submit.addEventListener('click', doSubmit);
+    input.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSubmit(); });
+    container.appendChild(submit);
+    setTimeout(()=> input.focus(), 50);
+  }
+
+  // Back button for the two staff forms (Technician / Admin) — returns to the
+  // role chooser rather than all the way out to the customer sign-in card,
+  // since that's the screen the technician/admin actually came from.
+  function loginStaffBackButton(){
+    const back = document.createElement('button');
+    back.type='button'; back.className='login-user-btn';
+    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
+    back.textContent = '← Back';
+    back.addEventListener('click', ()=> renderStaffRoleChooser());
+    return back;
+  }
+
+  // Staff sign-in used to be two separate top-bar links: "Technician Access"
+  // (which fetched and displayed EVERY active technician's username as a
+  // tappable button before asking for a password) and "Admin Panel". Both
+  // now go through this one combined entry point — pick a role first, then
+  // enter credentials — and the technician roster is never rendered as a
+  // pickable list; see renderTechnicianLoginForm below.
+  function renderStaffRoleChooser(message){
+    const container = $('loginList');
+    container.innerHTML = '';
+    container.appendChild(loginBackButton());
+    if(message){
+      const m = document.createElement('div');
+      m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
+      m.textContent = message;
+      container.appendChild(m);
+    }
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-size:13px; font-weight:700; color:var(--text-muted); margin-bottom:8px; text-align:center;';
+    heading.textContent = 'Sign in as';
+    container.appendChild(heading);
+    const techBtn = document.createElement('button');
+    techBtn.type='button'; techBtn.className='login-user-btn';
+    techBtn.textContent = '👷 Technician';
+    techBtn.addEventListener('click', ()=> renderTechnicianLoginForm());
+    container.appendChild(techBtn);
+    const adminBtn = document.createElement('button');
+    adminBtn.type='button'; adminBtn.className='login-user-btn';
+    adminBtn.textContent = '🔑 Admin';
+    adminBtn.addEventListener('click', ()=> renderAdminLoginForm());
+    container.appendChild(adminBtn);
+  }
+
+  // Technician sign-in: username + password in a single step. The username is
+  // matched (case-insensitively) against the roster from
+  // publicListTechnicians() purely to look up the internal auth email
+  // (techEmail(id)) Supabase actually needs for signInWithPassword — that
+  // roster is fetched quietly in the background and never rendered, so a
+  // visitor to the login screen no longer sees every technician's username
+  // the way the old picker did. An unknown username and a wrong password
+  // both show the same generic message, so failed attempts can't be used to
+  // fish for which usernames exist.
+  function renderTechnicianLoginForm(message, prefillUsername){
+    const container = $('loginList');
+    container.innerHTML = '';
+    container.appendChild(loginStaffBackButton());
+    if(message){
+      const m = document.createElement('div');
+      m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
+      m.textContent = message;
+      container.appendChild(m);
+    }
+    const userField = document.createElement('div');
+    userField.className = 'field';
+    userField.innerHTML = '<label>Username</label>';
+    const userInput = document.createElement('input');
+    userInput.type = 'text'; userInput.id = 'loginTechUser';
+    userInput.placeholder = 'Enter your username';
+    userInput.autocapitalize = 'none'; userInput.autocomplete = 'username';
+    if(prefillUsername) userInput.value = prefillUsername;
+    userField.appendChild(userInput);
+    container.appendChild(userField);
+
+    const pwField = document.createElement('div');
+    pwField.className = 'field';
+    pwField.innerHTML = '<label>Password</label>';
+    const pwInput = document.createElement('input');
+    pwInput.type = 'password'; pwInput.id = 'loginTechPw';
+    pwInput.placeholder = 'Enter your password';
+    pwField.appendChild(pwInput);
+    container.appendChild(pwField);
+
+    const submit = document.createElement('button');
+    submit.type = 'button'; submit.className = 'btn btn-primary'; submit.style.width = '100%';
+    submit.textContent = 'Sign In';
+    const doSubmit = async ()=>{
+      const username = (userInput.value||'').trim();
+      const pw = pwInput.value;
+      if(!username || !pw){ toast('Enter your username and password'); return; }
+      if(!(await ensureCloud())){ renderTechnicianLoginForm('Not connected to the cloud — check Shared Cloud Setup.', username); return; }
+      submit.disabled = true;
+      const roster = await publicListTechnicians();
+      const match = (roster||[]).find(u=> (u.username||'').toLowerCase() === username.toLowerCase());
+      if(!match){
+        submit.disabled = false;
+        renderTechnicianLoginForm('Incorrect username or password — try again.', username);
+        return;
+      }
+      const { data, error } = await db.auth.signInWithPassword({ email: techEmail(match.id), password: pw });
+      if(error){
+        submit.disabled = false;
+        renderTechnicianLoginForm('Incorrect username or password — try again.', username);
+        return;
+      }
+      // The roster match above intentionally carries no real name — only a
+      // username. Now that we're authenticated, pull the real profile row
+      // (name, restrictions, must_change_password) via the
+      // profiles_select_self_or_admin policy, which lets a signed-in user
+      // read their own row. Everywhere else in the app (reports, DTR, cash
+      // advance, etc.) needs the real name, not the username.
+      const profRow = await cloudGetUser(data.user.id);
+      submit.disabled = false;
+      if(!profRow){
+        await db.auth.signOut();
+        renderTechnicianLoginForm('Could not load your account — try again.', username);
+        return;
+      }
+      currentUser = {id: data.user.id, name: profRow.name || match.username, role:'tech', restrictions: profRow.restrictions||{}, mustChangePassword: !!profRow.mustChangePassword};
+      localStorage.setItem('current-user', JSON.stringify(currentUser));
+      updateUserBadge();
+      applyUserRestrictions();
+      $('loginOverlay').classList.remove('open');
+      if(currentUser.mustChangePassword) await showChangePasswordScreen(true);
+      enterApp({freshLogin:true});
+      toast('Welcome, '+currentUser.name);
+    };
+    submit.addEventListener('click', doSubmit);
+    pwInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSubmit(); });
+    container.appendChild(submit);
+    setTimeout(()=> userInput.focus(), 50);
+  }
+
+  async function showLoginScreen(message){
+    // Belt-and-suspenders, same reasoning as the rest of doLogout's cleanup
+    // below: the login overlay is meant to cover everything regardless of
+    // stacking order, but the customer nav bar is `position:fixed` with a
+    // z-index (200) higher than the login overlay's (80), so if it was left
+    // visible from a previous customer session it would render ON TOP of
+    // the overlay — visible, and clickable, on the login screen and for
+    // whichever account logs in next. Hide it explicitly every time the
+    // login screen is shown, not just on the logout path.
+    if($('cpNav')) $('cpNav').style.display = 'none';
+    $('loginOverlay').classList.add('open');
+    showRoleChooser(message);
+  }
+
+  // Reads the role from the VERIFIED Supabase session rather than trusting
+  // whatever localStorage says.
+  //
+  // Previously an admin session was restored purely because
+  // localStorage['current-user'].role === 'admin' — anyone could open devtools,
+  // write that one key, reload, and get the full admin UI (Manage Users,
+  // approvals, dropdown-list editing). Now the identity has to come back from
+  // Supabase Auth, and "admin" specifically has to match the admin account's
+  // email on the server-issued JWT.
+  //
+  // Returns one of three things, and callers must treat them differently:
+  //   {id,email,role}  a verified session was found — trust it fully.
+  //   false             the cloud IS reachable and Auth explicitly reports no
+  //                     active session (truly signed out, or the token
+  //                     expired/was revoked) — any saved local session is
+  //                     stale and should be dropped.
+  //   null              could NOT be checked right now (cloud unreachable,
+  //                     still connecting, or a transient error). This must
+  //                     NOT be treated the same as false/"no session" — doing
+  //                     so would sign someone out on every ordinary page
+  //                     reload/refresh that happens to land during a brief
+  //                     signal drop on a field connection.
+  async function getVerifiedSession(){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.auth.getSession();
+      if(error) return null; // couldn't check — unknown, not "none"
+      if(!data || !data.session || !data.session.user) return false; // genuinely no session
+      const user = data.session.user;
+      const email = (user.email||'').toLowerCase();
+      if(email === ADMIN_EMAIL.toLowerCase()){
+        return { id: user.id, email, role: 'admin' };
+      }
+      // Not the admin account — could be a technician or a customer portal
+      // login. Ask `profiles` rather than assuming 'tech' as before, now
+      // that a third role exists (self-select is already allowed by the
+      // existing `id = auth.uid()` clause on profiles' select policy, so
+      // this works pre-login-restoration same as cloudGetUser does below).
+      // Falls back to 'tech' — the old, only behavior — if this lookup
+      // fails or the row isn't a customer, so nothing changes for tech.
+      try{
+        const { data: prof } = await db.from('profiles').select('role, active').eq('id', user.id).maybeSingle();
+        if(prof && prof.role === 'customer' && prof.active !== false){
+          // Which specific customers this login can see is fetched by the
+          // caller (checkLoginGate) once it commits to restoring this as a
+          // customer session — no need to duplicate that lookup here.
+          return { id: user.id, email, role: 'customer' };
+        }
+      }catch(e){}
+      return { id: user.id, email, role: 'tech' };
+    }catch(e){ return null; }
+  }
+
+  async function checkLoginGate(){
+    let saved = null;
+    try{ saved = JSON.parse(localStorage.getItem('current-user')||'null'); }catch(e){}
+    const verified = await getVerifiedSession();
+    // A stored session that Supabase positively confirms is gone (expired or
+    // forged) is stale — drop it. A stored session we simply couldn't check
+    // right now (verified===null) is kept as-is; see getVerifiedSession above.
+    if(saved && verified===false){
+      localStorage.removeItem('current-user');
+      currentUser = null;
+      saved = null;
+    }
+    if(verified && verified.role==='admin'){
+      currentUser = {id: verified.id, name: 'Admin', role: 'admin'};
+      localStorage.setItem('current-user', JSON.stringify(currentUser));
+      enterAdminMode();
+      updateUserBadge();
+      applyUserRestrictions();
+      $('loginOverlay').classList.remove('open');
+      enterApp();
+      return;
+    }
+    // Claimed admin locally. A positively-confirmed-gone session (verified
+    // ===false, meaning the server was reachable and said there's no valid
+    // session) still forces re-login — admin's sensitive surface means we
+    // don't want to guess our way past an actual revocation. But a plain
+    // reload that simply couldn't reach the server in time (verified===
+    // null) is not the same thing as being logged out, so it now falls
+    // back to the cached session instead of forcing sign-in — matching the
+    // leniency tech/customer sessions already get below, and matching this
+    // file's own stated intent elsewhere that a refresh alone should never
+    // sign anyone out.
+    if(saved && saved.role==='admin'){
+      if(verified===null){
+        currentUser = {id: saved.id, name: saved.name||'Admin', role: 'admin'};
+        enterAdminMode();
+        updateUserBadge();
+        applyUserRestrictions();
+        $('loginOverlay').classList.remove('open');
+        enterApp();
+        return;
+      }
+      localStorage.removeItem('current-user');
+      currentUser = null;
+      await showLoginScreen('Please sign in again.');
+      return;
+    }
+    // ---- Customer portal session restore ----
+    // Mirrors the admin pattern above (verified case, then cached-locally
+    // case) rather than falling into the technician branch below — that
+    // branch's cloudGetUser()/profileToUser() path doesn't carry a role or
+    // customer_id, so a customer session would silently come back as a
+    // technician if it fell through. Pure insertion: none of this runs
+    // unless currentUser.role is 'customer'.
+    if(verified && verified.role==='customer'){
+      const custList = await fetchCustomerLinks(verified.id);
+      if(!custList.length){
+        // Login exists and is active, but isn't linked to any customer
+        // record (admin removed the last one, or it was never finished
+        // being set up) — same treatment as the login-form's own check.
+        localStorage.removeItem('current-user');
+        currentUser = null;
+        await showLoginScreen('This account is not linked to any customer records yet. Contact your service provider.');
+        return;
+      }
+      let custName = 'there';
+      try{
+        const { data: prof } = await db.from('profiles').select('name').eq('id', verified.id).maybeSingle();
+        if(prof && prof.name) custName = prof.name;
+      }catch(e){}
+      const activeId = pickActiveCustomerId(custList, verified.id);
+      currentUser = {
+        id: verified.id, name: custName, role:'customer',
+        customerId: activeId, customerIds: custList.map(c=> c.id), customerList: custList
+      };
+      localStorage.setItem('current-user', JSON.stringify(currentUser));
+      updateUserBadge();
+      applyUserRestrictions();
+      $('loginOverlay').classList.remove('open');
+      enterApp();
+      return;
+    }
+    if(saved && saved.role==='customer'){
+      if(verified===null){
+        // Cloud unreachable — trust the cache rather than forcing a login
+        // screen on a plain reload, same leniency as the technician branch.
+        currentUser = {
+          id:saved.id, name:saved.name, role:'customer', customerId:saved.customerId,
+          customerIds:saved.customerIds||[], customerList:saved.customerList||[]
+        };
+        updateUserBadge();
+        applyUserRestrictions();
+        $('loginOverlay').classList.remove('open');
+        enterApp();
+        return;
+      }
+      // Cloud WAS reachable but didn't confirm this as a live customer
+      // session (verified is false, or verified but a different
+      // role/identity) — don't guess, ask them to sign in again.
+      localStorage.removeItem('current-user');
+      currentUser = null;
+      await showLoginScreen('Please sign in again.');
+      return;
+    }
+    if(saved && verified && saved.id !== verified.id){
+      // Stored identity disagrees with a session we actually verified. Trust the server.
+      saved = {id: verified.id};
+    }
+    if(saved){
+      // When the cloud is reachable, refresh this technician's record so
+      // admin-side changes (deactivation, restrictions) take effect. When it
+      // isn't (verified===null), fall back to the cached copy rather than
+      // forcing a login screen on a simple reload/refresh while offline —
+      // technicians are exactly the ones most likely to hit a brief signal
+      // drop out in the field.
+      const fresh = verified ? await cloudGetUser(saved.id) : null;
+      if(fresh && fresh.active!==false){
+        currentUser = {id:fresh.id, name:fresh.name, role:'tech', restrictions: fresh.restrictions||{}, mustChangePassword: !!fresh.mustChangePassword};
+        localStorage.setItem('current-user', JSON.stringify(currentUser));
+        updateUserBadge();
+        applyUserRestrictions();
+        $('loginOverlay').classList.remove('open');
+        if(currentUser.mustChangePassword) await showChangePasswordScreen(true);
+        enterApp();
+        return;
+      }
+      if(fresh && fresh.active===false){
+        localStorage.removeItem('current-user');
+        currentUser = null;
+        await showLoginScreen('Your access was deactivated. Ask your admin, or sign in as someone else.');
+        return;
+      }
+      if(!verified){
+        currentUser = {id:saved.id, name:saved.name, role:'tech', restrictions: saved.restrictions||{}, mustChangePassword: !!saved.mustChangePassword};
+        updateUserBadge();
+        applyUserRestrictions();
+        $('loginOverlay').classList.remove('open');
+        enterApp();
+        return;
+      }
+      // Verified fine, but the profile lookup itself failed/returned nothing
+      // usable — a transient blip fetching the profile row (slow connection,
+      // brief signal drop), NOT the same thing as a confirmed sign-out. Only
+      // an explicit fresh.active===false above should actually end the
+      // session, so fall back to the cached copy here instead of forcing a
+      // login screen on what's still just a plain refresh.
+      currentUser = {id:saved.id, name:saved.name, role:'tech', restrictions: saved.restrictions||{}, mustChangePassword: !!saved.mustChangePassword};
+      updateUserBadge();
+      applyUserRestrictions();
+      $('loginOverlay').classList.remove('open');
+      enterApp();
+      return;
+    }
+    await showLoginScreen();
+  }
+
+  // returns false (and re-shows login) if this technician was deactivated mid-session
+  async function verifyStillActive(){
+    if(!currentUser || currentUser.role==='admin' || currentUser.role==='customer') return true; // admin/customer sessions aren't gated this way
+    const fresh = await cloudGetUser(currentUser.id);
+    if(fresh && fresh.active===false){
+      trackerStopBroadcasting();
+      localStorage.removeItem('current-user');
+      currentUser = null;
+      updateUserBadge();
+      applyUserRestrictions();
+      await showLoginScreen('Your access was deactivated. Ask your admin, or sign in as someone else.');
+      return false;
+    }
+    if(fresh){
+      // refresh restrictions in case admin changed them mid-session
+      currentUser.restrictions = fresh.restrictions || {};
+      localStorage.setItem('current-user', JSON.stringify(currentUser));
+      applyUserRestrictions();
+    }
+    return true;
+  }
+
+  async function doLogout(){
+    if(currentUser && currentUser.role==='admin') exitAdminModeUI();
+    stopIdleWatch();
+    trackerStopBroadcasting();
+    trackerAdminTeardown();
+    if(typeof srAdminTeardown === 'function') srAdminTeardown();
+    if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
+    // This used to only clear the app's OWN 'current-user' flag and never told
+    // Supabase Auth to end the session. The real session cookie/token was left
+    // fully valid, so the login screen showing right after tapping Logout was
+    // cosmetic only — checkLoginGate() runs on every reload, calls
+    // db.auth.getSession(), finds that still-live session, and logs the same
+    // account straight back in, landing on the homepage instead of login.
+    // Signing out of Supabase itself is what actually ends the session.
+    if(db){ try{ await db.auth.signOut(); }catch(e){} }
+    currentUser = null;
+    localStorage.removeItem('current-user');
+    try{ localStorage.removeItem('awes-last-screen'); }catch(e){}
+    updateUserBadge();
+    // Belt-and-suspenders: the login overlay is meant to cover everything
+    // underneath regardless, but explicitly hiding the home screen (map
+    // included) here means a signed-out session never depends on stacking
+    // order alone to keep the previous account's screen out of view.
+    const homeScreenEl = $('homeScreen');
+    if(homeScreenEl) homeScreenEl.style.display = 'none';
+    // Same belt-and-suspenders treatment for a customer session: without
+    // this, logging out mid-way through viewing one customer's equipment
+    // detail (specs + photos) left that screen sitting fully rendered but
+    // merely hidden behind the login overlay. The very next customer to
+    // log in on this device and open any equipment briefly saw the PREVIOUS
+    // customer's photos/specs still sitting in the DOM before their own
+    // render overwrote it. Resetting the underlying state here — not just
+    // hiding the screen — means there's nothing stale left for that next
+    // render to flash before it's replaced.
+    const custDetailScreenEl = $('customerEquipmentDetailScreen');
+    if(custDetailScreenEl) custDetailScreenEl.style.display = 'none';
+    const custHomeScreenEl = $('customerHomeScreen');
+    if(custHomeScreenEl) custHomeScreenEl.style.display = 'none';
+    const custPhotoGridEl = $('cpDetailPhotoGrid');
+    if(custPhotoGridEl) custPhotoGridEl.innerHTML = '';
+    if(typeof cpDetailEquip !== 'undefined') cpDetailEquip = null;
+    if(typeof cpEquipment !== 'undefined') cpEquipment = [];
+    if(typeof cpReports !== 'undefined') cpReports = [];
+    if(typeof cpCustomer !== 'undefined') cpCustomer = null;
+    await showLoginScreen();
+  }
+
+  // Tapping the header cloud chip opens the connection panel, so a technician
+  // who sees "Not Connected" has somewhere to go instead of just a dead label.
+  const cloudStatusBtn = $('cloudBtn');
+  if(cloudStatusBtn) cloudStatusBtn.addEventListener('click', ()=>{
+    $('cloudOverlay').classList.add('open');
+  });
+  $('closeCloud').addEventListener('click', ()=> $('cloudOverlay').classList.remove('open'));
+  $('cloudOverlay').addEventListener('click', (e)=>{ if(e.target.id==='cloudOverlay') $('cloudOverlay').classList.remove('open'); });
+  $('connectCloudBtn').addEventListener('click', async ()=>{
+    const url = $('cfgSupabaseUrl').value.trim();
+    const anonKey = $('cfgSupabaseKey').value.trim();
+    if(!url || !anonKey){ $('cloudStatusMsg').textContent = 'Enter both the Project URL and the anon public key.'; $('cloudStatusMsg').style.color='var(--danger)'; return; }
+    localStorage.setItem('cloud-config', JSON.stringify({url, anonKey}));
+    cloudInitPromise = null; cloudReady = false;
+    $('cloudStatusMsg').textContent = 'Connecting…'; $('cloudStatusMsg').style.color='var(--text-muted)';
+    const ok = await initCloud();
+    if(ok){
+      $('cloudStatusMsg').textContent = 'Connected! Reloading shared data…'; $('cloudStatusMsg').style.color='var(--green-dark)';
+      await loadFieldLists(); await seedDefaultLists(); await loadEmailCfg(); await loadCustomers();
+      toast('Connected to shared cloud');
+      setTimeout(()=> $('cloudOverlay').classList.remove('open'), 900);
+    }else{
+      $('cloudStatusMsg').textContent = 'Could not connect — double check the URL and key were copied correctly.';
+      $('cloudStatusMsg').style.color='var(--danger)';
+    }
+  });
+  $('disconnectCloudBtn').addEventListener('click', ()=>{
+    localStorage.removeItem('cloud-config');
+    cloudReady = false; cloudInitPromise = Promise.resolve(false); db = null;
+    setCloudStatusUI(false);
+    $('cfgSupabaseUrl').value = ''; $('cfgSupabaseKey').value = '';
+    toast('Disconnected — this device will use local storage only');
+  });
+  // Static top-bar staff-access link on the login screen (always visible,
+  // regardless of which loginList view is currently showing). Used to be two
+  // separate links (Technician / Admin); now it's one combined entry point —
+  // see renderStaffRoleChooser.
+  $('loginStaffTopBtn').addEventListener('click', ()=> renderStaffRoleChooser());
+
+  $('migrateBtn').addEventListener('click', async ()=>{
+    if(!(await ensureCloud())){ toast('Connect to the cloud first'); return; }
+    $('migrateBtn').textContent = 'Uploading…'; $('migrateBtn').disabled = true;
+    try{
+      try{
+        const res = await window.storage.get('field-lists', false);
+        if(res) await cloudSetDoc('settings/fieldLists', {data: JSON.parse(res.value)});
+      }catch(e){}
+      try{
+        const res = await window.storage.list('report:', false);
+        for(const key of (res.keys||[])){
+          const item = await window.storage.get(key, false);
+          const d = JSON.parse(item.value);
+          if(d.srNo) await cloudSaveReport(d.srNo, d);
+        }
+      }catch(e){}
+      toast('Local data uploaded to the cloud');
+    }catch(e){ toast('Migration ran into an error'); }
+    $('migrateBtn').textContent = "Upload this device's saved data to the cloud"; $('migrateBtn').disabled = false;
+  });
+
+
+// ---------- SR number counter (persisted, shared when cloud is connected) ----------
+  let currentSrNo = null;
+  // Tracks which technician a report belongs to across edits. Set when a
+  // report is freshly created (the logged-in user) or reopened from history
+  // (the report's original technician) — NOT reset to "whoever is currently
+  // editing" on every save, since an admin reviewing/fixing someone else's
+  // report shouldn't reassign it to themselves.
+  let currentTechnicianId = null;
+  async function nextSrNo(){
+    const dateStr = ($('svcDate').value || todayISO()).replace(/-/g,'');
+    if(await ensureCloud()){
+      const cloudSr = await cloudNextSrNo(dateStr);
+      if(cloudSr) return cloudSr;
+    }
+    // Offline fallback. The old code produced a plain 'SR-YYYYMMDD-001' from a
+    // per-device counter, so two technicians working offline on the same day
+    // both generated SR-...-001 and whichever synced second silently
+    // overwrote the other's report (sr_no is the conflict key). Offline numbers
+    // are now clearly provisional and carry a device tag so they can never
+    // collide; the real sequential number is assigned when the report uploads.
+    let seq = 1;
+    try{
+      const res = await window.storage.get('sr-counter:'+dateStr, false);
+      seq = res ? (JSON.parse(res.value).seq + 1) : 1;
+    }catch(e){ seq = 1; }
+    try{ await window.storage.set('sr-counter:'+dateStr, JSON.stringify({seq}), false); }catch(e){}
+    const tag = String(getDtrDeviceId()).replace(/[^a-z0-9]/gi,'').slice(-4).toUpperCase() || 'LOCL';
+    return 'SR-'+dateStr+'-P'+tag+'-'+String(seq).padStart(3,'0');
+  }
+  // Provisional numbers are the ones minted offline by the branch above.
+  function isProvisionalSrNo(srNo){ return /-P[A-Z0-9]{2,6}-\d+$/.test(srNo||''); }
+
+  // ---------- dynamic list rows (findings / recommendations) ----------
+  const LIST_KEY_BY_CONTAINER = {
+    findingsList: 'findings',
+    recsList: 'recs',
+    servicesDoneList: 'servicesDone'
+  };
+  function addListRow(containerId, value){
+    const wrap = document.createElement('div');
+    wrap.className = 'itemrow';
+    const ta = document.createElement('textarea');
+    ta.rows = 1; ta.value = value || '';
+    ta.placeholder = 'Describe...';
+    const rm = document.createElement('button');
+    rm.type = 'button'; rm.className = 'rm-btn'; rm.textContent = '\u2212';
+    rm.onclick = () => wrap.remove();
+    wrap.appendChild(ta); wrap.appendChild(rm);
+    $(containerId).appendChild(wrap);
+    attachCombo(ta, LIST_KEY_BY_CONTAINER[containerId] || containerId);
+  }
+  document.querySelectorAll('.add-row-btn[data-target]').forEach(btn=>{
+    btn.addEventListener('click', ()=> addListRow(btn.dataset.target));
+  });
+
+  // ---------- components / parts table ----------
+  let materialRowCount = 0;
+  function addMaterialRow(data){
+    data = data || {};
+    materialRowCount++;
+    const itemNo = materialRowCount;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="letter-cell">'+itemNo+'.</td>'+
+      '<td><input type="text" class="m-desc" value="'+escapeHtml(data.description||data.details||'')+'"></td>'+
+      '<td class="qty-cell"><input type="text" class="m-qty" value="'+escapeHtml(data.qty||'')+'"></td>'+
+      '<td class="unit-cell"><input type="text" class="m-unit" value="'+escapeHtml(data.unit||'')+'"></td>'+
+      '<td><button type="button" class="rm-btn" style="width:32px;height:32px;">\u2212</button></td>';
+    tr.querySelector('.rm-btn').onclick = () => { tr.remove(); relabelMaterialRows(); };
+    $('materialsBody').appendChild(tr);
+    attachCombo(tr.querySelector('.m-desc'), 'm_desc');
+    attachCombo(tr.querySelector('.m-qty'), 'm_qty');
+    attachCombo(tr.querySelector('.m-unit'), 'm_unit');
+    $('materialsTableWrap').style.display = '';
+  }
+  function relabelMaterialRows(){
+    const rows = $('materialsBody').querySelectorAll('tr');
+    materialRowCount = rows.length;
+    rows.forEach((tr,i)=>{ tr.querySelector('.letter-cell').textContent = (i+1)+'.'; });
+    if(rows.length===0) $('materialsTableWrap').style.display = 'none';
+  }
+  $('addMaterialRow').addEventListener('click', ()=> addMaterialRow());
+
+  // ---------- installation toggle ----------
+  $('isInstallToggle').addEventListener('change', function(){
+    $('installSection').classList.toggle('open', this.checked);
+  });
+
+  // ---------- signature pads (lazy-loaded) ----------
+  let sigCustomerPad = null, sigTechPad = null, sigPadsPromise = null;
+  // Whether each pad currently holds a "finalized" signature. Locking a pad
+  // stops it from accepting new strokes (via pad.off()) until it's cleared,
+  // so a signed signature can't accidentally get drawn over or altered.
+  const sigLocked = {sigCustomer:false, sigTech:false};
+  const sigPadById = () => ({sigCustomer:sigCustomerPad, sigTech:sigTechPad});
+  function lockSignature(padId){
+    const pad = sigPadById()[padId];
+    if(!pad || pad.isEmpty()) return;
+    sigLocked[padId] = true;
+    pad.off();
+    const box = $(padId).closest('.sig-box');
+    if(box) box.classList.add('locked');
+    srRenderStepper();
+  }
+  function unlockSignature(padId){
+    const pad = sigPadById()[padId];
+    if(pad) pad.on();
+    sigLocked[padId] = false;
+    const box = $(padId).closest('.sig-box');
+    if(box) box.classList.remove('locked');
+    srRenderStepper();
+  }
+  function setupSigPad(canvasId, phId){
+    const canvas = $(canvasId);
+    // Preserves the drawn strokes across a canvas resize. Resizing a canvas
+    // element (setting .width/.height) always blanks it in the browser, and
+    // this resize handler runs on every 'resize' event — including the ones
+    // mobile browsers fire when the on-screen keyboard opens or closes while
+    // the technician is typing into an unrelated field further down the
+    // form. That used to wipe out an already-drawn signature; now the pad's
+    // stroke data is captured beforehand and redrawn after resizing.
+    function resize(){
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const data = (pad && !pad.isEmpty()) ? pad.toData() : null;
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      canvas.getContext('2d').scale(ratio, ratio);
+      pad.clear();
+      if(data) pad.fromData(data);
+    }
+    const pad = new SignaturePad(canvas, {penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)'});
+    pad.addEventListener('beginStroke', ()=>{ $(phId).style.display='none'; });
+    window.addEventListener('resize', resize);
+    setTimeout(resize, 50);
+    return pad;
+  }
+  async function ensureSignaturePads(){
+    if(sigCustomerPad && sigTechPad) return;
+    if(!sigPadsPromise){
+      sigPadsPromise = loadAwesScript('signature', awesLibs.signature).then(()=>{
+        sigCustomerPad = setupSigPad('sigCustomer','sigCustomerPh');
+        sigTechPad = setupSigPad('sigTech','sigTechPh');
+      });
+    }
+    return sigPadsPromise;
+  }
+  // Load the signature library only when the user first enters either signature area.
+  ['sigCustomer','sigTech'].forEach(id=>{
+    $(id).addEventListener('pointerdown', ()=>{ ensureSignaturePads().catch(()=>toast('Signature tool could not be loaded')); }, {once:true});
+  });
+  loadFieldLists().then(async ()=>{
+    await migrateComponentFieldLists();
+    await seedDefaultLists();
+    await loadCustomers();
+    attachAllCombos();
+    checkLoginGate();
+    // Try to push anything stranded from a previous offline session. The banner
+    // itself is shown much earlier (see core.js) — it must not wait on this
+    // chain, which can sit for up to 12s behind the CDN load timeout.
+    if(navigator.onLine) outboxFlush({quiet:true});
+  });
+  // "Confirm Signature" is the explicit action that locks a pad — drawing a
+  // stroke no longer locks it by itself, so the technician/customer can
+  // redo strokes freely and only locks it in once they're happy with it.
+  document.querySelectorAll('[data-confirm]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      await ensureSignaturePads();
+      const padId = btn.dataset.confirm;
+      const pad = sigPadById()[padId];
+      if(!pad || pad.isEmpty()){ toast('Please sign before confirming'); return; }
+      lockSignature(padId);
+    });
+  });
+  document.querySelectorAll('[data-clear]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      await ensureSignaturePads();
+      const padId = btn.dataset.clear;
+      const map = {sigCustomer:sigCustomerPad, sigTech:sigTechPad};
+      map[padId].clear();
+      unlockSignature(padId); // clearing always re-opens the pad for a fresh signature
+      $(padId+'Ph').style.display='flex';
+    });
+  });
+
+  // ---------- dropdown lists (admin-managed) ----------
+  const FIELD_META = {
+    custName:{label:"Customer's Name", group:"Customer Info"},
+    contactNo:{label:'Contact No.', group:'Customer Info'},
+    contactPerson:{label:'Contact Person', group:'Customer Info'},
+    custEmail:{label:'Customer Email', group:'Customer Info'},
+    equipType:{label:'Equipment Type', group:'Equipment'},
+    modelCU:{label:'Model No. (CU)', group:'Equipment'},
+    serialCU:{label:'Serial No. (CU)', group:'Equipment'},
+    modelFCU:{label:'Model No. (FCU)', group:'Equipment'},
+    serialFCU:{label:'Serial No. (FCU)', group:'Equipment'},
+    coolCap:{label:'Cooling Capacity', group:'Equipment'},
+    mountType:{label:'Mounting Type', group:'Equipment'},
+    brand:{label:'Manufacturer / Brand', group:'Equipment'},
+    refrigerantType:{label:'Refrigerant Type', group:'Equipment'},
+    compressorType:{label:'Compressor Type', group:'Equipment'},
+    equipLocation:{label:'Specific Location', group:'Equipment'},
+    troubleCall:{label:'Trouble Call / Reason for Service', group:'Report Summary'},
+    findings:{label:'Findings / Evaluation', group:'Report Summary'},
+    recs:{label:'Recommendation/s', group:'Report Summary'},
+    b_amp_l1:{label:'Amperage L1 (Before)', group:'Operating Data'},
+    b_amp_l2:{label:'Amperage L2 (Before)', group:'Operating Data'},
+    b_amp_l3:{label:'Amperage L3 (Before)', group:'Operating Data'},
+    b_volt_l12:{label:'Voltage L12 (Before)', group:'Operating Data'},
+    b_volt_l23:{label:'Voltage L23 (Before)', group:'Operating Data'},
+    b_volt_l31:{label:'Voltage L31 (Before)', group:'Operating Data'},
+    b_press_suction:{label:'Pressure Suction (Before)', group:'Operating Data'},
+    b_press_discharge:{label:'Pressure Discharge (Before)', group:'Operating Data'},
+    b_temp:{label:'Supply Air Temp (Before)', group:'Operating Data'},
+    b_airflow:{label:'Air Volume (Before)', group:'Operating Data'},
+    a_amp_l1:{label:'Amperage L1 (After)', group:'Operating Data'},
+    a_amp_l2:{label:'Amperage L2 (After)', group:'Operating Data'},
+    a_amp_l3:{label:'Amperage L3 (After)', group:'Operating Data'},
+    a_volt_l12:{label:'Voltage L12 (After)', group:'Operating Data'},
+    a_volt_l23:{label:'Voltage L23 (After)', group:'Operating Data'},
+    a_volt_l31:{label:'Voltage L31 (After)', group:'Operating Data'},
+    a_press_suction:{label:'Pressure Suction (After)', group:'Operating Data'},
+    a_press_discharge:{label:'Pressure Discharge (After)', group:'Operating Data'},
+    a_temp:{label:'Supply Air Temp (After)', group:'Operating Data'},
+    a_airflow:{label:'Air Volume (After)', group:'Operating Data'},
+    pd_suction:{label:'Pipe Diameter — Suction', group:'Installation Data'},
+    pd_discharge:{label:'Pipe Diameter — Discharge', group:'Installation Data'},
+    pd_drain:{label:'Pipe Diameter — Drain', group:'Installation Data'},
+    pl_refline:{label:"Pipe Length — Ref't Line", group:'Installation Data'},
+    pl_drain:{label:'Pipe Length — Drain', group:'Installation Data'},
+    ws_feeder:{label:'Wire Size — Feeder', group:'Installation Data'},
+    ws_control:{label:'Wire Size — Control', group:'Installation Data'},
+    circuit_breaker:{label:'Circuit Breaker', group:'Installation Data'},
+    pi_refline:{label:"Pipe Insulation — Ref't Line", group:'Installation Data'},
+    pi_drain:{label:'Pipe Insulation — Drain', group:'Installation Data'},
+    riser_height:{label:'Riser Pipes Height', group:'Installation Data'},
+    ptrap:{label:'P-Trap', group:'Installation Data'},
+    bracketType:{label:'Accu Bracket Type', group:'Installation Data'},
+    m_desc:{label:'Components — Item Description', group:'Components'},
+    m_qty:{label:'Components — Qty', group:'Components'},
+    m_unit:{label:'Components — Unit', group:'Components'},
+    servicesDone:{label:'Services Done', group:'Services Done'},
+    scopeOfWork:{label:'Scope of Work', group:'Dispatch'},
+    custPrintedName:{label:'Customer Printed Name', group:'Acknowledgment'},
+    techName:{label:'Technician Name', group:'Acknowledgment'}
+  };
+  const GROUP_ORDER = ['Customer Info','Equipment','Report Summary','Components','Services Done','Dispatch','Operating Data','Installation Data','Acknowledgment'];
+
+  let fieldLists = {};
+  let adminMode = false;
+  // Admin credentials now live in real Supabase Auth, not a stored PIN.
+  // This synthetic email is the convention used when the admin account was created
+  // in Supabase (see setup instructions) — change it here if a different email was used.
+  const ADMIN_EMAIL = 'awes.manila@gmail.com';
+  function techEmail(technicianId){ return technicianId + '@awes-app.local'; }
+  // Re-verifies the admin's password against Supabase Auth.
+  //
+  // This used to call db.auth.signInWithPassword() on the SHARED client, which
+  // silently replaced whatever session was active. A technician who typed the
+  // admin password into the prompt was logged in AS THE ADMIN for the rest of
+  // the visit, with the admin's real Supabase JWT persisted in local storage —
+  // full privilege escalation, and it also stranded the technician's own
+  // identity for report attribution. The old comment claiming this was "safe
+  // because it's the same already-logged-in user" was simply wrong: the caller
+  // is usually NOT the admin.
+  //
+  // The fix is a throwaway client with persistSession:false and its own
+  // storageKey, so the sign-in attempt validates the password and then
+  // evaporates without touching the live session.
+  let verifyClientPromise = null;
+  async function getVerifyClient(){
+    if(!verifyClientPromise){
+      verifyClientPromise = (async ()=>{
+        if(!(await ensureCloud())) return null;
+        const cfg = getCloudConfig();
+        if(!cfg || !cfg.url || !cfg.anonKey) return null;
+        if(!window.supabase || !window.supabase.createClient) return null;
+        return window.supabase.createClient(cfg.url, cfg.anonKey, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+            storageKey: 'awes-verify-only'
+          }
+        });
+      })().catch(()=>null);
+    }
+    return verifyClientPromise;
+  }
+  async function verifyAdminPassword(pw){
+    if(!pw) return false;
+    const client = await getVerifyClient();
+    if(!client) return false;
+    try{
+      const { data, error } = await client.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
+      // Always tear the throwaway session down, whatever the outcome.
+      try{ await client.auth.signOut(); }catch(e){}
+      return !error && !!(data && data.user);
+    }catch(e){ return false; }
+  }
+
+  async function loadFieldLists(){
+    if(await ensureCloud()){
+      const doc = await cloudGetDoc('settings/fieldLists');
+      if(doc){ fieldLists = doc.data || {}; return; }
+    }
+    try{
+      const res = await window.storage.get('field-lists', false);
+      fieldLists = res ? JSON.parse(res.value) : {};
+    }catch(e){ fieldLists = {}; }
+  }
+  async function saveFieldLists(){
+    if(await ensureCloud()){
+      const ok = await cloudSetDoc('settings/fieldLists', {data: fieldLists});
+      if(ok) return;
+    }
+    try{ await window.storage.set('field-lists', JSON.stringify(fieldLists), false); }
+    catch(e){ toast('Could not save list'); }
+  }
+  function ensureList(key){ if(!fieldLists[key]) fieldLists[key] = []; return fieldLists[key]; }
+
+  // Equipment Description fields: unlike other dropdown lists (admin-only add),
+  // any logged-in user can add new values here directly while filling out a
+  // report — makes sense since technicians encounter new equipment specs in
+  // the field constantly. Admin can still add AND edit/rename via Manage
+  // Dropdown Lists; this set only affects who can add from the report form.
+  const USER_ADDABLE_LIST_KEYS = new Set([
+    'equipType','modelCU','serialCU','modelFCU','serialFCU',
+    'coolCap','mountType','brand','refrigerantType','compressorType','equipLocation'
+  ]);
+
+
+// ---------- Customer database (table: customers) ----------
+  // Powers the Customer's Name autocomplete: picking an existing customer
+  // auto-fills address/contact/email; saving a report keeps this list fresh.
+  let customersCache = [];
+  function customerRowToObj(row){
+    return { id: row.id, name: row.name, address: row.address||'', contactNo: row.contact_no||'', contactPerson: row.contact_person||'', email: row.email||'' };
+  }
+  async function loadCustomers(){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('customers').select('*').order('name');
+        if(error) throw error;
+        customersCache = (data||[]).map(customerRowToObj);
+        return;
+      }catch(e){ console.error('load customers failed', describeCloudError(e)); }
+    }
+    try{
+      const res = await window.storage.get('customers', false);
+      customersCache = res ? JSON.parse(res.value) : [];
+    }catch(e){ customersCache = []; }
+  }
+  async function saveCustomersLocal(){
+    try{ await window.storage.set('customers', JSON.stringify(customersCache), false); }catch(e){}
+  }
+  // Called when a report is saved — creates or updates the customer record
+  // so the next report for the same client can auto-fill from it.
+  async function cloudUpsertCustomer(c){
+    if(!c.name || !c.name.trim()) return;
+    const rec = { name: c.name.trim(), address: c.address||'', contact_no: c.contactNo||'', contact_person: c.contactPerson||'', email: c.email||'', updated_at: new Date().toISOString() };
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('customers').upsert(rec, { onConflict: 'name' });
+        if(error) throw error;
+        await loadCustomers();
+        return;
+      }catch(e){ console.error('upsert customer failed', describeCloudError(e)); }
+    }
+    const idx = customersCache.findIndex(x=> x.name.toLowerCase() === rec.name.toLowerCase());
+    const obj = { id: idx>=0 ? customersCache[idx].id : ('local-'+Date.now()), name: rec.name, address: rec.address, contactNo: rec.contact_no, contactPerson: rec.contact_person, email: rec.email };
+    if(idx>=0) customersCache[idx] = obj; else customersCache.push(obj);
+    await saveCustomersLocal();
+  }
+  async function cloudDeleteCustomer(id){
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('customers').delete().eq('id', id);
+        if(error) throw error;
+        await loadCustomers();
+        return true;
+      }catch(e){ console.error('delete customer failed', describeCloudError(e)); return false; }
+    }
+    customersCache = customersCache.filter(c=>c.id!==id);
+    await saveCustomersLocal();
+    return true;
+  }
+
+  // ---------- Customer Equipment (table: customer_equipment) ----------
+  // Equipment fields all use the normal global dropdown lists for free entry
+  // (via the generic combo). The toggle below lets a technician instead pick
+  // a whole known unit for the selected customer, filling every field at once.
+  const EQUIP_FIELD_KEYS = ['equipType','equipLocation','brand','mountType','coolCap','modelCU','serialCU','modelFCU','serialFCU','refrigerantType','compressorType'];
+  const EQUIP_FIELD_TO_COLUMN = {
+    equipType:'equip_type', equipLocation:'equip_location', brand:'brand', mountType:'mount_type', coolCap:'cool_cap',
+    modelCU:'model_cu', serialCU:'serial_cu', modelFCU:'model_fcu', serialFCU:'serial_fcu',
+    refrigerantType:'refrigerant_type', compressorType:'compressor_type'
+  };
+  let currentCustomerId = null;      // which customer's equipment is currently loaded
+  let currentEquipmentCache = [];    // that customer's equipment rows
+  // Which existing customer_equipment row (if any) the technician explicitly
+  // picked via the "Select Existing" tab, for the report currently being
+  // filled out. This — an explicit choice, tracked as a real id — is now
+  // the ONLY thing that decides whether saving a report reuses an existing
+  // row instead of creating a new one. It is NOT re-derived by comparing
+  // field values: "+Add New" means new, full stop, and picking "Existing"
+  // then editing a field afterward (see the input listeners wired up by
+  // watchEquipFieldsForManualEdit(), below) breaks the link on purpose —
+  // once you've changed something, it's no longer verified as that exact
+  // record, so it gets its own new row rather than silently overwriting
+  // the one you started from (use Manage Equipment > Edit for corrections).
+  let equipPickedId = null;
+  function getEquipPickedId(){ return equipPickedId; }
+  function setEquipPickedId(id){ equipPickedId = id || null; }
+  function clearEquipPickedId(){ equipPickedId = null; }
+  // Wires an 'input' listener onto every equipment field, once, so that
+  // manually typing into any of them after picking an existing record
+  // clears equipPickedId — see the comment above.
+  let equipFieldClearersAttached = false;
+  function watchEquipFieldsForManualEdit(){
+    if(equipFieldClearersAttached) return;
+    equipFieldClearersAttached = true;
+    EQUIP_FIELD_KEYS.forEach(k=>{ const el=$(k); if(el) el.addEventListener('input', clearEquipPickedId); });
+  }
+  function equipRowToObj(row){
+    return {
+      id: row.id, customerId: row.customer_id, equipType: row.equip_type, equipLocation: row.equip_location,
+      brand: row.brand, mountType: row.mount_type, coolCap: row.cool_cap, modelCU: row.model_cu, serialCU: row.serial_cu,
+      modelFCU: row.model_fcu, serialFCU: row.serial_fcu, refrigerantType: row.refrigerant_type, compressorType: row.compressor_type,
+      // Admin-set tentative next PM (preventive maintenance) date — drives
+      // the customer portal's PM-due status pill (see computeEquipmentStatus
+      // in customer-portal.js). Not part of a unit's identity.
+      nextPmDate: row.next_pm_date || '',
+      // Admin-set customer-facing display name (see
+      // 20260909_02_customer_equipment_label.sql) — shown in place of the
+      // raw id by equipDisplayName() (core.js). Also not part of identity.
+      label: row.label || ''
+    };
+  }
+  async function loadCustomerEquipment(customerId){
+    currentCustomerId = customerId;
+    watchEquipFieldsForManualEdit();
+    if(!customerId){ currentEquipmentCache = []; return; }
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('customer_equipment').select('*').eq('customer_id', customerId);
+        if(error) throw error;
+        currentEquipmentCache = (data||[]).map(equipRowToObj);
+        return;
+      }catch(e){ console.error('load customer equipment failed', describeCloudError(e)); }
+    }
+    try{
+      const res = await window.storage.get('cequip:'+customerId, false);
+      currentEquipmentCache = res ? JSON.parse(res.value) : [];
+    }catch(e){ currentEquipmentCache = []; }
+  }
+  // Called on report save when the technician didn't pick an existing
+  // record (see getEquipPickedId()/EquipPickedId above) — so, by
+  // definition, this is equipment that isn't in the database yet. Always
+  // creates a new row and returns its id; there is no content-based
+  // matching here at all, on purpose: identity is decided once, up front,
+  // by which tab the technician used ("Select Existing" carries the real
+  // id straight through via equipPickedId; "+Add New" means new), never
+  // re-guessed afterward by comparing fields. Returns null if there was
+  // nothing to add (no customerId, no fields) or the write failed.
+  async function cloudAddCustomerEquipment(customerId, fields){
+    if(!customerId) return null;
+    const hasAnyValue = EQUIP_FIELD_KEYS.some(k=> (fields[k]||'').trim());
+    if(!hasAnyValue) return null;
+    const rec = { customer_id: customerId };
+    EQUIP_FIELD_KEYS.forEach(k=> rec[EQUIP_FIELD_TO_COLUMN[k]] = fields[k]||'');
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('customer_equipment').insert(rec).select('id').single();
+        if(error) throw error;
+        await loadCustomerEquipment(customerId);
+        return data ? data.id : null;
+      }catch(e){ console.error('add customer equipment failed', describeCloudError(e)); return null; }
+    }
+    // Offline: this local id is only good for this device's own cache — it
+    // is not a real customer_equipment.id, so it should NOT be stamped onto
+    // a report as equipment_id (a foreign key nothing else will recognize).
+    // There is currently no outbox/sync path for offline-added equipment
+    // records, so a report saved fully offline falls back to the legacy
+    // serial/location+type matching until this gap gets its own fix.
+    const obj = { id:'local-'+Date.now(), customerId }; EQUIP_FIELD_KEYS.forEach(k=> obj[k]=fields[k]||'');
+    currentEquipmentCache.push(obj);
+    try{ await window.storage.set('cequip:'+customerId, JSON.stringify(currentEquipmentCache), false); }catch(e){}
+    return null;
+  }
+  // Deleting equipment requires a connection: there is no local delete queue,
+  // so the old offline path just dropped it from the in-memory cache and
+  // reported success — the record was still on the server and reappeared on the
+  // next refresh.
+  async function cloudDeleteCustomerEquipment(id){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('customer_equipment').delete().eq('id', id);
+      if(error) throw error;
+    }catch(e){
+      console.error('delete equipment failed', describeCloudError(e));
+      return false;
+    }
+    currentEquipmentCache = currentEquipmentCache.filter(e=>e.id!==id);
+    return true;
+  }
+  // Editing a record from the admin "Manage Equipment List → Edit" tab.
+  // Same reasoning as delete above: admin-only and requires a live cloud
+  // connection, no offline queue. Deliberately doesn't touch
+  // currentEquipmentCache — that cache belongs to whichever customer is
+  // currently open in Manage Customers / a report in progress, which may not
+  // be the customer this record belongs to; the admin list re-fetches fresh
+  // after saving instead.
+  async function cloudUpdateCustomerEquipment(id, fields){
+    if(!(await ensureCloud())) return false;
+    // Note: this admin-only path deliberately has no `label` handling.
+    // The customer label is the customer's own call, set from their own
+    // portal via the customer_set_equipment_label() RPC (see
+    // 20260909_03_customer_equipment_label_customer_write.sql /
+    // cloudSetEquipmentLabelAsCustomer() in customer-equipment-history.js),
+    // not something this admin-side updater writes.
+    const rec = {};
+    EQUIP_FIELD_KEYS.forEach(k=> rec[EQUIP_FIELD_TO_COLUMN[k]] = (fields[k]||'').trim());
+    // Next PM date — see the comment on equipRowToObj() above for why this
+    // stays out of EQUIP_FIELD_KEYS. undefined means the caller's form
+    // doesn't carry this field at all; empty string is a deliberate clear
+    // (the admin overlay blanking a previously-set date), so both are
+    // handled, just differently — undefined skips the column entirely,
+    // '' writes null.
+    if(fields.nextPmDate !== undefined) rec.next_pm_date = fields.nextPmDate || null;
+    try{
+      const { error } = await db.from('customer_equipment').update(rec).eq('id', id);
+      if(error) throw error;
+    }catch(e){
+      console.error('update equipment failed', describeCloudError(e));
+      return false;
+    }
+    return true;
+  }
+  // Adding a record from the admin "Manage Equipment List → Add" tab, for
+  // whichever customer the admin picks. This screen has no "select
+  // existing" alternative — it's an explicit Add action, full stop — so,
+  // same reasoning as cloudAddCustomerEquipment above, it always creates a
+  // new row with no content-based matching. Requires a live cloud connection.
+  async function cloudAddCustomerEquipmentAdmin(customerId, fields){
+    if(!customerId) return false;
+    const hasAnyValue = EQUIP_FIELD_KEYS.some(k=> (fields[k]||'').trim());
+    if(!hasAnyValue) return false;
+    if(!(await ensureCloud())) return false;
+    try{
+      const rec = { customer_id: customerId };
+      EQUIP_FIELD_KEYS.forEach(k=> rec[EQUIP_FIELD_TO_COLUMN[k]] = (fields[k]||'').trim());
+      const { error: insErr } = await db.from('customer_equipment').insert(rec);
+      if(insErr) throw insErr;
+      return true;
+    }catch(e){
+      console.error('admin add customer equipment failed', describeCloudError(e));
+      return false;
+    }
+  }
+  // Loads every equipment record across every customer, with the owning
+  // customer's name attached — powers the admin "Customer Equipment List"
+  // master view. (loadCustomerEquipment above is scoped to one customer,
+  // for the picker shown while filing a report / editing that customer.)
+  async function loadAllCustomerEquipment(){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('customer_equipment')
+          .select('*, customers(name)')
+          .order('customer_id');
+        if(error) throw error;
+        return (data||[]).map(row=>{
+          const obj = equipRowToObj(row);
+          obj.customerName = row.customers ? row.customers.name : '(unknown customer)';
+          return obj;
+        });
+      }catch(e){ console.error('load all customer equipment failed', describeCloudError(e)); }
+    }
+    // Offline fallback: stitch together each customer's own locally cached list.
+    try{
+      if(customersCache.length===0) await loadCustomers();
+      const list = [];
+      for(const c of customersCache){
+        try{
+          const res = await window.storage.get('cequip:'+c.id, false);
+          const items = res ? JSON.parse(res.value) : [];
+          items.forEach(e=> list.push(Object.assign({}, e, { customerName: c.name })));
+        }catch(e){ /* skip this customer's cache on read error */ }
+      }
+      return list;
+    }catch(e){ return []; }
+  }
+  // Detail fields (everything except Equipment Type) dynamically decide their
+  // own source each time they're opened:
+  // Equipment picker toggle: ON shows a list of this customer's known
+  // equipment (identified by Type + Brand + Capacity + Mounting + Location) to
+  // pick from as one unit. "Add New" reveals the normal input fields (global
+  // dropdown lists, free entry) for equipment not yet on file.
+  let currentEquipTab = 'addnew';
+  // Leads with equipDisplayName() (core.js) — the customer's label once
+  // one's been set, otherwise a shortened form of the fixed equipment id —
+  // so every equipment list row, everywhere in the app, shows the same
+  // stable identifier a technician or admin can tell units apart by, even
+  // before any label exists.
+  function equipSummaryLine(e){
+    const rest = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join('  ·  ') || '(no details on file)';
+    return equipDisplayName(e) + '  —  ' + rest;
+  }
+  function renderEquipPicker(){
+    const list = $('equipPickerList');
+    list.innerHTML = '';
+    if(!currentCustomerId){
+      list.innerHTML = '<div class="combo-empty">Select a customer first (step 1).</div>';
+      return;
+    }
+    if(currentEquipmentCache.length===0){
+      list.innerHTML = '<div class="combo-empty">No equipment on file yet for this customer — tap "+ Add New" to add one.</div>';
+      return;
+    }
+    currentEquipmentCache.forEach(e=>{
+      const row = document.createElement('div');
+      row.className = 'combo-item';
+      row.style.cssText = 'border:1px solid var(--border); border-radius:8px; margin-bottom:6px; padding:10px;';
+      row.textContent = equipSummaryLine(e);
+      row.addEventListener('click', ()=>{
+        EQUIP_FIELD_KEYS.forEach(k=>{ const el=$(k); if(el) el.value = e[k]||''; });
+        // Fields are filled from the SAME record this id points to, so
+        // stamp the real id now — that's what tells saveReport() (ui.js)
+        // to reuse this row instead of creating a new one. Any manual edit
+        // to a field after this clears it again (watchEquipFieldsForManualEdit).
+        setEquipPickedId(e.id);
+        setEquipTab('addnew');
+        toast('Loaded equipment: '+equipSummaryLine(e));
+      });
+      list.appendChild(row);
+    });
+  }
+  function setEquipTab(tab){
+    currentEquipTab = tab;
+    $('equipTabExisting').classList.toggle('active', tab==='existing');
+    $('equipTabAddNew').classList.toggle('active', tab==='addnew');
+    if(tab==='existing'){
+      if(!currentCustomerId){ toast('Select a customer first (step 1)'); currentEquipTab='addnew'; $('equipTabExisting').classList.remove('active'); $('equipTabAddNew').classList.add('active'); }
+      $('equipPickerPanel').style.display = currentEquipTab==='existing' ? '' : 'none';
+      $('equipFieldsWrap').style.display = currentEquipTab==='existing' ? 'none' : '';
+      if(currentEquipTab==='existing') renderEquipPicker();
+    }else if(tab==='addnew'){
+      $('equipPickerPanel').style.display = 'none';
+      $('equipFieldsWrap').style.display = '';
+    }else{
+      // Neutral state: nothing picked yet — keep both hidden until the
+      // technician taps a tab (or picking a customer auto-picks one).
+      $('equipPickerPanel').style.display = 'none';
+      $('equipFieldsWrap').style.display = 'none';
+    }
+  }
+  // When a customer is selected, default to whichever tab makes sense:
+  // show their equipment list if they have any on file, otherwise go
+  // straight to Add New so the technician isn't stuck looking at an empty list.
+  function defaultEquipTabForCustomer(){
+    // Neutral state: show only the "Select Existing" / "+ Add New" tab
+    // buttons, with neither box expanded — the technician taps one to
+    // reveal the picker list or the entry fields.
+    setEquipTab(null);
+  }
+  // Dedicated autocomplete for Customer's Name — separate from the generic
+  // attachCombo() used elsewhere, because selecting a result here fills
+  // FOUR fields (address/contact/person/email) at once, not just one.
+  function revealSectionsAfterCustomer(){
+    $('custDetailsWrap').style.display = '';
+    ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
+      const el = $(id); if(el) el.style.display = '';
+    });
+  }
+  // Shared by the customer-picker combo (below) and the "From Job Order"
+  // autofill — anywhere a customer record needs to populate section 1.
+  function applyCustomerToForm(c){
+    $('custName').value = c.name;
+    $('custAddress').value = c.address||'';
+    $('contactNo').value = c.contactNo||'';
+    $('contactPerson').value = c.contactPerson||'';
+    $('custEmail').value = c.email||'';
+    // Switching customers means switching equipment context — clear the old
+    // customer's equipment values (and any picked-existing id, which
+    // belongs to the previous customer's row) so nothing from a different
+    // site lingers, then load this customer's own equipment list for the picker.
+    EQUIP_FIELD_KEYS.forEach(k=>{ const el=$(k); if(el) el.value=''; });
+    clearEquipPickedId();
+    loadCustomerEquipment(c.id).then(defaultEquipTabForCustomer);
+    revealSectionsAfterCustomer();
+  }
+  function attachCustomerCombo(input){
+    if(input.dataset.comboAttached) return;
+    input.dataset.comboAttached = '1';
+    const wrap = document.createElement('div');
+    wrap.className = 'combo-wrap';
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    input.classList.add('combo-input');
+    const caret = document.createElement('button');
+    caret.type='button'; caret.className='combo-caret'; caret.innerHTML='&#9662;';
+    wrap.appendChild(caret);
+    const panel = document.createElement('div');
+    panel.className = 'combo-panel';
+    wrap.appendChild(panel);
+
+    function fillFromCustomer(c){
+      applyCustomerToForm(c);
+      panel.classList.remove('open');
+      input.dispatchEvent(new Event('change'));
+    }
+    // Selecting from the dropdown calls this directly (fillFromCustomer, above).
+    // Typing a brand-new customer name that isn't in the list should reveal
+    // the rest of the form too, once the technician moves on from the field —
+    // otherwise a new customer would have no way to get past step 1.
+    input.addEventListener('blur', ()=>{
+      if(input.value.trim()) revealSectionsAfterCustomer();
+    });
+    function render(filterText){
+      const q = (filterText||'').toLowerCase();
+      const filtered = customersCache.filter(c=> c.name.toLowerCase().includes(q));
+      panel.innerHTML = '';
+      if(filtered.length===0){
+        const empty = document.createElement('div');
+        empty.className = 'combo-empty';
+        empty.textContent = customersCache.length===0 ? 'No saved customers yet — fill in details and save a report to add one' : 'No matches — new customer? Just fill in the fields below';
+        panel.appendChild(empty);
+      }
+      filtered.slice(0,25).forEach(c=>{
+        const row = document.createElement('div');
+        row.className = 'combo-item';
+        const span = document.createElement('span');
+        span.textContent = c.name + (c.address ? '  —  '+c.address : '');
+        row.appendChild(span);
+        row.addEventListener('mousedown', (e)=> e.preventDefault());
+        row.addEventListener('click', ()=> fillFromCustomer(c));
+        panel.appendChild(row);
+      });
+    }
+    function open(){
+      closeAllCombos(panel);
+      render(input.value);
+      panel.classList.add('open');
+      panel.style.top=''; panel.style.bottom='';
+      const rect = wrap.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      if(spaceBelow < 200 && spaceAbove > spaceBelow){
+        panel.style.top='auto'; panel.style.bottom='calc(100% + 4px)';
+      }
+      setTimeout(()=>{ panel.scrollIntoView({block:'nearest', behavior:'smooth'}); }, 30);
+    }
+    input.addEventListener('focus', open);
+    input.addEventListener('input', ()=> render(input.value));
+    caret.addEventListener('click', (e)=>{
+      e.preventDefault();
+      if(panel.classList.contains('open')){ panel.classList.remove('open'); } else { open(); input.focus(); }
+    });
+  }
+
+  const DEFAULT_LISTS = {
+    troubleCall: [
+      'No cooling', 'Weak airflow', 'Water leaking from unit', 'Unit not turning on',
+      'Noisy operation', 'Foul odor from unit', 'Preventive maintenance / cleaning',
+      'Unit cycling on and off frequently', 'Remote control not responding', 'Ice buildup on coil'
+    ],
+    findings: [
+      'Dirty/clogged air filter', 'Low refrigerant charge / possible leak', 'Dirty condenser coil',
+      'Dirty evaporator coil', 'Clogged condensate drain line', 'Faulty capacitor', 'Faulty compressor',
+      'Damaged/worn fan motor', 'Loose or damaged electrical wiring', 'Frozen evaporator coil',
+      'Thermostat/sensor malfunction', 'Normal wear from lack of maintenance'
+    ],
+    recs: [
+      'Clean or replace air filter', 'Recharge refrigerant to proper level', 'Clean condenser coil',
+      'Clean evaporator coil', 'Clear condensate drain line', 'Replace capacitor', 'Replace/repair compressor',
+      'Replace fan motor', 'Repair/secure electrical wiring', 'Schedule regular preventive maintenance (every 3–6 months)',
+      'Monitor unit performance after repair'
+    ],
+    servicesDone: [
+      'General cleaning (air filter, evaporator coil, condenser coil)',
+      'Recharged refrigerant to proper level',
+      'Flushed and cleared condensate drain line',
+      'Replaced capacitor',
+      'Replaced air filter',
+      'Checked and tightened electrical connections',
+      'Checked and adjusted refrigerant pressure',
+      'Repaired refrigerant leak',
+      'Replaced fan motor',
+      'Performed full preventive maintenance service',
+      'Tested unit operation after service — normal cooling confirmed'
+    ],
+    // Used by the Dispatch form's "Default Scope of Works" list and each
+    // equipment item's own "Scope of Service" list — same suggestion-dropdown
+    // mechanism (attachCombo) as Service Report's Findings/Recs/Services Done,
+    // but phrased as planned work (what to do) rather than completed work
+    // (what was done), since these are written before the job is carried out.
+    scopeOfWork: [
+      'General cleaning (air filter, evaporator coil, condenser coil)',
+      'Check and recharge refrigerant to proper level',
+      'Flush and clear condensate drain line',
+      'Check and replace capacitor if needed',
+      'Replace air filter',
+      'Check and tighten electrical connections',
+      'Check and adjust refrigerant pressure',
+      'Check for and repair refrigerant leak',
+      'Check fan motor operation',
+      'Test unit operation after service',
+      'Preventive maintenance / cleaning'
+    ],
+    coolCap: [
+      '0.5 HP (5,000 BTU/hr)', '0.75 HP (7,500 BTU/hr)', '1.0 HP (9,000 BTU/hr)',
+      '1.5 HP (12,000 BTU/hr)', '2.0 HP (18,000 BTU/hr)', '2.5 HP (21,000 BTU/hr)',
+      '3.0 HP (24,000 BTU/hr)', '4.0 HP (36,000 BTU/hr / 3 TR)', '5.0 HP (48,000 BTU/hr / 4 TR)',
+      '6.0 HP (56,000 BTU/hr / 5 TR)', '7.5 HP (72,000 BTU/hr / 6 TR)', '10 HP (96,000 BTU/hr / 8 TR)',
+      '15 HP (12 TR)', '20 HP (16 TR)', '25 HP (20 TR)', '30 HP (25 TR)'
+    ],
+    mountType: [
+      'Wall Mounted', 'Ceiling Mounted (Cassette)', 'Ceiling Concealed (Ducted)',
+      'Floor Standing', 'Window Type', 'Portable', 'Rooftop Package Unit', 'Ceiling Suspended'
+    ],
+    brand: [
+      'Daikin', 'Carrier', 'Panasonic', 'LG', 'Samsung', 'Hitachi', 'Mitsubishi Electric',
+      'Mitsubishi Heavy Industries', 'Fujitsu General', 'York', 'Trane', 'McQuay', 'Kolin',
+      'Condura', 'Koppel', 'Century', 'TCL', 'Midea', 'Gree', 'Sharp'
+    ],
+    refrigerantType: [
+      'R22', 'R410A', 'R32', 'R404A', 'R134A', 'R407C', 'R290'
+    ],
+    compressorType: [
+      'Inverter', 'Non-Inverter'
+    ],
+    bracketType: [
+      'L-Type Bracket', 'Floor Mounted Type'
+    ],
+    transportMode: [
+      'Jeepney', 'Tricycle', 'Bus', 'Taxi', 'Grab/Ride-hailing', 'Motorcycle', 'Company Vehicle', 'Own Vehicle', 'Van Rental', 'Other'
+    ],
+    equipType: [
+      'Split Type Unit', 'Window Type', 'Chilled Water', 'Water-Cooled Type', 'Refrigerator', 'Freezer/Chiller'
+    ],
+    m_desc: [
+      'Compressor', 'Condenser Fan Motor', 'Blower/Fan Motor', 'Indoor PCB', 'Outdoor PCB',
+      'Remote Control', 'Capacitor', 'Contactor', 'Overload Relay', 'Thermostat/Sensor',
+      'Air Filter', 'Drain Pump', 'Cross Flow Fan', 'Expansion Valve', 'Solenoid Valve',
+      'Copper Pipe/Tubing', 'Insulation Tape/Armaflex', 'Refrigerant R22', 'Refrigerant R410A',
+      'Refrigerant R32', 'General Cleaning/Aircon Service'
+    ],
+    m_unit: [
+      'pc/s', 'set', 'assy', 'unit', 'lot', 'pair', 'roll', 'meter', 'kg', 'liter', 'can', 'box'
+    ]
+  };
+  // The Qty and Item Description suggestion lists moved to fresh keys/columns
+  // when this table split "Model No. / Details" into a plain Item Description
+  // column and a separate Unit column. Anyone who had already been building up
+  // suggestions under the old keys — or who (understandably, given the old
+  // combined field) had typed part descriptions into the Qty box and saved them
+  // there by mistake — would otherwise see those suggestions vanish from
+  // Description and linger, out of place, under Qty. Run this once to carry
+  // them over to where they now belong.
+  function looksLikePlainQty(v){ return /^\d+(\.\d+)?$/.test(String(v).trim()); }
+  async function migrateComponentFieldLists(){
+    if(fieldLists.__componentListsMigrated) return;
+    let changed = false;
+    if(Array.isArray(fieldLists.m_details) && fieldLists.m_details.length){
+      const desc = ensureList('m_desc');
+      fieldLists.m_details.forEach(v=>{ if(!desc.includes(v)) desc.push(v); });
+      changed = true;
+    }
+    if(Array.isArray(fieldLists.m_qty) && fieldLists.m_qty.length){
+      const desc = ensureList('m_desc');
+      const stillQty = [];
+      fieldLists.m_qty.forEach(v=>{
+        if(looksLikePlainQty(v)) stillQty.push(v);
+        else { if(!desc.includes(v)) desc.push(v); changed = true; }
+      });
+      if(stillQty.length !== fieldLists.m_qty.length){ fieldLists.m_qty = stillQty; changed = true; }
+    }
+    // Top up with the curated defaults too, so accounts that already had some
+    // Description suggestions (migrated or otherwise) still get the rest of
+    // the starter list, and everyone gets the new Unit suggestions — plain
+    // seedDefaultLists() below only seeds a key the very first time it's seen,
+    // which these two keys no longer qualify for once migration touches them.
+    ['m_desc','m_unit'].forEach(key=>{
+      const list = ensureList(key);
+      DEFAULT_LISTS[key].forEach(v=>{ if(!list.includes(v)){ list.push(v); changed = true; } });
+    });
+    fieldLists.__componentListsMigrated = true;
+    if(changed) await saveFieldLists();
+  }
+  async function seedDefaultLists(){
+    let changed = false;
+    Object.keys(DEFAULT_LISTS).forEach(key=>{
+      if(!(key in fieldLists)){ fieldLists[key] = DEFAULT_LISTS[key].slice(); changed = true; }
+    });
+    if(changed) await saveFieldLists();
+  }
+
+  function closeAllCombos(except){
+    document.querySelectorAll('.combo-panel.open').forEach(p=>{ if(p!==except) p.classList.remove('open'); });
+  }
+
+  function attachCombo(input, keyOverride){
+    if(input.dataset.comboAttached) return;
+    input.dataset.comboAttached = '1';
+    const key = keyOverride || input.id;
+    if(!key) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'combo-wrap';
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    input.classList.add('combo-input');
+    const caret = document.createElement('button');
+    caret.type = 'button'; caret.className = 'combo-caret'; caret.innerHTML = '&#9662;';
+    wrap.appendChild(caret);
+    const panel = document.createElement('div');
+    panel.className = 'combo-panel';
+    wrap.appendChild(panel);
+
+    // One delegated handler replaces dozens of per-option listeners created every
+    // time the suggestion list is rendered. This is both lighter and easier to maintain.
+    panel.addEventListener('mousedown', e=>{
+      if(e.target.closest('.combo-item')) e.preventDefault();
+    });
+    panel.addEventListener('click', async e=>{
+      const del = e.target.closest('.combo-del');
+      if(del){
+        e.stopPropagation();
+        const row = del.closest('.combo-item');
+        const opt = row && row.dataset.value;
+        const idx = ensureList(key).indexOf(opt);
+        if(idx>-1){ ensureList(key).splice(idx,1); await saveFieldLists(); render(input.value); }
+        return;
+      }
+      const add = e.target.closest('.combo-additem');
+      if(add){
+        const value = add.dataset.value || '';
+        if(value){ ensureList(key).push(value); await saveFieldLists(); render(value); }
+        return;
+      }
+      const row = e.target.closest('.combo-item');
+      if(row && !row.classList.contains('combo-additem')){
+        input.value = row.dataset.value || '';
+        panel.classList.remove('open');
+        input.dispatchEvent(new Event('change'));
+      }
+    });
+
+    function render(filterText){
+      const list = ensureList(key);
+      const q = (filterText||'').toLowerCase();
+      const filtered = list.filter(o=>o.toLowerCase().includes(q));
+      panel.innerHTML = '';
+      if(filtered.length===0){
+        const empty = document.createElement('div');
+        empty.className = 'combo-empty';
+        empty.textContent = list.length===0
+          ? (USER_ADDABLE_LIST_KEYS.has(key) ? 'No suggestions yet — start typing to add one' : 'No suggestions yet — set up via Admin')
+          : 'No matches';
+        panel.appendChild(empty);
+      }
+      filtered.forEach(opt=>{
+        const row = document.createElement('div');
+        row.className = 'combo-item';
+        row.dataset.value = opt;
+        const span = document.createElement('span'); span.textContent = opt;
+        row.appendChild(span);
+        if(adminMode){
+          const del = document.createElement('button');
+          del.type='button'; del.className='combo-del'; del.textContent='\u2715';
+          row.appendChild(del);
+        }
+        panel.appendChild(row);
+      });
+      if((adminMode || USER_ADDABLE_LIST_KEYS.has(key)) && filterText && filterText.trim() && !list.includes(filterText.trim())){
+        const addRow = document.createElement('div');
+        addRow.className = 'combo-item combo-additem';
+        addRow.dataset.value = filterText.trim();
+        addRow.textContent = '+ Add "'+filterText.trim()+'" to list';
+        panel.appendChild(addRow);
+      }
+    }
+    function open(){
+      closeAllCombos(panel);
+      render(input.value);
+      panel.classList.add('open');
+      panel.style.top = ''; panel.style.bottom = '';
+      const rect = wrap.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      if(spaceBelow < 200 && spaceAbove > spaceBelow){
+        panel.style.top = 'auto';
+        panel.style.bottom = 'calc(100% + 4px)';
+      }
+      setTimeout(()=>{ panel.scrollIntoView({block:'nearest', behavior:'smooth'}); }, 30);
+    }
+    input.addEventListener('focus', open);
+    input.addEventListener('input', ()=> render(input.value));
+    caret.addEventListener('click', e=>{
+      e.preventDefault();
+      if(panel.classList.contains('open')) panel.classList.remove('open');
+      else { open(); input.focus(); }
+    });
+  }
+  document.addEventListener('click', (e)=>{
+    if(!e.target.closest('.combo-wrap')) closeAllCombos(null);
+  });
+  function attachAllCombos(){
+    // Only attach the suggestion dropdown to fields that actually have saved
+    // suggestions (the FIELD_META keys). The old version attached it to every
+    // text input in the document, which meant Dispatch, Leave, Cash Advance and
+    // Admin inputs all sprouted an empty suggestion panel and a caret button.
+    Object.keys(FIELD_META).forEach(key=>{
+      if(key==='custName') return; // has its own customer-record combo below
+      const el = $(key);
+      if(el && el.tagName==='INPUT' && el.type==='text') attachCombo(el);
+    });
+    attachCombo($('troubleCall'), 'troubleCall');
+    attachCustomerCombo($('custName'));
+    if(!$('equipTabExisting').dataset.hooked){
+      $('equipTabExisting').dataset.hooked = '1';
+      $('equipTabExisting').addEventListener('click', ()=> setEquipTab('existing'));
+      $('equipTabAddNew').addEventListener('click', ()=>{
+        // A direct tap on "+ Add New" means the technician wants to log
+        // equipment that isn't on file yet — start blank. (Don't put this
+        // inside setEquipTab() itself: history.js/dispatch.js/the equipment
+        // picker all call setEquipTab('addnew') AFTER filling the fields
+        // with data they want kept, so clearing has to be scoped to this
+        // literal button tap only.)
+        EQUIP_FIELD_KEYS.forEach(k=>{ const el=$(k); if(el) el.value=''; });
+        clearEquipPickedId();
+        setEquipTab('addnew');
+      });
+      setEquipTab(null);
+    }
+  }
+  // Sections 3–8 (Report Summary through Acknowledgment) show only their
+  // title until tapped — tapping the header expands/collapses its body.
+  function toggleCollapsibleSection(head, forceOpen){
+    const body = head.nextElementSibling;
+    if(!body) return;
+    const isOpen = forceOpen!==undefined ? forceOpen : body.style.display==='none';
+    body.style.display = isOpen ? '' : 'none';
+    head.classList.toggle('open', isOpen);
+  }
+  function collapseAllSections(){
+    document.querySelectorAll('.collapsible-head').forEach(head=> toggleCollapsibleSection(head, false));
+  }
+  function expandAllSections(){
+    document.querySelectorAll('.collapsible-head').forEach(head=> toggleCollapsibleSection(head, true));
+  }
+  // Wired via event delegation on document, at load time — NOT inside
+  // attachAllCombos(). attachAllCombos() only runs after an async chain
+  // (loadFieldLists -> seedDefaultLists -> loadCustomers) that can stall or
+  // throw on a slow/offline connection; if it never completes, the old
+  // per-element listeners here never got attached and every header appeared
+  // permanently dead ("nothing happens" on tap). Delegation on document
+  // means tapping a header always works, independent of that network chain.
+  document.addEventListener('click', (e)=>{
+    const head = e.target.closest('.collapsible-head');
+    if(!head) return;
+    const body = head.nextElementSibling;
+    if(!body) return;
+    // Accordion behavior: the phone screen is too small to read two open
+    // sections at once, so opening one collapses whichever other section
+    // was open. expandAllSections() (read-only history view) and
+    // resetForm's initial state still show multiple — this only governs
+    // what happens on a user tap.
+    const willOpen = body.style.display === 'none';
+    if(willOpen){
+      document.querySelectorAll('.collapsible-head').forEach(h=>{
+        if(h !== head) toggleCollapsibleSection(h, false);
+      });
+    }
+    toggleCollapsibleSection(head, willOpen);
+  });
+
+  function fieldsInGroup(group){
+    return Object.keys(FIELD_META).filter(k=>FIELD_META[k].group===group);
+  }
+  function renderManageLists(){
+    const body = $('adminListsBody');
+    body.innerHTML = '';
+    GROUP_ORDER.forEach(group=>{
+      const keys = fieldsInGroup(group);
+      if(keys.length===0) return;
+      const gDiv = document.createElement('div');
+      gDiv.className = 'admin-group';
+      const h4 = document.createElement('h4'); h4.textContent = group;
+      gDiv.appendChild(h4);
+      keys.forEach(key=>{
+        const list = ensureList(key);
+        const fDiv = document.createElement('div');
+        fDiv.className = 'admin-field';
+        const lbl = document.createElement('label'); lbl.textContent = FIELD_META[key].label;
+        fDiv.appendChild(lbl);
+        const chips = document.createElement('div'); chips.className='chips';
+        if(list.length===0){
+          const em = document.createElement('span'); em.className='chip-empty'; em.textContent='No items yet';
+          chips.appendChild(em);
+        }
+        list.forEach(item=>{
+          const chip = document.createElement('div'); chip.className='chip';
+          const txt = document.createElement('span'); txt.textContent = item;
+          const edit = document.createElement('button'); edit.type='button'; edit.textContent='\u270E';
+          edit.title = 'Rename';
+          edit.addEventListener('click', async ()=>{
+            const idx = list.indexOf(item);
+            if(idx===-1) return;
+            const next = prompt('Rename "'+item+'" to:', item); // plain text, not a secret
+            if(next===null) return;
+            const trimmed = next.trim();
+            if(!trimmed) return;
+            list[idx] = trimmed;
+            await saveFieldLists();
+            renderManageLists();
+          });
+          const rm = document.createElement('button'); rm.type='button'; rm.textContent='\u2715';
+          rm.title = 'Remove';
+          rm.addEventListener('click', async ()=>{
+            const idx = list.indexOf(item);
+            if(idx>-1){ list.splice(idx,1); await saveFieldLists(); renderManageLists(); }
+          });
+          chip.appendChild(txt); chip.appendChild(edit); chip.appendChild(rm);
+          chips.appendChild(chip);
+        });
+        fDiv.appendChild(chips);
+        const addRow = document.createElement('div'); addRow.className='admin-add-row';
+        const inp = document.createElement('input'); inp.type='text'; inp.placeholder='Add new value…';
+        const btn = document.createElement('button'); btn.type='button'; btn.textContent='Add';
+        async function doAdd(){
+          const v = inp.value.trim();
+          if(!v) return;
+          if(!list.includes(v)) list.push(v);
+          inp.value='';
+          await saveFieldLists();
+          renderManageLists();
+        }
+        btn.addEventListener('click', doAdd);
+        inp.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); doAdd(); } });
+        addRow.appendChild(inp); addRow.appendChild(btn);
+        fDiv.appendChild(addRow);
+        gDiv.appendChild(fDiv);
+      });
+      body.appendChild(gDiv);
+    });
+  }
+
+  $('adminBtn').addEventListener('click', async ()=>{
+    if(!adminMode){
+      const pin = await askPassword({
+        title: 'Manage Dropdown Lists',
+        label: 'Enter the Admin Password to edit the dropdown lists'
+      });
+      if(pin===null) return;
+      if(!(await verifyAdminPassword(pin))){ toast('Incorrect password'); return; }
+      enterAdminMode();
+      toast('Admin mode on — dropdowns are now editable');
+    }
+    renderManageLists();
+    $('adminOverlay').classList.add('open');
+  });
+  $('closeAdmin').addEventListener('click', ()=> $('adminOverlay').classList.remove('open'));
+  $('adminOverlay').addEventListener('click', (e)=>{ if(e.target.id==='adminOverlay') $('adminOverlay').classList.remove('open'); });
+
+
+// ---------- Manage Users ----------
+  // Usernames are what the public, pre-login sign-in screen shows instead of
+  // a technician's real name (see list-technicians / publicListTechnicians).
+  // Kept deliberately simple/ASCII so it always renders cleanly as a button
+  // label and is easy for a technician to read back to themselves.
+  const USERNAME_RE = /^[a-z0-9._-]{3,20}$/;
+  function normalizeUsername(v){ return (v||'').trim().toLowerCase(); }
+
+  function restrictionLabel(r){
+    r = r || {};
+    const flags = [];
+    if(r.noHistory) flags.push('No history');
+    if(r.noReport) flags.push('No report generation');
+    if(r.readOnly) flags.push('Read-only');
+    return flags.length ? flags.join(' · ') : 'No restrictions';
+  }
+
+  async function renderUsersList(){
+    const body = $('usersList');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const cloudOn = await ensureCloud();
+    const users = (await cloudListUsers()) || [];
+    body.innerHTML = '';
+    if(!cloudOn){
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:12px; color:var(--amber); margin-bottom:10px;';
+      note.textContent = 'Not connected to Shared Cloud — user accounts are saved on this device only.';
+      body.appendChild(note);
+    }
+    if(users.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No technicians added yet.';
+      body.appendChild(empty);
+    }
+    users.sort((a,b)=> (a.name||'').localeCompare(b.name||'')).forEach(u=>{
+      const r = u.restrictions || {};
+      const active = u.active!==false;
+      const card = document.createElement('div');
+      card.className = 'user-card' + (active ? '' : ' inactive');
+      card.innerHTML =
+        '<div class="user-card-head">'+
+          '<div>'+
+            '<div class="u-name">'+escapeHtml(u.name)+'</div>'+
+            '<div class="u-status '+(active?'':'deact')+'">'+
+              (active ? 'Active' : 'Deactivated')+' · '+escapeHtml(restrictionLabel(r))+
+            '</div>'+
+            '<div class="u-status">Sign-in username: '+
+              (u.username ? escapeHtml(u.username) : '<span style="color:var(--amber);">not set — set one below</span>')+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="user-card-actions">'+
+          '<button data-act="edit" class="primary">Edit</button>'+
+          '<button data-act="toggle">'+(active ? 'Restrict (Deactivate)' : 'Reactivate')+'</button>'+
+          '<button data-act="resetDevice">Reset DTR Device</button>'+
+          '<button data-act="remove" class="danger">Remove</button>'+
+        '</div>'+
+        '<div class="user-edit-panel" data-panel="1">'+
+          '<div class="field"><label>Full Name</label><input type="text" data-f="name" value="'+escapeHtml(u.name)+'"></div>'+
+          '<div class="field"><label>Username (shown on the sign-in screen instead of the name)</label><input type="text" data-f="username" autocapitalize="none" autocomplete="off" value="'+escapeHtml(u.username||'')+'"></div>'+
+          '<div class="field"><label>New Password (leave blank to keep current)</label><input type="password" data-f="pw1" placeholder="Set a new password"></div>'+
+          '<div class="field"><label>Confirm New Password</label><input type="password" data-f="pw2" placeholder="Re-enter the new password"></div>'+
+          '<div class="restrict-group">'+
+            '<h5>Restrictions</h5>'+
+            '<label class="restrict-row"><input type="checkbox" data-f="noHistory" '+(r.noHistory?'checked':'')+'>'+
+              '<span class="rtxt"><span class="rt-title">Block History access</span><span class="rt-desc">User cannot open the History sheet or view past reports.</span></span></label>'+
+            '<label class="restrict-row"><input type="checkbox" data-f="noReport" '+(r.noReport?'checked':'')+'>'+
+              '<span class="rtxt"><span class="rt-title">Block report generation</span><span class="rt-desc">User cannot preview, generate, or share PDF reports.</span></span></label>'+
+            '<label class="restrict-row"><input type="checkbox" data-f="readOnly" '+(r.readOnly?'checked':'')+'>'+
+              '<span class="rtxt"><span class="rt-title">Read-only</span><span class="rt-desc">User cannot save drafts, start new reports, or generate reports.</span></span></label>'+
+          '</div>'+
+          '<div class="edit-save-row">'+
+            '<button class="cancel-btn" data-act="cancel" type="button">Cancel</button>'+
+            '<button class="save-btn" data-act="save" type="button">Save Changes</button>'+
+          '</div>'+
+        '</div>';
+
+      const panel = card.querySelector('[data-panel="1"]');
+      card.querySelector('[data-act="edit"]').addEventListener('click', ()=>{
+        // close any other open panels
+        body.querySelectorAll('.user-edit-panel.open').forEach(p=>{ if(p!==panel) p.classList.remove('open'); });
+        panel.classList.toggle('open');
+      });
+      card.querySelector('[data-act="cancel"]').addEventListener('click', ()=>{
+        panel.classList.remove('open');
+        // reset fields
+        panel.querySelector('[data-f="name"]').value = u.name;
+        panel.querySelector('[data-f="username"]').value = u.username||'';
+        panel.querySelector('[data-f="pw1"]').value = '';
+        panel.querySelector('[data-f="pw2"]').value = '';
+        panel.querySelector('[data-f="noHistory"]').checked = !!r.noHistory;
+        panel.querySelector('[data-f="noReport"]').checked = !!r.noReport;
+        panel.querySelector('[data-f="readOnly"]').checked = !!r.readOnly;
+      });
+      card.querySelector('[data-act="save"]').addEventListener('click', async ()=>{
+        const newName = panel.querySelector('[data-f="name"]').value.trim();
+        const newUsername = normalizeUsername(panel.querySelector('[data-f="username"]').value);
+        const pw1 = panel.querySelector('[data-f="pw1"]').value;
+        const pw2 = panel.querySelector('[data-f="pw2"]').value;
+        if(!newName){ toast('Name cannot be empty'); return; }
+        if(!USERNAME_RE.test(newUsername)){
+          toast('Username must be 3-20 characters: letters, numbers, dot, underscore, or hyphen');
+          return;
+        }
+        if(pw1 || pw2){
+          if(pw1.length < 4){ toast('Password must be at least 4 characters'); return; }
+          if(pw1 !== pw2){ toast('Passwords do not match'); return; }
+        }
+        const restrictions = {
+          noHistory: panel.querySelector('[data-f="noHistory"]').checked,
+          noReport: panel.querySelector('[data-f="noReport"]').checked,
+          readOnly: panel.querySelector('[data-f="readOnly"]').checked
+        };
+        const ok1 = await cloudSetUser(u.id, { name: newName, username: newUsername, restrictions });
+        let ok2 = true;
+        if(pw1){
+          const { data, error } = await db.functions.invoke('admin-create-technician', {
+            body: { action:'reset_password', technicianId: u.id, password: pw1 }
+          });
+          ok2 = !error && !(data && data.error);
+        }
+        if(ok1 && ok2){
+          toast('Saved changes for '+newName);
+          renderUsersList();
+        }else toast('Could not save all changes');
+      });
+      card.querySelector('[data-act="toggle"]').addEventListener('click', async ()=>{
+        const ok = await cloudSetUser(u.id, {active: active ? false : true});
+        if(ok){ toast(active ? 'Restricted '+u.name+' (access revoked)' : 'Reactivated '+u.name); renderUsersList(); }
+        else toast('Could not update');
+      });
+      card.querySelector('[data-act="resetDevice"]').addEventListener('click', async ()=>{
+        if(!confirm('Unlock '+u.name+"'s DTR from their current device? Use this if they lost or replaced their phone — the next device they time in from will become the new locked device.")) return;
+        const ok = await clearDeviceLock(u.id);
+        toast(ok ? "Device lock cleared for "+u.name : 'Could not clear device lock');
+      });
+      card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
+        if(!confirm('Remove '+u.name+' completely? Their past reports stay saved, but they will no longer appear anywhere.')) return;
+        const ok = await cloudDeleteUser(u.id);
+        if(ok){ toast('Removed '+u.name); renderUsersList(); }
+        else toast('Could not remove');
+      });
+      body.appendChild(card);
+    });
+
+    // ---------- Customer Portal Logins ----------
+    // Rendered in the same list, below the technician cards. Kept as its
+    // own pass (not merged into the users.forEach above) since the card
+    // shape differs — a set of linked customer records to edit instead of
+    // restrictions/DTR device lock.
+    if(!customersCache || customersCache.length===0) await loadCustomers();
+    const custLogins = await cloudListCustomerLogins();
+    const custHeader = document.createElement('div');
+    custHeader.style.cssText = 'font-size:12px; font-weight:700; margin:18px 0 8px; padding-top:14px; border-top:1px solid var(--border); color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px;';
+    custHeader.textContent = 'Customer Portal Logins';
+    body.appendChild(custHeader);
+    if(custLogins.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No customer portal logins yet — add one below.';
+      body.appendChild(empty);
+    }
+    custLogins.sort((a,b)=> (a.name||'').localeCompare(b.name||'')).forEach(u=>{
+      const active = u.active!==false;
+      const card = document.createElement('div');
+      card.className = 'user-card' + (active ? '' : ' inactive');
+      card.innerHTML =
+        '<div class="user-card-head">'+
+          '<div>'+
+            '<div class="u-name">'+escapeHtml(u.name)+'</div>'+
+            '<div class="u-status '+(active?'':'deact')+'">'+
+              (active ? 'Active' : 'Deactivated')+' · '+
+              (u.email ? escapeHtml(u.email) : 'Email unavailable')+' · '+
+              (u.customerNames.length ? escapeHtml(u.customerNames.join(', ')) : 'No customer records linked')+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="user-card-actions">'+
+          '<button data-act="edit" class="primary">Edit</button>'+
+          '<button data-act="toggle">'+(active ? 'Restrict (Deactivate)' : 'Reactivate')+'</button>'+
+          '<button data-act="remove" class="danger">Remove</button>'+
+        '</div>'+
+        '<div class="user-edit-panel" data-panel="1">'+
+          '<div class="field"><label>Contact Name</label><input type="text" data-f="name" value="'+escapeHtml(u.name)+'"></div>'+
+          '<div class="field"><label>Login Email</label><input type="text" data-f="email" inputmode="email" value="'+escapeHtml(u.email||'')+'" placeholder="customer@email.com"></div>'+
+          '<div class="field"><label>New Password (leave blank to keep current)</label><input type="password" data-f="pw1" placeholder="Set a new password"></div>'+
+          '<div class="field"><label>Confirm New Password</label><input type="password" data-f="pw2" placeholder="Re-enter the new password"></div>'+
+          '<div class="field"><label>Linked Customer Record(s)</label>'+
+            '<div class="restrict-group" data-f="custBox" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:8px 10px;">'+
+              customerCheckboxListHtml('edit-'+u.id, u.customerIds)+
+            '</div>'+
+          '</div>'+
+          '<div class="edit-save-row">'+
+            '<button class="cancel-btn" data-act="cancel" type="button">Cancel</button>'+
+            '<button class="save-btn" data-act="save" type="button">Save Changes</button>'+
+          '</div>'+
+        '</div>';
+
+      const panel = card.querySelector('[data-panel="1"]');
+      card.querySelector('[data-act="edit"]').addEventListener('click', ()=>{
+        body.querySelectorAll('.user-edit-panel.open').forEach(p=>{ if(p!==panel) p.classList.remove('open'); });
+        panel.classList.toggle('open');
+      });
+      card.querySelector('[data-act="cancel"]').addEventListener('click', ()=>{
+        panel.classList.remove('open');
+        panel.querySelector('[data-f="name"]').value = u.name;
+        panel.querySelector('[data-f="email"]').value = u.email||'';
+        panel.querySelector('[data-f="pw1"]').value = '';
+        panel.querySelector('[data-f="pw2"]').value = '';
+        panel.querySelector('[data-f="custBox"]').innerHTML = customerCheckboxListHtml('edit-'+u.id, u.customerIds);
+      });
+      card.querySelector('[data-act="save"]').addEventListener('click', async ()=>{
+        const newName = panel.querySelector('[data-f="name"]').value.trim();
+        const newEmail = panel.querySelector('[data-f="email"]').value.trim();
+        const pw1 = panel.querySelector('[data-f="pw1"]').value;
+        const pw2 = panel.querySelector('[data-f="pw2"]').value;
+        const custIds = getCheckedCustomerIds(panel.querySelector('[data-f="custBox"]'));
+        if(!newName){ toast('Name cannot be empty'); return; }
+        if(!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)){ toast('Enter a valid email'); return; }
+        if(pw1 || pw2){
+          if(pw1.length < 4){ toast('Password must be at least 4 characters'); return; }
+          if(pw1 !== pw2){ toast('Passwords do not match'); return; }
+        }
+        if(!custIds.length){ toast('Select at least one linked customer record'); return; }
+        const saveBtn = panel.querySelector('[data-act="save"]');
+        saveBtn.disabled = true;
+        try{
+          const ok1 = await cloudSetUser(u.id, { name: newName });
+          let ok2 = true;
+          if(pw1){
+            const { data, error } = await db.functions.invoke('admin-create-customer', {
+              body: { action:'reset_password', customerLoginId: u.id, password: pw1 }
+            });
+            ok2 = !error && !(data && data.error);
+          }
+          let ok3 = true;
+          const changedCust = custIds.slice().sort().join(',') !== u.customerIds.slice().sort().join(',');
+          if(changedCust){
+            const { data, error } = await db.functions.invoke('admin-create-customer', {
+              body: { action:'set_customers', customerLoginId: u.id, customerIds: custIds }
+            });
+            ok3 = !error && !(data && data.error);
+          }
+          let ok4 = true;
+          if(newEmail !== (u.email||'')){
+            const { data, error } = await db.functions.invoke('admin-create-customer', {
+              body: { action:'change_email', customerLoginId: u.id, email: newEmail }
+            });
+            ok4 = !error && !(data && data.error);
+            if(!ok4) toast((data && data.error) || 'Could not update email');
+          }
+          if(ok1 && ok2 && ok3 && ok4){
+            toast('Saved changes for '+newName);
+            renderUsersList();
+          }else if(ok1 && ok2 && ok3){
+            // ok4's own toast above already explained the email failure —
+            // still refresh so the name/password/customer changes that DID
+            // succeed aren't left looking unsaved.
+            renderUsersList();
+          }else toast('Could not save all changes');
+        } finally { saveBtn.disabled = false; }
+      });
+      card.querySelector('[data-act="toggle"]').addEventListener('click', async ()=>{
+        const ok = await cloudSetUser(u.id, {active: active ? false : true});
+        if(ok){ toast(active ? 'Restricted '+u.name+' (access revoked)' : 'Reactivated '+u.name); renderUsersList(); }
+        else toast('Could not update');
+      });
+      card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
+        if(!confirm('Remove '+u.name+"'s customer portal login completely? They will no longer be able to sign in.")) return;
+        const ok = await cloudDeleteUser(u.id);
+        if(ok){ toast('Removed '+u.name); renderUsersList(); }
+        else toast('Could not remove');
+      });
+      body.appendChild(card);
+    });
+  }
+  $('closeUsers').addEventListener('click', ()=> $('usersOverlay').classList.remove('open'));
+  $('usersOverlay').addEventListener('click', (e)=>{ if(e.target.id==='usersOverlay') $('usersOverlay').classList.remove('open'); });
+
+  // ---------- Manage Customers (admin-only) ----------
+  async function renderCustomersList(filterText){
+    const body = $('customersList');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const cloudOn = await ensureCloud();
+    await loadCustomers();
+    body.innerHTML = '';
+    if(!cloudOn){
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:12px; color:var(--amber); margin-bottom:10px;';
+      note.textContent = 'Not connected to Shared Cloud — customers are saved on this device only.';
+      body.appendChild(note);
+    }
+    const q = (filterText||'').toLowerCase();
+    const list = customersCache.filter(c=> c.name.toLowerCase().includes(q)).sort((a,b)=> a.name.localeCompare(b.name));
+    if(list.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = customersCache.length===0 ? 'No customers added yet.' : 'No matches.';
+      body.appendChild(empty);
+      return;
+    }
+    list.forEach(c=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      card.innerHTML =
+        '<div class="user-card-head" data-act="toggle" style="cursor:pointer;"><div>'+
+          '<div class="u-name">'+escapeHtml(c.name)+'</div>'+
+          '<div class="u-status">'+escapeHtml(c.address||'No address on file')+'</div>'+
+        '</div><span class="card-caret">▾</span></div>'+
+        '<div class="user-edit-panel" data-panel="1">'+
+          '<div class="cust-detail-row"><b>Address:</b> '+escapeHtml(c.address||'—')+'</div>'+
+          '<div class="cust-detail-row"><b>Contact No.:</b> '+escapeHtml(c.contactNo||'—')+'</div>'+
+          '<div class="cust-detail-row"><b>Contact Person:</b> '+escapeHtml(c.contactPerson||'—')+'</div>'+
+          '<div class="cust-detail-row"><b>Email:</b> '+escapeHtml(c.email||'—')+'</div>'+
+          '<div class="user-card-actions">'+
+            '<button data-act="edit" class="primary">Edit</button>'+
+            '<button data-act="history">History</button>'+
+            '<button data-act="remove" class="danger">Delete</button>'+
+          '</div>'+
+        '</div>';
+      const panel = card.querySelector('[data-panel="1"]');
+      card.querySelector('[data-act="toggle"]').addEventListener('click', (e)=>{
+        // Accordion behavior: opening one card's details closes any other
+        // that was left open, same convention as Manage Users above.
+        body.querySelectorAll('.user-edit-panel.open').forEach(p=>{
+          if(p!==panel){ p.classList.remove('open'); p.previousElementSibling.classList.remove('open'); }
+        });
+        panel.classList.toggle('open');
+        e.currentTarget.classList.toggle('open', panel.classList.contains('open'));
+      });
+      card.querySelector('[data-act="edit"]').addEventListener('click', (e)=>{ e.stopPropagation(); startEditCustomer(c); });
+      card.querySelector('[data-act="history"]').addEventListener('click', (e)=>{ e.stopPropagation(); showCustomerHistoryView(c); });
+      card.querySelector('[data-act="remove"]').addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        if(!confirm('Remove '+c.name+' from the customer list? This does not affect past reports.')) return;
+        const ok = await cloudDeleteCustomer(c.id);
+        if(ok){ toast('Removed '+c.name); renderCustomersList($('customerSearch').value); }
+        else toast('Could not remove');
+      });
+      body.appendChild(card);
+    });
+  }
+  function startEditCustomer(c){
+    $('editCustomerId').value = c.id;
+    $('customerFormTitle').textContent = 'Edit customer';
+    $('newCustName').value = c.name;
+    $('newCustAddress').value = c.address||'';
+    $('newCustContactNo').value = c.contactNo||'';
+    $('newCustContactPerson').value = c.contactPerson||'';
+    $('newCustEmail').value = c.email||'';
+    $('cancelEditCustomerBtn').style.display = '';
+    $('customerEquipmentSection').style.display = '';
+    renderCustomerEquipmentList(c.id);
+    $('customerFormTitle').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  async function renderCustomerEquipmentList(customerId){
+    const body = $('customerEquipmentList');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    await loadCustomerEquipment(customerId);
+    body.innerHTML = '';
+    if(currentEquipmentCache.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No equipment recorded yet for this customer.';
+      body.appendChild(empty);
+      return;
+    }
+    currentEquipmentCache.forEach(e=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      const summary = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join(' · ') || '(no details)';
+      const serials = [e.serialCU && ('CU: '+e.serialCU), e.serialFCU && ('FCU: '+e.serialFCU)].filter(Boolean).join('  ');
+      card.innerHTML =
+        '<div class="user-card-head"><div>'+
+          '<div class="u-name">'+escapeHtml(summary)+'</div>'+
+          '<div class="u-status">'+escapeHtml(serials||'No serials on file')+'</div>'+
+        '</div></div>'+
+        '<div class="user-card-actions">'+
+          '<button data-act="remove" class="danger">Remove</button>'+
+        '</div>';
+      card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
+        if(!confirm('Remove this equipment record? This does not affect past reports.')) return;
+        const ok = await cloudDeleteCustomerEquipment(e.id);
+        if(ok){ toast('Removed'); renderCustomerEquipmentList(customerId); }
+        else toast('Could not remove');
+      });
+      body.appendChild(card);
+    });
+  }
+
+  // ---------- Customer History (admin-only, full page) — reached via the
+  // "History" action on a customer card above. Two states within the same
+  // page, same drill-down convention as the DTR attendance table: the
+  // equipment-list card (customer details + every equipment record on
+  // file) and the service-history card for whichever equipment was tapped. ----------
+  let custHistCustomer = null;   // the customer this page is currently showing
+  let custHistEquipment = null;  // the equipment currently drilled into, or null
+  async function openCustomerHistoryPage(c){
+    custHistCustomer = c;
+    custHistEquipment = null;
+    const d = $('custHistDetails');
+    d.innerHTML =
+      '<div class="cust-detail-row"><b>'+escapeHtml(c.name)+'</b></div>'+
+      '<div class="cust-detail-row"><b>Address:</b> '+escapeHtml(c.address||'—')+'</div>'+
+      '<div class="cust-detail-row"><b>Contact No.:</b> '+escapeHtml(c.contactNo||'—')+'</div>'+
+      '<div class="cust-detail-row"><b>Contact Person:</b> '+escapeHtml(c.contactPerson||'—')+'</div>'+
+      '<div class="cust-detail-row"><b>Email:</b> '+escapeHtml(c.email||'—')+'</div>';
+    custHistShowEquipList();
+    await renderCustHistEquipList(c);
+  }
+  function custHistShowEquipList(){
+    custHistEquipment = null;
+    $('custHistServiceCard').style.display = 'none';
+    $('custHistEquipListCard').style.display = '';
+    window.scrollTo({top:0});
+  }
+  async function renderCustHistEquipList(c){
+    const body = $('custHistEquipList');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    await loadCustomerEquipment(c.id);
+    body.innerHTML = '';
+    if(currentEquipmentCache.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No equipment recorded yet for this customer.';
+      body.appendChild(empty);
+      return;
+    }
+    currentEquipmentCache.forEach(e=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      const summary = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join(' · ') || '(no details)';
+      const serials = [e.serialCU && ('CU: '+e.serialCU), e.serialFCU && ('FCU: '+e.serialFCU)].filter(Boolean).join('  ');
+      card.innerHTML =
+        '<div class="user-card-head" data-act="open" style="cursor:pointer;"><div>'+
+          '<div class="u-name">'+escapeHtml(summary)+'</div>'+
+          '<div class="u-status">'+escapeHtml(serials||'No serials on file')+'</div>'+
+        '</div><span class="card-caret">›</span></div>';
+      card.querySelector('[data-act="open"]').addEventListener('click', ()=> custHistShowServiceHistory(c, e));
+      body.appendChild(card);
+    });
+  }
+  // A report is treated as belonging to a piece of equipment when its
+  // equipment_id — stamped once, at whichever point it was added (see
+  // cloudAddCustomerEquipment()/dtAddCustomerEquipmentBatch()) and carried
+  // through by saveReport() (ui.js) — matches this record's own fixed id.
+  // Previously this matched on customer name plus every EQUIP_FIELD_KEYS
+  // field being exactly equal, which had drifted out of step with the rest
+  // of the app: cloudAddCustomerEquipment() no longer does any such
+  // content-based identity check (identity is decided once, by which
+  // action added the row — see its own comment), so a report and an
+  // equipment record could legitimately be the same unit with different
+  // field text (e.g. after an admin edits the record via Manage Equipment
+  // List → Edit) and still fail to match, or — the more dangerous
+  // direction — two genuinely different units that happen to share every
+  // field could be wrongly shown as one. Matching on the fixed id avoids
+  // both. Reports filed before equipment_id existed have no id to match
+  // and won't appear here; that legacy gap already has a shared fallback
+  // in matchReportHistoryForEquipment() (core.js), used by Manage
+  // Equipment List and the customer portal.
+  function reportMatchesEquipment(report, equip){
+    return !!(equip && equip.id && report && report.equipmentId === equip.id);
+  }
+  async function custHistShowServiceHistory(c, equip){
+    custHistEquipment = equip;
+    $('custHistEquipListCard').style.display = 'none';
+    $('custHistServiceCard').style.display = '';
+    window.scrollTo({top:0});
+    const summary = [equip.equipLocation, equip.brand, equip.mountType, equip.equipType, equip.coolCap].filter(Boolean).join(' · ') || '(no details)';
+    const serials = [equip.serialCU && ('CU: '+equip.serialCU), equip.serialFCU && ('FCU: '+equip.serialFCU)].filter(Boolean).join('  ');
+    $('custHistEquipSummary').innerHTML =
+      '<div class="cust-detail-row"><b>'+escapeHtml(c.name)+' — '+escapeHtml(summary)+'</b></div>'+
+      (serials ? '<div class="cust-detail-row">'+escapeHtml(serials)+'</div>' : '');
+    const body = $('custHistServiceTableBody');
+    body.innerHTML = '<tr><td colspan="4"><div class="empty-state">Loading…</div></td></tr>';
+    let reports = null;
+    if(await ensureCloud()) reports = await cloudListReports();
+    if(reports===null){
+      reports = [];
+      try{
+        const res = await window.storage.list('report:', false);
+        const keys = (res && res.keys) ? res.keys : [];
+        for(const key of keys){
+          try{ const item = await window.storage.get(key, false); reports.push(JSON.parse(item.value)); }catch(e){}
+        }
+      }catch(e){}
+    }
+    const matches = reports.filter(r=> r.completed && reportMatchesEquipment(r, equip))
+      .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+    body.innerHTML = '';
+    if(matches.length===0){
+      body.innerHTML = '<tr><td colspan="4"><div class="empty-state">No completed service reports for this equipment yet.</div></td></tr>';
+      return;
+    }
+    matches.forEach(d=>{
+      const svcArr = Array.isArray(d.servicesDone) ? d.servicesDone : (d.servicesDone ? [d.servicesDone] : []);
+      const svcText = svcArr.length ? svcArr.join('; ') : '—';
+      const row = document.createElement('tr');
+      row.innerHTML =
+        '<td>'+escapeHtml(svcText)+'</td>'+
+        '<td>'+escapeHtml(fmtDate(d.date)||'—')+'</td>'+
+        '<td>'+escapeHtml(d.srNo||'—')+'</td>'+
+        '<td><button type="button" class="att-view-btn" data-act="view">View</button></td>';
+      row.querySelector('[data-act="view"]').addEventListener('click', async ()=>{
+        try{
+          const doc = await buildPdf(d);
+          $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
+          $('previewOkBtn').textContent = 'Close';
+          $('previewOverlay').classList.add('open');
+          await renderPdfPreview(doc);
+        }catch(err){
+          console.error('view report failed', err);
+          toast('Could not open this report');
+        }
+      });
+      body.appendChild(row);
+    });
+  }
+
+  // ---------- Manage Equipment List (admin menu — the equipment list per
+  // customer, in one master view across every customer, not scoped to
+  // whichever one is open in Manage Customers) ----------
+  let equipListTab = 'edit'; // 'edit' | 'add' | 'delete'
+
+  // (Re)builds the customer filter (Edit/Delete tabs) and the customer
+  // picker on the Add tab from the shared customers list, keeping whatever
+  // was already selected if it's still there.
+  async function populateEquipmentCustomerSelects(){
+    if(customersCache.length===0) await loadCustomers();
+    const sorted = customersCache.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+    const opts = sorted.map(c=> '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>').join('');
+    const filterSel = $('equipmentListCustomerFilter');
+    const keepFilter = filterSel.value;
+    filterSel.innerHTML = '<option value="">Search and select a customer…</option>' + opts;
+    filterSel.value = keepFilter;
+    const addSel = $('eqAddCustomer');
+    const keepAdd = addSel.value;
+    addSel.innerHTML = '<option value="">Select a customer…</option>' + opts;
+    addSel.value = keepAdd;
+  }
+  function setEquipListTab(tab){
+    equipListTab = tab;
+    $('equipListTabEdit').classList.toggle('active', tab==='edit');
+    $('equipListTabAdd').classList.toggle('active', tab==='add');
+    $('equipListTabDelete').classList.toggle('active', tab==='delete');
+    $('equipListViewSection').style.display = tab==='add' ? 'none' : '';
+    $('equipAddSection').style.display = tab==='add' ? '' : 'none';
+    if(tab!=='add') renderEquipmentMasterList();
+  }
+  async function renderEquipmentMasterList(){
+    const custId = $('equipmentListCustomerFilter').value;
+    const resultsWrap = $('equipListResultsWrap');
+    const noCustHint = $('equipListNoCustomerHint');
+    // Nothing renders until a customer is picked — no "browse everyone's
+    // equipment at once" view, so the list only ever shows one customer's
+    // units at a time.
+    if(!custId){
+      resultsWrap.style.display = 'none';
+      noCustHint.style.display = '';
+      $('equipmentListBody').innerHTML = '';
+      return;
+    }
+    resultsWrap.style.display = '';
+    noCustHint.style.display = 'none';
+    const body = $('equipmentListBody');
+    body.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = await loadAllCustomerEquipment();
+    const q = ($('equipmentListSearch').value||'').trim().toLowerCase();
+    let items = all.filter(e=> String(e.customerId)===String(custId));
+    if(q){
+      items = items.filter(e=>{
+        const hay = [e.customerName, e.equipType, e.equipLocation, e.brand, e.mountType, e.modelCU, e.serialCU, e.modelFCU, e.serialFCU, e.label, equipShortId(e)]
+          .filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    items.sort((a,b)=> (a.customerName||'').localeCompare(b.customerName||''));
+    // One query for the whole (already customer-scoped) list rather than
+    // one per card — see cloudGetEquipmentPhotoCounts in
+    // equipment-photos.js.
+    const photoCounts = await cloudGetEquipmentPhotoCounts(custId);
+    body.innerHTML = '';
+    if(items.length===0){
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = q ? 'No equipment matches "'+$('equipmentListSearch').value+'".' : 'No equipment on file yet.';
+      body.appendChild(empty);
+      return;
+    }
+    items.forEach(e=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      // Customer name is dropped here since the list is already scoped to one
+      // customer — location becomes the card's title instead (bold/larger,
+      // via the existing u-name style) so it's what stands out per row.
+      const rest = [e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join(' · ') || '(no details)';
+      const serials = [e.serialCU && ('CU: '+e.serialCU), e.serialFCU && ('FCU: '+e.serialFCU)].filter(Boolean).join('  ');
+      const pmLine = e.nextPmDate ? 'Next PM: '+fmtDate(e.nextPmDate) : 'No PM scheduled';
+      // Equipment id/label line: always shows the fixed id (equipShortId),
+      // plus the customer label alongside it once one's been set — so an
+      // admin scanning the list can see both at a glance instead of having
+      // to open each record to check whether it's labeled yet.
+      const idLine = e.label ? escapeHtml(e.label)+' · '+escapeHtml(equipShortId(e)) : escapeHtml(equipShortId(e));
+      // Photo-count badge only — the actual thumbnails live in the detail
+      // overlay's gallery (renderEquipmentPhotosSection below); showing a
+      // real image per list row would mean a signed-URL round trip per
+      // card just to browse the list, which isn't worth it here.
+      const photoBadge = photoCounts[e.id] ? ' &nbsp;📷 '+photoCounts[e.id] : '';
+      card.innerHTML =
+        '<div class="user-card-head"'+(equipListTab==='edit' ? ' data-act="toggle" style="cursor:pointer;"' : '')+'><div>'+
+          '<div class="u-name">'+escapeHtml(e.equipLocation || '(no location)')+'</div>'+
+          '<div class="u-status" style="font-family:monospace;">'+idLine+photoBadge+'</div>'+
+          '<div class="u-status">'+escapeHtml(rest)+'</div>'+
+          (serials ? '<div class="u-status">'+escapeHtml(serials)+'</div>' : '')+
+          '<div class="u-status">'+escapeHtml(pmLine)+'</div>'+
+        '</div></div>'+
+        (equipListTab==='delete' ?
+          '<div class="user-card-actions"><button data-act="remove" class="danger">Delete</button></div>' : '');
+      if(equipListTab==='edit'){
+        card.querySelector('[data-act="toggle"]').addEventListener('click', ()=> openEquipmentDetailOverlay(e));
+      }
+      if(equipListTab==='delete'){
+        card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
+          if(!confirm('Remove this equipment record for '+e.customerName+'? This does not affect past reports.')) return;
+          const ok = await cloudDeleteCustomerEquipment(e.id);
+          if(ok){ toast('Removed'); renderEquipmentMasterList(); }
+          else toast('Could not remove');
+        });
+      }
+      body.appendChild(card);
+    });
+  }
+  // ---------- Equipment full-detail overlay (Manage Equipment List → View
+  // All → tap a row) — a clean label/value view of every field, the same
+  // layout the Dispatch Ticket equipment detail popup uses. "Edit" swaps the
+  // read-only rows for input fields in place; "Save" writes and re-renders
+  // the master list; "Cancel" discards and returns to the read-only view.
+  const EQUIP_DETAIL_KEYS = [
+    'equipType','brand','mountType','coolCap','modelCU','serialCU',
+    'modelFCU','serialFCU','refrigerantType','compressorType','equipLocation',
+    'nextPmDate'
+  ];
+  // Labels for fields that aren't part of FIELD_META (service-report.js) —
+  // nextPmDate deliberately isn't in FIELD_META itself, since that list also
+  // drives the technician's report-filling form and the equipment-add
+  // autosuggest fields (see customers.js), neither of which this
+  // admin-only, PM-reminder-only field belongs on.
+  const EQUIP_DETAIL_EXTRA_LABELS = { nextPmDate: 'Next PM Date' };
+  let equipDetailRecord = null; // the equipment row currently open in the overlay
+  function equipDetailRowsHtml(record, editing){
+    // Two fixed, always-read-only rows up top, in neither EQUIP_DETAIL_KEYS
+    // nor the edit-mode input loop below:
+    //  - Equipment ID: the permanent id service_reports.equipment_id
+    //    actually matches against (equipShortId, core.js) — never editable
+    //    here, it isn't meant to change.
+    //  - Customer Label: the customer's own name for this unit, set from
+    //    their own portal (see customer_set_equipment_label() in
+    //    20260909_03_customer_equipment_label_customer_write.sql) — shown
+    //    here so admin can see it, but deliberately not editable from this
+    //    overlay; naming the unit is the customer's call, not admin's.
+    const idRow = '<div class="equip-detail-row"><span class="equip-detail-label">Equipment ID</span>'+
+      '<span style="font-family:monospace;">'+escapeHtml(equipShortId(record))+'</span></div>';
+    const labelRow = '<div class="equip-detail-row"><span class="equip-detail-label">Customer Label</span>'+
+      '<span>'+(record.label ? escapeHtml(record.label) : '<span style="color:var(--text-muted);">Not set by customer yet</span>')+'</span></div>';
+    return idRow + labelRow + EQUIP_DETAIL_KEYS.map(k=>{
+      const label = EQUIP_DETAIL_EXTRA_LABELS[k] || (FIELD_META[k] && FIELD_META[k].label) || k;
+      const isDate = k === 'nextPmDate';
+      const val = (record[k]||'').toString();
+      return '<div class="equip-detail-row"><span class="equip-detail-label">'+escapeHtml(label)+'</span>'+
+        (editing
+          ? '<input type="'+(isDate?'date':'text')+'" data-f="'+k+'" value="'+escapeHtml(val)+'" style="text-align:right; border:1px solid var(--border); border-radius:6px; padding:4px 6px; font-size:13px; flex:1; max-width:60%;">'
+          : '<span>'+(val.trim() ? escapeHtml(isDate ? fmtDate(val) : val) : '—')+'</span>')+
+      '</div>';
+    }).join('');
+  }
+  function setEquipDetailMode(mode){
+    if(!equipDetailRecord) return;
+    $('equipmentDetailBody').innerHTML = equipDetailRowsHtml(equipDetailRecord, mode==='edit');
+    $('equipmentDetailEditBtn').style.display = mode==='edit' ? 'none' : '';
+    $('equipmentDetailCancelBtn').style.display = mode==='edit' ? '' : 'none';
+    $('equipmentDetailSaveBtn').style.display = mode==='edit' ? '' : 'none';
+  }
+  // Fetches this equipment's own service-visit history for the "Service
+  // History" section below — same report columns and the same
+  // matchReportHistoryForEquipment() matching logic (core.js) the customer
+  // portal's own equipment history screen uses, so the admin sees exactly
+  // what that customer would see for this unit. Matched via customer_id
+  // (not cust_name text) for the same reason customer-portal.js was
+  // switched over: a report whose cust_name didn't exactly match this
+  // customer's name (typo, casing, a nickname a technician typed in) was
+  // otherwise a real visit for this unit but got silently excluded here,
+  // while the customer portal — once it also matched on customer_id —
+  // could show a DIFFERENT set of visits for the very same equipment. Both
+  // screens now source from the same customer_id-scoped query so they
+  // never disagree.
+  async function loadEquipmentServiceHistory(eq){
+    if(!eq.customerId || !(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('service_reports')
+        .select('sr_no, date, cust_name, equipment_id, equip_type, equip_location, model_cu, serial_cu, model_fcu, serial_fcu, trouble_call, remarks, completed, technician_name, findings, recommendations, materials, services_done')
+        .eq('customer_id', eq.customerId)
+        .order('date', { ascending:false });
+      if(error) throw error;
+      return matchReportHistoryForEquipment(data||[], eq);
+    }catch(e){ console.error('load equipment service history failed', describeCloudError(e)); return []; }
+  }
+  // Renders the expandable visit timeline into the overlay, reusing
+  // cpVisitCardHtml (customer-equipment-history.js) so admin and customer
+  // see an identical per-visit layout. Looks up each visit's body via
+  // head.nextElementSibling rather than by id — cpVisitCardHtml's ids are
+  // only unique per render, and this overlay can be opened for a different
+  // equipment record (and thus re-rendered) many times in one session.
+  function renderEquipmentHistorySection(history){
+    $('equipmentDetailHistoryMeta').textContent = history.length
+      ? history.length+' visit'+(history.length===1?'':'s')+' on record · last serviced '+fmtDate(history[0].date)
+      : 'No service visits recorded yet for this unit.';
+    const list = $('equipmentDetailHistoryList');
+    list.innerHTML = history.map(cpVisitCardHtml).join('');
+    $$('.cp-visit-head', list).forEach(head=>{
+      head.addEventListener('click', ()=>{
+        const body = head.nextElementSibling;
+        if(!body) return;
+        const open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : '';
+        head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
+      });
+    });
+    $$('.cp-visit-pdf-btn', list).forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        const sr = btn.dataset.srNo;
+        if(sr) openCustomerReportPreview(sr);
+      });
+    });
+  }
+  // ---------- Equipment Photos (inside the equipment detail overlay) ----------
+  // Admin-only upload/organize; see 20260910_01_equipment_photos.sql and
+  // js/modules-src/equipment-photos.js for the storage/RLS design. The
+  // customer's own equipment screen (customer-equipment-history.js) shows
+  // the same photos read-only.
+  function equipPhotoCardHtml(photo){
+    const url = photo.signedUrl;
+    return (
+      '<div class="equip-photo-card" data-photo-id="'+photo.id+'" style="width:110px;">'+
+        '<div class="equip-photo-thumb" data-act="view" style="width:110px; height:110px; border-radius:8px; overflow:hidden; cursor:pointer; background:var(--bg-alt,#eee); display:flex; align-items:center; justify-content:center;">'+
+          (url ? '<img src="'+url+'" style="width:100%; height:100%; object-fit:cover;">' : '<span style="font-size:11px; color:var(--text-muted);">…</span>')+
+        '</div>'+
+        '<div style="display:flex; gap:4px; margin-top:4px;">'+
+          '<button type="button" data-act="cover" title="Set as cover photo" style="flex:1; font-size:10px; padding:2px; border:1px solid var(--border); border-radius:5px; background:'+(photo.is_cover?'var(--accent,#2563eb)':'none')+'; color:'+(photo.is_cover?'#fff':'inherit')+'; cursor:pointer;">'+(photo.is_cover?'★ Cover':'☆ Set cover')+'</button>'+
+          '<button type="button" data-act="delete" title="Delete photo" style="font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:5px; background:none; cursor:pointer; color:#b42318;">✕</button>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+  async function renderEquipmentPhotosSection(record){
+    const grid = $('equipmentPhotoGrid');
+    const status = $('equipmentPhotoUploadStatus');
+    grid.innerHTML = '<div class="empty-state" style="padding:8px 0;">Loading photos…</div>';
+    const photos = await cloudListEquipmentPhotos(record.id);
+    // Guard against the admin having closed/switched records while this
+    // was in flight — same pattern as loadEquipmentServiceHistory above.
+    if(equipDetailRecord !== record) return;
+    if(photos.length===0){
+      grid.innerHTML = '<div class="empty-state" style="padding:8px 0;">No photos uploaded yet.</div>';
+    }else{
+      // Grouped by folder — headings give the admin the "archive by
+      // folder" browsing the folder tag is meant for, even though the
+      // photos underneath are otherwise just one flat list per equipment.
+      const byFolder = {};
+      photos.forEach(p=>{ const f = p.folder || 'Uncategorized'; (byFolder[f] = byFolder[f]||[]).push(p); });
+      const folderNames = Object.keys(byFolder).sort((a,b)=> a==='Uncategorized' ? 1 : b==='Uncategorized' ? -1 : a.localeCompare(b));
+      grid.innerHTML = folderNames.map(f=>
+        '<div style="margin-bottom:10px; flex-basis:100%;">'+
+          '<div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">'+
+            '<span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.4px;">'+escapeHtml(f)+'</span>'+
+            (f!=='Uncategorized' ? '<button type="button" data-act="rename-folder" data-folder="'+escapeHtml(f)+'" title="Rename folder" style="font-size:11px; padding:0 4px; border:none; background:none; cursor:pointer; color:var(--text-muted);">\u270E</button>' : '')+
+          '</div>'+
+          '<div style="display:flex; flex-wrap:wrap; gap:8px;">'+byFolder[f].map(equipPhotoCardHtml).join('')+'</div>'+
+        '</div>'
+      ).join('');
+    }
+    $$('[data-act="rename-folder"]', grid).forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const oldFolder = btn.dataset.folder;
+        const next = prompt('Rename folder "'+oldFolder+'" to:', oldFolder); // plain text, not a secret
+        if(next===null) return;
+        const trimmed = next.trim();
+        if(!trimmed || trimmed===oldFolder) return;
+        btn.disabled = true;
+        const ok = await cloudRenameEquipmentPhotoFolder(record.id, oldFolder, trimmed);
+        if(ok){
+          renderEquipmentPhotosSection(record);
+          cloudListEquipmentPhotoFolders().then(names=>{
+            $('equipmentPhotoFolderOptions').innerHTML = names.map(n=> '<option value="'+escapeHtml(n)+'">').join('');
+          });
+        }else{ toast('Could not rename folder'); btn.disabled = false; }
+      });
+    });
+    $$('.equip-photo-card', grid).forEach(card=>{
+      const photo = photos.find(p=> String(p.id)===card.dataset.photoId);
+      if(!photo) return;
+      const viewEl = card.querySelector('[data-act="view"]');
+      if(viewEl) viewEl.addEventListener('click', ()=> { if(photo.signedUrl) window.open(photo.signedUrl, '_blank'); });
+      const coverBtn = card.querySelector('[data-act="cover"]');
+      if(coverBtn) coverBtn.addEventListener('click', async ()=>{
+        coverBtn.disabled = true;
+        const ok = await cloudSetEquipmentPhotoCover(record.id, photo.id);
+        if(ok){ renderEquipmentPhotosSection(record); renderEquipmentMasterList(); }
+        else{ toast('Could not set cover photo'); coverBtn.disabled = false; }
+      });
+      const delBtn = card.querySelector('[data-act="delete"]');
+      if(delBtn) delBtn.addEventListener('click', async ()=>{
+        if(!confirm('Delete this photo? This cannot be undone.')) return;
+        delBtn.disabled = true;
+        const ok = await cloudDeleteEquipmentPhoto(photo);
+        if(ok){ renderEquipmentPhotosSection(record); renderEquipmentMasterList(); }
+        else{ toast('Could not delete photo'); delBtn.disabled = false; }
+      });
+    });
+    if(status) status.textContent = '';
+  }
+  // File input change handler — uploads every selected file in sequence
+  // (not parallel: keeps the status line meaningful and avoids hammering
+  // Storage with a burst of simultaneous uploads from one tap on mobile).
+  $('equipmentPhotoFileInput').addEventListener('change', async (e)=>{
+    const files = Array.from(e.target.files||[]);
+    if(files.length===0 || !equipDetailRecord) return;
+    const record = equipDetailRecord;
+    const folder = $('equipmentPhotoFolderInput').value;
+    const status = $('equipmentPhotoUploadStatus');
+    let done = 0, failed = 0;
+    for(const file of files){
+      status.textContent = 'Uploading '+(done+failed+1)+' of '+files.length+'…';
+      const ok = await cloudUploadEquipmentPhoto(record.id, record.customerId, file, folder);
+      if(ok) done++; else failed++;
+    }
+    status.textContent = failed ? (done+' uploaded, '+failed+' failed') : '';
+    e.target.value = '';
+    if(equipDetailRecord === record){
+      renderEquipmentPhotosSection(record);
+      cloudListEquipmentPhotoFolders().then(names=>{
+        $('equipmentPhotoFolderOptions').innerHTML = names.map(n=> '<option value="'+escapeHtml(n)+'">').join('');
+      });
+    }
+    renderEquipmentMasterList();
+  });
+
+  async function openEquipmentDetailOverlay(record){
+    equipDetailRecord = record;
+    const summary = [record.equipLocation, record.brand, record.mountType, record.equipType, record.coolCap].filter(Boolean).join(' · ') || record.customerName;
+    $('equipmentDetailTitle').textContent = record.label ? (record.label+' — '+summary) : summary;
+    setEquipDetailMode('view');
+    $('equipmentDetailHistoryMeta').textContent = 'Loading service history…';
+    $('equipmentDetailHistoryList').innerHTML = '';
+    $('equipmentPhotoFolderInput').value = '';
+    $('equipmentPhotoUploadStatus').textContent = '';
+    $('equipmentDetailOverlay').classList.add('open');
+    const history = await loadEquipmentServiceHistory(record);
+    // Guard against the admin having closed this record (or opened a
+    // different one) while the history fetch was still in flight.
+    if(equipDetailRecord === record) renderEquipmentHistorySection(history);
+    renderEquipmentPhotosSection(record);
+    cloudListEquipmentPhotoFolders().then(names=>{
+      $('equipmentPhotoFolderOptions').innerHTML = names.map(n=> '<option value="'+escapeHtml(n)+'">').join('');
+    });
+  }
+  $('closeEquipmentDetail').addEventListener('click', ()=> $('equipmentDetailOverlay').classList.remove('open'));
+  $('equipmentDetailOverlay').addEventListener('click', (e)=>{ if(e.target.id==='equipmentDetailOverlay') $('equipmentDetailOverlay').classList.remove('open'); });
+  $('equipmentDetailEditBtn').addEventListener('click', ()=> setEquipDetailMode('edit'));
+  $('equipmentDetailCancelBtn').addEventListener('click', ()=> setEquipDetailMode('view'));
+  $('equipmentDetailSaveBtn').addEventListener('click', async ()=>{
+    if(!equipDetailRecord) return;
+    const fields = {};
+    Array.from($('equipmentDetailBody').querySelectorAll('input[data-f]')).forEach(inp=> fields[inp.dataset.f] = inp.value.trim());
+    const ok = await cloudUpdateCustomerEquipment(equipDetailRecord.id, fields);
+    if(ok){
+      toast('Saved');
+      Object.assign(equipDetailRecord, fields);
+      $('equipmentDetailOverlay').classList.remove('open');
+      renderEquipmentMasterList();
+    }else{
+      toast('Could not save — check your connection');
+    }
+  });
+  // ---------- Scan Equipment Label (Manage Equipment List → Add) ----------
+  // Best-effort only: OCR reads whatever text is on the nameplate photo, then
+  // a handful of regexes guess which bits are the model/serial/refrigerant/
+  // capacity/compressor/type. Anything it can't confidently identify — and
+  // anything it gets wrong — is left for the technician to fill in or fix by
+  // hand; the raw scanned text is kept visible for that reason.
+  function parseEquipmentLabelText(raw){
+    const text = (raw||'').toUpperCase();
+    const fields = {};
+    function grabAfter(regexes){
+      for(const re of regexes){
+        const m = text.match(re);
+        if(m && m[1]) return m[1].trim();
+      }
+      return '';
+    }
+    fields.modelCU = grabAfter([
+      /MODEL\s*(?:NO\.?|NUMBER|N[°O])?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{3,})/
+    ]);
+    fields.serialCU = grabAfter([
+      /SERIAL\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{4,})/,
+      /S\/N\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{4,})/
+    ]);
+    const refMatch = text.match(/\bR[\-\s]?(22|32|134A|404A|407C|410A|410|290|600A)\b/);
+    if(refMatch) fields.refrigerantType = 'R-'+refMatch[1];
+    const btu = text.match(/([\d,]{3,7})\s*BTU/);
+    const hp = text.match(/(\d+(?:\.\d+)?)\s*HP\b/);
+    const kw = text.match(/(\d+(?:\.\d+)?)\s*KW\b/);
+    const ton = text.match(/(\d+(?:\.\d+)?)\s*(?:TON|TR)\b/);
+    if(btu) fields.coolCap = btu[1]+' BTU/hr';
+    else if(hp) fields.coolCap = hp[1]+' HP';
+    else if(kw) fields.coolCap = kw[1]+' kW';
+    else if(ton) fields.coolCap = ton[1]+' TR';
+    if(/\bSCROLL\b/.test(text)) fields.compressorType = 'Scroll';
+    else if(/\bROTARY\b/.test(text)) fields.compressorType = 'Rotary';
+    else if(/\bRECIPROCATING\b/.test(text)) fields.compressorType = 'Reciprocating';
+    if(/\bWINDOW\s*TYPE\b/.test(text)) fields.equipType = 'Window Type Unit';
+    else if(/\bSPLIT\s*TYPE\b/.test(text)) fields.equipType = 'Split Type Unit';
+    else if(/\bPACKAGE(?:D)?\s*TYPE\b/.test(text)) fields.equipType = 'Package Type Unit';
+    else if(/\bVRF\b|\bVRV\b/.test(text)) fields.equipType = 'VRF/VRV System';
+    const knownBrands = {
+      PANASONIC:'Panasonic', DAIKIN:'Daikin', CARRIER:'Carrier', LG:'LG', SAMSUNG:'Samsung',
+      MITSUBISHI:'Mitsubishi', YORK:'York', FUJITSU:'Fujitsu', HITACHI:'Hitachi', KOLIN:'Kolin',
+      CONDURA:'Condura', TCL:'TCL', MIDEA:'Midea', GREE:'Gree', KOPPEL:'Koppel', HAIER:'Haier',
+      SHARP:'Sharp', AUX:'AUX', CHIGO:'Chigo', TOSOT:'Tosot', ELECTROLUX:'Electrolux'
+    };
+    const brandKey = Object.keys(knownBrands).find(b=> text.includes(b));
+    if(brandKey) fields.brand = knownBrands[brandKey];
+    return fields;
+  }
+  async function scanEquipmentLabel(file){
+    const status = $('eqScanStatus');
+    status.style.display = '';
+    status.textContent = 'Loading scanner…';
+    try{
+      await loadAwesScript('tesseract', awesLibs.tesseract);
+    }catch(e){
+      status.textContent = 'Could not load the scanner — check your connection and try again.';
+      return;
+    }
+    status.textContent = 'Reading label… this can take a few seconds.';
+    let result;
+    try{
+      result = await Tesseract.recognize(file, 'eng');
+    }catch(e){
+      console.error('OCR failed', e);
+      status.textContent = 'Could not read that photo. Try a clearer, well-lit shot, or fill in the fields manually.';
+      return;
+    }
+    const rawText = (result && result.data && result.data.text) || '';
+    const parsed = parseEquipmentLabelText(rawText);
+    const filledLabels = [];
+    Object.keys(parsed).forEach(k=>{
+      if(!parsed[k]) return;
+      const el = $('eqAdd'+k.charAt(0).toUpperCase()+k.slice(1));
+      // Never overwrite something the technician already typed in.
+      if(el && !el.value.trim()){ el.value = parsed[k]; filledLabels.push((FIELD_META[k]&&FIELD_META[k].label)||k); }
+    });
+    status.textContent = filledLabels.length
+      ? 'Filled in from the label: '+filledLabels.join(', ')+'. Please review before saving.'
+      : 'Could not confidently read any fields from that photo — please fill them in manually.';
+    const rawWrap = $('eqScanRawWrap');
+    rawWrap.style.display = rawText.trim() ? '' : 'none';
+    $('eqScanRawText').textContent = rawText.trim() || '(no text detected)';
+  }
+  $('eqScanBtn').addEventListener('click', ()=> $('eqScanInput').click());
+  $('eqScanInput').addEventListener('change', (e)=>{
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // lets the same photo be re-picked next time
+    if(file) scanEquipmentLabel(file);
+  });
+
+  $('equipmentListSearch').addEventListener('input', ()=> renderEquipmentMasterList());
+  $('equipmentListCustomerFilter').addEventListener('change', ()=> renderEquipmentMasterList());
+  $('equipListTabEdit').addEventListener('click', ()=> setEquipListTab('edit'));
+  $('equipListTabAdd').addEventListener('click', ()=> setEquipListTab('add'));
+  $('equipListTabDelete').addEventListener('click', ()=> setEquipListTab('delete'));
+  function resetEqScanUI(){
+    $('eqScanStatus').style.display = 'none';
+    $('eqScanStatus').textContent = '';
+    $('eqScanRawWrap').style.display = 'none';
+    $('eqScanRawText').textContent = '';
+  }
+  $('eqAddSaveBtn').addEventListener('click', async ()=>{
+    const customerId = $('eqAddCustomer').value;
+    if(!customerId){ toast('Select a customer'); return; }
+    const fields = {};
+    EQUIP_FIELD_KEYS.forEach(k=>{
+      const el = $('eqAdd'+k.charAt(0).toUpperCase()+k.slice(1));
+      fields[k] = el ? el.value.trim() : '';
+    });
+    if(!EQUIP_FIELD_KEYS.some(k=>fields[k])){ toast('Enter at least one equipment detail'); return; }
+    $('eqAddSaveBtn').disabled = true;
+    const result = await cloudAddCustomerEquipmentAdmin(customerId, fields);
+    $('eqAddSaveBtn').disabled = false;
+    if(!result){ toast('Could not add — check your connection'); return; }
+    toast('Equipment added');
+    EQUIP_FIELD_KEYS.forEach(k=>{
+      const el = $('eqAdd'+k.charAt(0).toUpperCase()+k.slice(1));
+      if(el) el.value = '';
+    });
+    resetEqScanUI();
+  });
+  // Links each "Add Equipment" field to the same named suggestion list the
+  // technician's own Service Report Equipment section uses (configured via
+  // Manage Dropdown Lists), even though these inputs have different ids —
+  // attachCombo's keyOverride lets a differently-id'd input share a list.
+  // Guarded by attachCombo's own dataset flag, so calling this more than
+  // once (e.g. every time the overlay opens) is harmless.
+  function attachEquipAddCombos(){
+    const idFor = (key)=> 'eqAdd'+key.charAt(0).toUpperCase()+key.slice(1);
+    EQUIP_FIELD_KEYS.forEach(key=>{
+      const el = $(idFor(key));
+      if(el) attachCombo(el, key);
+    });
+  }
+  // ---------- Manage Equipment List — full page (admin-only) ----------
+  // Reached via the "Equipment" sidebar nav item; see showEquipmentManagerView()
+  // in home.js, which shows this page and then calls this to populate it.
+  async function openEquipmentManagerPage(){
+    $('equipmentListSearch').value = '';
+    await populateEquipmentCustomerSelects();
+    $('equipmentListCustomerFilter').value = '';
+    resetEqScanUI();
+    setEquipListTab('edit');
+    attachEquipAddCombos();
+  }
+
+
+  function resetCustomerForm(){
+    $('editCustomerId').value = '';
+    $('customerFormTitle').textContent = 'Add a customer';
+    $('newCustName').value=''; $('newCustAddress').value=''; $('newCustContactNo').value='';
+    $('newCustContactPerson').value=''; $('newCustEmail').value='';
+    $('cancelEditCustomerBtn').style.display = 'none';
+    $('customerEquipmentSection').style.display = 'none';
+  }
+  $('cancelEditCustomerBtn').addEventListener('click', resetCustomerForm);
+  $('saveCustomerBtn').addEventListener('click', async ()=>{
+    const name = $('newCustName').value.trim();
+    if(!name){ toast('Enter a customer name'); return; }
+    if(!(await ensureCloud())){ toast('Not connected to the cloud'); return; }
+    const editingId = $('editCustomerId').value;
+    const payload = {
+      name, address: $('newCustAddress').value.trim(), contactNo: $('newCustContactNo').value.trim(),
+      contactPerson: $('newCustContactPerson').value.trim(), email: $('newCustEmail').value.trim()
+    };
+    $('saveCustomerBtn').disabled = true;
+    try{
+      let renamedCount = 0;
+      if(editingId){
+        const existing = customersCache.find(x=> String(x.id)===String(editingId));
+        const oldName = existing ? existing.name : '';
+        const { error } = await db.from('customers').update({
+          name: payload.name, address: payload.address, contact_no: payload.contactNo,
+          contact_person: payload.contactPerson, email: payload.email, updated_at: new Date().toISOString()
+        }).eq('id', editingId);
+        if(error){ toast('Could not save: '+error.message); return; }
+        // Carry every past report filed under the old name forward to the new
+        // one, so this customer's History stays complete after a rename.
+        if(oldName && oldName.trim().toLowerCase() !== name.toLowerCase()){
+          renamedCount = await cloudRenameReportsCustomer(oldName, name);
+        }
+      }else{
+        await cloudUpsertCustomer(payload);
+      }
+      await loadCustomers();
+      resetCustomerForm();
+      toast(renamedCount>0 ? ('Saved '+name+' — updated '+renamedCount+' past report(s) to the new name') : ('Saved '+name));
+      renderCustomersList($('customerSearch').value);
+    } finally { $('saveCustomerBtn').disabled = false; }
+  });
+  $('customerSearch').addEventListener('input', ()=> renderCustomersList($('customerSearch').value));
+
+  // ---------- Manage Customers — full page (admin-only) ----------
+  // Reached via the "Customers" sidebar nav item; see showCustomersManagerView()
+  // in home.js, which shows this page and then calls this to populate it.
+  async function openCustomersManagerPage(){
+    resetCustomerForm();
+    renderCustomersList('');
+  }
+
+  // Populates the "Linked Customer Record(s)" checkbox list in Add a User
+  // from the same customers table Manage Customers uses. A customer login
+  // can be linked to more than one customer record (an account holder
+  // managing several sites/branches) — the admin ticks as many as apply.
+  function customerCheckboxListHtml(containerId, checkedIds){
+    const checked = new Set((checkedIds||[]).map(String));
+    return customersCache.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''))
+      .map(c=>
+        '<label class="restrict-row"><input type="checkbox" data-cust-check="'+containerId+'" value="'+c.id+'" '+(checked.has(String(c.id))?'checked':'')+'>'+
+          '<span class="rtxt"><span class="rt-title">'+escapeHtml(c.name)+'</span></span></label>'
+      ).join('') || '<div class="empty-state" style="padding:6px 0;">No customer records yet — add one under Manage Customers first.</div>';
+  }
+  function getCheckedCustomerIds(container){
+    return $$('input[type="checkbox"]', container).filter(cb=> cb.checked).map(cb=> cb.value);
+  }
+  async function populateNewUserCustomerOptions(){
+    const box = $('newUserCustomerOptions');
+    if(!box) return;
+    if(!customersCache || customersCache.length===0) await loadCustomers();
+    box.innerHTML = customerCheckboxListHtml('newUserCustomerOptions', []);
+  }
+  $('newUserRole').addEventListener('change', ()=>{
+    const isCust = $('newUserRole').value === 'customer';
+    $('newUserCustomerField').style.display = isCust ? '' : 'none';
+    $('newUserEmail').style.display = isCust ? '' : 'none';
+    // Customer portal logins sign in with an e-mail, not the technician
+    // picker, so there's nothing for a username to hide there.
+    $('newUserUsernameField').style.display = isCust ? 'none' : '';
+    $('newUserNameLabel').textContent = isCust ? 'Contact Name' : 'Full Name';
+    $('newUserName').placeholder = isCust ? 'e.g. Maria Santos' : 'e.g. Juan Dela Cruz';
+    if(isCust) populateNewUserCustomerOptions();
+  });
+
+  $('addUserBtn').addEventListener('click', async ()=>{
+    const role = $('newUserRole').value;
+    const name = $('newUserName').value.trim();
+    const username = normalizeUsername($('newUserUsername').value);
+    const pin = $('newUserPin').value;
+    const pin2 = $('newUserPin2').value;
+    if(!name){ toast(role==='customer' ? 'Enter a contact name' : 'Enter a name'); return; }
+    if(role!=='customer' && !USERNAME_RE.test(username)){
+      toast('Username must be 3-20 characters: letters, numbers, dot, underscore, or hyphen');
+      return;
+    }
+    if(!pin || pin.length < 4){ toast('Password must be at least 4 characters'); return; }
+    if(pin !== pin2){ toast('Passwords do not match'); return; }
+    if(!(await ensureCloud())){ toast('Not connected to the cloud'); return; }
+
+    if(role === 'customer'){
+      const customerIds = getCheckedCustomerIds($('newUserCustomerOptions'));
+      const email = $('newUserEmail').value.trim();
+      if(!customerIds.length){ toast('Select at least one customer record this login belongs to'); return; }
+      if(!email){ toast('Enter an email for this customer login'); return; }
+      $('addUserBtn').disabled = true;
+      try{
+        // Customer logins go through their own Edge Function rather than
+        // admin-create-technician — that function's deployed source isn't
+        // part of this codebase, so its technician-creation logic is left
+        // completely untouched rather than guessed at and extended blind.
+        // See supabase/functions/admin-create-customer/index.ts (new —
+        // needs to be deployed to Supabase before this button will work).
+        const { data, error } = await db.functions.invoke('admin-create-customer', {
+          body: { name, email, password: pin, customerIds }
+        });
+        if(error || (data && data.error)){
+          toast((data && data.error) || 'Could not add customer login');
+        }else{
+          $('newUserName').value=''; $('newUserPin').value=''; $('newUserPin2').value=''; $('newUserEmail').value='';
+          $$('input[type="checkbox"]', $('newUserCustomerOptions')).forEach(cb=> cb.checked=false);
+          toast('Added customer login for '+name);
+          renderUsersList();
+        }
+      }finally{ $('addUserBtn').disabled = false; }
+      return;
+    }
+
+    $('addUserBtn').disabled = true;
+    try{
+      // Real account creation happens server-side (Edge Function) so it can't
+      // hijack the admin's own browser session — see admin-create-technician.
+      // That function's deployed source isn't part of this codebase (see the
+      // comment on the customer branch above), so `username` isn't passed to
+      // it — it likely wouldn't know what to do with a column it doesn't
+      // expect. Instead the username is saved as a normal follow-up profile
+      // update, the same path Edit already uses for name/restrictions.
+      const { data, error } = await db.functions.invoke('admin-create-technician', {
+        body: { name, password: pin }
+      });
+      if(error || (data && data.error)){
+        toast((data && data.error) || 'Could not add user');
+      }else{
+        const newId = data && data.id;
+        const usernameOk = newId ? await cloudSetUser(newId, { username }) : false;
+        $('newUserName').value=''; $('newUserPin').value=''; $('newUserPin2').value=''; $('newUserUsername').value='';
+        if(usernameOk){
+          toast('Added '+name);
+        }else{
+          toast('Added '+name+', but the username could not be saved (maybe already taken) — set it from Edit.');
+        }
+        renderUsersList();
+      }
+    }finally{ $('addUserBtn').disabled = false; }
+  });
+
+  async function doChangeAdminPin(){
+    const cur = await askPassword({
+      title: 'Change Admin Password',
+      label: 'Enter your CURRENT admin password'
+    });
+    if(cur===null) return;
+    if(!(await verifyAdminPassword(cur))){ toast('Incorrect password'); return; }
+    const next = await askPassword({
+      title: 'Change Admin Password',
+      label: 'Enter your NEW admin password (at least 8 characters)',
+      placeholder: 'New password'
+    });
+    if(next===null) return;
+    // Raised from 4 to 8: this single password protects every technician
+    // account, all reports and all cash-advance approvals in the business.
+    if(next.length < 8){ toast('Password must be at least 8 characters'); return; }
+    if(next===cur){ toast('That is the same as your current password'); return; }
+    const { error } = await db.auth.updateUser({ password: next });
+    if(error){ toast('Could not update password: '+error.message); return; }
+    toast('Password updated');
+  }
+
+  // ========================================================================
+  // Technician Profile — photo + records for attendance, leaves, violations
+  // and admin-uploaded memos, reached from the Technicians attendance table
+  // ("View Profile", wired in history.js) via techOpenProfile(u).
+  // ========================================================================
+  let tpCurrentUser = null;
+
+  function tpSwitchTab(tab){
+    ['Attendance','Leaves','Violations','Documents'].forEach(t=>{
+      $('tpTab'+t).classList.toggle('active', t===tab);
+      $('tp'+t+'Card').style.display = t===tab ? '' : 'none';
+    });
+    if(tab==='Leaves') tpRenderLeaves();
+    if(tab==='Violations') tpRenderViolations();
+    if(tab==='Documents') tpRenderDocuments();
+  }
+  $('tpTabAttendance').addEventListener('click', ()=> tpSwitchTab('Attendance'));
+  $('tpTabLeaves').addEventListener('click', ()=> tpSwitchTab('Leaves'));
+  $('tpTabViolations').addEventListener('click', ()=> tpSwitchTab('Violations'));
+  $('tpTabDocuments').addEventListener('click', ()=> tpSwitchTab('Documents'));
+
+  $('tpViewFullDtrBtn').addEventListener('click', ()=>{
+    if(!tpCurrentUser) return;
+    $('techProfileOverlay').classList.remove('open');
+    dtrShowTechnicianDetail(tpCurrentUser);
+  });
+
+  async function tpLoadPhoto(){
+    $('techProfilePhoto').style.display = 'none';
+    $('techProfilePhotoPlaceholder').style.display = 'flex';
+    if(!(await ensureCloud())) return;
+    try{
+      const { data, error } = await db.from('profiles').select('photo_data').eq('id', tpCurrentUser.id).maybeSingle();
+      if(error) throw error;
+      if(data && data.photo_data){
+        $('techProfilePhoto').src = data.photo_data;
+        $('techProfilePhoto').style.display = '';
+        $('techProfilePhotoPlaceholder').style.display = 'none';
+      }
+    }catch(e){ console.error('load technician photo failed', describeCloudError(e)); }
+  }
+  $('techProfilePhotoInput').addEventListener('change', async (e)=>{
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if(!file || !tpCurrentUser) return;
+    try{
+      const dataUrl = await compressImageToDataURL(file, 500, 0.7);
+      if(!(await ensureCloud())){ toast('Photo needs an internet connection to save'); return; }
+      const { error } = await db.from('profiles').update({ photo_data: dataUrl }).eq('id', tpCurrentUser.id);
+      if(error) throw error;
+      toast('Photo updated');
+      tpLoadPhoto();
+    }catch(e){ console.error('upload technician photo failed', describeCloudError(e)); toast('Could not upload photo'); }
+  });
+
+  async function tpRenderLeaves(){
+    const list = $('tpLeavesList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Needs an internet connection.</div>'; return; }
+    try{
+      const rows = await leaveListForUser(tpCurrentUser.id);
+      if(!rows.length){ list.innerHTML = '<div class="empty-state">No leave requests on file.</div>'; return; }
+      list.innerHTML = rows.map(r=>
+        '<div class="user-row"><div>'+
+          '<div class="u-name">'+escapeHtml(r.leaveType||'Leave')+'</div>'+
+          '<div class="u-status">'+leaveFmtDate(r.dateFrom)+' – '+leaveFmtDate(r.dateTo)+' ('+r.days+(r.days===1?' day':' days')+')</div>'+
+        '</div>'+leaveStatusPill(r.status)+'</div>'
+      ).join('');
+    }catch(e){ console.error('load technician leaves failed', describeCloudError(e)); list.innerHTML = '<div class="empty-state">Could not load leave records.</div>'; }
+  }
+
+  async function tpRenderViolations(){
+    const list = $('tpViolationsList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Needs an internet connection.</div>'; return; }
+    try{
+      const { data, error } = await db.from('technician_violations').select('*').eq('technician_id', tpCurrentUser.id).order('occurred_on', {ascending:false});
+      if(error) throw error;
+      const rows = data || [];
+      if(!rows.length){ list.innerHTML = '<div class="empty-state">No violations on file.</div>'; return; }
+      list.innerHTML = rows.map(r=>
+        '<div class="user-row" data-vid="'+r.id+'"><div>'+
+          '<div class="u-name">'+leaveFmtDate(r.occurred_on)+'</div>'+
+          '<div class="u-status">'+escapeHtml(r.description)+'</div>'+
+        '</div><div class="u-actions"><button type="button" data-remove-violation="'+r.id+'">Remove</button></div></div>'
+      ).join('');
+      list.querySelectorAll('[data-remove-violation]').forEach(btn=>{
+        btn.addEventListener('click', ()=> tpDeleteViolation(btn.dataset.removeViolation));
+      });
+    }catch(e){ console.error('load violations failed', describeCloudError(e)); list.innerHTML = '<div class="empty-state">Could not load violations.</div>'; }
+  }
+  $('tpAddViolationBtn').addEventListener('click', async ()=>{
+    const date = $('tpViolationDate').value;
+    const desc = $('tpViolationDesc').value.trim();
+    if(!date || !desc){ toast('Enter a date and description'); return; }
+    if(!(await ensureCloud())){ toast('Needs an internet connection'); return; }
+    $('tpAddViolationBtn').disabled = true;
+    try{
+      const { error } = await db.from('technician_violations').insert({
+        technician_id: tpCurrentUser.id, occurred_on: date, description: desc, created_by: currentUser.id
+      });
+      if(error) throw error;
+      $('tpViolationDate').value = ''; $('tpViolationDesc').value = '';
+      toast('Violation recorded');
+      tpRenderViolations();
+    }catch(e){ console.error('add violation failed', describeCloudError(e)); toast('Could not save violation'); }
+    finally{ $('tpAddViolationBtn').disabled = false; }
+  });
+  async function tpDeleteViolation(id){
+    if(!confirm('Remove this violation record?')) return;
+    try{
+      const { error } = await db.from('technician_violations').delete().eq('id', id);
+      if(error) throw error;
+      tpRenderViolations();
+    }catch(e){ console.error('delete violation failed', describeCloudError(e)); toast('Could not remove violation'); }
+  }
+
+  async function tpRenderDocuments(){
+    const list = $('tpDocumentsList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Needs an internet connection.</div>'; return; }
+    try{
+      const { data, error } = await db.from('technician_documents').select('id,title,file_data,created_at').eq('technician_id', tpCurrentUser.id).order('created_at', {ascending:false});
+      if(error) throw error;
+      const rows = data || [];
+      if(!rows.length){ list.innerHTML = '<div class="empty-state">No documents uploaded.</div>'; return; }
+      list.innerHTML = rows.map(r=>
+        '<div class="user-row"><div>'+
+          '<div class="u-name">'+escapeHtml(r.title)+'</div>'+
+          '<div class="u-status">'+leaveFmtWhen(r.created_at)+'</div>'+
+        '</div><div class="u-actions">'+
+          '<a href="'+r.file_data+'" download="'+escapeHtml(r.title)+'" style="border:1px solid var(--border); background:#fff; border-radius:6px; padding:6px 10px; font-size:12px; text-decoration:none; color:var(--text);">Download</a>'+
+          '<button type="button" data-remove-doc="'+r.id+'">Remove</button>'+
+        '</div></div>'
+      ).join('');
+      list.querySelectorAll('[data-remove-doc]').forEach(btn=>{
+        btn.addEventListener('click', ()=> tpDeleteDocument(btn.dataset.removeDoc));
+      });
+    }catch(e){ console.error('load documents failed', describeCloudError(e)); list.innerHTML = '<div class="empty-state">Could not load documents.</div>'; }
+  }
+  $('tpAddDocBtn').addEventListener('click', async ()=>{
+    const title = $('tpDocTitle').value.trim();
+    const file = $('tpDocFile').files && $('tpDocFile').files[0];
+    if(!title || !file){ toast('Enter a title and choose a file'); return; }
+    if(!(await ensureCloud())){ toast('Needs an internet connection'); return; }
+    $('tpAddDocBtn').disabled = true;
+    try{
+      // Images are downscaled like the photo above; PDFs are kept as-is
+      // (already compact for a one- or two-page memo) and just read as a
+      // base64 data URL so they can be stored in the same text column.
+      const dataUrl = file.type.startsWith('image/')
+        ? await compressImageToDataURL(file, 1400, 0.7)
+        : await new Promise((resolve, reject)=>{
+            const reader = new FileReader();
+            reader.onerror = ()=> reject(new Error('read failed'));
+            reader.onload = ()=> resolve(reader.result);
+            reader.readAsDataURL(file);
+          });
+      const { error } = await db.from('technician_documents').insert({
+        technician_id: tpCurrentUser.id, title, file_data: dataUrl, uploaded_by: currentUser.id
+      });
+      if(error) throw error;
+      $('tpDocTitle').value = ''; $('tpDocFile').value = '';
+      toast('Memo uploaded');
+      tpRenderDocuments();
+    }catch(e){ console.error('upload document failed', describeCloudError(e)); toast('Could not upload memo'); }
+    finally{ $('tpAddDocBtn').disabled = false; }
+  });
+  async function tpDeleteDocument(id){
+    if(!confirm('Remove this document?')) return;
+    try{
+      const { error } = await db.from('technician_documents').delete().eq('id', id);
+      if(error) throw error;
+      tpRenderDocuments();
+    }catch(e){ console.error('delete document failed', describeCloudError(e)); toast('Could not remove document'); }
+  }
+
+  function techOpenProfile(u){
+    tpCurrentUser = u;
+    $('techProfileName').textContent = u.name;
+    tpSwitchTab('Attendance');
+    tpLoadPhoto();
+    $('techProfileOverlay').classList.add('open');
+  }
+  $('closeTechProfile').addEventListener('click', ()=> $('techProfileOverlay').classList.remove('open'));
+  $('techProfileOverlay').addEventListener('click', (e)=>{ if(e.target.id==='techProfileOverlay') $('techProfileOverlay').classList.remove('open'); });
+
+
+// ---------- EmailJS settings ----------
+  let emailCfg = {publicKey:'', serviceId:'', templateId:'', officeEmail:''};
+  async function loadEmailCfg(){
+    if(await ensureCloud()){
+      const doc = await cloudGetDoc('settings/emailjs');
+      if(doc){ emailCfg = doc; if(emailCfg.publicKey && window.emailjs){ try{ emailjs.init({publicKey: emailCfg.publicKey}); }catch(e){} } return; }
+    }
+    try{
+      const res = await window.storage.get('settings:emailjs', false);
+      if(res) emailCfg = JSON.parse(res.value);
+    }catch(e){ /* not set yet */ }
+    if(emailCfg.publicKey && window.emailjs){ try{ emailjs.init({publicKey: emailCfg.publicKey}); }catch(e){} }
+  }
+  loadEmailCfg();
+
+  $('settingsBtn').addEventListener('click', ()=>{
+    $('cfgPublicKey').value = emailCfg.publicKey||'';
+    $('cfgServiceId').value = emailCfg.serviceId||'';
+    $('cfgTemplateId').value = emailCfg.templateId||'';
+    $('cfgOfficeEmail').value = emailCfg.officeEmail||'';
+    $('settingsOverlay').classList.add('open');
+  });
+  $('closeSettings').addEventListener('click', ()=> $('settingsOverlay').classList.remove('open'));
+  $('settingsOverlay').addEventListener('click', (e)=>{ if(e.target.id==='settingsOverlay') $('settingsOverlay').classList.remove('open'); });
+  $('settingsHelpBtn').addEventListener('click', ()=>{
+    // Point at the real vendor docs instead of an unreachable chat session.
+    toast('Opening the EmailJS setup guide…');
+    window.open('https://www.emailjs.com/docs/tutorial/overview/', '_blank', 'noopener');
+  });
+  $('saveSettingsBtn').addEventListener('click', async ()=>{
+    emailCfg = {
+      publicKey: $('cfgPublicKey').value.trim(),
+      serviceId: $('cfgServiceId').value.trim(),
+      templateId: $('cfgTemplateId').value.trim(),
+      officeEmail: $('cfgOfficeEmail').value.trim()
+    };
+    if(emailCfg.publicKey && window.emailjs){ try{ emailjs.init({publicKey: emailCfg.publicKey}); }catch(e){} }
+    if(await ensureCloud()){
+      const ok = await cloudSetDoc('settings/emailjs', emailCfg);
+      if(ok){ toast('Email settings saved for all devices'); $('settingsOverlay').classList.remove('open'); return; }
+    }
+    try{
+      await window.storage.set('settings:emailjs', JSON.stringify(emailCfg), false);
+      toast('Email settings saved on this device');
+      $('settingsOverlay').classList.remove('open');
+    }catch(e){ toast('Could not save settings'); }
+  });
+  function emailConfigured(){
+    return !!(emailCfg.publicKey && emailCfg.serviceId && emailCfg.templateId && (emailCfg.officeEmail));
+  }
+
+  // downscale a signature dataURL so PDFs/email attachments stay small
+  function downscaleDataUrl(dataUrl, maxWidth){
+    return new Promise((resolve)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const scale = Math.min(1, maxWidth / img.width);
+        const c = document.createElement('canvas');
+        c.width = img.width*scale; c.height = img.height*scale;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/png'));
+      };
+      img.onerror = ()=> resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  // send the generated PDF via EmailJS as a dynamic attachment
+  async function sendEmailWithPdf(doc, data, filename){
+    await loadAwesScript('emailjs', awesLibs.emailjs);
+    if(!emailConfigured()) return {ok:false, reason:'not_configured'};
+    try{ emailjs.init({publicKey: emailCfg.publicKey}); }catch(e){}
+    const base64 = doc.output('datauristring').split(',')[1];
+    // rough size check — most free/personal EmailJS plans cap attachments around 500KB
+    const approxBytes = base64.length * 0.75;
+    if(approxBytes > 480000){
+      return {ok:false, reason:'too_large'};
+    }
+    const toEmail = (data.custEmail || '').trim();
+    const recipients = toEmail ? (toEmail+','+emailCfg.officeEmail) : emailCfg.officeEmail;
+    const templateParams = {
+      to_email: recipients,
+      sr_no: data.srNo || '',
+      customer_name: data.custName || '',
+      service_date: data.date || '',
+      pdf_attachment: base64,
+      pdf_filename: filename
+    };
+    try{
+      await emailjs.send(emailCfg.serviceId, emailCfg.templateId, templateParams);
+      return {ok:true};
+    }catch(err){
+      console.error('EmailJS error', err);
+      return {ok:false, reason:'send_failed'};
+    }
+  }
+
+
+// ---------- meta bar live update ----------
+  $('svcDate').addEventListener('change', ()=> $('metaDate').textContent = fmtDate($('svcDate').value));
+
+  // ---------- init defaults ----------
+  // Which dispatch ticket + equipment line item (if any) the report
+  // currently being filed is tied to — set by srApplyJobOrder (dispatch.js)
+  // when a technician picks a piece of equipment off a Job Order, read by
+  // the save handler in pdf.js to mark that item "reported" once the report
+  // goes through. Declared here because resetForm() below runs once at load
+  // time, before dispatch.js's own module code has executed.
+  let srCurrentTicketId = null;
+  let srCurrentEquipId = null;
+  // Set instead of srCurrentEquipId when a technician has picked MULTIPLE
+  // equipment items off one Job Order to batch-sign — see
+  // srApplyJobOrderBatch() (dispatch.js) and the submit loop in pdf.js.
+  // Each entry is one equipment item off the ticket's equipmentList.
+  let srBatchEquipItems = null;
+  function resetForm(){
+    // Scoped to the Service Report view only. This used to select every text,
+    // number, textarea and checkbox on the page, so starting a new report also
+    // wiped whatever the user had typed into the Dispatch, Leave, Cash Advance,
+    // Customers and Admin forms — all of which live in the same document.
+    const scope = $('serviceReportView') || document;
+    scope.querySelectorAll('input[type=text], input[type=number], textarea').forEach(el=>el.value='');
+    scope.querySelectorAll('input[type=checkbox]').forEach(el=>{ el.checked=false; el.closest('.chk')?.classList.remove('checked'); });
+    $('svcDate').value = todayISO();
+    $('timeIn').value=''; $('timeOut').value='';
+    $('findingsList').innerHTML=''; $('recsList').innerHTML=''; $('servicesDoneList').innerHTML='';
+    addListRow('findingsList'); addListRow('recsList'); addListRow('servicesDoneList');
+    $('materialsBody').innerHTML=''; materialRowCount=0;
+    $('isInstallToggle').checked=false; $('installSection').classList.remove('open');
+    loadCustomerEquipment(null);
+    clearEquipPickedId();
+    setEquipTab(null);
+    $('custDetailsWrap').style.display = 'none';
+    // Technicians must pick an authorized Job Order before Customer's Info
+    // (and everything after it) appears — admin has no Job Order gate and
+    // always sees it directly. srRenderJobOrderPicker/srApplyJobOrder
+    // re-confirm this on their own paths too; this just sets the sane
+    // default whenever the form is reset from anywhere else.
+    const sec1 = $('sec1Card');
+    if(sec1) sec1.style.display = (currentUser && currentUser.role==='admin') ? '' : 'none';
+    ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
+      const el = $(id); if(el) el.style.display = 'none';
+    });
+    $('materialsTableWrap').style.display = 'none';
+    collapseAllSections();
+    toggleCollapsibleSection($('sec1Head'), true); // keep section 1 (Customer's Info) open — it's the entry point
+    if($('srJobOrderHead')) toggleCollapsibleSection($('srJobOrderHead'), true); // keep the Job Order picker open too
+    if(sigCustomerPad) sigCustomerPad.clear();
+    if(sigTechPad) sigTechPad.clear();
+    unlockSignature('sigCustomer'); unlockSignature('sigTech');
+    $('sigCustomerPh').style.display='flex'; $('sigTechPh').style.display='flex';
+    $('metaDate').textContent = fmtDate($('svcDate').value);
+    $('statusPill').textContent='Draft'; $('statusPill').className='status-pill status-draft';
+    currentSrNo = null;
+    currentTechnicianId = null;
+    srCurrentTicketId = null;
+    srCurrentEquipId = null;
+    srBatchEquipItems = null;
+    if($('srBatchBanner')) $('srBatchBanner').style.display = 'none';
+    $('metaSrNo').textContent='—';
+    clearInvalid();
+    applyTechNameDefault();
+    srRenderStepper();
+  }
+  resetForm();
+  // ---------- progressive step tracker ----------
+  // Same jo-stepper visual language as the Job Order / Cash Advance
+  // trackers. Re-rendered at every state change below rather than on every
+  // keystroke — resetForm, applying a Job Order (single or batch), signing,
+  // and submitting all call this directly.
+  function srRenderStepper(){
+    const container = $('srStepperContainer');
+    if(!container) return;
+    const isAdmin = currentUser && currentUser.role==='admin';
+    const step1Done = isAdmin || !!srCurrentTicketId;
+    const step2Done = step1Done && !!$('custName').value.trim() && !!$('svcDate').value;
+    const custSigned = !!(sigCustomerPad && !sigCustomerPad.isEmpty());
+    const techSigned = !!(sigTechPad && !sigTechPad.isEmpty());
+    const step3Done = step2Done && custSigned && techSigned;
+    const step4Done = step3Done && $('statusPill').textContent==='Completed';
+    let stage = 0;
+    if(step1Done) stage = 1;
+    if(step2Done) stage = 2;
+    if(step3Done) stage = 3;
+    if(step4Done) stage = 4;
+    const isBatch = srBatchEquipItems && srBatchEquipItems.length > 1;
+    const labels = isBatch
+      ? ['Job Order Selected','Details Filled','Signed Once','All Reports Submitted']
+      : ['Job Order Selected','Details Filled','Signed','Submitted'];
+    const stepsHtml = labels.map((label,i)=>{
+      const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
+      return '<div class="jo-step '+state+'">'+
+          '<span class="jo-step-line"></span>'+
+          '<span class="jo-step-dot">'+(i<stage ? '\u2713' : (i+1))+'</span>'+
+          '<span class="jo-step-label">'+label+'</span>'+
+        '</div>';
+    }).join('');
+    let nextText;
+    if(step4Done) nextText = isBatch ? 'All reports for this batch were generated.' : 'Report submitted.';
+    else if(step3Done) nextText = 'Tap "Generate & Share Report" below to submit'+(isBatch ? ' every report in this batch.' : '.');
+    else if(step2Done) nextText = 'Sign in Section 8 to continue (both customer and technician).';
+    else if(step1Done) nextText = "Fill in Customer's Information and the sections below.";
+    else nextText = 'Select a Job Order above to get started.';
+    container.innerHTML = '<div class="jo-stepper">'+
+      '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
+      '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
+    '</div>';
+  }
+  ['custName','svcDate'].forEach(id=>{ const el = $(id); if(el){ el.addEventListener('input', srRenderStepper); el.addEventListener('change', srRenderStepper); } });
+  srRenderStepper();
+  // Auto-fills the Technician Name field from the logged-in account (still
+  // editable, in case a different technician actually performed the work).
+  function applyTechNameDefault(){
+    if(currentUser && currentUser.name) $('techName').value = currentUser.name;
+  }
+
+  // ---------- validation ----------
+  function clearInvalid(){
+    document.querySelectorAll('.field.invalid').forEach(f=>f.classList.remove('invalid'));
+  }
+  function validate(){
+    clearInvalid();
+    let ok = true;
+    if(!$('custName').value.trim()){ $('f_custName').classList.add('invalid'); ok=false; }
+    if(!$('svcDate').value){ $('f_date').classList.add('invalid'); ok=false; }
+    const email = $('custEmail').value.trim();
+    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ $('f_custEmail').classList.add('invalid'); ok=false; }
+    return ok;
+  }
+
+  // ---------- gather form data ----------
+  function gatherData(){
+    const findings = Array.from($('findingsList').querySelectorAll('textarea')).map(t=>t.value.trim()).filter(Boolean);
+    const recs = Array.from($('recsList').querySelectorAll('textarea')).map(t=>t.value.trim()).filter(Boolean);
+    const servicesDone = Array.from($('servicesDoneList').querySelectorAll('textarea')).map(t=>t.value.trim()).filter(Boolean);
+    const materials = Array.from($('materialsBody').querySelectorAll('tr')).map(tr=>({
+      description: tr.querySelector('.m-desc').value.trim(),
+      qty: tr.querySelector('.m-qty').value.trim(),
+      unit: tr.querySelector('.m-unit').value.trim()
+    })).filter(r=>r.description||r.qty||r.unit);
+
+    return {
+      srNo: currentSrNo,
+      technicianId: currentTechnicianId || (currentUser ? currentUser.id : null),
+      date: $('svcDate').value,
+      custName: $('custName').value.trim(),
+      custAddress: $('custAddress').value.trim(),
+      contactNo: $('contactNo').value.trim(),
+      contactPerson: $('contactPerson').value.trim(),
+      equipType: $('equipType').value.trim(), modelCU:$('modelCU').value.trim(), serialCU:$('serialCU').value.trim(),
+      modelFCU:$('modelFCU').value.trim(), serialFCU:$('serialFCU').value.trim(),
+      coolCap:$('coolCap').value.trim(), mountType:$('mountType').value.trim(),
+      brand:$('brand').value.trim(), refrigerantType:$('refrigerantType').value.trim(),
+      compressorType:$('compressorType').value.trim(), equipLocation:$('equipLocation').value.trim(),
+      troubleCall:$('troubleCall').value.trim(), findings, recs, materials, servicesDone,
+      before:{
+        amp:[$('b_amp_l1').value,$('b_amp_l2').value,$('b_amp_l3').value],
+        volt:[$('b_volt_l12').value,$('b_volt_l23').value,$('b_volt_l31').value],
+        pressure:[$('b_press_suction').value,$('b_press_discharge').value],
+        temp:$('b_temp').value, airflow:$('b_airflow').value
+      },
+      after:{
+        amp:[$('a_amp_l1').value,$('a_amp_l2').value,$('a_amp_l3').value],
+        volt:[$('a_volt_l12').value,$('a_volt_l23').value,$('a_volt_l31').value],
+        pressure:[$('a_press_suction').value,$('a_press_discharge').value],
+        temp:$('a_temp').value, airflow:$('a_airflow').value
+      },
+      isInstall: $('isInstallToggle').checked,
+      install:{
+        pd:[$('pd_suction').value,$('pd_discharge').value,$('pd_drain').value],
+        pl:[$('pl_refline').value,$('pl_drain').value],
+        ws:[$('ws_feeder').value,$('ws_control').value],
+        breaker:$('circuit_breaker').value,
+        pi:[$('pi_refline').value,$('pi_drain').value],
+        riser:$('riser_height').value, ptrap:$('ptrap').value, bracketType:$('bracketType').value
+      },
+      timeIn:$('timeIn').value, timeOut:$('timeOut').value, remarks:$('remarks').value.trim(),
+      custPrintedName:$('custPrintedName').value.trim(), techName:$('techName').value.trim(),
+      custEmail: $('custEmail').value.trim(),
+      sigCustomerRaw: sigCustomerPad.isEmpty() ? null : sigCustomerPad.toDataURL('image/png'),
+      sigTechRaw: sigTechPad.isEmpty() ? null : sigTechPad.toDataURL('image/png')
+    };
+  }
+  async function gatherDataForOutput(){
+    await ensureSignaturePads();
+    const data = gatherData();
+    data.sigCustomer = data.sigCustomerRaw ? await downscaleDataUrl(data.sigCustomerRaw, 400) : null;
+    data.sigTech = data.sigTechRaw ? await downscaleDataUrl(data.sigTechRaw, 400) : null;
+    return data;
+  }
+
+  // ---------- save draft ----------
+  // Returns SAVE_CLOUD / SAVE_QUEUED / SAVE_FAILED so callers stop telling the
+  // user "saved" when the write actually failed and nothing was retained.
+  // Drafts save locally first when there is no signal, then upload on their
+  // own via the outbox (see registerOutboxHandler('report', ...) below) —
+  // triggered automatically on 'online', on the app coming back to the
+  // foreground, and by the periodic safety-net timer in core.js. "Sync now"
+  // just runs that same flush immediately on demand.
+  async function saveReport(srNo, data){
+    // Which customer_equipment row this report is for is decided by an
+    // explicit earlier choice, not guessed here: getEquipPickedId() (set
+    // by renderEquipPicker()'s click handler, or by openReport() when
+    // resuming a draft/batch item that already has one) is the real id if
+    // the technician picked an existing record and hasn't edited a field
+    // since. Otherwise this is content the technician typed via "+ Add
+    // New" — genuinely new, so cloudAddCustomerEquipment() just creates a
+    // fresh row, no matching against what's already on file.
+    const matchedCustomer = customersCache.find(c=> c.name.toLowerCase() === (data.custName||'').trim().toLowerCase());
+    if(matchedCustomer) data.equipmentId = getEquipPickedId() || await cloudAddCustomerEquipment(matchedCustomer.id, data);
+    let result = SAVE_FAILED;
+    if(await ensureCloud() && await cloudSaveReport(srNo, data)) result = SAVE_CLOUD;
+    // Keep only the downscaled signatures on disk: the full-resolution raw
+    // canvas exports are several hundred KB each and were being persisted for
+    // no reason, filling local storage and bloating every upload.
+    const persisted = Object.assign({}, data);
+    delete persisted.sigCustomerRaw;
+    delete persisted.sigTechRaw;
+    try{ await window.storage.set('report:'+srNo, JSON.stringify(persisted), false); }
+    catch(e){ console.error('local report save failed', e); }
+    if(result!==SAVE_CLOUD){
+      // Queue it so it uploads by itself the next time there is a connection,
+      // instead of living only on this phone until someone reopens it.
+      if(await outboxQueue('report', srNo, persisted)) result = SAVE_QUEUED;
+    }
+    return result;
+  }
+  registerOutboxHandler('report', async (srNo, payload)=>{
+    let finalSr = srNo;
+    // A report numbered offline gets a real sequential SR number now that the
+    // server is reachable, so provisional ids never reach the shared history.
+    if(isProvisionalSrNo(srNo)){
+      const real = await cloudNextSrNo((payload.date || todayISO()).replace(/-/g,''));
+      if(real) finalSr = real;
+    }
+    payload.srNo = finalSr;
+    const ok = await cloudSaveReport(finalSr, payload);
+    if(!ok) throw new Error('report upload failed');
+    if(finalSr !== srNo){
+      try{
+        await window.storage.set('report:'+finalSr, JSON.stringify(payload), false);
+        await window.storage.delete('report:'+srNo);
+      }catch(e){}
+    }
+  });
+  $('saveDraftBtn').addEventListener('click', async ()=>{
+    if(!$('custName').value.trim()){ toast('Add a customer name before saving'); $('f_custName').classList.add('invalid'); return; }
+    if(!currentSrNo){ currentSrNo = await nextSrNo(); $('metaSrNo').textContent = currentSrNo; }
+    const data = await gatherDataForOutput();
+    const res = await saveReport(currentSrNo, data);
+    if(res===SAVE_FAILED){ toast('Could not save '+currentSrNo+' — nothing was stored, please try again'); return; }
+    toast(res===SAVE_CLOUD
+      ? ('Draft saved to shared cloud: '+currentSrNo)
+      : ('Draft saved on this device — it will upload automatically when you are online'));
+    resetForm();
+  });
+
+
+// ---------- build PDF ----------
+  const AWES_LOGO_B64 = 'data:image/png;base64,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';
+
+  // A report can reach buildPdf from three directions: straight off the form
+  // (gatherDataForOutput), out of local storage, or out of the cloud via
+  // rowToReport. Older cloud rows are missing fields entirely, and History used
+  // to crash here on `data.recs.length` with no visible error at all because the
+  // click handler had no catch. Normalise once, up front, so every downstream
+  // .length / .join / .forEach is safe.
+  function normalizeReportForPdf(data){
+    const d = Object.assign({}, data || {});
+    d.findings     = Array.isArray(d.findings) ? d.findings : [];
+    d.recs         = Array.isArray(d.recs) ? d.recs : [];
+    d.servicesDone = Array.isArray(d.servicesDone) ? d.servicesDone : [];
+    d.materials    = Array.isArray(d.materials) ? d.materials : [];
+    d.before  = normalizeOperatingData(d.before);
+    d.after   = normalizeOperatingData(d.after);
+    d.install = normalizeInstallData(d.install);
+    d.sigCustomer = asSignature(d.sigCustomer);
+    d.sigTech     = asSignature(d.sigTech);
+    return d;
+  }
+
+  async function buildPdf(rawData){
+    const data = normalizeReportForPdf(rawData);
+    await loadAwesScript('jspdf', awesLibs.jspdf);
+    await loadAwesScript('autotable', awesLibs.autotable);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p','pt','a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = 44;
+
+    const headerH = 112;
+    doc.setFillColor(21,77,52);
+    doc.rect(0,0,pageW,headerH,'F');
+    try{ doc.addImage(AWES_LOGO_B64,'PNG', margin, 14, 108, 36); }catch(e){}
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold'); doc.setFontSize(13);
+    doc.text('SERVICE REPORT', pageW-margin, 28, {align:'right'});
+    doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text('SR No: '+(data.srNo||'—'), pageW-margin, 42, {align:'right'});
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    doc.text('Date: '+(data.date||'—'), pageW-margin, 55, {align:'right'});
+    doc.setFont('helvetica','bold'); doc.setFontSize(9);
+    doc.text('AW Engineering Services', margin, 64);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8);
+    doc.text('Air Conditioning & Ventilation System', margin, 75);
+    doc.setFontSize(7.5);
+    doc.text('3F DJET Commercial Bldg., Imelda Ave., Karangalan Vill., Manggahan, Pasig City', margin, 87);
+    doc.text('8441-6497 / 8441-6796   •   awes.manila@gmail.com', margin, 98);
+    doc.setTextColor(0,0,0);
+    y = headerH + 18;
+
+    // The Time In/Out fields are captured from <input type="time">, which
+    // stores a plain 24-hour "HH:MM" string with no AM/PM indicator. The PDF
+    // preview/output printed that raw string (e.g. "04:44"), leaving it
+    // ambiguous whether a service happened at 4 in the morning or afternoon.
+    // Render it as 12-hour time with an explicit AM/PM suffix instead.
+    function fmtTime12h(hhmm){
+      if(!hhmm) return '';
+      const m = /^(\d{1,2}):(\d{2})/.exec(hhmm);
+      if(!m) return hhmm;
+      let h = parseInt(m[1], 10);
+      const min = m[2];
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12; if(h === 0) h = 12;
+      return h + ':' + min + ' ' + ampm;
+    }
+    function sectionHeader(title){
+      doc.setFillColor(31,122,80);
+      doc.rect(margin, y, pageW-margin*2, 18, 'F');
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(10);
+      doc.text(title.toUpperCase(), margin+6, y+12.5);
+      doc.setTextColor(0,0,0);
+      y += 26;
+    }
+    function kv(label, value, xOffset, width){
+      doc.setFont('helvetica','bold'); doc.setFontSize(9);
+      doc.text(label, margin+xOffset, y);
+      doc.setFont('helvetica','normal');
+      const lines = doc.splitTextToSize(value || '—', width);
+      doc.text(lines, margin+xOffset, y+11);
+      return lines.length;
+    }
+    function checkPageBreak(needed){
+      if(y + needed > 790){ doc.addPage(); y = 40; }
+    }
+
+    // 1. Customer info
+    sectionHeader('1. Customer\'s Information');
+    kv('SR NO.', data.srNo, 0, 240); kv('DATE', data.date, 300, 220); y += 22;
+    let h1 = kv('CUSTOMER NAME', data.custName, 0, 250);
+    kv('CONTACT NO.', data.contactNo, 300, 220);
+    y += Math.max(h1,1)*11 + 12;
+    let h2 = kv('ADDRESS', data.custAddress, 0, 250);
+    kv('CONTACT PERSON', data.contactPerson, 300, 220);
+    y += Math.max(h2,1)*11 + 16;
+
+    // 2. Equipment
+    checkPageBreak(90);
+    sectionHeader('2. Equipment Description');
+    kv('EQUIPMENT TYPE', data.equipType || '—', 0, 500); y += 24;
+    kv('MODEL NO. (CU)', data.modelCU, 0, 240); kv('SERIAL NO. (CU)', data.serialCU, 300, 220); y += 22;
+    kv('MODEL NO. (FCU)', data.modelFCU, 0, 240); kv('SERIAL NO. (FCU)', data.serialFCU, 300, 220); y += 22;
+    kv('COOLING CAPACITY', data.coolCap, 0, 240); kv('MOUNTING TYPE', data.mountType, 300, 220); y += 22;
+    kv('BRAND / MANUFACTURER', data.brand, 0, 240); kv('REFRIGERANT TYPE', data.refrigerantType, 300, 220); y += 22;
+    kv('COMPRESSOR TYPE', data.compressorType, 0, 240); kv('LOCATION', data.equipLocation, 300, 220); y += 26;
+
+    // 3. Report summary
+    checkPageBreak(100);
+    sectionHeader('3. Report Summary');
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('TROUBLE CALL / REASON FOR SERVICE', margin, y);
+    doc.setFont('helvetica','normal');
+    let tc = doc.splitTextToSize(data.troubleCall || '—', pageW-margin*2);
+    doc.text(tc, margin, y+11); y += tc.length*11 + 16;
+
+    checkPageBreak(60);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('FINDINGS / EVALUATION', margin, y); y+=12;
+    doc.setFont('helvetica','normal');
+    if(data.findings.length===0){ doc.text('—', margin+8, y); y+=13; }
+    data.findings.forEach(f=>{
+      checkPageBreak(20);
+      const lines = doc.splitTextToSize('• '+f, pageW-margin*2-8);
+      doc.text(lines, margin+8, y); y += lines.length*11+3;
+    });
+    y += 6;
+
+    checkPageBreak(60);
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('RECOMMENDATION/S', margin, y); y+=12;
+    doc.setFont('helvetica','normal');
+    if(data.recs.length===0){ doc.text('—', margin+8, y); y+=13; }
+    data.recs.forEach(r=>{
+      checkPageBreak(20);
+      const lines = doc.splitTextToSize('• '+r, pageW-margin*2-8);
+      doc.text(lines, margin+8, y); y += lines.length*11+3;
+    });
+    y += 10;
+
+    // 4. Components / Parts Needed to Replace
+    checkPageBreak(60);
+    sectionHeader('4. Components / Parts Needed to Replace');
+    const rows = data.materials.map((m,i)=>[
+      String(i+1)+'.', m.description||m.details||'—', m.qty||'—', m.unit||'—'
+    ]);
+    doc.autoTable({
+      startY: y,
+      margin:{left:margin, right:margin},
+      head:[['Item No.','Item Description','Qty','Unit']],
+      body: rows.length? rows : [['1.','—','—','—']],
+      styles:{fontSize:8.5, cellPadding:4},
+      headStyles:{fillColor:[231,243,236], textColor:[21,77,52], fontStyle:'bold'},
+      columnStyles:{0:{cellWidth:40},2:{cellWidth:50},3:{cellWidth:50}}
+    });
+    y = doc.lastAutoTable.finalY + 18;
+
+    // 5. Services Done
+    checkPageBreak(60);
+    sectionHeader('5. Services Done');
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    if(!data.servicesDone || data.servicesDone.length===0){ doc.text('—', margin+8, y); y+=13; }
+    (data.servicesDone||[]).forEach(s=>{
+      checkPageBreak(20);
+      const lines = doc.splitTextToSize('• '+s, pageW-margin*2-8);
+      doc.text(lines, margin+8, y); y += lines.length*11+3;
+    });
+    y += 6;
+
+    // 6. Operating data
+    checkPageBreak(120);
+    sectionHeader('6. Operating Data');
+    doc.autoTable({
+      startY:y, margin:{left:margin,right:margin},
+      head:[['','Before Servicing','After Servicing']],
+      body:[
+        ['Amperage (L1/L2/L3)', data.before.amp.join(' / ')||'—', data.after.amp.join(' / ')||'—'],
+        ['Voltage (L12/L23/L31)', data.before.volt.join(' / ')||'—', data.after.volt.join(' / ')||'—'],
+        ['Pressure (Suction/Discharge)', data.before.pressure.join(' / ')||'—', data.after.pressure.join(' / ')||'—'],
+        ['Supply Air Temp (°C)', data.before.temp||'—', data.after.temp||'—'],
+        ['Air Volume Flow Rate (cfm)', data.before.airflow||'—', data.after.airflow||'—']
+      ],
+      styles:{fontSize:8.5, cellPadding:4},
+      headStyles:{fillColor:[231,243,236], textColor:[21,77,52], fontStyle:'bold'}
+    });
+    y = doc.lastAutoTable.finalY + 18;
+
+    // 7. Installation data
+    if(data.isInstall){
+      checkPageBreak(100);
+      sectionHeader('7. Installation Data');
+      doc.autoTable({
+        startY:y, margin:{left:margin,right:margin},
+        body:[
+          ['Pipe Diameter (in) — Suction/Discharge/Drain', data.install.pd.join(' / ')||'—'],
+          ['Pipe Length (ft) — Ref\'t Line/Drain', data.install.pl.join(' / ')||'—'],
+          ['Wire Size (awg) — Feeder/Control', data.install.ws.join(' / ')||'—'],
+          ['Circuit Breaker (amp)', data.install.breaker||'—'],
+          ['Pipe Insulation (in) — Ref\'t Line/Drain', data.install.pi.join(' / ')||'—'],
+          ['Riser Pipes Height (m)', data.install.riser||'—'],
+          ['P-Trap', data.install.ptrap||'—'],
+          ['Accu Bracket Type', data.install.bracketType||'—']
+        ],
+        styles:{fontSize:8.5, cellPadding:4},
+        theme:'plain'
+      });
+      y = doc.lastAutoTable.finalY + 18;
+    }
+
+    // 8. Terms & Conditions of Service
+    const tcSections = [
+      {
+        heading: 'Preventive Maintenance Service (PMS)',
+        body: 'PMS consists strictly of cleaning, routine inspection, and operational checks, and does not constitute a warranty on the equipment or its future performance. A limited 7-day workmanship guarantee covers only the direct physical labor (e.g., proper reassembly and drain line clearance). Pre-existing defects, component failures, and additional repairs require a separate quote and approval.'
+      },
+      {
+        heading: 'Repair Works',
+        body: 'Repairs cover only the specified scope and agreed-upon components. Replaced parts carry a 90-day warranty against manufacturing defects, while related labor carries a 30-day guarantee or as indicated in our proposal. Warranty is void if damage results from power surges, voltage fluctuations, unauthorized tampering, or external site factors.'
+      },
+      {
+        heading: 'Installation Works',
+        body: 'Installation workmanship and piping integrity are guaranteed for 6 months or as indicated in our proposal from commissioning. Equipment warranties are covered separately by the manufacturer. Warranty excludes damages from electrical supply issues, lack of routine maintenance, unauthorized modifications, or improper operation. Sign-off confirms turnover in good operating condition.'
+      }
+    ];
+    // Terms & Conditions and Acknowledgment belong together as the closing
+    // block of the report. Estimate the combined height up front so the pair
+    // is always pushed to a fresh page together rather than being split, and
+    // always ends up as the last block at the bottom of the printout.
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+    let tcHeight = 26;
+    tcSections.forEach(sec=>{
+      const bodyLines = doc.splitTextToSize(sec.body, pageW-margin*2);
+      tcHeight += 10 + bodyLines.length*9.5 + 8;
+    });
+    const ackHeight = 190;
+    checkPageBreak(tcHeight + ackHeight);
+
+    sectionHeader('8. Terms & Conditions of Service');
+    tcSections.forEach(sec=>{
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(21,77,52);
+      doc.text(sec.heading, margin, y); y += 10;
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(60,68,63);
+      const lines = doc.splitTextToSize(sec.body, pageW-margin*2);
+      doc.text(lines, margin, y); y += lines.length*9.5 + 8;
+      doc.setTextColor(0,0,0);
+    });
+    y += 4;
+
+    // 9. Acknowledgment
+    checkPageBreak(190);
+    sectionHeader('9. Acknowledgment');
+    doc.setFont('helvetica','italic'); doc.setFontSize(8.5); doc.setTextColor(70,80,74);
+    const ackLines = doc.splitTextToSize(
+      'By signing below, the Client confirms that the scope of works indicated in this report has been performed to satisfaction and that the equipment was turned over in good, operational condition. The Client acknowledges, understands, and agrees to the Terms & Conditions set forth above.',
+      pageW-margin*2
+    );
+    doc.text(ackLines, margin, y);
+    doc.setTextColor(0,0,0);
+    y += ackLines.length*11 + 12;
+    kv('TIME IN', fmtTime12h(data.timeIn)||'—', 0, 150); kv('TIME OUT', fmtTime12h(data.timeOut)||'—', 200, 150); y+=22;
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('REMARKS', margin, y);
+    doc.setFont('helvetica','normal');
+    const remLines = doc.splitTextToSize(data.remarks||'—', pageW-margin*2);
+    doc.text(remLines, margin, y+11); y += remLines.length*11 + 18;
+
+    checkPageBreak(150);
+    const colW = (pageW - margin*2 - 20)/2;
+    const sigY = y;
+    doc.setDrawColor(220,227,221);
+    doc.rect(margin, sigY, colW, 80);
+    doc.rect(margin+colW+20, sigY, colW, 80);
+    if(data.sigCustomer){ try{ doc.addImage(data.sigCustomer,'PNG', margin+6, sigY+6, colW-12, 55); }catch(e){} }
+    if(data.sigTech){ try{ doc.addImage(data.sigTech,'PNG', margin+colW+26, sigY+6, colW-12, 55); }catch(e){} }
+    doc.setFontSize(8.5);
+    doc.text('Customer — '+(data.custPrintedName||'_______________'), margin+4, sigY+72);
+    doc.text('Technician — '+(data.techName||'_______________'), margin+colW+24, sigY+72);
+    y = sigY + 96;
+
+    doc.setFontSize(8); doc.setTextColor(120,130,124);
+    doc.text('Generated on '+new Date().toLocaleString('en-PH'), margin, 815);
+
+    return doc;
+  }
+
+  async function shareOrDownloadPdf(doc, filename){
+    const blob = doc.output('blob');
+    if(navigator.canShare && navigator.canShare({files:[new File([blob], filename, {type:'application/pdf'})]})){
+      try{
+        await navigator.share({
+          files:[new File([blob], filename, {type:'application/pdf'})],
+          title:'AWES Service Report',
+          text:'Service report '+filename
+        });
+        return 'shared';
+      }catch(e){ /* user cancelled or unsupported — fall through to download */ }
+    }
+    doc.save(filename);
+    return 'downloaded';
+  }
+
+  // Mobile browsers use canvas rendering for reliable PDF preview. PDF.js is lazy-loaded.
+  async function ensurePdfJs(){
+    await loadAwesScript('pdfjs', awesLibs.pdfjs);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  let previewRenderToken = 0;
+  function closePreview(){
+    $('previewOverlay').classList.remove('open');
+    previewRenderToken++; // invalidate any in-flight render
+    const frame = $('previewFrame');
+    frame.innerHTML = '<div class="empty-state" style="display:none;">Rendering preview…</div>';
+  }
+  async function renderPdfPreview(doc){
+    const myToken = ++previewRenderToken;
+    const frame = $('previewFrame');
+    frame.innerHTML = '';
+    const loading = document.createElement('div');
+    loading.className = 'empty-state';
+    loading.textContent = 'Rendering preview…';
+    frame.appendChild(loading);
+
+    await ensurePdfJs();
+    const arrayBuffer = doc.output('arraybuffer');
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    if(myToken !== previewRenderToken) return; // overlay was closed / superseded
+    frame.innerHTML = '';
+
+    for(let pageNum = 1; pageNum <= pdf.numPages; pageNum++){
+      if(myToken !== previewRenderToken) return;
+      const page = await pdf.getPage(pageNum);
+      const scale = Math.min(2, (frame.clientWidth || 700) / page.getViewport({ scale: 1 }).width);
+      const viewport = page.getViewport({ scale: Math.max(scale, 1) });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.cssText = 'max-width:100%; height:auto; display:block; margin:0 auto 12px; box-shadow:0 1px 4px rgba(0,0,0,.2); background:#fff;';
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      if(myToken !== previewRenderToken) return;
+      frame.appendChild(canvas);
+    }
+  }
+  $('previewBtn').addEventListener('click', async ()=>{
+    if(!validate()){ toast('Please fill required fields before previewing'); return; }
+    $('previewBtn').disabled = true; $('previewBtn').textContent = 'Building preview…';
+    try{
+      const data = await gatherDataForOutput();
+      const doc = await buildPdf(data);
+      $('previewOverlay').querySelector('h3').textContent = 'Report Preview';
+      $('previewOkBtn').textContent = 'Looks Good — Continue to Signatures';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc);
+    }catch(e){
+      console.error(e);
+      toast('Could not build preview');
+    }finally{
+      $('previewBtn').disabled = false; $('previewBtn').textContent = '👁 Preview Report Before Signing';
+    }
+  });
+  $('closePreview').addEventListener('click', closePreview);
+  $('previewOkBtn').addEventListener('click', closePreview);
+
+  function showShareSuccess(detail){
+    $('shareSuccessDetail').textContent = detail || '';
+    $('shareSuccessOverlay').classList.add('open');
+  }
+  $('shareSuccessHomeBtn').addEventListener('click', ()=>{
+    $('shareSuccessOverlay').classList.remove('open');
+    resetForm();
+    showHome();
+  });
+
+  // Batch-sign submit path (2+ equipment items selected off one Job Order,
+  // see srApplyJobOrderBatch in dispatch.js). Everything gathered from the
+  // form — including the one signature — is shared across every report;
+  // only the equipment-identity fields (EQUIP_FIELD_KEYS) differ, pulled
+  // straight from each selected item rather than the (hidden) form fields.
+  async function submitBatchReports(){
+    const items = srBatchEquipItems;
+    const ticketId = srCurrentTicketId;
+    const baseData = await gatherDataForOutput();
+    let savedCount = 0, failedCount = 0;
+    const toShare = [];
+    for(const item of items){
+      const srNo = await nextSrNo();
+      const data = Object.assign({}, baseData, { srNo, completed:true });
+      EQUIP_FIELD_KEYS.forEach(k=> data[k] = item[k] || '');
+      if(item.scope && item.scope.length) data.troubleCall = item.scope.join('; ');
+      // Same reuse-by-real-id as the single-report path (srApplyJobOrder) —
+      // each item's own equipmentId (stamped on at ticket-creation time),
+      // not a fresh content comparison, decides whether saveReport() below
+      // reuses that row or creates a new one.
+      setEquipPickedId(item.equipmentId || null);
+      const saveResult = await saveReport(srNo, data);
+      if(saveResult===SAVE_FAILED){ failedCount++; continue; }
+      savedCount++;
+      await dtMarkEquipmentReported(ticketId, item.id, srNo);
+      const doc = await buildPdf(data);
+      toShare.push({ srNo, doc, data });
+    }
+    if(savedCount===0){
+      toast('Could not save any of the '+items.length+' reports — fix the connection or free up space, then try again');
+      return;
+    }
+    $('statusPill').textContent='Completed'; $('statusPill').className='status-pill status-done';
+    $('metaSrNo').textContent = savedCount+' reports (batch)';
+    srRenderStepper();
+    // Send/share each generated PDF in turn — there is no single combined
+    // file, so this is N separate emails (silent, no UI per one) or N
+    // share/download prompts (the browser/OS share sheet, one after another).
+    let emailedCount = 0;
+    for(const {srNo, doc, data} of toShare){
+      const filename = srNo+'.pdf';
+      if(emailConfigured()){
+        const emailResult = await sendEmailWithPdf(doc, data, filename);
+        if(emailResult.ok) emailedCount++;
+        else await shareOrDownloadPdf(doc, filename);
+      }else{
+        await shareOrDownloadPdf(doc, filename);
+      }
+    }
+    let summary = savedCount+' of '+items.length+' reports generated'+(failedCount ? ' ('+failedCount+' failed to save — retry those individually)' : '')+'.';
+    summary += emailConfigured() ? (' '+emailedCount+' emailed to the customer.') : ' Shared/downloaded to this device.';
+    showShareSuccess(summary);
+  }
+
+  $('genPdfBtn').addEventListener('click', async ()=>{
+    if(!validate()){ toast('Please fill required fields'); return; }
+    $('genPdfBtn').disabled = true;
+    $('genPdfBtn').textContent = 'Building PDF…';
+    try{
+      if(srBatchEquipItems && srBatchEquipItems.length > 0){
+        await submitBatchReports();
+        return;
+      }
+      if(!currentSrNo){ currentSrNo = await nextSrNo(); $('metaSrNo').textContent = currentSrNo; }
+      const data = await gatherDataForOutput();
+      Object.assign(data, {completed:true});
+      const saveResult = await saveReport(currentSrNo, data);
+      if(saveResult===SAVE_FAILED){
+        // Don't hand over a PDF for a report that was not stored anywhere.
+        toast('Could not save this report — fix the connection or free up space, then try again');
+        return;
+      }
+      if(saveResult===SAVE_QUEUED) toast('Saved on this device — it will upload when you are online');
+      // If this report was filed against a specific piece of equipment on a
+      // dispatch ticket, mark that item reported so the ticket's progress
+      // ("38 of 100 reported") picks it up. Best-effort — never blocks or
+      // fails the report save itself.
+      if(srCurrentTicketId && srCurrentEquipId) await dtMarkEquipmentReported(srCurrentTicketId, srCurrentEquipId, currentSrNo);
+      $('statusPill').textContent='Completed'; $('statusPill').className='status-pill status-done';
+      srRenderStepper();
+      const doc = await buildPdf(data);
+      const filename = (currentSrNo||'service-report')+'.pdf';
+
+      if(emailConfigured()){
+        $('genPdfBtn').textContent = 'Sending email…';
+        const emailResult = await sendEmailWithPdf(doc, data, filename);
+        if(emailResult.ok){
+          showShareSuccess('Emailed to the customer and saved to the shared cloud.');
+        }else if(emailResult.reason==='too_large'){
+          await shareOrDownloadPdf(doc, filename);
+          showShareSuccess('PDF was too large to email, so it was shared/downloaded instead.');
+        }else{
+          await shareOrDownloadPdf(doc, filename);
+          showShareSuccess('Auto-email failed, so it was shared/downloaded instead.');
+        }
+      }else{
+        const result = await shareOrDownloadPdf(doc, filename);
+        showShareSuccess(result==='shared' ? 'Report '+filename+' was shared.' : 'Report '+filename+' was downloaded to this device.');
+      }
+    }catch(e){
+      console.error(e);
+      toast('Something went wrong generating the PDF');
+    }finally{
+      $('genPdfBtn').disabled = false;
+      $('genPdfBtn').textContent = 'Generate & Share Report';
+    }
+  });
+
+  // ---------- new report ----------
+  $('newBtn').addEventListener('click', ()=>{
+    if(confirm('Start a new blank report? Unsaved changes will be lost.')) resetForm();
+  });
+
+
+// ---------- history ----------
+  async function loadHistory(containerId, filter, onlyUserId, searchText){
+    const list = $(containerId || 'historyList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    let reports = null;
+    if(await ensureCloud()){
+      reports = await cloudListReports();
+    }
+    if(reports===null){
+      reports = [];
+      try{
+        const res = await window.storage.list('report:', false);
+        const keys = (res && res.keys) ? res.keys.slice().reverse() : [];
+        for(const key of keys){
+          try{ const item = await window.storage.get(key, false); reports.push(JSON.parse(item.value)); }catch(e){}
+        }
+      }catch(e){}
+    }
+    if(onlyUserId) reports = reports.filter(d=> d.technicianId===onlyUserId);
+    if(filter==='draft') reports = reports.filter(d=> !d.completed);
+    else if(filter==='completed') reports = reports.filter(d=> d.completed);
+    // filter==='all' (or omitted) keeps everything, unfiltered.
+    const q = (searchText||'').trim().toLowerCase();
+    if(q) reports = reports.filter(d=> (d.custName||'').toLowerCase().includes(q) || (d.srNo||'').toLowerCase().includes(q));
+    if(reports.length===0){
+      const emptyMsg = q ? 'No reports match "'+searchText.trim()+'".'
+        : filter==='draft' ? 'No draft reports yet.'
+        : filter==='completed' ? 'No completed reports yet.'
+        : 'No saved reports yet.';
+      list.innerHTML = '<div class="empty-state">'+emptyMsg+'</div>';
+      return;
+    }
+    list.innerHTML = '';
+    reports.forEach(d=>{
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      // Customer names are free text typed by technicians, so they must be
+      // escaped before being injected as HTML.
+      // Drafts aren't finished yet, so they get actions for finishing/removing
+      // the draft rather than the open/PDF actions that make sense once a
+      // report is completed. This is keyed off the report's own completed
+      // state (not the current tab) so it's also correct on the "All" tab,
+      // which mixes drafts and completed reports in one list.
+      const isDraft = !d.completed;
+      row.innerHTML =
+        '<div class="hist-info"><b>'+escapeHtml(d.custName||'Untitled')+'</b>'+
+        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+'</span></div>'+
+        (isDraft
+          ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
+          : '<div class="hist-actions"><button data-act="view">View</button><button data-act="share">Share</button></div>');
+      if(isDraft){
+        // "Continue" reopens the draft in the form so the technician can
+        // finish filling it out and submit it — same underlying action as
+        // opening a report, just labeled for what a draft actually needs next.
+        row.querySelector('[data-act="continue"]').addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          try{ await openReport(d); }
+          catch(err){ console.error('openReport failed', err); toast('Could not open this draft'); }
+        });
+        row.querySelector('[data-act="delete"]').addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          if(!confirm('Delete this draft? "'+(d.custName||'Untitled')+'" ('+(d.srNo||'')+') cannot be recovered.')) return;
+          try{
+            // The local storage shim reports success even for a key that was
+            // never there (e.g. a draft that only exists in the cloud), so it
+            // can't be used to paper over a failed cloud delete. When cloud is
+            // reachable, trust its result; only fall back to local-only deletion
+            // when we're offline.
+            let ok;
+            if(await ensureCloud()){
+              ok = await cloudDeleteReport(d.srNo);
+              try{ await window.storage.delete('report:'+d.srNo, false); }catch(e){}
+            }else{
+              try{ await window.storage.delete('report:'+d.srNo, false); ok = true; }
+              catch(e){ ok = false; }
+            }
+            if(ok){ toast('Draft deleted'); row.remove(); }
+            else toast('Could not delete this draft — check your connection and try again');
+          }catch(err){ console.error('delete draft failed', err); toast('Could not delete this draft'); }
+        });
+      }else{
+        // "View" opens the completed report as a PDF preview (reusing the same
+        // preview overlay the form uses before signing) rather than dropping
+        // the technician back into the editable form — a completed report is
+        // meant to be looked at, not re-edited.
+        row.querySelector('[data-act="view"]').addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          try{
+            const doc = await buildPdf(d);
+            // Reuse the pre-signing preview overlay, but relabel it — this is
+            // a completed report being viewed, not a draft on its way to
+            // signatures, so the default "Continue to Signatures" copy doesn't apply.
+            $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
+            $('previewOkBtn').textContent = 'Close';
+            $('previewOverlay').classList.add('open');
+            await renderPdfPreview(doc);
+          }catch(err){
+            console.error('view report failed', err);
+            toast('Could not open this report');
+          }
+        });
+        // This handler used to be un-caught: any error inside buildPdf (and there
+        // was one for every cloud-loaded report) rejected silently and the button
+        // simply appeared to do nothing.
+        row.querySelector('[data-act="share"]').addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          try{
+            const doc = await buildPdf(d);
+            await shareOrDownloadPdf(doc, (d.srNo||'service-report')+'.pdf');
+          }catch(err){
+            console.error('PDF generation failed', err);
+            toast('Could not generate PDF for this report');
+          }
+        });
+      }
+      list.appendChild(row);
+    });
+  }
+  async function openReport(d){
+    showServiceReport();
+    resetForm();
+    currentSrNo = d.srNo; $('metaSrNo').textContent = d.srNo||'—';
+    currentTechnicianId = d.technicianId || (currentUser ? currentUser.id : null);
+    $('custName').value = d.custName||''; $('svcDate').value = d.date||todayISO();
+    $('metaDate').textContent = fmtDate($('svcDate').value);
+    $('custAddress').value = d.custAddress||''; $('contactNo').value = d.contactNo||''; $('contactPerson').value = d.contactPerson||'';
+    $('custEmail').value = d.custEmail||'';
+    // Re-establish equipment context for this report's customer, so its
+    // equipment dropdowns work correctly if the technician reopens this field.
+    const matchedCustomer = customersCache.find(c=> c.name.toLowerCase() === (d.custName||'').trim().toLowerCase());
+    loadCustomerEquipment(matchedCustomer ? matchedCustomer.id : null);
+    setEquipTab('addnew');
+    $('custDetailsWrap').style.display = '';
+    $('sec1Card').style.display = '';
+    ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
+      const el = $(id); if(el) el.style.display = '';
+    });
+    expandAllSections();
+    $('equipType').value = d.equipType || (Array.isArray(d.equipCodes) ? d.equipCodes.join(', ') : '') || '';
+    $('modelCU').value=d.modelCU||''; $('serialCU').value=d.serialCU||'';
+    $('modelFCU').value=d.modelFCU||''; $('serialFCU').value=d.serialFCU||'';
+    $('coolCap').value=d.coolCap||''; $('mountType').value=d.mountType||'';
+    $('brand').value=d.brand||''; $('refrigerantType').value=d.refrigerantType||'';
+    $('compressorType').value=d.compressorType||''; $('equipLocation').value=d.equipLocation||'';
+    // This report already has a resolved customer_equipment row (it was
+    // set the first time this was saved) — restore it so re-saving without
+    // touching the equipment fields reuses that same row instead of
+    // creating a new one. Editing any field here still clears it, same as
+    // any other pick (watchEquipFieldsForManualEdit).
+    setEquipPickedId(d.equipmentId || null);
+    $('troubleCall').value=d.troubleCall||'';
+    $('findingsList').innerHTML=''; (d.findings&&d.findings.length?d.findings:['']).forEach(f=>addListRow('findingsList',f));
+    $('recsList').innerHTML=''; (d.recs&&d.recs.length?d.recs:['']).forEach(r=>addListRow('recsList',r));
+    $('servicesDoneList').innerHTML='';
+    const svcArr = Array.isArray(d.servicesDone) ? d.servicesDone : (d.servicesDone ? [d.servicesDone] : []);
+    (svcArr.length?svcArr:['']).forEach(s=>addListRow('servicesDoneList',s));
+    $('materialsBody').innerHTML=''; materialRowCount=0;
+    (d.materials&&d.materials.length?d.materials:[{},{},{}]).forEach(m=>addMaterialRow(m));
+    // Legacy/cloud rows can carry partial objects (e.g. {} or a missing `amp`
+    // array), which used to throw on `d.before.amp[0]`. Normalise first.
+    {
+      const before = normalizeOperatingData(d.before);
+      $('b_amp_l1').value=before.amp[0]||''; $('b_amp_l2').value=before.amp[1]||''; $('b_amp_l3').value=before.amp[2]||'';
+      $('b_volt_l12').value=before.volt[0]||''; $('b_volt_l23').value=before.volt[1]||''; $('b_volt_l31').value=before.volt[2]||'';
+      $('b_press_suction').value=before.pressure[0]||''; $('b_press_discharge').value=before.pressure[1]||'';
+      $('b_temp').value=before.temp||''; $('b_airflow').value=before.airflow||'';
+      const after = normalizeOperatingData(d.after);
+      $('a_amp_l1').value=after.amp[0]||''; $('a_amp_l2').value=after.amp[1]||''; $('a_amp_l3').value=after.amp[2]||'';
+      $('a_volt_l12').value=after.volt[0]||''; $('a_volt_l23').value=after.volt[1]||''; $('a_volt_l31').value=after.volt[2]||'';
+      $('a_press_suction').value=after.pressure[0]||''; $('a_press_discharge').value=after.pressure[1]||'';
+      $('a_temp').value=after.temp||''; $('a_airflow').value=after.airflow||'';
+    }
+    $('isInstallToggle').checked = !!d.isInstall;
+    $('installSection').classList.toggle('open', !!d.isInstall);
+    {
+      const inst = normalizeInstallData(d.install);
+      $('pd_suction').value=inst.pd[0]||''; $('pd_discharge').value=inst.pd[1]||''; $('pd_drain').value=inst.pd[2]||'';
+      $('pl_refline').value=inst.pl[0]||''; $('pl_drain').value=inst.pl[1]||'';
+      $('ws_feeder').value=inst.ws[0]||''; $('ws_control').value=inst.ws[1]||'';
+      $('circuit_breaker').value=inst.breaker||'';
+      $('pi_refline').value=inst.pi[0]||''; $('pi_drain').value=inst.pi[1]||'';
+      $('riser_height').value=inst.riser||''; $('ptrap').value=inst.ptrap||'';
+      $('bracketType').value=inst.bracketType||'';
+    }
+    $('timeIn').value=d.timeIn||''; $('timeOut').value=d.timeOut||''; $('remarks').value=d.remarks||'';
+    $('custPrintedName').value=d.custPrintedName||''; $('techName').value=d.techName || (currentUser ? currentUser.name : '') || '';
+    const sigCust = asSignature(d.sigCustomer), sigTech = asSignature(d.sigTech);
+    // fromDataURL loads the image asynchronously (it returns a promise), so the
+    // lock is applied only once the pad has actually finished drawing the
+    // restored signature — otherwise isEmpty() could still read true and skip it.
+    if(sigCust){ await ensureSignaturePads(); await Promise.resolve(sigCustomerPad.fromDataURL(sigCust)); $('sigCustomerPh').style.display='none'; lockSignature('sigCustomer'); }
+    if(sigTech){ await ensureSignaturePads(); await Promise.resolve(sigTechPad.fromDataURL(sigTech)); $('sigTechPh').style.display='none'; lockSignature('sigTech'); }
+    $('statusPill').textContent = d.completed ? 'Completed' : 'Draft';
+    $('statusPill').className = 'status-pill ' + (d.completed ? 'status-done' : 'status-draft');
+    srShowTab('new', {skipReset:true});
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+
+  // ---------- Manage Service Reports (admin-only full page) — the "Saved
+  // Reports" list across every technician, with All / Draft / Completed
+  // tabs and a search bar. Reached via the "Service Reports" sidebar nav
+  // item (see showServiceReportsManagerView in home.js). ----------
+  let srMgrFilter = 'all';
+  function renderServiceReportsManagerList(){
+    loadHistory('historyList', srMgrFilter==='all' ? undefined : srMgrFilter, null, $('srMgrSearch').value);
+  }
+  async function openServiceReportsManagerPage(){
+    srMgrFilter = 'all';
+    $('srMgrSearch').value = '';
+    $$('#srMgrFilterRow button').forEach(b=> b.classList.toggle('active', b.dataset.filter==='all'));
+    await renderServiceReportsManagerList();
+  }
+  $$('#srMgrFilterRow button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      $$('#srMgrFilterRow button').forEach(b=> b.classList.remove('active'));
+      btn.classList.add('active');
+      srMgrFilter = btn.dataset.filter;
+      renderServiceReportsManagerList();
+    });
+  });
+  $('srMgrSearch').addEventListener('input', ()=> renderServiceReportsManagerList());
+
+  // ---------- Main Menu (admin sidebar) ----------
+  // On mobile the admin sidebar is an off-canvas drawer toggled by menuBtn;
+  // on wide screens it's permanently visible (see the role-admin rules in
+  // css/app.css), where these two are harmless no-ops.
+  function closeMainMenu(){
+    $('adminSidebar').classList.remove('open');
+    $('sidebarBackdrop').classList.remove('open');
+  }
+  function openMainMenu(){
+    $('adminSidebar').classList.add('open');
+    $('sidebarBackdrop').classList.add('open');
+  }
+  async function ensureAdminAuthenticated(){
+    if(adminMode) return true;
+    const pin = await askPassword({ label: 'Enter the Admin Password to continue' });
+    if(pin===null) return false;
+    if(!(await verifyAdminPassword(pin))){ toast('Incorrect password'); return false; }
+    enterAdminMode();
+    toast('Admin mode on');
+    return true;
+  }
+
+  $('menuBtn').addEventListener('click', (e)=>{
+    e.stopPropagation();
+    $('adminSidebar').classList.toggle('open');
+    $('sidebarBackdrop').classList.toggle('open');
+  });
+  $('sidebarBackdrop').addEventListener('click', closeMainMenu);
+  document.addEventListener('click', (e)=>{
+    if(!$('adminSidebar').classList.contains('open')) return;
+    if(!$('adminSidebar').contains(e.target) && e.target.id!=='menuBtn') closeMainMenu();
+  });
+
+  $('menuManageUsers').addEventListener('click', async ()=>{
+    closeMainMenu();
+    if(!(await ensureAdminAuthenticated())) return;
+    $('usersOverlay').classList.add('open');
+    renderUsersList();
+  });
+  $('menuManageDropdowns').addEventListener('click', async ()=>{
+    closeMainMenu();
+    if(!(await ensureAdminAuthenticated())) return;
+    renderManageLists();
+    $('adminOverlay').classList.add('open');
+  });
+  $('menuChangePin').addEventListener('click', ()=>{
+    closeMainMenu();
+    doChangeAdminPin();
+  });
+  $('menuLogout').addEventListener('click', ()=>{
+    closeMainMenu();
+    doLogout();
+  });
+  // Technician-facing direct buttons (shown in place of Menu — see applyUserRestrictions)
+  $('userLogoutBtn').addEventListener('click', doLogout);
+
+  // ---------- Auto-logout admin/technician when the app is actually closed ----------
+  // A plain refresh and a real tab close both fire 'pagehide' identically, and
+  // event.persisted only tells us about the bfcache case — a normal reload
+  // gets persisted:false too, same as a real close. So this used to clear
+  // 'current-user' on pagehide directly, which meant hitting refresh wiped
+  // the cached session exactly like closing the tab did. Most of the time
+  // that was invisible, because checkLoginGate() re-derives currentUser from
+  // the still-live Supabase session on a reachable connection — but the
+  // moment the cloud was briefly unreachable during that refresh (a signal
+  // drop in the field is exactly when this matters most), checkLoginGate had
+  // no verified session AND no cached 'saved' one left to fall back to, so it
+  // fell through to the login screen. A plain refresh was logging people out.
+  //
+  // sessionStorage fixes this because, unlike localStorage, it survives an
+  // in-tab reload but is wiped the instant the tab/window is actually closed.
+  // So instead of reacting on the way OUT (pagehide), check on the way IN
+  // (this load): if our marker is still there, the tab never really closed —
+  // this is just a refresh, so the session is left alone. If it's missing,
+  // either this is the very first load ever or the tab that held this
+  // session was truly closed; either way there's no live tab to preserve, so
+  // any leftover admin/technician session is dropped. Customers are exempt —
+  // their portal session is meant to persist across closes, same as it
+  // already does via the verified Supabase session path in checkLoginGate.
+  const TAB_ALIVE_KEY = 'awes-tab-alive';
+  let tabSurvivedReload = false;
+  try{ tabSurvivedReload = sessionStorage.getItem(TAB_ALIVE_KEY) === '1'; }
+  catch(e){ tabSurvivedReload = true; } // fail open: never force a logout on refresh just because storage is unavailable
+  try{ sessionStorage.setItem(TAB_ALIVE_KEY, '1'); }catch(e){}
+  if(!tabSurvivedReload){
+    try{
+      const saved = JSON.parse(localStorage.getItem('current-user')||'null');
+      if(saved && (saved.role==='admin' || saved.role==='tech')) localStorage.removeItem('current-user');
+    }catch(e){}
+  }
+
+  // ============================================================
+  // Online DTR (Daily Time Record) — a fully separate module/page.
+  // It does not read or write anything from the Service Report; it
+  // has its own data store ('dtr' collection / 'dtr:' local keys),
+  // its own device-lock store, and its own screen.
+  // ============================================================
+
+  // ---- Non-transferable device id ----------------------------------
+  // A random id persisted in this device's own localStorage the first
+  // time the app runs on it. It identifies *this physical install*,
+  // not the logged-in user, so it survives logout/login and is what
+  // lets us tell "your phone" apart from "someone else's phone".
+  function getDtrDeviceId(){
+    let id = null;
+    try{ id = localStorage.getItem('device-id'); }catch(e){}
+    if(!id){
+      id = 'dev-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+      try{ localStorage.setItem('device-id', id); }catch(e){}
+    }
+    return id;
+  }
+  const dtrDeviceId = getDtrDeviceId();
+
+  async function dtrGetDeviceLock(userId){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('device_locks').select('device_id').eq('technician_id', userId).maybeSingle();
+        if(error) throw error;
+        return data ? data.device_id : null;
+      }catch(e){ console.error('device lock read failed', describeCloudError(e)); }
+    }
+    try{
+      const res = await window.storage.get('device-lock:'+userId, false);
+      return res ? JSON.parse(res.value).deviceId : null;
+    }catch(e){ return null; }
+  }
+  async function dtrSetDeviceLock(userId, devId){
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('device_locks').upsert(
+          { technician_id: userId, device_id: devId }, { onConflict: 'technician_id' }
+        );
+        if(error) throw error;
+        return true;
+      }catch(e){ console.error('device lock write failed', describeCloudError(e)); }
+    }
+    try{ await window.storage.set('device-lock:'+userId, JSON.stringify({deviceId:devId}), false); return true; }
+    catch(e){ return false; }
+  }
+  // Admin-only escape hatch (wired into Manage Users → "Reset DTR Device")
+  // for when a technician legitimately gets a new phone.
+  async function clearDeviceLock(userId){
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('device_locks').delete().eq('technician_id', userId);
+        if(error) throw error;
+        return true;
+      }catch(e){ console.error('device lock clear failed', describeCloudError(e)); }
+    }
+    try{ await window.storage.delete('device-lock:'+userId, false); return true; }
+    catch(e){ return false; }
+  }
+  // Binds this device to the user the first time they use DTR on it.
+  // From then on, only that same device may time this user in/out —
+  // this is what stops someone from signing in on a coworker's phone
+  // just to punch a time in for them.
+  async function dtrEnsureDeviceAllowed(userId){
+    const bound = await dtrGetDeviceLock(userId);
+    if(!bound){ await dtrSetDeviceLock(userId, dtrDeviceId); return true; }
+    return bound === dtrDeviceId;
+  }
+
+  // ---- Geolocation ---------------------------------------------------
+  // Nominatim is a free, donation-funded service with a strict usage policy:
+  // one request per second, and it blocks clients that don't identify
+  // themselves. Every time-in, time-out, OT-in and OT-out was firing an
+  // un-identified request, which is exactly the pattern that gets an app's
+  // traffic blocked outright — at which point every punch would silently record
+  // bare coordinates instead of an address.
+  //
+  // Two mitigations: identify the app via the Referer the browser already sends
+  // plus an explicit contact e-mail parameter (the policy's documented method,
+  // since browsers forbid setting User-Agent from JS), and cache results so
+  // repeated punches from the same spot cost zero requests.
+  const GEO_CONTACT = 'awes.manila@gmail.com';
+  const GEO_CACHE_KEY = 'geocode-cache';
+  const GEO_CACHE_MAX = 200;
+  const GEO_TTL_MS = 30 * 24 * 60 * 60 * 1000; // addresses don't move
+  let geoCache = null;
+
+  async function geoCacheLoad(){
+    if(geoCache) return geoCache;
+    try{
+      const rec = await storage.get(GEO_CACHE_KEY);
+      geoCache = rec && rec.value ? JSON.parse(rec.value) : {};
+    }catch(e){ geoCache = {}; }
+    return geoCache;
+  }
+  async function geoCacheSave(){
+    try{
+      const keys = Object.keys(geoCache);
+      if(keys.length > GEO_CACHE_MAX){
+        // Drop the oldest entries so this can never grow without bound.
+        keys.sort((a,b)=> (geoCache[a].t||0) - (geoCache[b].t||0))
+            .slice(0, keys.length - GEO_CACHE_MAX)
+            .forEach(k=> delete geoCache[k]);
+      }
+      await storage.set(GEO_CACHE_KEY, JSON.stringify(geoCache));
+    }catch(e){ /* cache is an optimisation only */ }
+  }
+
+  async function dtrReverseGeocode(lat, lng){
+    // ~5 decimal places is roughly a metre, which is finer than phone GPS
+    // accuracy, so rounding to 4 (~11m) makes repeat punches at the same site
+    // land on the same cache key.
+    const key = Number(lat).toFixed(4)+','+Number(lng).toFixed(4);
+    const cache = await geoCacheLoad();
+    const hit = cache[key];
+    if(hit && (Date.now() - (hit.t||0)) < GEO_TTL_MS) return hit.a || null;
+
+    try{
+      const ctrl = new AbortController();
+      const timer = setTimeout(()=> ctrl.abort(), 8000);
+      const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2'
+        + '&lat='+encodeURIComponent(lat)
+        + '&lon='+encodeURIComponent(lng)
+        + '&zoom=18&addressdetails=1'
+        + '&email='+encodeURIComponent(GEO_CONTACT);
+      const res = await fetch(url, {signal: ctrl.signal, headers:{'Accept-Language':'en'}});
+      clearTimeout(timer);
+      if(!res.ok){
+        console.warn('reverse geocode rejected', res.status);
+        return hit ? (hit.a || null) : null;   // stale beats nothing
+      }
+      const data = await res.json();
+      const addr = (data && data.display_name) ? data.display_name : null;
+      cache[key] = {a: addr, t: Date.now()};
+      await geoCacheSave();
+      return addr;
+    }catch(e){
+      return hit ? (hit.a || null) : null;
+    }
+  }
+  function dtrGetLocation(){
+    return new Promise((resolve)=>{
+      if(!navigator.geolocation){ resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        async (pos)=>{
+          const loc = {lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy||0)};
+          loc.address = await dtrReverseGeocode(loc.lat, loc.lng);
+          resolve(loc);
+        },
+        ()=> resolve(null),
+        {enableHighAccuracy:true, timeout:12000, maximumAge:0}
+      );
+    });
+  }
+  function dtrLocLabel(loc){
+    if(!loc) return 'Location unavailable';
+    if(loc.address) return loc.address;
+    return loc.lat.toFixed(5)+', '+loc.lng.toFixed(5)+(loc.accuracy?(' (±'+loc.accuracy+'m)'):'');
+  }
+  // Tapping a location tag shows the address plus an embedded map pin.
+  function dtrOpenLocationOverlay(loc, title){
+    if(!loc) return;
+    $('dtrLocationTitle').textContent = title || 'Location';
+    $('dtrLocationAddress').textContent = loc.address || 'Address unavailable';
+    $('dtrLocationCoords').textContent = loc.lat.toFixed(5)+', '+loc.lng.toFixed(5)+(loc.accuracy ? (' (±'+loc.accuracy+'m accuracy)') : '');
+    const d = 0.003; // ~300m bounding box half-width around the pin
+    const bbox = (loc.lng-d)+','+(loc.lat-d)+','+(loc.lng+d)+','+(loc.lat+d);
+    $('dtrLocationIframe').src = 'https://www.openstreetmap.org/export/embed.html?bbox='+bbox+'&layer=mapnik&marker='+loc.lat+','+loc.lng;
+    $('dtrLocationExternalLink').href = 'https://www.google.com/maps?q='+loc.lat+','+loc.lng;
+    $('dtrLocationOverlay').classList.add('open');
+  }
+  function dtrCloseLocationOverlay(){
+    $('dtrLocationOverlay').classList.remove('open');
+    $('dtrLocationIframe').src = '';
+  }
+  $('closeDtrLocation').addEventListener('click', dtrCloseLocationOverlay);
+  $('dtrLocationOverlay').addEventListener('click', (e)=>{ if(e.target.id==='dtrLocationOverlay') dtrCloseLocationOverlay(); });
+
+  // ---- DTR record storage (own 'dtr' collection/keys; one doc per user per day) ----
+  async function dtrGetDay(userId, dateISO){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('dtr_records').select('data')
+          .eq('technician_id', userId).eq('date', dateISO).maybeSingle();
+        if(error) throw error;
+        return data ? data.data : null;
+      }catch(e){ console.error('dtr get failed', describeCloudError(e)); }
+    }
+    try{ const res = await window.storage.get('dtr:'+userId+':'+dateISO, false); return res ? JSON.parse(res.value) : null; }
+    catch(e){ return null; }
+  }
+  // Every technician's DTR for one date, for the admin Overview dashboard —
+  // a single query instead of one dtrGetDay() round-trip per technician.
+  async function dtrListAllForDate(dateISO){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('dtr_records').select('technician_id,data').eq('date', dateISO);
+        if(error) throw error;
+        return (data||[]).map(r=> Object.assign({technicianId:r.technician_id}, r.data));
+      }catch(e){ console.error('dtr list for date failed', describeCloudError(e)); }
+    }
+    // Offline fallback only ever sees this device's own technician (dtr keys
+    // are 'dtr:<userId>:<dateISO>' and nothing pools other phones' records
+    // locally), so the count will undercount — acceptable for a best-effort
+    // dashboard tile that already leads with cloud data whenever it's online.
+    try{
+      const res = await window.storage.list('dtr:', false);
+      const items = [];
+      for(const key of (res.keys||[])){
+        if(!key.endsWith(':'+dateISO)) continue;
+        try{ const item = await window.storage.get(key, false); items.push(JSON.parse(item.value)); }catch(e){}
+      }
+      return items;
+    }catch(e){ return []; }
+  }
+  async function dtrSaveDay(userId, dateISO, data){
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('dtr_records').upsert(
+          { technician_id: userId, date: dateISO, data },
+          { onConflict: 'technician_id,date' }
+        );
+        if(error) throw error;
+        return SAVE_CLOUD;
+      }catch(e){ console.error('dtr save failed', describeCloudError(e)); }
+    }
+    try{
+      await window.storage.set('dtr:'+userId+':'+dateISO, JSON.stringify(data), false);
+      // Queued so a time-in recorded in a basement or a client site with no
+      // signal still reaches the shared record instead of staying on the phone.
+      return (await outboxQueue('dtr', userId+'|'+dateISO, data)) ? SAVE_QUEUED : SAVE_FAILED;
+    }catch(e){ return SAVE_FAILED; }
+  }
+  registerOutboxHandler('dtr', async (key, payload)=>{
+    const sep = key.lastIndexOf('|');
+    const userId = key.slice(0, sep), dateISO = key.slice(sep+1);
+    const { error } = await db.from('dtr_records').upsert(
+      { technician_id: userId, date: dateISO, data: payload },
+      { onConflict: 'technician_id,date' }
+    );
+    if(error) throw error;
+  });
+  // History is always scoped to one user (per-user DTR) and capped to the last 30 days.
+  async function dtrListForUser(userId, sinceISO){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('dtr_records').select('data')
+          .eq('technician_id', userId).gte('date', sinceISO).order('date',{ascending:false});
+        if(error) throw error;
+        return (data||[]).map(r=>r.data);
+      }catch(e){ console.error('dtr list failed', describeCloudError(e)); }
+    }
+    try{
+      const res = await window.storage.list('dtr:'+userId+':', false);
+      const items = [];
+      for(const key of (res.keys||[])){
+        try{ const item = await window.storage.get(key, false); const d = JSON.parse(item.value); if(d.date>=sinceISO) items.push(d); }catch(e){}
+      }
+      items.sort((a,b)=> b.date.localeCompare(a.date));
+      return items;
+    }catch(e){ return []; }
+  }
+
+  function dtrFmtTime(iso){
+    if(!iso) return '—';
+    return new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  function dtrFmtDateLabel(dateISO){
+    const d = new Date(dateISO+'T00:00:00');
+    return d.toLocaleDateString('en-PH', {weekday:'short', year:'numeric', month:'short', day:'numeric'});
+  }
+
+  // Who the history/status panel currently shows: the logged-in tech
+  // themself, or — for admin — whichever technician they picked.
+  let dtrViewingUser = null;
+
+  // Accepts an optional preloadedRec (the record we JUST saved) to avoid
+  // re-querying the server immediately after a write — a fresh read right
+  // after a save was intermittently returning the pre-save state (likely a
+  // browser HTTP cache serving the identical GET request URL), leaving the
+  // screen showing blank/old times until the technician navigated away and
+  // back, even though the save itself had already succeeded.
+  async function dtrRenderTodayStatus(preloadedRec){
+    if(!currentUser || currentUser.role==='admin') return;
+    const dateISO = todayISO();
+    $('dtrTodayDate').textContent = dtrFmtDateLabel(dateISO);
+    const rec = preloadedRec !== undefined ? preloadedRec : await dtrGetDay(currentUser.id, dateISO);
+    $('dtrTodayIn').textContent = rec && rec.timeIn ? dtrFmtTime(rec.timeIn) : '—';
+    $('dtrTodayOut').textContent = rec && rec.timeOut ? dtrFmtTime(rec.timeOut) : '—';
+    $('dtrTimeInBtn').disabled = !!(rec && rec.timeIn);
+    $('dtrTimeOutBtn').disabled = !(rec && rec.timeIn) || !!(rec && rec.timeOut);
+
+    $('dtrTodayOtIn').textContent = rec && rec.otTimeIn ? dtrFmtTime(rec.otTimeIn) : '—';
+    $('dtrTodayOtOut').textContent = rec && rec.otTimeOut ? dtrFmtTime(rec.otTimeOut) : '—';
+    // Overtime is logged after the regular shift ends — OT Time In stays
+    // disabled until the regular Time Out is recorded for the day.
+    $('dtrOtTimeInBtn').disabled = !(rec && rec.timeOut) || !!(rec && rec.otTimeIn);
+    $('dtrOtTimeOutBtn').disabled = !(rec && rec.otTimeIn) || !!(rec && rec.otTimeOut);
+  }
+
+  async function dtrRenderDeviceBanner(){
+    const banner = $('dtrDeviceBanner');
+    if(!currentUser || currentUser.role==='admin'){ banner.style.display='none'; return; }
+    const bound = await dtrGetDeviceLock(currentUser.id);
+    if(bound && bound !== dtrDeviceId){
+      banner.textContent = 'This account is already registered to another device. Time In/Out is blocked on this phone — ask your admin to reset your DTR device if this is now your phone.';
+      banner.style.display = '';
+    }else{
+      banner.style.display = 'none';
+    }
+  }
+
+  async function dtrRenderHistory(){
+    const list = $('dtrHistoryList');
+    const target = dtrViewingUser || (currentUser && currentUser.role!=='admin' ? {id:currentUser.id, name:currentUser.name} : null);
+    if(!target){ list.innerHTML = '<div class="empty-state">Select a technician to view their DTR.</div>'; return; }
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const since = new Date(); since.setDate(since.getDate()-30);
+    const sinceY = since.getFullYear(), sinceM = String(since.getMonth()+1).padStart(2,'0'), sinceD = String(since.getDate()).padStart(2,'0');
+    const sinceISO = sinceY+'-'+sinceM+'-'+sinceD;
+    const items = await dtrListForUser(target.id, sinceISO);
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No DTR entries in the last 30 days.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(d=>{
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      row.style.cursor = 'default';
+      const inTxt = d.timeIn ? dtrFmtTime(d.timeIn) : '—';
+      const outTxt = d.timeOut ? dtrFmtTime(d.timeOut) : '—';
+      const otInTxt = d.otTimeIn ? dtrFmtTime(d.otTimeIn) : null;
+      const otOutTxt = d.otTimeOut ? dtrFmtTime(d.otTimeOut) : null;
+      row.innerHTML =
+        '<div class="hist-info"><b>'+escapeHtml(dtrFmtDateLabel(d.date))+'</b>'+
+        '<span>In: '+escapeHtml(inTxt)+' &nbsp;·&nbsp; Out: '+escapeHtml(outTxt)+'</span>'+
+        ((otInTxt || otOutTxt) ? '<span>OT In: '+escapeHtml(otInTxt||'—')+' &nbsp;·&nbsp; OT Out: '+escapeHtml(otOutTxt||'—')+'</span>' : '')+
+        (d.timeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="in">📍 In: '+escapeHtml(dtrLocLabel(d.timeInLoc))+'</button>' : '')+
+        (d.timeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="out">📍 Out: '+escapeHtml(dtrLocLabel(d.timeOutLoc))+'</button>' : '')+
+        (d.otTimeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otin">📍 OT In: '+escapeHtml(dtrLocLabel(d.otTimeInLoc))+'</button>' : '')+
+        (d.otTimeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otout">📍 OT Out: '+escapeHtml(dtrLocLabel(d.otTimeOutLoc))+'</button>' : '')+
+        '</div>';
+      list.appendChild(row);
+      const inTag = row.querySelector('[data-kind="in"]');
+      if(inTag) inTag.addEventListener('click', ()=> dtrOpenLocationOverlay(d.timeInLoc, dtrFmtDateLabel(d.date)+' — Time In'));
+      const outTag = row.querySelector('[data-kind="out"]');
+      if(outTag) outTag.addEventListener('click', ()=> dtrOpenLocationOverlay(d.timeOutLoc, dtrFmtDateLabel(d.date)+' — Time Out'));
+      const otInTag = row.querySelector('[data-kind="otin"]');
+      if(otInTag) otInTag.addEventListener('click', ()=> dtrOpenLocationOverlay(d.otTimeInLoc, dtrFmtDateLabel(d.date)+' — OT Time In'));
+      const otOutTag = row.querySelector('[data-kind="otout"]');
+      if(otOutTag) otOutTag.addEventListener('click', ()=> dtrOpenLocationOverlay(d.otTimeOutLoc, dtrFmtDateLabel(d.date)+' — OT Time Out'));
+    });
+  }
+
+  // Turns a tri-state save result into an honest message. The old code treated
+  // any truthy return as success, so a device-only save was reported exactly
+  // like a cloud save and a total failure was reported as success too.
+  function dtrSaveToast(res, label){
+    if(res===SAVE_CLOUD) return label;
+    if(res===SAVE_QUEUED) return label+' (saved on this device \u2014 it will sync when you are online)';
+    return 'Could not save \u2014 please try again';
+  }
+  // Whether this technician is currently "on the clock" per today's DTR —
+  // gates the live location tracker so it only runs between a time-in and
+  // its matching time-out (regular shift or overtime), not just because the
+  // app happens to be open.
+  function dtrIsOnClock(rec){
+    if(!rec || !rec.timeIn) return false;
+    if(!rec.timeOut) return true;                    // regular shift still running
+    if(rec.otTimeIn && !rec.otTimeOut) return true;   // overtime shift running
+    return false;
+  }
+  async function dtrDoTimeIn(){
+    if(!currentUser || currentUser.role==='admin') return;
+    const allowed = await dtrEnsureDeviceAllowed(currentUser.id);
+    await dtrRenderDeviceBanner();
+    if(!allowed){ toast('This account is registered to another device. Contact your admin.'); return; }
+    const dateISO = todayISO();
+    const existing = await dtrGetDay(currentUser.id, dateISO);
+    if(existing && existing.timeIn){ toast('Already timed in today at '+dtrFmtTime(existing.timeIn)); return; }
+    $('dtrTimeInBtn').disabled = true;
+    toast('Getting your location…');
+    const loc = await dtrGetLocation();
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, existing, {
+      userId: currentUser.id, userName: currentUser.name, date: dateISO,
+      timeIn: now, timeInLoc: loc
+    });
+    const res = await dtrSaveDay(currentUser.id, dateISO, rec);
+    // Location sharing starts here, not at sign-in — see dtrIsOnClock().
+    // A device-only queued save still counts: the phone knows locally that
+    // this technician just clocked in, even before it reaches the cloud.
+    if(res !== SAVE_FAILED) trackerStartBroadcasting();
+    toast(dtrSaveToast(res, 'Timed in at '+dtrFmtTime(now)));
+    await dtrRenderTodayStatus(res===SAVE_FAILED ? undefined : rec);
+    await dtrRenderHistory();
+  }
+  async function dtrDoTimeOut(){
+    if(!currentUser || currentUser.role==='admin') return;
+    const allowed = await dtrEnsureDeviceAllowed(currentUser.id);
+    await dtrRenderDeviceBanner();
+    if(!allowed){ toast('This account is registered to another device. Contact your admin.'); return; }
+    const dateISO = todayISO();
+    const existing = await dtrGetDay(currentUser.id, dateISO);
+    if(!existing || !existing.timeIn){ toast('Time in first before timing out'); return; }
+    if(existing.timeOut){ toast('Already timed out today at '+dtrFmtTime(existing.timeOut)); return; }
+    $('dtrTimeOutBtn').disabled = true;
+    toast('Getting your location…');
+    const loc = await dtrGetLocation();
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, existing, { timeOut: now, timeOutLoc: loc });
+    const res = await dtrSaveDay(currentUser.id, dateISO, rec);
+    // Regular shift ends here — stop broadcasting unless overtime picks
+    // straight back up (that's handled by dtrDoOtTimeIn instead).
+    if(res !== SAVE_FAILED) trackerStopBroadcasting();
+    toast(dtrSaveToast(res, 'Timed out at '+dtrFmtTime(now)));
+    await dtrRenderTodayStatus(res===SAVE_FAILED ? undefined : rec);
+    await dtrRenderHistory();
+  }
+  $('dtrTimeInBtn').addEventListener('click', dtrDoTimeIn);
+  $('dtrTimeOutBtn').addEventListener('click', dtrDoTimeOut);
+
+  async function dtrDoOtTimeIn(){
+    if(!currentUser || currentUser.role==='admin') return;
+    const allowed = await dtrEnsureDeviceAllowed(currentUser.id);
+    await dtrRenderDeviceBanner();
+    if(!allowed){ toast('This account is registered to another device. Contact your admin.'); return; }
+    const dateISO = todayISO();
+    const existing = await dtrGetDay(currentUser.id, dateISO);
+    if(!existing || !existing.timeOut){ toast('Time out from your regular shift first before starting overtime'); return; }
+    if(existing.otTimeIn){ toast('Overtime already started today at '+dtrFmtTime(existing.otTimeIn)); return; }
+    $('dtrOtTimeInBtn').disabled = true;
+    toast('Getting your location…');
+    const loc = await dtrGetLocation();
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, existing, { otTimeIn: now, otTimeInLoc: loc });
+    const res = await dtrSaveDay(currentUser.id, dateISO, rec);
+    if(res !== SAVE_FAILED) trackerStartBroadcasting();
+    toast(dtrSaveToast(res, 'Overtime timed in at '+dtrFmtTime(now)));
+    await dtrRenderTodayStatus(res===SAVE_FAILED ? undefined : rec);
+    await dtrRenderHistory();
+  }
+  async function dtrDoOtTimeOut(){
+    if(!currentUser || currentUser.role==='admin') return;
+    const allowed = await dtrEnsureDeviceAllowed(currentUser.id);
+    await dtrRenderDeviceBanner();
+    if(!allowed){ toast('This account is registered to another device. Contact your admin.'); return; }
+    const dateISO = todayISO();
+    const existing = await dtrGetDay(currentUser.id, dateISO);
+    if(!existing || !existing.otTimeIn){ toast('Start overtime time in first before timing out'); return; }
+    if(existing.otTimeOut){ toast('Already timed out from overtime today at '+dtrFmtTime(existing.otTimeOut)); return; }
+    $('dtrOtTimeOutBtn').disabled = true;
+    toast('Getting your location…');
+    const loc = await dtrGetLocation();
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, existing, { otTimeOut: now, otTimeOutLoc: loc });
+    const res = await dtrSaveDay(currentUser.id, dateISO, rec);
+    if(res !== SAVE_FAILED) trackerStopBroadcasting();
+    toast(dtrSaveToast(res, 'Overtime timed out at '+dtrFmtTime(now)));
+    await dtrRenderTodayStatus(res===SAVE_FAILED ? undefined : rec);
+    await dtrRenderHistory();
+  }
+  $('dtrOtTimeInBtn').addEventListener('click', dtrDoOtTimeIn);
+  $('dtrOtTimeOutBtn').addEventListener('click', dtrDoOtTimeOut);
+
+  // ---- Admin: today's attendance table (the DTR landing view) ----
+  // One row per active technician — Present (timed in, no time out yet),
+  // Completed (timed in and out today), or Absent (no DTR record today).
+  // "View DTR" on a row swaps to the read-only detail + 30-day history
+  // view further down, scoped to that technician.
+  function dtrHoursLabel(mins){
+    if(mins==null) return '—';
+    const h = Math.floor(mins/60), m = mins%60;
+    return h+'h '+String(m).padStart(2,'0')+'m';
+  }
+  async function dtrRenderAdminTable(){
+    const body = $('dtrAttendanceTableBody');
+    const dateISO = todayISO();
+    const dateEl = $('dtrAttendanceDate');
+    if(dateEl) dateEl.textContent = dtrFmtDateLabel(dateISO);
+    body.innerHTML = '<tr><td colspan="9"><div class="empty-state">Loading…</div></td></tr>';
+    const [users, records] = await Promise.all([
+      cloudListUsers().catch(()=>[]),
+      dtrListAllForDate(dateISO).catch(()=>[])
+    ]);
+    const active = (users||[]).filter(u=> u.active!==false)
+      .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+    const summaryEl = $('dtrAttendanceSummary');
+    if(active.length===0){
+      body.innerHTML = '<tr><td colspan="9"><div class="empty-state">No technician accounts yet.</div></td></tr>';
+      if(summaryEl) summaryEl.textContent = '';
+      return;
+    }
+    const recByTech = Object.create(null);
+    (records||[]).forEach(r=>{ if(r && r.technicianId) recByTech[r.technicianId] = r; });
+
+    const now = new Date();
+    let presentCount = 0, completedCount = 0, absentCount = 0, otCount = 0;
+    body.innerHTML = '';
+    active.forEach(u=>{
+      const rec = recByTech[u.id];
+      let statusLabel, inTxt = '—', outTxt = '—', hoursTxt = '—';
+      let otInTxt = '—', otOutTxt = '—', otHoursTxt = '—';
+      if(rec && rec.timeIn && rec.timeOut){
+        inTxt = dtrFmtTime(rec.timeIn); outTxt = dtrFmtTime(rec.timeOut);
+        hoursTxt = dtrHoursLabel(Math.max(0, Math.round((new Date(rec.timeOut)-new Date(rec.timeIn))/60000)));
+        // Regular shift is done, but overtime logged after it can still be
+        // running — that's a distinct status from "Completed for the day",
+        // same split dtrIsOnClock() uses to keep the location tracker on.
+        if(rec.otTimeIn && !rec.otTimeOut){
+          statusLabel = '🟠 Overtime'; otCount++;
+          otInTxt = dtrFmtTime(rec.otTimeIn);
+          otHoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.otTimeIn))/60000)));
+        }else{
+          statusLabel = '⚫ Completed'; completedCount++;
+          if(rec.otTimeIn){
+            otInTxt = dtrFmtTime(rec.otTimeIn);
+            otOutTxt = rec.otTimeOut ? dtrFmtTime(rec.otTimeOut) : '—';
+            if(rec.otTimeOut) otHoursTxt = dtrHoursLabel(Math.max(0, Math.round((new Date(rec.otTimeOut)-new Date(rec.otTimeIn))/60000)));
+          }
+        }
+      }else if(rec && rec.timeIn){
+        statusLabel = '🟢 Present'; presentCount++;
+        inTxt = dtrFmtTime(rec.timeIn);
+        hoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.timeIn))/60000)));
+      }else{
+        statusLabel = '🔴 Absent'; absentCount++;
+      }
+      const row = document.createElement('tr');
+      row.innerHTML =
+        '<td class="att-name">'+escapeHtml(u.name)+'</td>'+
+        '<td class="att-status">'+statusLabel+'</td>'+
+        '<td>'+escapeHtml(inTxt)+'</td>'+
+        '<td>'+escapeHtml(outTxt)+'</td>'+
+        '<td>'+escapeHtml(hoursTxt)+'</td>'+
+        '<td>'+escapeHtml(otInTxt)+'</td>'+
+        '<td>'+escapeHtml(otOutTxt)+'</td>'+
+        '<td>'+escapeHtml(otHoursTxt)+'</td>'+
+        '<td><button type="button" class="att-view-btn">View DTR</button> <button type="button" class="att-view-btn">View Profile</button></td>';
+      const [viewDtrBtn, viewProfileBtn] = row.querySelectorAll('.att-view-btn');
+      viewDtrBtn.addEventListener('click', ()=> dtrShowTechnicianDetail({id:u.id, name:u.name}));
+      viewProfileBtn.addEventListener('click', ()=> techOpenProfile({id:u.id, name:u.name}));
+      body.appendChild(row);
+    });
+    if(summaryEl) summaryEl.textContent = presentCount+' Present · '+completedCount+' Completed · '+otCount+' On Overtime · '+absentCount+' Absent · '+active.length+' Total';
+  }
+  function dtrShowTechnicianDetail(u){
+    dtrViewingUser = u;
+    $('dtrAdminTableCard').style.display = 'none';
+    $('dtrAdminViewingCard').style.display = '';
+    $('dtrHistoryCard').style.display = '';
+    $('dtrAdminViewingName').textContent = u.name;
+    dtrRenderHistory();
+    window.scrollTo({top:0});
+  }
+  function dtrBackToAttendanceList(){
+    dtrViewingUser = null;
+    $('dtrAdminViewingCard').style.display = 'none';
+    $('dtrHistoryCard').style.display = 'none';
+    $('dtrAdminTableCard').style.display = '';
+    dtrRenderAdminTable();
+  }
+  $('dtrSwitchUserBtn').addEventListener('click', dtrBackToAttendanceList);
+
+
+// ---------- Leave Form (table: leave_requests; id/status/technician_id are real columns, rest in data) ----------
+  // Fallback UUID v4 generator for browsers without crypto.randomUUID — the
+  // id column requires a real UUID shape, not just any unique-looking string.
+  function leaveGenUUIDv4Fallback(){
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{
+      const r = Math.random()*16|0;
+      return (c==='x' ? r : (r&0x3|0x8)).toString(16);
+    });
+  }
+  function leaveGenId(userId){
+    // id is a real UUID column in Postgres — it must be a single valid UUID,
+    // not the technician's id glued onto a random one with '_' (that combined
+    // string fails Postgres's uuid type check on every insert, online or not).
+    // The technician is already recorded separately via technician_id.
+    return (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : leaveGenUUIDv4Fallback();
+  }
+
+  // A technician submitting or editing their OWN request. Note this deliberately
+  // never writes the decision fields — see leaveDecide.
+  async function leaveSaveRequest(id, data){
+    const payload = {
+      id,
+      technician_id: data.userId,
+      status: data.status || 'pending',
+      submitted_at: data.submittedAt || new Date().toISOString(),
+      data
+    };
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('leave_requests').upsert(payload);
+        if(error) throw error;
+        return SAVE_CLOUD;
+      }catch(e){ console.error('leave save failed', describeCloudError(e)); }
+    }
+    // Offline (or the write was rejected): keep a local copy AND queue it, so it
+    // actually reaches the cloud once there is a connection instead of being
+    // silently stranded on the phone.
+    try{ await window.storage.set('leave:'+id, JSON.stringify(data), false); }
+    catch(e){ return SAVE_FAILED; }
+    return (await outboxQueue('leave', id, payload)) ? SAVE_QUEUED : SAVE_FAILED;
+  }
+  registerOutboxHandler('leave', async (id, payload)=>{
+    const { error } = await db.from('leave_requests').upsert(payload);
+    if(error) throw error;
+  });
+
+  // Cloud reads are paginated. The old `.limit(200)` silently truncated the list
+  // with no indication, so once the company passed 200 requests the oldest ones
+  // just vanished from every screen.
+  const LEAVE_PAGE = 200;
+  async function leaveFetchPaged(applyFilter){
+    const out = [];
+    for(let from = 0; ; from += LEAVE_PAGE){
+      let q = db.from('leave_requests').select('data').order('submitted_at',{ascending:false}).range(from, from+LEAVE_PAGE-1);
+      if(applyFilter) q = applyFilter(q);
+      const { data, error } = await q;
+      if(error) throw error;
+      const batch = data || [];
+      batch.forEach(r=> out.push(r.data));
+      if(batch.length < LEAVE_PAGE) break;
+      if(out.length >= 5000) break; // hard stop; nothing sane reaches this
+    }
+    return out;
+  }
+  async function leaveLocalList(userId){
+    try{
+      const res = await window.storage.list('leave:', false);
+      const items = [];
+      for(const key of (res.keys||[])){
+        try{ const item = await window.storage.get(key, false); items.push(JSON.parse(item.value)); }catch(e){}
+      }
+      const filtered = userId ? items.filter(r=> r && r.userId===userId) : items;
+      filtered.sort((a,b)=> (b.submittedAt||'').localeCompare(a.submittedAt||''));
+      return filtered;
+    }catch(e){ return []; }
+  }
+  async function leaveListAll(){
+    if(await ensureCloud()){
+      try{ return await leaveFetchPaged(null); }
+      catch(e){ console.error('leave list failed', describeCloudError(e)); }
+    }
+    return await leaveLocalList(null);
+  }
+  // Filters on the SERVER. Previously this downloaded every technician's leave
+  // requests to the phone and filtered in JavaScript, which both leaked
+  // co-workers' personal leave reasons to anyone who opened devtools and wasted
+  // mobile data.
+  async function leaveListForUser(userId){
+    if(!userId) return [];
+    if(await ensureCloud()){
+      try{ return await leaveFetchPaged(q=> q.eq('technician_id', userId)); }
+      catch(e){ console.error('leave list (user) failed', describeCloudError(e)); }
+    }
+    return await leaveLocalList(userId);
+  }
+
+  function leaveFmtDate(iso){
+    if(!iso) return '—';
+    return new Date(iso+'T00:00:00').toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'});
+  }
+  function leaveFmtWhen(iso){
+    if(!iso) return '—';
+    return new Date(iso).toLocaleString('en-PH', {year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  }
+  function leaveStatusPill(status){
+    if(status==='approved') return '<span class="status-pill status-done">Approved</span>';
+    if(status==='disapproved') return '<span class="status-pill status-rejected">Disapproved</span>';
+    if(status==='cancelled') return '<span class="status-pill status-cancelled">Cancelled</span>';
+    return '<span class="status-pill status-draft">Pending</span>';
+  }
+  function leaveCalcDays(){
+    const from = $('leaveDateFrom').value, to = $('leaveDateTo').value;
+    if(!from || !to){ $('leaveDaysDisplay').value = ''; return; }
+    const d1 = new Date(from+'T00:00:00'), d2 = new Date(to+'T00:00:00');
+    const diff = Math.round((d2-d1)/86400000)+1;
+    $('leaveDaysDisplay').value = diff>0 ? diff+(diff===1?' day':' days') : 'Invalid range';
+  }
+  $('leaveDateFrom').addEventListener('change', leaveCalcDays);
+  $('leaveDateTo').addEventListener('change', leaveCalcDays);
+
+  function leaveResetForm(){
+    $('leaveType').value = '';
+    $('leaveDateFrom').value = '';
+    $('leaveDateTo').value = '';
+    $('leaveDaysDisplay').value = '';
+    $('leaveReason').value = '';
+    $('leaveContact').value = '';
+  }
+
+  async function leaveSubmit(){
+    if(!currentUser || currentUser.role==='admin') return;
+    const leaveType = $('leaveType').value;
+    const dateFrom = $('leaveDateFrom').value;
+    const dateTo = $('leaveDateTo').value;
+    const reason = $('leaveReason').value.trim();
+    const contact = $('leaveContact').value.trim();
+    if(!leaveType){ toast('Select a leave type'); return; }
+    if(!dateFrom || !dateTo){ toast('Set the date range'); return; }
+    if(dateTo < dateFrom){ toast('"Date To" cannot be before "Date From"'); return; }
+    if(!reason){ toast('Enter a reason for the leave'); return; }
+    const days = Math.round((new Date(dateTo+'T00:00:00') - new Date(dateFrom+'T00:00:00'))/86400000)+1;
+    const id = leaveGenId(currentUser.id);
+    const data = {
+      id, userId: currentUser.id, userName: currentUser.name,
+      leaveType, dateFrom, dateTo, days, reason, contact,
+      status: 'pending', comment: '',
+      submittedAt: new Date().toISOString(),
+      decidedAt: null, decidedBy: null
+    };
+    $('leaveSubmitBtn').disabled = true;
+    const res = await leaveSaveRequest(id, data);
+    $('leaveSubmitBtn').disabled = false;
+    if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+    // Be honest about which of the two happened: "submitted" used to be shown
+    // even when the request never left the phone.
+    toast(res===SAVE_CLOUD
+      ? 'Leave request submitted for approval'
+      : 'Saved on this device — it will be submitted once you have a connection');
+    leaveResetForm();
+    leaveShowTab('history');
+  }
+  $('leaveSubmitBtn').addEventListener('click', leaveSubmit);
+
+  async function leaveRenderHistory(){
+    const list = $('leaveHistoryList');
+    if(!currentUser || currentUser.role==='admin') return;
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const items = await leaveListForUser(currentUser.id);
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No leave requests yet.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
+      row.innerHTML =
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">'+
+          '<div class="hist-info"><b>'+escapeHtml(r.leaveType)+'</b>'+
+            '<span>'+leaveFmtDate(r.dateFrom)+' – '+leaveFmtDate(r.dateTo)+' ('+r.days+(r.days===1?' day':' days')+')</span>'+
+          '</div>'+
+          leaveStatusPill(r.status)+
+        '</div>'+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
+      list.appendChild(row);
+    });
+  }
+
+  function leaveShowTab(which){
+    $('leaveTabNew').classList.toggle('active', which==='new');
+    $('leaveTabHistory').classList.toggle('active', which==='history');
+    $('leaveFormCard').style.display = which==='new' ? '' : 'none';
+    $('leaveHistoryCard').style.display = which==='history' ? '' : 'none';
+    if(which==='history') leaveRenderHistory();
+  }
+  $('leaveTabNew').addEventListener('click', ()=> leaveShowTab('new'));
+  $('leaveTabHistory').addEventListener('click', ()=> leaveShowTab('history'));
+
+  // ---- Admin: review all technicians' requests ----
+  let leaveAdminFilter = 'pending';
+  async function leaveRenderAdminList(){
+    const list = $('leaveAdminList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = await leaveListAll();
+    const items = leaveAdminFilter==='all' ? all : all.filter(r=> r.status===leaveAdminFilter);
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No '+(leaveAdminFilter==='all'?'':leaveAdminFilter+' ')+'leave requests.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      card.innerHTML =
+        '<div class="user-card-head">'+
+          '<div>'+
+            '<div class="u-name">'+escapeHtml(r.userName)+' — '+escapeHtml(r.leaveType)+'</div>'+
+            '<div class="u-status">'+leaveFmtDate(r.dateFrom)+' – '+leaveFmtDate(r.dateTo)+' ('+r.days+(r.days===1?' day':' days')+') · Filed '+leaveFmtWhen(r.submittedAt)+'</div>'+
+          '</div>'+
+          leaveStatusPill(r.status)+
+        '</div>'+
+        '<div class="leave-comment" style="margin-top:8px;"><b>Reason</b>'+escapeHtml(r.reason)+'</div>'+
+        (r.contact ? '<div class="leave-comment"><b>Contact while on leave</b>'+escapeHtml(r.contact)+'</div>' : '')+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '')+
+        '<div class="user-card-actions">'+
+          '<button data-act="review" class="primary">'+(r.status==='pending' ? 'Review' : 'Change Decision')+'</button>'+
+        '</div>'+
+        '<div class="user-edit-panel" data-panel="1">'+
+          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="edit-save-row">'+
+            '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
+            '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
+          '</div>'+
+        '</div>';
+      const panel = card.querySelector('[data-panel="1"]');
+      card.querySelector('[data-act="review"]').addEventListener('click', ()=>{
+        list.querySelectorAll('.user-edit-panel.open').forEach(p=>{ if(p!==panel) p.classList.remove('open'); });
+        panel.classList.toggle('open');
+      });
+      card.querySelector('[data-act="approve"]').addEventListener('click', ()=> leaveDecide(r.id, 'approved', panel.querySelector('[data-f="comment"]').value.trim()));
+      card.querySelector('[data-act="disapprove"]').addEventListener('click', ()=> leaveDecide(r.id, 'disapproved', panel.querySelector('[data-f="comment"]').value.trim()));
+      list.appendChild(card);
+    });
+  }
+  async function leaveDecide(id, status, comment){
+    if(status==='disapproved' && !comment){
+      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+    }
+    if(!currentUser || currentUser.role!=='admin'){ toast('Admin only'); return; }
+    if(!(await ensureCloud())){ toast('Decisions need a connection — try again when online'); return; }
+    // Targeted update rather than re-uploading the whole record. The old
+    // read-modify-write raced with the technician editing their request (either
+    // side could silently clobber the other) and it also meant the decision
+    // travelled inside the same blob the technician is allowed to write.
+    const decision = {
+      status, comment: comment || '',
+      decidedAt: new Date().toISOString(),
+      decidedBy: currentUser.name || 'Admin'
+    };
+    try{
+      const { data: rows, error: readErr } = await db.from('leave_requests')
+        .select('data').eq('id', id).maybeSingle();
+      if(readErr) throw readErr;
+      if(!rows){ toast('Request not found'); return; }
+      const merged = Object.assign({}, rows.data || {}, decision);
+      const { data: updated, error } = await db.from('leave_requests')
+        .update({ status, data: merged })
+        .eq('id', id)
+        .eq('status', 'pending')   // optimistic guard: don't overwrite a decision
+        .select('id');
+      if(error) throw error;
+      if(!updated || !updated.length){
+        toast('This request was already decided — refreshing');
+      }else{
+        toast('Request '+status);
+      }
+    }catch(e){
+      console.error('leave decide failed', describeCloudError(e));
+      toast('Could not save decision');
+    }
+    leaveRenderAdminList();
+  }
+  document.querySelectorAll('#leaveAdminFilterRow button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#leaveAdminFilterRow button').forEach(b=> b.classList.remove('active'));
+      btn.classList.add('active');
+      leaveAdminFilter = btn.dataset.filter;
+      leaveRenderAdminList();
+    });
+  });
+
+
+// ---------- Service Dispatch Ticket (table: dispatch_tickets) ----------
+  // Admin-created and assigned to one or more technicians; those technicians
+  // then acknowledge and later mark it completed. This is the reverse
+  // direction from Leave/Cash Advance (which are technician-filed, admin-
+  // reviewed) — here admin files, technician actions it.
+  function dtGenLocalId(){ return 'JO-'+todayISO().replace(/-/g,'')+'-'+Date.now(); }
+  // Old tickets only ever had a single equipmentDetails object + one shared
+  // scope list. Wrap those into the new equipmentList shape on read so
+  // nothing written before this change breaks.
+  function dtNormalizeTicket(rec){
+    if(!rec) return rec;
+    if(!rec.equipmentList){
+      if(rec.equipmentDetails && Object.values(rec.equipmentDetails).some(v=>v)){
+        rec.equipmentList = [Object.assign({id:'legacy-1'}, rec.equipmentDetails, {
+          scope: rec.scope||[], reportSrNo: rec.status==='completed' ? 'legacy' : null
+        })];
+      }else{
+        rec.equipmentList = [];
+      }
+    }
+    return rec;
+  }
+  const DT_PAGE = 200;
+  const DT_MAX_ROWS = 5000;
+  async function dtNextJobOrderNo(){
+    const dateStr = todayISO().replace(/-/g,'');
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.rpc('next_jo_no', { p_date: todayISO() });
+        if(!error && data) return data;
+      }catch(e){ console.error('cloud JO counter failed', e); }
+    }
+    let seq = 1;
+    try{
+      const res = await window.storage.get('jo-counter:'+dateStr, false);
+      seq = res ? (JSON.parse(res.value).seq + 1) : 1;
+    }catch(e){ seq = 1; }
+    try{ await window.storage.set('jo-counter:'+dateStr, JSON.stringify({seq}), false); }catch(e){}
+    return 'JO-'+dateStr+'-'+String(seq).padStart(3,'0');
+  }
+  // Returns a tri-state result so callers can tell "saved to the server" from
+  // "only saved on this phone" instead of showing a success message either way.
+  async function dtSaveTicket(id, data){
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('dispatch_tickets').upsert({
+          id, status: data.status||'open',
+          created_at: data.createdAt || new Date().toISOString(), data
+        });
+        if(error) throw error;
+        return SAVE_CLOUD;
+      }catch(e){ console.error('dispatch save failed', describeCloudError(e)); }
+    }
+    try{
+      await window.storage.set('dispatch:'+id, JSON.stringify(data), false);
+      return (await outboxQueue('dispatch', id, data)) ? SAVE_QUEUED : SAVE_FAILED;
+    }catch(e){ return SAVE_FAILED; }
+  }
+  registerOutboxHandler('dispatch', async (id, payload)=>{
+    const { error } = await db.from('dispatch_tickets').upsert({
+      id, status: payload.status||'open',
+      created_at: payload.createdAt || new Date().toISOString(), data: payload
+    });
+    if(error) throw error;
+  });
+
+  async function dtLocalList(){
+    try{
+      const res = await window.storage.list('dispatch:', false);
+      const items = [];
+      for(const key of (res.keys||[])){
+        try{ const item = await window.storage.get(key, false); items.push(dtNormalizeTicket(JSON.parse(item.value))); }catch(e){}
+      }
+      items.sort((a,b)=> (b.createdAt||'').localeCompare(a.createdAt||''));
+      return items;
+    }catch(e){ return []; }
+  }
+  // Pages through results instead of silently stopping at 300 rows, which used
+  // to make older tickets vanish from the admin list with no warning.
+  async function dtFetchPaged(applyFilter){
+    const out = [];
+    for(let from=0; from<DT_MAX_ROWS; from+=DT_PAGE){
+      let q = db.from('dispatch_tickets').select('data')
+        .order('created_at',{ascending:false}).range(from, from+DT_PAGE-1);
+      if(applyFilter) q = applyFilter(q);
+      const { data, error } = await q;
+      if(error) throw error;
+      const rows = data || [];
+      rows.forEach(r=> out.push(dtNormalizeTicket(r.data)));
+      if(rows.length < DT_PAGE) break;
+    }
+    return out;
+  }
+  async function dtListAll(){
+    if(await ensureCloud()){
+      try{ return await dtFetchPaged(null); }
+      catch(e){ console.error('dispatch list failed', describeCloudError(e)); }
+    }
+    return dtLocalList();
+  }
+  // Filters on the server (`assigned_worker_ids @> [workerId]`) rather than
+  // downloading every technician's tickets and filtering in JavaScript.
+  async function dtListForWorker(workerId){
+    if(!workerId) return [];
+    if(await ensureCloud()){
+      try{
+        return await dtFetchPaged(q=> q.contains('data->assignedWorkerIds', JSON.stringify([workerId])));
+      }catch(e){ console.error('dispatch worker list failed', describeCloudError(e)); }
+    }
+    return (await dtLocalList()).filter(t=> (t.assignedWorkerIds||[]).includes(workerId));
+  }
+  // Being ASSIGNED to a ticket and being ALLOWED to file its Service Report
+  // are two different things — admin explicitly picks which assigned
+  // worker(s) may create the report, so not everyone on the ticket can.
+  // This powers the "From Job Order" picker specifically; dtListForWorker
+  // above still governs general ticket visibility (the My Job Order tab).
+  async function dtListForReporter(workerId){
+    if(!workerId) return [];
+    if(await ensureCloud()){
+      try{
+        return await dtFetchPaged(q=> q.contains('data->reportAllowedWorkerIds', JSON.stringify([workerId])));
+      }catch(e){ console.error('dispatch reporter list failed', describeCloudError(e)); }
+    }
+    return (await dtLocalList()).filter(t=> (t.reportAllowedWorkerIds||[]).includes(workerId));
+  }
+
+  // ---------- Service Report: "From Job Order" picker ----------
+  // Shows the technician's own Job Order tickets that still have equipment
+  // needing a report. Tapping a ticket expands its pending equipment as a
+  // checklist; tapping one piece of equipment fills the form with THAT
+  // unit's details/scope and files one report just for it — one dispatch
+  // ticket can cover many units, but each still gets its own report.
+  // srCurrentTicketId / srCurrentEquipId (which ticket + equipment item the
+  // report currently being filed is tied to) are declared in ui.js, not
+  // here — resetForm() runs once at load time before this module's code
+  // executes, and clears them, so they must already be initialized by then.
+  async function srRenderJobOrderPicker(){
+    const card = $('srJobOrderCard');
+    const list = $('srJobOrderList');
+    if(!currentUser || currentUser.role==='admin'){
+      card.style.display = 'none';
+      // Admin has no Job Order gate — Customer's Info is always visible.
+      $('sec1Card').style.display = '';
+      return;
+    }
+    card.style.display = '';
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const mine = await dtListForReporter(currentUser.id);
+    // A ticket can be closed with some equipment left unreported (closing
+    // with exceptions marks those units "not done" instead of requiring a
+    // report — see dtCloseTicket). Once closed, the Job Order is finalized,
+    // so it shouldn't keep showing up here as something still needing a
+    // report to be filed against it.
+    const openOnes = mine.filter(r=> dtEffectiveStatus(r)!=='closed' && (r.equipmentList||[]).some(it=> !it.reportSrNo));
+    if(openOnes.length===0){
+      list.innerHTML = '<div class="empty-state">No Job Order tickets with equipment still needing a report.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    openOnes.forEach(r=>{
+      const items = r.equipmentList||[];
+      const pending = items.filter(it=>!it.reportSrNo);
+      // A technician must acknowledge a Job Order (see My Job Order / the
+      // Acknowledge button) before they're allowed to file a report against
+      // it — filing implies the visit happened, which shouldn't be possible
+      // for a ticket the technician hasn't even confirmed receiving yet.
+      const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
+      const row = document.createElement('div');
+      row.className = 'user-card' + (alreadyAck ? '' : ' jo-locked');
+      row.innerHTML = '<div class="user-card-head" style="cursor:pointer;">'+
+          '<div>'+
+            '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
+            '<div class="u-status">'+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+
+              (r.siteAddress ? (' · '+escapeHtml(r.siteAddress)) : '')+'</div>'+
+            '<div class="u-status">'+(items.length-pending.length)+' of '+items.length+' equipment reported</div>'+
+          '</div>'+
+          (alreadyAck
+            ? dtStatusPill(r)
+            : '<button type="button" class="sr-ack-required-btn">🔒 Acknowledge Required</button>')+
+        '</div>'+
+        (alreadyAck
+          ? '<div class="dt-equip-pending" style="display:none; margin-top:8px;"></div>'
+          : '<div class="sr-ack-required-note">Open this Job Order in <b>My Job Order</b> and tap Acknowledge before you can file a report for it.</div>');
+      const head = row.querySelector('.user-card-head');
+      if(!alreadyAck){
+        // Locked row: tapping anywhere on it (including the pill button)
+        // sends the technician to acknowledge it, instead of expanding an
+        // equipment picker they're not allowed to use yet.
+        head.addEventListener('click', (e)=>{ e.stopPropagation(); srGoAcknowledgeTicket(r); });
+        list.appendChild(row);
+        return;
+      }
+      const pendingWrap = row.querySelector('.dt-equip-pending');
+      function renderSinglePickList(){
+        pendingWrap.innerHTML = '';
+        if(pending.length===0){
+          pendingWrap.innerHTML = '<div class="empty-state">All equipment on this ticket already has a report.</div>';
+          return;
+        }
+        pending.forEach(it=>{
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'combo-item';
+          btn.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; padding:10px; background:none;';
+          // A pending item with a draftSrNo already has a Service Report
+          // started for it (just not completed yet). Flag it clearly so a
+          // technician re-opening this ticket doesn't start a second,
+          // duplicate report for the same unit — tapping it below resumes
+          // the existing draft instead of blanking the form.
+          btn.innerHTML = '<span>'+escapeHtml(dtEquipSummaryLine(it))+'</span>'+
+            (it.draftSrNo ? '<span class="status-pill status-draft" style="flex-shrink:0;">Draft Saved</span>' : '');
+          btn.addEventListener('click', (e)=>{
+            e.stopPropagation();
+            if(it.draftSrNo) srResumeDraft(r, it);
+            else srApplyJobOrder(r, it);
+          });
+          pendingWrap.appendChild(btn);
+        });
+        // Batch signing entry point — only worth offering with 2+ items
+        // still pending on this ticket (see srApplyJobOrderBatch below).
+        if(pending.length >= 2){
+          const batchLink = document.createElement('button');
+          batchLink.type = 'button';
+          batchLink.className = 'sr-batch-toggle-link';
+          batchLink.style.cssText = 'width:100%; text-align:center; background:none; border:none; color:var(--green-dark); font-size:12px; font-weight:600; padding:8px 0 2px; cursor:pointer;';
+          batchLink.textContent = '☑ Select multiple to batch sign →';
+          batchLink.addEventListener('click', (e)=>{
+            e.stopPropagation();
+            srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList);
+          });
+          pendingWrap.appendChild(batchLink);
+        }
+      }
+      head.addEventListener('click', ()=>{
+        const isOpen = pendingWrap.style.display !== 'none';
+        pendingWrap.style.display = isOpen ? 'none' : '';
+        if(!isOpen && pendingWrap.childElementCount===0) renderSinglePickList();
+      });
+      list.appendChild(row);
+    });
+  }
+  // Checkbox multi-select shown in place of the single-tap list above, once
+  // a technician taps "Select multiple to batch sign". Replaces
+  // pendingWrap's contents; tapping "Cancel" restores the single-tap list
+  // via the onCancel callback (renderSinglePickList, passed in above) rather
+  // than re-deriving it here.
+  function srRenderBatchPicker(pendingWrap, ticket, pending, onCancel){
+    pendingWrap.innerHTML = '<div class="leave-note" style="margin-bottom:8px;">Check every unit you serviced on this visit, then continue — you\'ll fill the shared details once and sign once for all of them.</div>';
+    const checks = [];
+    pending.forEach(it=>{
+      const label = document.createElement('label');
+      label.className = 'chk';
+      label.style.cssText = 'display:flex; align-items:center; gap:8px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; padding:10px;';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.value = it.id;
+      label.appendChild(cb);
+      const span = document.createElement('span');
+      span.textContent = dtEquipSummaryLine(it) + (it.draftSrNo ? ' (Draft Saved — will be overwritten)' : '');
+      label.appendChild(span);
+      pendingWrap.appendChild(label);
+      checks.push({cb, item:it});
+    });
+    const actionRow = document.createElement('div');
+    actionRow.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+    const continueBtn = document.createElement('button');
+    continueBtn.type = 'button';
+    continueBtn.className = 'btn btn-primary';
+    continueBtn.style.cssText = 'flex:1;';
+    continueBtn.textContent = 'Continue with Selected';
+    continueBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const selected = checks.filter(c=> c.cb.checked).map(c=> c.item);
+      if(selected.length===0){ toast('Check at least one unit first'); return; }
+      srApplyJobOrderBatch(ticket, selected);
+    });
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', (e)=>{ e.stopPropagation(); onCancel(); });
+    actionRow.appendChild(continueBtn); actionRow.appendChild(cancelBtn);
+    pendingWrap.appendChild(actionRow);
+  }
+  // Set while a technician is being sent from the Service Report picker to
+  // My Job Order to acknowledge a specific ticket (see srGoAcknowledgeTicket
+  // below). Read by dtRenderTechList to show the "Back to Service Report"
+  // banner and by dtHighlightTechCard to know which card to scroll to.
+  let srAckReturnTicketId = null;
+  function srGoAcknowledgeTicket(ticket){
+    srAckReturnTicketId = ticket.id;
+    toast('Acknowledge '+ticket.jobOrderNo+' to unlock its report');
+    // No filter tabs anymore — every job order is always listed, so the
+    // ticket is guaranteed to be there once the list renders.
+    showDispatchView().then(()=> dtHighlightTechCard(ticket.id));
+  }
+  // Scrolls to and briefly outlines one card in the My Job Order list, and
+  // expands its details — used right after landing here from
+  // srGoAcknowledgeTicket so the technician doesn't have to hunt for the
+  // one ticket they were sent to deal with among everything else assigned
+  // to them.
+  function dtHighlightTechCard(ticketId){
+    const card = $('dtTechList') && $('dtTechList').querySelector('[data-ticket-id="'+CSS.escape(ticketId)+'"]');
+    if(!card) return;
+    const toggleHead = card.querySelector('.jo-card-toggle');
+    if(toggleHead) dtToggleCardBody(toggleHead, true);
+    card.scrollIntoView({behavior:'smooth', block:'center'});
+    card.classList.add('jo-card-flash');
+    setTimeout(()=> card.classList.remove('jo-card-flash'), 1800);
+  }
+  // Was calling applyCustomerToForm(matched), which kicks off
+  // loadCustomerEquipment(...).then(defaultEquipTabForCustomer) without
+  // waiting for it — that promise settled AFTER this function had already
+  // filled in the equipment fields and switched to the "addnew" tab to show
+  // them, and its resolution (defaultEquipTabForCustomer -> setEquipTab(null))
+  // immediately hid that same section again. The fields were technically
+  // populated, but invisible, so a technician tapping a unit from the Job
+  // Order picker had to switch tabs by hand to actually see the autofill —
+  // exactly the redundant re-selecting this picker exists to avoid. Awaiting
+  // the equipment load here, then applying the equipment fields and calling
+  // setEquipTab('addnew') last, guarantees nothing can hide the section
+  // afterward.
+  async function srApplyJobOrder(ticket, equipItem){
+    resetForm();
+    // A Job Order was actually picked — Customer's Info (and everything
+    // after it) can now be shown, since a technician's report must be tied
+    // to an authorized ticket rather than a freely-typed customer.
+    $('sec1Card').style.display = '';
+    // Prefer a saved customer record when the name matches — it may have an
+    // email on file (dispatch tickets don't capture one), which the report
+    // needs for auto-send. Job-order-specific site/contact details still win.
+    const matched = customersCache.find(c=> c.name.toLowerCase() === (ticket.custName||'').trim().toLowerCase());
+    if(matched){
+      $('custName').value = matched.name;
+      $('custAddress').value = matched.address||'';
+      $('contactNo').value = matched.contactNo||'';
+      $('contactPerson').value = matched.contactPerson||'';
+      $('custEmail').value = matched.email||'';
+      await loadCustomerEquipment(matched.id);
+      revealSectionsAfterCustomer();
+    }else{
+      $('custName').value = ticket.custName||'';
+      revealSectionsAfterCustomer();
+    }
+    if(ticket.siteAddress) $('custAddress').value = ticket.siteAddress;
+    if(ticket.contactName) $('contactPerson').value = ticket.contactName;
+    if(ticket.contactNo) $('contactNo').value = ticket.contactNo;
+    if(equipItem){
+      EQUIP_FIELD_KEYS.forEach(k=>{ const el=$(k); if(el) el.value = equipItem[k]||''; });
+      // equipItem.equipmentId is the real customer_equipment.id, stamped
+      // onto the ticket's equipmentList item at ticket-creation time (see
+      // dtAddCustomerEquipmentBatch in dispatch.js) — reuse it directly so
+      // filing this report doesn't create a second row for the same unit.
+      // Tickets created before this fix won't carry one; falls through to
+      // treating it as new, same as any other "+ Add New" content.
+      setEquipPickedId(equipItem.equipmentId || null);
+      setEquipTab('addnew'); // last, so nothing queued above can re-hide these fields
+      if(equipItem.scope && equipItem.scope.length) $('troubleCall').value = equipItem.scope.join('; ');
+    }
+    srCurrentTicketId = ticket.id;
+    srCurrentEquipId = equipItem ? equipItem.id : null;
+    toast('Job Order '+ticket.jobOrderNo+' applied — check the fields below');
+    $('sec1Head').scrollIntoView({behavior:'smooth', block:'start'});
+    srRenderStepper();
+  }
+
+  // Batch-sign entry point: fills Customer's Information ONCE for every
+  // selected equipment item (same ticket, so same customer/site), then
+  // hides Section 2 (Equipment Description) — it has no single answer when
+  // several different units are involved, so each unit's own equipment
+  // fields (EQUIP_FIELD_KEYS) are pulled straight off its ticket record at
+  // submit time instead (see the batch loop in pdf.js). Sections 3-8 are
+  // filled once and shared verbatim across every report this generates.
+  async function srApplyJobOrderBatch(ticket, equipItems){
+    resetForm();
+    $('sec1Card').style.display = '';
+    const matched = customersCache.find(c=> c.name.toLowerCase() === (ticket.custName||'').trim().toLowerCase());
+    if(matched){
+      $('custName').value = matched.name;
+      $('custAddress').value = matched.address||'';
+      $('contactNo').value = matched.contactNo||'';
+      $('contactPerson').value = matched.contactPerson||'';
+      $('custEmail').value = matched.email||'';
+      revealSectionsAfterCustomer();
+    }else{
+      $('custName').value = ticket.custName||'';
+      revealSectionsAfterCustomer();
+    }
+    if(ticket.siteAddress) $('custAddress').value = ticket.siteAddress;
+    if(ticket.contactName) $('contactPerson').value = ticket.contactName;
+    if(ticket.contactNo) $('contactNo').value = ticket.contactNo;
+    // Section 2 doesn't apply in batch mode — each report's equipment
+    // fields come from its own item at submit time, not from this form.
+    if($('sec2Card')) $('sec2Card').style.display = 'none';
+    srCurrentTicketId = ticket.id;
+    srCurrentEquipId = null;
+    srBatchEquipItems = equipItems;
+    $('srBatchBanner').style.display = '';
+    $('srBatchList').innerHTML = equipItems.map(it=>
+      '<div class="leave-note" style="margin-bottom:4px;">• '+escapeHtml(dtEquipSummaryLine(it))+'</div>'
+    ).join('');
+    const scopes = Array.from(new Set(equipItems.flatMap(it=> it.scope||[])));
+    if(scopes.length) $('troubleCall').value = scopes.join('; ');
+    toast('Job Order '+ticket.jobOrderNo+' applied for batch signing — fill in the shared details below, then sign once');
+    $('srBatchBanner').scrollIntoView({behavior:'smooth', block:'start'});
+    srRenderStepper();
+  }
+
+  // Re-opens an equipment item that already has a draft Service Report
+  // (equipItem.draftSrNo) instead of starting a blank one — that avoids
+  // filing a second report for the same unit. Pulls the full previously-
+  // saved report (not just the customer/equipment fields srApplyJobOrder
+  // fills in) via the normal report loader, then re-attaches the Job Order
+  // linkage from this click's context, since the saved report row itself
+  // doesn't carry ticketId/equipId.
+  async function srResumeDraft(ticket, equipItem){
+    const srNo = equipItem.draftSrNo;
+    let data = null;
+    if(await ensureCloud()) data = await cloudGetReport(srNo);
+    if(!data){
+      try{ const item = await window.storage.get('report:'+srNo, false); data = item ? JSON.parse(item.value) : null; }
+      catch(e){ data = null; }
+    }
+    if(!data){
+      toast('Could not load the saved draft for this unit — starting a new report instead');
+      srApplyJobOrder(ticket, equipItem);
+      return;
+    }
+    await openReport(data);
+    srCurrentTicketId = ticket.id;
+    srCurrentEquipId = equipItem.id;
+    toast('Continuing draft '+srNo);
+  }
+
+  // ---- simple repeatable-textarea list (scope items) ----
+  // Mirrors service-report.js's addListRow, including the suggestions
+  // dropdown (attachCombo) — this used to just be a plain textarea with no
+  // suggestions at all, unlike every equivalent list in Service Report
+  // (Findings, Recommendations, Services Done). Both the shared "Default
+  // Scope of Works" list and each equipment item's own "Scope of Service"
+  // list go through this function, so both get suggestions from the same
+  // admin-editable 'scopeOfWork' list (see DEFAULT_LISTS in customers.js).
+  function dtAddSimpleRow(containerId, value){
+    const wrap = document.createElement('div');
+    wrap.className = 'itemrow';
+    const ta = document.createElement('textarea');
+    ta.rows = 1; ta.value = value || '';
+    ta.placeholder = 'e.g. Clean coils, check refrigerant, test operation';
+    const rm = document.createElement('button');
+    rm.type = 'button'; rm.className = 'rm-btn'; rm.textContent = '\u2212';
+    rm.onclick = () => wrap.remove();
+    wrap.appendChild(ta); wrap.appendChild(rm);
+    $(containerId).appendChild(wrap);
+    attachCombo(ta, 'scopeOfWork');
+  }
+  document.querySelectorAll('#dtNewCard .add-row-btn[data-target]').forEach(btn=>{
+    btn.addEventListener('click', ()=> dtAddSimpleRow(btn.dataset.target));
+  });
+  function dtCollectSimpleList(containerId){
+    return Array.from($(containerId).querySelectorAll('textarea')).map(t=>t.value.trim()).filter(Boolean);
+  }
+
+  $('dtReqOthers').addEventListener('change', function(){
+    $('dtReqOthersDetailWrap').style.display = this.checked ? '' : 'none';
+  });
+
+  // ---- lightweight customer autocomplete scoped to this form's own fields ----
+  // ---------- Equipment picker for Dispatch Ticket ----------
+  // Deliberately independent state from Service Report's equipment picker
+  // (not sharing currentCustomerId/currentEquipmentCache) — Dispatch and
+  // Service Report can each have their own form mid-edit, and sharing that
+  // global state would let one screen's customer selection silently
+  // overwrite the other's equipment list. Both read/write the same
+  // customer_equipment table underneath, so equipment entered on a dispatch
+  // ticket shows up for technicians on Service Report later, and vice versa.
+  let dtCurrentCustomerId = null;
+  let dtCurrentEquipmentCache = [];
+  let dtCurrentEquipTab = null;
+  // Multi-equipment draft state for the ticket currently being built — each
+  // item becomes its own Service Report later, so each carries its own scope
+  // (seeded from the Default Scope list at the moment it's added, then
+  // independently editable per unit).
+  let dtDraftEquipItems = [];
+  function dtGenEquipId(){ return 'de-'+Date.now()+'-'+Math.random().toString(36).slice(2,7); }
+  function dtPickEquipFields(e){ const out={}; EQUIP_FIELD_KEYS.forEach(k=> out[k]=e[k]||''); return out; }
+  function dtEquipKey(fields){ return EQUIP_FIELD_KEYS.map(k=>(fields[k]||'').trim()).join('|'); }
+  async function dtLoadCustomerEquipment(customerId){
+    dtCurrentCustomerId = customerId;
+    if(!customerId){ dtCurrentEquipmentCache = []; return; }
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('customer_equipment').select('*').eq('customer_id', customerId);
+        if(error) throw error;
+        dtCurrentEquipmentCache = (data||[]).map(equipRowToObj);
+        return;
+      }catch(e){ console.error('load dispatch equipment failed', describeCloudError(e)); }
+    }
+    dtCurrentEquipmentCache = [];
+  }
+  // Leads with equipDisplayName() (core.js) — same convention as
+  // equipSummaryLine() in customers.js — so a unit's label (or, until one's
+  // set, its shortened fixed id) is visible everywhere a dispatch ticket
+  // lists equipment, not just in the admin/customer-portal equipment views.
+  function dtEquipSummaryLine(e){
+    const rest = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join('  ·  ') || '(no details on file)';
+    return equipDisplayName(e) + '  —  ' + rest;
+  }
+  // Checkbox multi-select — lets an admin add several (or all) of a
+  // customer's known units to this ticket in one pass instead of loading
+  // them into the single-equipment fields one at a time.
+  function dtRenderEquipPicker(){
+    const list = $('dtEquipPickerList');
+    list.innerHTML = '';
+    if(!dtCurrentCustomerId){
+      list.innerHTML = '<div class="combo-empty">Select a customer first.</div>';
+      return;
+    }
+    if(dtCurrentEquipmentCache.length===0){
+      list.innerHTML = '<div class="combo-empty">No equipment on file yet for this customer — tap "+ Add New" to add one.</div>';
+      return;
+    }
+    const addedKeys = new Set(dtDraftEquipItems.map(it=> dtEquipKey(it)));
+    dtCurrentEquipmentCache.forEach(e=>{
+      const already = addedKeys.has(dtEquipKey(e));
+      const row = document.createElement('label');
+      row.className = 'chk';
+      row.style.cssText = 'display:flex; border:1px solid var(--border); border-radius:8px; margin-bottom:6px; padding:10px;'+(already?' opacity:.6;':'');
+      row.innerHTML = '<input type="checkbox" value="'+e.id+'"'+(already?' disabled checked':'')+'><span>'+escapeHtml(dtEquipSummaryLine(e))+(already?' (already added)':'')+'</span>';
+      list.appendChild(row);
+    });
+  }
+  function dtEquipCountLabel(){
+    $('dtEquipCount').textContent = dtDraftEquipItems.length===0
+      ? 'No equipment added yet'
+      : (dtDraftEquipItems.length+' equipment added to this ticket');
+  }
+  // Appends one equipment line item as its own card with an independent,
+  // always-editable Scope of Service list — seeded from the Default Scope
+  // list at the moment of adding. Appending (never re-rendering the whole
+  // list) means adding/removing one item never wipes another item's
+  // in-progress scope edits.
+  function dtAppendEquipItemCard(item){
+    const wrap = $('dtEquipItemsList');
+    const empty = wrap.querySelector('.empty-state');
+    if(empty) empty.remove();
+    const scopeId = 'dtEquipScope-'+item.id;
+    const card = document.createElement('div');
+    card.className = 'user-card';
+    card.style.marginBottom = '8px';
+    card.dataset.equipId = item.id;
+    card.innerHTML = '<div class="user-card-head"><div><div class="u-name">'+escapeHtml(dtEquipSummaryLine(item))+'</div></div></div>'+
+      '<div class="field" style="margin-top:6px; margin-bottom:6px;">'+
+        '<label style="font-size:12px;">Scope of Service for this unit</label>'+
+        '<div id="'+scopeId+'"></div>'+
+      '</div>';
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button'; rmBtn.className = 'rm-btn'; rmBtn.textContent = 'Remove';
+    rmBtn.style.cssText = 'width:auto; padding:4px 10px;';
+    rmBtn.addEventListener('click', ()=>{
+      dtDraftEquipItems = dtDraftEquipItems.filter(x=> x.id!==item.id);
+      card.remove();
+      dtEquipCountLabel();
+      if(dtDraftEquipItems.length===0) wrap.innerHTML = '<div class="empty-state">No equipment added yet.</div>';
+      dtRenderEquipPicker();
+    });
+    card.querySelector('.user-card-head').appendChild(rmBtn);
+    const scopeBtn = document.createElement('button');
+    scopeBtn.type = 'button'; scopeBtn.className = 'add-row-btn'; scopeBtn.textContent = '+ Add scope item';
+    scopeBtn.addEventListener('click', ()=> dtAddSimpleRow(scopeId));
+    card.querySelector('.field').appendChild(scopeBtn);
+    wrap.appendChild(card);
+    const defaults = dtCollectSimpleList('dtDefaultScopeList');
+    if(defaults.length) defaults.forEach(v=> dtAddSimpleRow(scopeId, v));
+    else dtAddSimpleRow(scopeId);
+    dtEquipCountLabel();
+  }
+  async function dtAddEquipItemFromFields(){
+    const fields = dtCollectEquipmentFields();
+    if(!EQUIP_FIELD_KEYS.some(k=>fields[k])){ toast('Enter at least one equipment detail'); return; }
+    const item = Object.assign({id: dtGenEquipId()}, fields);
+    dtDraftEquipItems.push(item);
+    dtAppendEquipItemCard(item);
+    // Genuinely new content (this is the "+ Add New" path) — insert it now
+    // and stamp the real id straight onto this same item object (mutated
+    // in place, since it's already the one sitting in dtDraftEquipItems).
+    if(dtCurrentCustomerId) await dtAddCustomerEquipmentBatch(dtCurrentCustomerId, [item]);
+    dtResetEquipmentFields();
+    toast('Equipment added to ticket');
+  }
+  function dtAddSelectedExistingEquip(){
+    const checked = Array.from($('dtEquipPickerList').querySelectorAll('input:checked:not(:disabled)'));
+    if(checked.length===0){ toast('Select at least one'); return; }
+    checked.forEach(cb=>{
+      const e = dtCurrentEquipmentCache.find(x=> x.id===cb.value);
+      if(!e) return;
+      // Carries the real customer_equipment.id straight through as
+      // equipmentId — this is an explicit "it's already on file" pick, so
+      // dtAddCustomerEquipmentBatch() will skip it entirely rather than
+      // re-deriving (or re-verifying) sameness from its fields.
+      const item = Object.assign({id: dtGenEquipId(), equipmentId: e.id}, dtPickEquipFields(e));
+      dtDraftEquipItems.push(item);
+      dtAppendEquipItemCard(item);
+    });
+    dtRenderEquipPicker();
+    toast(checked.length+' equipment added');
+  }
+  function dtAddAllExistingEquip(){
+    const addedKeys = new Set(dtDraftEquipItems.map(it=> dtEquipKey(it)));
+    let count = 0;
+    dtCurrentEquipmentCache.forEach(e=>{
+      const key = dtEquipKey(e);
+      if(addedKeys.has(key)) return;
+      const item = Object.assign({id: dtGenEquipId(), equipmentId: e.id}, dtPickEquipFields(e));
+      dtDraftEquipItems.push(item);
+      dtAppendEquipItemCard(item);
+      addedKeys.add(key);
+      count++;
+    });
+    dtRenderEquipPicker();
+    toast(count>0 ? ('Added '+count+' equipment from file') : 'All equipment on file is already added');
+  }
+  $('dtAddEquipItemBtn').addEventListener('click', dtAddEquipItemFromFields);
+  $('dtAddSelectedEquipBtn').addEventListener('click', dtAddSelectedExistingEquip);
+  $('dtAddAllEquipBtn').addEventListener('click', dtAddAllExistingEquip);
+  function dtSetEquipTab(tab){
+    dtCurrentEquipTab = tab;
+    $('dtEquipTabExisting').classList.toggle('active', tab==='existing');
+    $('dtEquipTabAddNew').classList.toggle('active', tab==='addnew');
+    if(tab==='existing'){
+      if(!dtCurrentCustomerId){ toast('Select a customer first'); dtCurrentEquipTab='addnew'; $('dtEquipTabExisting').classList.remove('active'); $('dtEquipTabAddNew').classList.add('active'); }
+      $('dtEquipPickerPanel').style.display = dtCurrentEquipTab==='existing' ? '' : 'none';
+      $('dtEquipFieldsWrap').style.display = dtCurrentEquipTab==='existing' ? 'none' : '';
+      if(dtCurrentEquipTab==='existing') dtRenderEquipPicker();
+    }else if(tab==='addnew'){
+      $('dtEquipPickerPanel').style.display = 'none';
+      $('dtEquipFieldsWrap').style.display = '';
+    }else{
+      $('dtEquipPickerPanel').style.display = 'none';
+      $('dtEquipFieldsWrap').style.display = 'none';
+    }
+  }
+  function dtDefaultEquipTabForCustomer(){
+    dtSetEquipTab(dtCurrentEquipmentCache.length>0 ? 'existing' : 'addnew');
+  }
+  function dtCollectEquipmentFields(){
+    const fields = {};
+    EQUIP_FIELD_KEYS.forEach(k=>{ const el=$('dt'+k.charAt(0).toUpperCase()+k.slice(1)); fields[k] = el ? el.value.trim() : ''; });
+    return fields;
+  }
+  function dtResetEquipmentFields(){
+    EQUIP_FIELD_KEYS.forEach(k=>{ const el=$('dt'+k.charAt(0).toUpperCase()+k.slice(1)); if(el) el.value=''; });
+  }
+  // Ensures every item in a batch (a dispatch ticket's equipmentList, or a
+  // single item just added via "+ Add New") has a real customer_equipment.id
+  // attached as item.equipmentId — mutating each item object in place.
+  // Fixed 2026-09, twice over:
+  // 1) This used to be dtAddCustomerEquipmentIfNew(), called once per item
+  //    via equipmentList.forEach(item=> dtAddCustomerEquipmentIfNew(custId,
+  //    item)) — forEach doesn't await its (async) callback, so every call
+  //    for a multi-item ticket ran concurrently against the same stale
+  //    snapshot of dtCurrentEquipmentCache.
+  // 2) The fix for that still decided "is this new?" by comparing field
+  //    values against what's already on file — which is the wrong
+  //    question. Whether an item needs a new row is decided once, up
+  //    front, by which action added it: dtAddSelectedExistingEquip() /
+  //    dtAddAllExistingEquip() stamp the real id straight from the picked
+  //    record (item.equipmentId already set, nothing to do here); only
+  //    "+ Add New" items reach this function without one, and those are
+  //    unconditionally new — inserted with no comparison against existing
+  //    rows at all, exactly like cloudAddCustomerEquipment() (customers.js).
+  async function dtAddCustomerEquipmentBatch(customerId, items){
+    const toInsert = items.filter(it=> !it.equipmentId);
+    if(!customerId || toInsert.length===0) return;
+    if(!(await ensureCloud())) return;
+    for(const item of toInsert){
+      const hasAnyValue = EQUIP_FIELD_KEYS.some(k=> (item[k]||'').trim());
+      if(!hasAnyValue) continue;
+      const rec = { customer_id: customerId };
+      EQUIP_FIELD_KEYS.forEach(k=> rec[EQUIP_FIELD_TO_COLUMN[k]] = item[k]||'');
+      try{
+        const { data: inserted, error } = await db.from('customer_equipment').insert(rec).select('id').single();
+        if(error) throw error;
+        item.equipmentId = inserted.id;
+        if(customerId === dtCurrentCustomerId) dtCurrentEquipmentCache.push(equipRowToObj(Object.assign({}, rec, { id: inserted.id })));
+      }catch(e){ console.error('add dispatch equipment failed', describeCloudError(e)); }
+    }
+  }
+
+  function dtSetupCustomerCombo(){
+    const input = $('dtCustName');
+    if(input.dataset.comboAttached) return;
+    input.dataset.comboAttached = '1';
+    const wrap = $('dtCustNameWrap');
+    wrap.style.position = 'relative';
+    input.classList.add('combo-input');
+    const caret = document.createElement('button');
+    caret.type = 'button'; caret.className = 'combo-caret'; caret.innerHTML = '&#9662;';
+    wrap.appendChild(caret);
+    const panel = document.createElement('div');
+    panel.className = 'combo-panel';
+    wrap.appendChild(panel);
+    function fillFrom(c){
+      input.value = c.name;
+      input.dataset.customerId = c.id;
+      $('dtSiteAddress').value = c.address||'';
+      $('dtContactName').value = c.contactPerson||'';
+      $('dtContactNo').value = c.contactNo||'';
+      panel.classList.remove('open');
+      dtResetEquipmentFields();
+      dtLoadCustomerEquipment(c.id).then(dtDefaultEquipTabForCustomer);
+    }
+    function render(filterText){
+      const q = (filterText||'').toLowerCase();
+      const filtered = customersCache.filter(c=> c.name.toLowerCase().includes(q));
+      panel.innerHTML = '';
+      if(filtered.length===0){
+        const empty = document.createElement('div');
+        empty.className = 'combo-empty';
+        empty.textContent = customersCache.length===0 ? 'No saved customers yet — just type the name' : 'No matches — new customer? Just fill in the fields below';
+        panel.appendChild(empty);
+      }
+      filtered.slice(0,25).forEach(c=>{
+        const row = document.createElement('div');
+        row.className = 'combo-item';
+        const span = document.createElement('span');
+        span.textContent = c.name + (c.address ? '  —  '+c.address : '');
+        row.appendChild(span);
+        row.addEventListener('mousedown', (e)=> e.preventDefault());
+        row.addEventListener('click', ()=> fillFrom(c));
+        panel.appendChild(row);
+      });
+      panel.classList.add('open');
+    }
+    input.addEventListener('focus', ()=> render(input.value));
+    input.addEventListener('input', ()=>{ delete input.dataset.customerId; render(input.value); });
+    caret.addEventListener('click', (e)=>{
+      e.preventDefault();
+      if(panel.classList.contains('open')){ panel.classList.remove('open'); } else { render(input.value); input.focus(); }
+    });
+    document.addEventListener('click', (e)=>{ if(!wrap.contains(e.target)) panel.classList.remove('open'); });
+    if(!$('dtEquipTabExisting').dataset.hooked){
+      $('dtEquipTabExisting').dataset.hooked = '1';
+      $('dtEquipTabExisting').addEventListener('click', ()=> dtSetEquipTab('existing'));
+      $('dtEquipTabAddNew').addEventListener('click', ()=> dtSetEquipTab('addnew'));
+      dtSetEquipTab(null);
+    }
+    attachDtEquipCombos();
+  }
+
+  // Links the "Equipment for this Job Order" fields (Equipment Type, Brand,
+  // Mounting Type, etc.) to the same named suggestion lists the Service
+  // Report's own Equipment section and the admin "Manage Equipment List →
+  // Add" tab use (configured via Manage Dropdown Lists) — even though these
+  // inputs have dt-prefixed ids, attachCombo's keyOverride lets a
+  // differently-id'd input share a list. Guarded by attachCombo's own
+  // dataset flag, so calling this more than once (e.g. every time the New
+  // Job Order form is opened) is harmless.
+  function attachDtEquipCombos(){
+    const idFor = (key)=> 'dt'+key.charAt(0).toUpperCase()+key.slice(1);
+    EQUIP_FIELD_KEYS.forEach(key=>{
+      const el = $(idFor(key));
+      if(el) attachCombo(el, key);
+    });
+  }
+
+  async function dtRenderWorkerChecklist(){
+    const box = $('dtWorkerChecklist');
+    box.innerHTML = '<div class="empty-state">Loading technicians…</div>';
+    const users = (await cloudListUsers()) || [];
+    const active = users.filter(u=> u.active!==false);
+    if(active.length===0){ box.innerHTML = '<div class="empty-state">No active technicians — add one under Manage Users.</div>'; return; }
+    box.innerHTML = '';
+    active.sort((a,b)=> a.name.localeCompare(b.name)).forEach(u=>{
+      const lbl = document.createElement('label');
+      lbl.className = 'chk';
+      lbl.innerHTML = '<input type="checkbox" value="'+u.id+'" data-name="'+escapeHtml(u.name)+'"><span>'+escapeHtml(u.name)+'</span>';
+      box.appendChild(lbl);
+    });
+    if(!box.dataset.hooked){
+      box.dataset.hooked = '1';
+      box.addEventListener('change', dtRenderReporterChecklist);
+    }
+    dtRenderReporterChecklist();
+  }
+  // The "who can create the Service Report" list is always a SUBSET of
+  // whoever is currently checked in Assigned Workers — kept in sync live,
+  // so admin can't accidentally authorize someone who isn't even assigned.
+  function dtRenderReporterChecklist(){
+    const assigned = Array.from($('dtWorkerChecklist').querySelectorAll('input:checked'))
+      .map(el=>({id: el.value, name: el.dataset.name}));
+    const box = $('dtReporterChecklist');
+    const previouslyChecked = new Set(Array.from(box.querySelectorAll('input:checked')).map(el=>el.value));
+    if(assigned.length===0){ box.innerHTML = '<div class="empty-state">Assign workers above first.</div>'; return; }
+    box.innerHTML = '';
+    assigned.forEach(w=>{
+      const lbl = document.createElement('label');
+      lbl.className = 'chk';
+      const checked = previouslyChecked.has(w.id) ? ' checked' : '';
+      lbl.innerHTML = '<input type="checkbox" value="'+w.id+'" data-name="'+escapeHtml(w.name)+'"'+checked+'><span>'+escapeHtml(w.name)+'</span>';
+      box.appendChild(lbl);
+    });
+  }
+
+  function dtResetForm(){
+    dtSourceServiceRequestId = null;
+    $('dtJobOrderNo').value = '—';
+    $('dtDate').value = todayISO();
+    $('dtExpectedTime').value = '';
+    $('dtCustName').value = ''; delete $('dtCustName').dataset.customerId;
+    $('dtSiteAddress').value = '';
+    $('dtContactName').value = ''; $('dtContactNo').value = '';
+    dtResetEquipmentFields();
+    dtLoadCustomerEquipment(null);
+    dtSetEquipTab(null);
+    $('dtDefaultScopeList').innerHTML=''; dtAddSimpleRow('dtDefaultScopeList');
+    dtDraftEquipItems = [];
+    $('dtEquipItemsList').innerHTML = '<div class="empty-state">No equipment added yet.</div>';
+    dtEquipCountLabel();
+    $('dtRemarks').value = '';
+    ['dtReqWorkPermit','dtReqGatePass','dtReqSafety','dtReqOthers'].forEach(id=> $(id).checked=false);
+    $('dtReqOthersDetail').value = '';
+    $('dtReqOthersDetailWrap').style.display = 'none';
+    dtRenderWorkerChecklist();
+  }
+
+  // Set by dtPrefillCreateFromServiceRequest below when the Create form was
+  // opened from a customer's service request; dtCreateTicket's success path
+  // uses it to call srLinkTicket() so the request follows the resulting
+  // ticket (see also the completion-sync hook in dtComplete). Cleared by
+  // dtResetForm so it never leaks onto an unrelated, later ticket.
+  let dtSourceServiceRequestId = null;
+
+  // Opens the Create Dispatch Ticket tab with a customer service request's
+  // details pre-filled, so admin can review/adjust and finish creating the
+  // ticket the normal way (dtCreateTicket, above). Called from
+  // service-requests.js srConvertToTicket() — this does not save a ticket
+  // by itself. request: {id, customerId, equipmentId, description, urgency,
+  // requestedDate} as shaped by service-requests.js srRowToRequest().
+  async function dtPrefillCreateFromServiceRequest(request){
+    await showDispatchView('new'); // already calls dtResetForm() internally via dtShowAdminTab('new')
+    dtSourceServiceRequestId = request.id;
+    if(request.customerId){
+      // customersCache is populated by whichever screen loads it first
+      // (see showDispatchView's own comment on this above); find the
+      // matching name for the combo's text field.
+      const cust = (typeof customersCache !== 'undefined' ? customersCache : []).find(c=> String(c.id)===String(request.customerId));
+      if(cust){
+        $('dtCustName').value = cust.name || '';
+        $('dtCustName').dataset.customerId = cust.id;
+        // Site address only ever comes from the customer's own record —
+        // service_requests has no separate address field of its own.
+        $('dtSiteAddress').value = cust.address || '';
+        // Contact name/number: the request's own on-site contact (if the
+        // customer filled it in) is more relevant to THIS job than the
+        // customer's general on-file contact, so it takes priority.
+        $('dtContactName').value = request.contactPerson || cust.contactPerson || '';
+        $('dtContactNo').value = request.contactNumber || cust.contactNo || '';
+        await dtLoadCustomerEquipment(cust.id);
+      }
+    }
+    if(request.requestedDate) $('dtDate').value = request.requestedDate;
+    // Reason for service — the request's description, as-is (no extra
+    // narrative wrapping); the urgency tag stays since it's easy to miss
+    // otherwise once this is sitting in a plain remarks box.
+    const urgentPrefix = request.urgency==='urgent' ? '[URGENT] ' : '';
+    $('dtRemarks').value = urgentPrefix + (request.description||'');
+    // Access requirements the customer already flagged when filing the
+    // request carry straight over — no reason to make admin re-enter them.
+    $('dtReqGatePass').checked = !!request.accessGatePass;
+    $('dtReqWorkPermit').checked = !!request.accessWorkPermit;
+    $('dtReqOthers').checked = !!request.accessOthers;
+    if(request.accessOthers){
+      $('dtReqOthersDetail').value = request.accessOthersDetail || (request.accessLadder ? 'Ladder' : '');
+      $('dtReqOthersDetailWrap').style.display = '';
+    } else if(request.accessLadder){
+      // Dispatch's requirement checklist has no dedicated "Ladder" option
+      // (only Work Permit / Gate Pass / Safety / Others) — fold it into
+      // Others rather than silently dropping it.
+      $('dtReqOthers').checked = true;
+      $('dtReqOthersDetail').value = 'Ladder';
+      $('dtReqOthersDetailWrap').style.display = '';
+    }
+    toast('Review the pre-filled details, then create the ticket');
+  }
+
+  // Assigned technician names for one ticket — already denormalized right
+  // onto the ticket's own JSON blob (assignedWorkerNames, set at creation —
+  // see dtCreateTicket below), so this is a single-row fetch with no join
+  // to a users table needed. Used by the customer portal's home-screen
+  // "Active service" hero to show who's on the job.
+  async function dtFetchTicketTechNames(ticketId){
+    if(!ticketId || !(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('dispatch_tickets')
+        .select('data').eq('id', ticketId).maybeSingle();
+      if(error) throw error;
+      return (data && data.data && data.data.assignedWorkerNames) || [];
+    }catch(e){ console.error('fetch ticket technicians failed', describeCloudError(e)); return []; }
+  }
+
+  async function dtCreateTicket(){
+    const workers = Array.from($('dtWorkerChecklist').querySelectorAll('input:checked'))
+      .map(el=>({id: el.value, name: el.dataset.name}));
+    const reporters = Array.from($('dtReporterChecklist').querySelectorAll('input:checked'))
+      .map(el=>({id: el.value, name: el.dataset.name}));
+    const custName = $('dtCustName').value.trim();
+    const custId = $('dtCustName').dataset.customerId || null;
+    if(workers.length===0){ toast('Assign at least one worker'); return; }
+    if(reporters.length===0){ toast('Select at least one technician who can create the Service Report'); return; }
+    if(!custName){ toast('Enter the customer\'s name'); return; }
+    if(!$('dtDate').value){ toast('Set the date'); return; }
+    if(dtDraftEquipItems.length===0){ toast('Add at least one piece of equipment to the ticket'); return; }
+    $('dtCreateBtn').disabled = true; $('dtCreateBtn').textContent = 'Creating…';
+    const jobOrderNo = await dtNextJobOrderNo();
+    const id = jobOrderNo || dtGenLocalId();
+    // One line item per piece of equipment, each with its own scope — one
+    // Service Report gets filed per item later, tracked via reportSrNo.
+    const equipmentList = dtDraftEquipItems.map(item=>{
+      const scope = dtCollectSimpleList('dtEquipScope-'+item.id);
+      return Object.assign({}, item, { scope, reportSrNo: null });
+    });
+    // Catch-all: every item should already carry equipmentId by now (set
+    // the moment it was added — see dtAddEquipItemFromFields/
+    // dtAddSelectedExistingEquip/dtAddAllExistingEquip above), but this is
+    // a no-op for anything that does and a last chance for anything that
+    // doesn't (e.g. the earlier insert failed offline and connectivity has
+    // since come back) — done BEFORE the ticket saves, so equipmentList
+    // is stored with every real id already attached.
+    if(custId) await dtAddCustomerEquipmentBatch(custId, equipmentList);
+    const data = {
+      id, jobOrderNo: id, status: 'open',
+      date: $('dtDate').value, expectedTime: $('dtExpectedTime').value,
+      assignedWorkerIds: workers.map(w=>w.id), assignedWorkerNames: workers.map(w=>w.name),
+      reportAllowedWorkerIds: reporters.map(w=>w.id), reportAllowedWorkerNames: reporters.map(w=>w.name),
+      custName, siteAddress: $('dtSiteAddress').value.trim(),
+      contactName: $('dtContactName').value.trim(), contactNo: $('dtContactNo').value.trim(),
+      equipment: equipmentList.map(dtEquipSummaryLine), equipmentList,
+      remarks: $('dtRemarks').value.trim(),
+      requirements: {
+        workPermit: $('dtReqWorkPermit').checked, gatePass: $('dtReqGatePass').checked,
+        safety: $('dtReqSafety').checked, others: $('dtReqOthers').checked,
+        othersDetail: $('dtReqOthersDetail').value.trim()
+      },
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser ? currentUser.name : 'Admin',
+      acknowledgedBy: [], completedBy: [], completedAt: null
+    };
+    const res = await dtSaveTicket(id, data);
+    $('dtCreateBtn').disabled = false; $('dtCreateBtn').textContent = 'Create Dispatch Ticket';
+    if(res===SAVE_FAILED){ toast('Could not create ticket — check your connection'); return; }
+    toast(res===SAVE_CLOUD
+      ? ('Dispatch ticket '+id+' created')
+      : ('Ticket '+id+' saved on this device — technicians will see it once you are online'));
+    // If this ticket was created from a customer's service request (see
+    // dtPrefillCreateFromServiceRequest above), link the two so the
+    // request's status follows the ticket from here on (srLinkTicket sets
+    // it to 'dispatched' now; dtAcknowledge's hook takes it to
+    // 'in_progress' once a technician acknowledges, and dtComplete's
+    // completion hook takes it to 'completed' later). Best-effort — an
+    // ordinary ticket with no source request just leaves this as a no-op.
+    if(dtSourceServiceRequestId && typeof srLinkTicket === 'function'){
+      srLinkTicket(dtSourceServiceRequestId, id).catch(()=>{});
+    }
+    dtResetForm();
+    $('dtJobOrderNo').value = '—';
+  }
+  $('dtCreateBtn').addEventListener('click', dtCreateTicket);
+
+  function dtReqSummary(r){
+    const items = [];
+    if(r.requirements){
+      if(r.requirements.workPermit) items.push('Work Permit');
+      if(r.requirements.gatePass) items.push('Gate Pass');
+      if(r.requirements.safety) items.push('Safety');
+      if(r.requirements.others) items.push('Others'+(r.requirements.othersDetail ? (' ('+escapeHtml(r.requirements.othersDetail)+')') : ''));
+    }
+    return items.length ? items.join(', ') : 'None specified';
+  }
+  // ---------- Auto-expire (display-only) ----------
+  // A ticket is never silently rewritten by this — "expired" is computed
+  // fresh every render, purely from today's date vs. the ticket's scheduled
+  // date. Nothing is actually resolved until someone uses Close Job Order
+  // (see dtCloseTicket below), which is the only thing that writes a final
+  // status. If the date field is edited or the ticket already reached
+  // completed/closed, this stops applying on its own — no cleanup needed.
+  function dtIsPastDue(r){ return !!r.date && r.date < todayISO(); }
+  function dtEffectiveStatus(r){
+    if(r.status==='completed' || r.status==='closed') return r.status;
+    if(dtIsPastDue(r)) return 'expired';
+    return r.status || 'open';
+  }
+  function dtStatusPill(r){
+    const status = dtEffectiveStatus(r);
+    if(status==='completed') return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: Completed</span>';
+    if(status==='closed'){
+      const hasExceptions = (r.equipmentList||[]).some(it=> it.notDone);
+      return '<span class="status-pill" style="background:#E4E7E4; color:#4A524B;">Status: Closed'+(hasExceptions ? ' \u26A0' : '')+'</span>';
+    }
+    if(status==='expired') return '<span class="status-pill" style="background:#F8D7DA; color:#B02A37;">Status: Expired</span>';
+    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCEAE0; color:var(--green-dark);">Status: Acknowledged</span>';
+    return '<span class="status-pill status-draft">Status: Open</span>';
+  }
+  // Shows every equipment item on the ticket with its own scope and
+  // report status, capped so a 100-unit ticket doesn't blow up the card —
+  // the full list is still reachable via the technician's equipment
+  // checklist when filing reports. Each row is a link (data-ticket-id /
+  // data-equip-idx) opening dtOpenEquipDetailOverlay with that unit's full
+  // record — see the click delegation on #dtAdminList/#dtTechList below,
+  // since dtCardHtml's result is injected via innerHTML rather than built
+  // as live DOM nodes, so individual listeners can't be attached here.
+  function dtEquipmentSummaryBlock(r){
+    const items = r.equipmentList || [];
+    if(items.length===0) return '';
+    const reported = items.filter(it=>it.reportSrNo).length;
+    const cap = 8;
+    const rows = items.slice(0,cap).map((it,i)=>{
+      const scope = (it.scope||[]).map(escapeHtml).join('; ');
+      return '<div class="dt-equip-row" data-ticket-id="'+escapeHtml(r.id)+'" data-equip-idx="'+i+'" '+
+        'style="margin:4px 0; padding-left:8px; border-left:2px solid var(--border); cursor:pointer;">'+
+        '<div>'+escapeHtml(dtEquipSummaryLine(it))+(it.reportSrNo ? ' <span style="color:var(--green-dark);">&#10003; Reported</span>' : '')+
+          ' <span style="color:var(--green-dark); text-decoration:underline; font-size:12px;">View details ›</span></div>'+
+        (scope ? '<div style="font-size:12px; color:var(--text-muted);">Scope: '+scope+'</div>' : '')+
+      '</div>';
+    }).join('') + (items.length>cap ? '<div style="font-size:12px; color:var(--text-muted);">+'+(items.length-cap)+' more…</div>' : '');
+    return '<div class="leave-comment"><b>Equipment ('+reported+' of '+items.length+' reported)</b>'+rows+'</div>';
+  }
+  // Full-detail view for one equipment line item — every field the
+  // Equipment Information section of a Service Report would show, plus
+  // this unit's Scope of Service and its report status on this ticket.
+  const DT_EQUIP_DETAIL_KEYS = [
+    'equipType','brand','mountType','coolCap','modelCU','serialCU',
+    'modelFCU','serialFCU','refrigerantType','compressorType','equipLocation'
+  ];
+  function dtOpenEquipDetailOverlay(ticket, item){
+    if(!item) return;
+    $('dtEquipDetailTitle').textContent = dtEquipSummaryLine(item);
+    // Fixed "Equipment ID" row — always the raw id (equipShortId), same as
+    // the admin equipment detail overlay's own read-only ID row, plus the
+    // customer label alongside it (if set) so a technician sees both
+    // without having to leave the dispatch ticket.
+    const idRows = '<div class="equip-detail-row"><span class="equip-detail-label">Equipment ID</span><span style="font-family:monospace;">'+escapeHtml(equipShortId(item))+'</span></div>'+
+      (item.label ? '<div class="equip-detail-row"><span class="equip-detail-label">Customer Label</span><span>'+escapeHtml(item.label)+'</span></div>' : '');
+    const fieldRows = idRows + DT_EQUIP_DETAIL_KEYS.map(k=>{
+      const val = (item[k]||'').toString().trim();
+      if(!val) return '';
+      const label = (FIELD_META[k] && FIELD_META[k].label) || k;
+      return '<div class="equip-detail-row"><span class="equip-detail-label">'+escapeHtml(label)+'</span><span>'+escapeHtml(val)+'</span></div>';
+    }).join('');
+    const scope = (item.scope||[]).map(escapeHtml).join('; ');
+    const scopeRow = scope ? '<div class="equip-detail-row"><span class="equip-detail-label">Scope of Service</span><span>'+scope+'</span></div>' : '';
+    const statusRow = item.reportSrNo
+      ? '<div class="equip-detail-row"><span class="equip-detail-label">Report</span><span>'+escapeHtml(item.reportSrNo)+' — Reported</span></div>'
+      : item.draftSrNo
+        ? '<div class="equip-detail-row"><span class="equip-detail-label">Report</span><span>'+escapeHtml(item.draftSrNo)+' — Draft saved</span></div>'
+        : '<div class="equip-detail-row"><span class="equip-detail-label">Report</span><span>Not started yet</span></div>';
+    $('dtEquipDetailBody').innerHTML = (fieldRows || '<div class="empty-state">No equipment details on file.</div>') + scopeRow + statusRow;
+    $('dtEquipDetailOverlay').classList.add('open');
+  }
+  $('closeDtEquipDetail').addEventListener('click', ()=> $('dtEquipDetailOverlay').classList.remove('open'));
+  $('dtEquipDetailOverlay').addEventListener('click', (e)=>{ if(e.target.id==='dtEquipDetailOverlay') $('dtEquipDetailOverlay').classList.remove('open'); });
+  // Both admin's "All" tab and a technician's "My Job Order" tab render
+  // dtCardHtml() straight into innerHTML, so a single delegated listener per
+  // list (rather than one per row) is what actually gets a click on a
+  // "View details" row, or the "Open Job Order" button. dtLastTicketsById is
+  // refreshed by whichever render function ran most recently, so a click
+  // always resolves against what's currently on screen.
+  let dtLastTicketsById = {};
+  // Per-card expand/collapse for the job order list rows — independent
+  // toggles (not an accordion like the Service Report form's collapsible
+  // sections), so a technician can have several open at once while
+  // scanning. Delegated on the same listener as the other row clicks.
+  function dtToggleCardBody(head, forceOpen){
+    const body = head.nextElementSibling;
+    if(!body || !body.classList.contains('jo-card-body')) return;
+    const willOpen = forceOpen!==undefined ? forceOpen : body.style.display==='none';
+    body.style.display = willOpen ? '' : 'none';
+    const caret = head.querySelector('.jo-caret');
+    if(caret) caret.textContent = willOpen ? '▴' : '▾';
+  }
+  function dtHandleEquipRowClick(e){
+    // Checked before the toggle header below: "Open Job Order" now lives
+    // inside the same header element that carries data-jo-toggle (it sits to
+    // the right of the title), so without this ordering a tap on the button
+    // would match the ancestor's data-jo-toggle first and just expand the
+    // card instead of opening the ticket.
+    const openBtn = e.target.closest('[data-jo-open]');
+    if(openBtn){
+      e.stopPropagation();
+      dtOpenTicketOverlay(openBtn.dataset.joOpen);
+      return;
+    }
+    const toggleHead = e.target.closest('[data-jo-toggle]');
+    if(toggleHead){
+      // Everywhere else, each Job Order card expands/collapses independently
+      // (a technician scanning several open tickets can leave more than one
+      // expanded). The Schedule Calendar's day list is the one place that
+      // should behave like an accordion — opening one Job Order there closes
+      // any other one already open, so the day list stays scannable. This is
+      // scoped to #dtCalDayList / #homeCalDayList only via e.currentTarget,
+      // the list the listener is actually attached to.
+      const listEl = e.currentTarget;
+      const isCalendarList = listEl && (listEl.id==='dtCalDayList' || listEl.id==='homeCalDayList');
+      if(isCalendarList){
+        const body = toggleHead.nextElementSibling;
+        const willOpen = !!(body && body.classList.contains('jo-card-body') && body.style.display==='none');
+        listEl.querySelectorAll('.jo-card-toggle').forEach(h=>{ if(h!==toggleHead) dtToggleCardBody(h, false); });
+        dtToggleCardBody(toggleHead, willOpen);
+      }else{
+        dtToggleCardBody(toggleHead);
+      }
+      return;
+    }
+    const row = e.target.closest('.dt-equip-row');
+    if(!row) return;
+    e.stopPropagation();
+    const ticket = dtLastTicketsById[row.dataset.ticketId];
+    const item = ticket && (ticket.equipmentList||[])[Number(row.dataset.equipIdx)];
+    dtOpenEquipDetailOverlay(ticket, item);
+  }
+  $('dtAdminList').addEventListener('click', dtHandleEquipRowClick);
+  $('dtTechList').addEventListener('click', dtHandleEquipRowClick);
+  // The Job Order detail overlay re-renders dtCardHtml() too (for the
+  // summary at the top), so its equipment "View details" rows need the
+  // same delegated handler — see dtOpenTicketOverlay, which also seeds
+  // dtLastTicketsById with the ticket being viewed.
+  $('dtTicketOverlay').addEventListener('click', dtHandleEquipRowClick);
+  // The header row (job order no., customer, date, status) always stays
+  // visible so a technician can scan the whole list at a glance; everything
+  // below it — address, equipment, remarks, requirements — sits inside a
+  // collapsed "jo-card-body" that opens on tap (see data-jo-toggle handling
+  // in dtHandleEquipRowClick). "Open Job Order" lives in the header itself
+  // (right side, next to the status pill) rather than below the collapsible
+  // body, so it's reachable without expanding the card. hideOpenBtn lets the
+  // ticket-detail overlay reuse this same header for its own summary without
+  // showing a redundant "Open Job Order" button for the ticket it's already
+  // showing. extraBodyHtml (used by the technician's list — see
+  // dtStepperHtml) is inserted at the very top of the body, above the rest
+  // of the ticket's details.
+  function dtCardHtml(r, forAdmin, extraBodyHtml, hideOpenBtn){
+    const detailBody =
+      (extraBodyHtml || '')+
+      (r.siteAddress ? '<div class="leave-comment"><b>Site Address</b>'+escapeHtml(r.siteAddress)+'</div>' : '')+
+      (forAdmin && r.reportAllowedWorkerNames && r.reportAllowedWorkerNames.length ? '<div class="leave-comment"><b>Can Create Service Report</b>'+escapeHtml(r.reportAllowedWorkerNames.join(', '))+'</div>' : '')+
+      (r.contactName ? '<div class="leave-comment"><b>Contact at Site</b>'+escapeHtml(r.contactName)+(r.contactNo?(' · '+escapeHtml(r.contactNo)):'')+'</div>' : '')+
+      dtEquipmentSummaryBlock(r)+
+      (r.remarks ? '<div class="leave-comment"><b>Special Instructions</b>'+escapeHtml(r.remarks)+'</div>' : '')+
+      '<div class="leave-comment"><b>Requirements</b>'+dtReqSummary(r)+'</div>'+
+      (forAdmin ? '<div class="leave-comment"><b>Created by</b>'+escapeHtml(r.createdBy||'Admin')+'</div>' : '');
+    return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
+        '<div>'+
+          '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
+          '<div class="u-status">'+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+'</div>'+
+        '</div>'+
+        '<div class="jo-card-head-actions">'+
+          (hideOpenBtn ? '' : '<button type="button" class="jo-open-btn" data-jo-open="'+escapeHtml(r.id)+'">Open Job Order</button>')+
+          dtStatusPill(r)+'<span class="jo-caret">▾</span>'+
+        '</div>'+
+      '</div>'+
+      '<div class="jo-card-body" style="display:none;">'+detailBody+'</div>';
+  }
+  // ---------- Technician list: progressive step tracker ----------
+  // Shown at the top of each expanded job order card in "My Job Order" (not
+  // on admin's list) so a technician can see at a glance where a ticket
+  // stands and exactly what to do next, without reading through the full
+  // detail block below it. Stage is derived from the same acknowledgedBy /
+  // completedBy / status fields the action buttons already use — "Expired"
+  // is deliberately NOT one of the stages: it's a date-based warning (see
+  // dtEffectiveStatus) that can appear at any stage before Closed, not a
+  // step the ticket passes through.
+  function dtStepperHtml(r){
+    const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
+    const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
+    const completed = r.status==='completed';
+    const closed = r.status==='closed';
+    const waitingOnOthers = doneBySelf && !completed;
+    let stage = 0;
+    if(closed) stage = 3;
+    else if(completed) stage = 2;
+    else if(ack) stage = 1;
+    const steps = ['Open','Acknowledged','Completed','Closed'];
+    const stepsHtml = steps.map((label,i)=>{
+      const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
+      return '<div class="jo-step '+state+'">'+
+          '<span class="jo-step-line"></span>'+
+          '<span class="jo-step-dot">'+(i<stage ? '✓' : (i+1))+'</span>'+
+          '<span class="jo-step-label">'+label+'</span>'+
+        '</div>';
+    }).join('');
+    let nextText;
+    if(closed) nextText = 'Fully closed — no further action needed.';
+    else if(completed) nextText = 'File the Service Report for this ticket, then open it below and run Close Job Order.';
+    else if(waitingOnOthers) nextText = 'Recorded — waiting for the other assigned technician(s) to mark it completed.';
+    else if(ack) nextText = 'You are on site. Tap Mark Completed once your visit here is done — that just closes out the fieldwork step, not that everything went perfectly; Close Job Order still lets you flag anything that wasn\'t finished.';
+    else nextText = 'New assignment. Tap Acknowledge to accept this job order.';
+    const expiredWarn = dtEffectiveStatus(r)==='expired'
+      ? '<div class="jo-stepper-warn">⚠ Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
+      : '';
+    return '<div class="jo-stepper">'+expiredWarn+
+      '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
+      '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
+    '</div>';
+  }
+  // Best-effort write-back: called after a Service Report tied to one
+  // equipment line item is saved, so the ticket's progress ("38 of 100
+  // reported") reflects it. Never blocks or fails the report save itself —
+  // if it can't reach the cloud right now, the ticket just catches up
+  // whenever it's next viewed online.
+  async function dtMarkEquipmentReported(ticketId, equipId, srNo){
+    if(!ticketId || !equipId) return;
+    if(!(await ensureCloud())) return;
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec || !rec.equipmentList) return;
+      const idx = rec.equipmentList.findIndex(it=> it.id===equipId);
+      if(idx<0 || rec.equipmentList[idx].reportSrNo===srNo) return;
+      const equipmentList = rec.equipmentList.slice();
+      equipmentList[idx] = Object.assign({}, equipmentList[idx], { reportSrNo: srNo });
+      const merged = Object.assign({}, rec, { equipmentList });
+      const { error } = await db.from('dispatch_tickets').update({ data: merged }).eq('id', ticketId);
+      if(error) throw error;
+    }catch(e){ console.error('mark equipment reported failed', describeCloudError(e)); }
+  }
+  // Same idea as dtMarkEquipmentReported, but for a Service Report that was
+  // only saved as a draft. Lets the "From Job Order" picker show "Draft
+  // Saved" on that equipment instead of leaving it looking untouched, which
+  // is what let technicians file a second report for the same unit.
+  async function dtMarkEquipmentDraft(ticketId, equipId, srNo){
+    if(!ticketId || !equipId) return;
+    if(!(await ensureCloud())) return;
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec || !rec.equipmentList) return;
+      const idx = rec.equipmentList.findIndex(it=> it.id===equipId);
+      // Never downgrade an item that's already fully reported, and skip the
+      // write if it's already flagged with this exact draft.
+      if(idx<0 || rec.equipmentList[idx].reportSrNo || rec.equipmentList[idx].draftSrNo===srNo) return;
+      const equipmentList = rec.equipmentList.slice();
+      equipmentList[idx] = Object.assign({}, equipmentList[idx], { draftSrNo: srNo });
+      const merged = Object.assign({}, rec, { equipmentList });
+      const { error } = await db.from('dispatch_tickets').update({ data: merged }).eq('id', ticketId);
+      if(error) throw error;
+    }catch(e){ console.error('mark equipment draft failed', describeCloudError(e)); }
+  }
+
+  let dtAdminFilter = 'open';
+  async function dtRenderAdminList(){
+    const list = $('dtAdminList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = await dtListAll();
+    const items = dtAdminFilter==='all' ? all : all.filter(r=> dtEffectiveStatus(r)===dtAdminFilter);
+    dtLastTicketsById = {};
+    items.forEach(r=> dtLastTicketsById[r.id] = r);
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No '+(dtAdminFilter==='all'?'':dtAdminFilter+' ')+'dispatch tickets.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      card.innerHTML = dtCardHtml(r, true);
+      list.appendChild(card);
+    });
+  }
+  document.querySelectorAll('#dtAdminFilterRow button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#dtAdminFilterRow button').forEach(b=> b.classList.remove('active'));
+      btn.classList.add('active');
+      dtAdminFilter = btn.dataset.filter;
+      dtRenderAdminList();
+    });
+  });
+  function dtShowAdminTab(which){
+    $('dtTabNew').classList.toggle('active', which==='new');
+    $('dtTabAll').classList.toggle('active', which==='all');
+    $('dtTabCalendar').classList.toggle('active', which==='calendar');
+    $('dtNewCard').style.display = which==='new' ? '' : 'none';
+    $('dtAllCard').style.display = which==='all' ? '' : 'none';
+    $('dtCalendarCard').style.display = which==='calendar' ? '' : 'none';
+    if(which==='new') dtResetForm();
+    else if(which==='calendar') dtRenderCalendarTab();
+    else dtRenderAdminList();
+  }
+  $('dtTabNew').addEventListener('click', ()=> dtShowAdminTab('new'));
+  $('dtTabAll').addEventListener('click', ()=> dtShowAdminTab('all'));
+  $('dtTabCalendar').addEventListener('click', ()=> dtShowAdminTab('calendar'));
+
+  // Which of the two technician-list tabs is showing — 'active' (open,
+  // acknowledged, completed, expired: anything still needing attention) or
+  // 'closed' (fully finalized tickets, kept out of the way by default).
+  // Module-level so dtRenderTechList (re-run after every action) remembers
+  // which tab the technician was on.
+  let dtTechListTab = 'active';
+  function dtSetTechListTab(tab){
+    dtTechListTab = tab;
+    if($('dtTechTabActive')) $('dtTechTabActive').classList.toggle('active', tab==='active');
+    if($('dtTechTabClosed')) $('dtTechTabClosed').classList.toggle('active', tab==='closed');
+    dtRenderTechList();
+  }
+  if($('dtTechTabActive')) $('dtTechTabActive').addEventListener('click', ()=> dtSetTechListTab('active'));
+  if($('dtTechTabClosed')) $('dtTechTabClosed').addEventListener('click', ()=> dtSetTechListTab('closed'));
+  // No more status tabs — every job order assigned to the technician is
+  // always shown. This just orders the list so the ones needing action sit
+  // above ones that don't: unacknowledged first, then acknowledged/in
+  // progress, then completed, then closed last; ties broken by soonest
+  // scheduled date.
+  function dtSortTechTickets(items){
+    function priority(r){
+      const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
+      const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
+      if(r.status==='closed') return 4;
+      if(r.status==='completed') return 3;
+      if(doneBySelf) return 2; // acknowledged + done own part, waiting on others
+      if(ack) return 1;
+      return 0; // not yet acknowledged — most urgent
+    }
+    return items.slice().sort((a,b)=>{
+      const pa = priority(a), pb = priority(b);
+      if(pa!==pb) return pa-pb;
+      return (a.date||'').localeCompare(b.date||'');
+    });
+  }
+  async function dtRenderTechList(){
+    const list = $('dtTechList');
+    if(!currentUser || currentUser.role==='admin') return;
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    // Fresh render = every card starts collapsed again, so the toolbar
+    // button's label always starts back at "Expand all" too.
+    if($('dtTechExpandAllBtn')){
+      $('dtTechExpandAllBtn').dataset.mode = 'expand';
+      $('dtTechExpandAllBtn').textContent = '⤢ Expand all';
+    }
+    const mine = await dtListForWorker(currentUser.id);
+    dtRenderBackToSrBanner(mine);
+    const sorted = dtSortTechTickets(mine);
+    // Closed tickets live in their own tab now, so each tab only ever
+    // renders the subset it owns — a technician's day-to-day list isn't
+    // padded out with tickets that need nothing further from them. The
+    // Closed tab additionally re-sorts newest-first (by closedAt when
+    // available, falling back to the scheduled date), since "recent on top"
+    // is what's useful once a ticket is done — dtSortTechTickets's own
+    // ascending date tie-break is aimed at the Active tab's upcoming work.
+    const items = dtTechListTab==='closed'
+      ? sorted.filter(r=> r.status==='closed').sort((a,b)=>
+          (b.closedAt||b.date||'').localeCompare(a.closedAt||a.date||''))
+      : sorted.filter(r=> r.status!=='closed');
+    dtLastTicketsById = {};
+    items.forEach(r=> dtLastTicketsById[r.id] = r);
+    if(items.length===0){
+      list.innerHTML = dtTechListTab==='closed'
+        ? '<div class="empty-state">📁 No closed job orders yet</div>'
+        : '<div class="empty-state">📭 No active job orders<br><span class="dt-jo-empty-sub">Job orders your admin assigns to you will show up here.</span></div>';
+      return;
+    }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      card.dataset.ticketId = r.id;
+      // Buttons now follow THIS technician's own progress, not the whole
+      // ticket's status. Previously a shared ticket could sit at "open" so a
+      // colleague who had already acknowledged never got a Complete button,
+      // and one person's Complete closed it for everyone.
+      const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
+      const alreadyDone = r.status==='completed' || (r.completedBy||[]).includes(currentUser.id);
+      card.innerHTML = dtCardHtml(r, false, dtStepperHtml(r)) +
+        '<div class="user-card-actions">'+
+          (!alreadyAck && !alreadyDone ? '<button data-act="enroute" class="secondary">On My Way</button>' : '')+
+          (!alreadyAck && !alreadyDone ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
+          (alreadyAck && !alreadyDone ? '<button data-act="complete" class="primary">Mark Completed</button>' : '')+
+          (alreadyDone && r.status!=='completed' ? '<span class="u-status">Waiting for the other assigned technician(s)</span>' : '')+
+        '</div>';
+      const enRouteBtn = card.querySelector('[data-act="enroute"]');
+      if(enRouteBtn) enRouteBtn.addEventListener('click', ()=> dtMarkEnRoute(r.id, enRouteBtn));
+      const ackBtn = card.querySelector('[data-act="ack"]');
+      if(ackBtn) ackBtn.addEventListener('click', ()=> dtAcknowledge(r.id));
+      const compBtn = card.querySelector('[data-act="complete"]');
+      if(compBtn) compBtn.addEventListener('click', ()=> dtComplete(r.id));
+      list.appendChild(card);
+    });
+  }
+  // Shows/updates the "Back to Service Report" banner when the technician
+  // was sent here specifically to acknowledge one ticket (srAckReturnTicketId
+  // — set by srGoAcknowledgeTicket). Its wording adapts once that ticket
+  // actually becomes acknowledged, but the button works either way: going
+  // back just re-shows the Job Order picker, which re-checks acknowledgment
+  // for itself.
+  function dtRenderBackToSrBanner(mine){
+    const banner = $('dtBackToSrBanner');
+    if(!banner) return;
+    if(!srAckReturnTicketId){ banner.style.display = 'none'; return; }
+    const ticket = (mine||[]).find(t=> t.id===srAckReturnTicketId);
+    const jo = ticket ? ticket.jobOrderNo : 'That Job Order';
+    const nowAck = ticket && currentUser && (ticket.acknowledgedBy||[]).includes(currentUser.id);
+    $('dtBackToSrText').textContent = nowAck
+      ? ('✅ '+jo+' is acknowledged — you can head back now.')
+      : ('📋 Acknowledge '+jo+' below to unlock its Service Report.');
+    banner.style.display = '';
+  }
+  if($('dtBackToSrBtn')){
+    $('dtBackToSrBtn').addEventListener('click', ()=>{
+      srAckReturnTicketId = null;
+      $('dtBackToSrBanner').style.display = 'none';
+      showServiceReport();
+    });
+  }
+  if($('dtBackToSrDismissBtn')){
+    $('dtBackToSrDismissBtn').addEventListener('click', ()=>{
+      srAckReturnTicketId = null;
+      $('dtBackToSrBanner').style.display = 'none';
+    });
+  }
+  // Every render rebuilds #dtTechList with all cards collapsed, so this
+  // button always starts back at "Expand all" too — its own state never
+  // needs to survive a re-render, only reflect what's on screen right now.
+  if($('dtTechExpandAllBtn')){
+    $('dtTechExpandAllBtn').addEventListener('click', function(){
+      const expand = this.dataset.mode === 'expand';
+      $$('#dtTechList .jo-card-toggle', document).forEach(head=> dtToggleCardBody(head, expand));
+      this.dataset.mode = expand ? 'collapse' : 'expand';
+      this.textContent = expand ? '⤡ Collapse all' : '⤢ Expand all';
+    });
+  }
+  // Fetches only the ticket being changed, checks the current user is actually
+  // assigned to it, and writes a targeted update instead of upserting the whole
+  // record — so two technicians acting at once no longer overwrite each other.
+  async function dtGetTicket(id){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('dispatch_tickets').select('data').eq('id', id).maybeSingle();
+        if(error) throw error;
+        return data ? dtNormalizeTicket(data.data) : null;
+      }catch(e){ console.error('dispatch fetch failed', describeCloudError(e)); return null; }
+    }
+    try{
+      const item = await window.storage.get('dispatch:'+id, false);
+      return item ? dtNormalizeTicket(JSON.parse(item.value)) : null;
+    }catch(e){ return null; }
+  }
+  async function dtApplyWorkerChange(id, mutate){
+    if(!currentUser){ toast('Please sign in again'); return false; }
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    try{
+      const rec = await dtGetTicket(id);
+      if(!rec){ toast('Ticket not found'); return false; }
+      const assigned = rec.assignedWorkerIds || [];
+      if(currentUser.role!=='admin' && !assigned.includes(currentUser.id)){
+        toast('This ticket is not assigned to you');
+        return false;
+      }
+      const change = mutate(rec, assigned);
+      if(!change) return false;
+      const merged = Object.assign({}, rec, change);
+      const { data: rows, error } = await db.from('dispatch_tickets')
+        .update({ status: merged.status, data: merged }).eq('id', id).select('id');
+      if(error) throw error;
+      if(!rows || !rows.length){ toast('This ticket changed elsewhere — refreshing'); return false; }
+      return true;
+    }catch(e){
+      console.error('dispatch update failed', describeCloudError(e));
+      toast('Could not save — please try again');
+      return false;
+    }
+  }
+  // "On My Way" — a lightweight, optional signal a technician can send
+  // before acknowledging, purely so the customer's home screen shows a
+  // real "en route" state instead of jumping straight from "assigned" to
+  // "in progress". Deliberately does NOT touch the ticket itself (no
+  // acknowledgedBy change, no status change) — only the linked
+  // service_request, via srMarkEnRouteByTicket's RPC. Safe to tap more
+  // than once; the RPC just no-ops if the request has already moved past
+  // 'dispatched'.
+  async function dtMarkEnRoute(id, btn){
+    if(typeof srMarkEnRouteByTicket !== 'function') return;
+    if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
+    const ok = await srMarkEnRouteByTicket(id);
+    if(btn){ btn.disabled = false; btn.textContent = 'On My Way'; }
+    toast(ok ? "Customer notified you're on the way" : 'Could not send — check your connection');
+  }
+  async function dtAcknowledge(id){
+    let becameAcknowledged = false;
+    const ok = await dtApplyWorkerChange(id, (rec, assigned)=>{
+      const ackBy = new Set(rec.acknowledgedBy||[]);
+      if(ackBy.has(currentUser.id)){ toast('You already acknowledged this'); return null; }
+      ackBy.add(currentUser.id);
+      const list = Array.from(ackBy);
+      // A multi-worker ticket is only fully "acknowledged" once everyone
+      // assigned has confirmed; before that it stays open so the remaining
+      // technicians still see the Acknowledge button.
+      const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
+      if(everyone) becameAcknowledged = true;
+      return { acknowledgedBy: list, status: everyone ? 'acknowledged' : (rec.status||'open') };
+    });
+    if(ok) toast('Acknowledged');
+    // If this ticket originated from a customer's service request, move
+    // that request from 'dispatched' to 'in_progress' now that work has
+    // actually started — see srMarkInProgressByTicket in
+    // service-requests.js and the homepage progress tracker it feeds.
+    if(ok && becameAcknowledged && typeof srMarkInProgressByTicket === 'function'){
+      srMarkInProgressByTicket(id).catch(()=>{});
+    }
+    dtRenderTechList();
+  }
+  async function dtComplete(id){
+    let becameCompleted = false;
+    const ok = await dtApplyWorkerChange(id, (rec, assigned)=>{
+      if(rec.status==='completed'){ toast('Already completed'); return null; }
+      const ackBy = rec.acknowledgedBy || [];
+      if(currentUser.role!=='admin' && !ackBy.includes(currentUser.id)){
+        toast('Acknowledge this ticket first'); return null;
+      }
+      const done = new Set(rec.completedBy||[]);
+      done.add(currentUser.id);
+      const list = Array.from(done);
+      const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
+      if(!everyone){
+        toast('Recorded — waiting for the other assigned technician(s)');
+        return { completedBy: list, status: rec.status||'acknowledged' };
+      }
+      becameCompleted = true;
+      return { completedBy: list, status: 'completed', completedAt: new Date().toISOString() };
+    });
+    if(ok) toast('Marked completed');
+    // If this ticket originated from a customer's service request (see
+    // service-requests.js srConvertToTicket/srLinkTicket), flip that
+    // request to 'completed' too so the admin's requests queue doesn't
+    // show a job that's actually done as still open. Best-effort — a
+    // ticket not linked to any request is the normal case and this is a
+    // silent no-op then.
+    if(ok && becameCompleted && typeof srMarkCompletedByTicket === 'function'){
+      srMarkCompletedByTicket(id).catch(()=>{});
+    }
+    dtRenderTechList();
+  }
+
+  // ---------- Job Order detail overlay: close-with-exceptions + inquiry thread ----------
+  // Opened via the "Open Job Order" button on any ticket card (admin or
+  // technician). Two things live here that don't belong on the card list
+  // itself: the "Close Job Order" flow (report any scope that wasn't done,
+  // then close), and a small message thread scoped to this one ticket.
+  let dtOverlayTicket = null;
+  let dtMsgChannel = null;
+
+  function dtCloseTicketOverlay(){
+    const overlay = $('dtTicketOverlay');
+    if(overlay) overlay.classList.remove('open');
+    if(dtMsgChannel && db){ try{ db.removeChannel(dtMsgChannel); }catch(e){} }
+    dtMsgChannel = null;
+    dtOverlayTicket = null;
+  }
+
+  function dtRenderCloseChecklist(rec){
+    const items = rec.equipmentList || [];
+    if(items.length===0) return '<div class="empty-state">No equipment on this ticket.</div>';
+    return items.map((it,i)=>{
+      const reportStatus = it.reportSrNo
+        ? ('Reported ('+escapeHtml(it.reportSrNo)+')')
+        : (it.draftSrNo ? 'Draft saved' : 'Not started');
+      const checked = it.notDone ? 'checked' : '';
+      return '<div class="dt-close-row" data-idx="'+i+'">'+
+        '<div style="font-weight:600;">'+escapeHtml(dtEquipSummaryLine(it))+'</div>'+
+        '<div class="u-status" style="margin-bottom:6px;">'+reportStatus+'</div>'+
+        '<label class="chk"><input type="checkbox" class="dt-notdone-chk" '+checked+'><span>Scope not completed on this unit</span></label>'+
+        '<textarea class="dt-notdone-reason" rows="2" placeholder="Reason (e.g. parts needed, access denied, unit not operational)" '+
+          'style="display:'+(it.notDone ? '' : 'none')+';">'+escapeHtml(it.notDoneReason||'')+'</textarea>'+
+      '</div>';
+    }).join('');
+  }
+
+  function dtCanActOnTicket(rec){
+    if(!currentUser) return false;
+    if(currentUser.role==='admin') return true;
+    return (rec.assignedWorkerIds||[]).includes(currentUser.id);
+  }
+
+  async function dtOpenTicketOverlay(ticketId){
+    const rec = await dtGetTicket(ticketId);
+    if(!rec){ toast('Ticket not found'); return; }
+    dtOverlayTicket = rec;
+    dtLastTicketsById[rec.id] = rec; // so equipment "View details" rows inside this overlay resolve
+    const canAct = dtCanActOnTicket(rec);
+    const alreadyClosed = dtEffectiveStatus(rec)==='closed';
+
+    $('dtTicketTitle').textContent = rec.jobOrderNo+' — '+rec.custName;
+    $('dtTicketStatusWrap').innerHTML = dtStatusPill(rec);
+    $('dtTicketSummary').innerHTML = dtCardHtml(rec, currentUser && currentUser.role==='admin', undefined, true);
+    // This overlay IS the detail view, so its embedded card summary should
+    // show fully expanded, not the collapsed list-row state — force the
+    // body open and drop the tap-to-toggle affordance from its header.
+    const joSummaryBody = $('dtTicketSummary').querySelector('.jo-card-body');
+    if(joSummaryBody) joSummaryBody.style.display = '';
+    const joSummaryHead = $('dtTicketSummary').querySelector('.jo-card-toggle');
+    if(joSummaryHead){ joSummaryHead.classList.remove('jo-card-toggle'); joSummaryHead.removeAttribute('data-jo-toggle'); }
+
+    if(alreadyClosed){
+      const closedNote = '<div class="leave-comment"><b>Closed</b>'+
+        escapeHtml(rec.closedBy||'—')+' · '+(rec.closedAt ? leaveFmtDate(rec.closedAt.slice(0,10)) : '')+
+        (rec.closeRemarks ? ('<br>'+escapeHtml(rec.closeRemarks)) : '')+'</div>';
+      $('dtCloseSection').innerHTML = closedNote + '<div style="margin-top:10px;">'+dtRenderCloseChecklist(rec)+'</div>';
+      $$('#dtCloseSection .dt-notdone-chk, #dtCloseSection .dt-close-row textarea', document).forEach(el=> el.disabled = true);
+      $('dtCloseSubmitBtn').style.display = 'none';
+    }else if(canAct){
+      // Closing used to be reachable straight from "Open", skipping
+      // Acknowledge and Mark Completed entirely — which made those two
+      // steps optional in practice even though the step tracker implies
+      // they're required. For a technician (not admin), Close Job Order now
+      // only unlocks once every assigned technician has marked their part
+      // completed (rec.status==='completed'); until then this section
+      // explains which of the two steps to do next instead of showing the
+      // close form. Admin keeps the ability to close directly as an
+      // override (e.g. a tech is unavailable to complete the app flow).
+      const readyToClose = rec.status==='completed';
+      if(!readyToClose && currentUser.role!=='admin'){
+        const ack = (rec.acknowledgedBy||[]).includes(currentUser.id);
+        const doneSelf = (rec.completedBy||[]).includes(currentUser.id);
+        const nextStep = !ack
+          ? 'Acknowledge this job order'
+          : (!doneSelf ? 'Mark Completed once your visit here is done' : 'Wait for the other assigned technician(s) to mark it completed');
+        $('dtCloseSection').innerHTML =
+          '<div class="empty-state">🔒 '+nextStep+' — from My Job Order — before you can close this ticket.'+
+          '<br><span class="dt-jo-empty-sub">Marking it completed doesn\'t mean everything went perfectly — you can still note anything that wasn\'t finished right here when you close it.</span></div>';
+        $('dtCloseSubmitBtn').style.display = 'none';
+      }else{
+        $('dtCloseSection').innerHTML =
+          '<div id="dtCloseChecklist">'+dtRenderCloseChecklist(rec)+'</div>'+
+          '<div class="field" style="margin-top:8px;"><label>Overall Remarks (optional)</label>'+
+          '<textarea id="dtCloseRemarks" rows="2" placeholder="Anything else worth noting before closing"></textarea></div>';
+        $('dtCloseSubmitBtn').style.display = '';
+      }
+    }else{
+      $('dtCloseSection').innerHTML = '<div class="empty-state">Only the assigned technician(s) or admin can close this ticket.</div>';
+      $('dtCloseSubmitBtn').style.display = 'none';
+    }
+
+    $('dtTicketOverlay').classList.add('open');
+    await dtRefreshMessages();
+    if(dtMsgChannel && db){ try{ db.removeChannel(dtMsgChannel); }catch(e){} dtMsgChannel = null; }
+    if(await ensureCloud()){
+      dtMsgChannel = db.channel('dt-messages-'+ticketId)
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'dispatch_ticket_messages', filter:'ticket_id=eq.'+ticketId }, ()=> dtRefreshMessages())
+        .subscribe();
+    }
+  }
+  $('closeDtTicketOverlay').addEventListener('click', dtCloseTicketOverlay);
+  $('dtTicketOverlay').addEventListener('click', (e)=>{ if(e.target.id==='dtTicketOverlay') dtCloseTicketOverlay(); });
+
+  // Toggle a unit's reason textarea as its "not completed" checkbox changes.
+  $('dtCloseSection').addEventListener('change', (e)=>{
+    if(!e.target.classList.contains('dt-notdone-chk')) return;
+    const row = e.target.closest('.dt-close-row');
+    const ta = row && row.querySelector('.dt-notdone-reason');
+    if(ta) ta.style.display = e.target.checked ? '' : 'none';
+  });
+
+  async function dtCloseTicket(ticketId, equipmentList, remarks){
+    if(!currentUser){ toast('Please sign in again'); return false; }
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec){ toast('Ticket not found'); return false; }
+      if(!dtCanActOnTicket(rec)){ toast('This ticket is not assigned to you'); return false; }
+      if(dtEffectiveStatus(rec)==='closed'){ toast('Already closed'); return false; }
+      // Mirrors the gating in dtOpenTicketOverlay — checked here too so a
+      // technician can't reach Close Job Order some other way (e.g. a stale
+      // overlay left open from before they closed a different browser tab)
+      // and skip Acknowledge/Mark Completed. Admin keeps its override.
+      if(currentUser.role!=='admin' && rec.status!=='completed'){
+        toast('Acknowledge and Mark Completed this job order first'); return false;
+      }
+      const merged = Object.assign({}, rec, {
+        equipmentList,
+        status: 'closed',
+        closedBy: currentUser.name,
+        closedById: currentUser.id,
+        closedAt: new Date().toISOString(),
+        closeRemarks: remarks || ''
+      });
+      const { data: rows, error } = await db.from('dispatch_tickets')
+        .update({ status: 'closed', data: merged }).eq('id', ticketId).select('id');
+      if(error) throw error;
+      if(!rows || !rows.length){ toast('This ticket changed elsewhere — refreshing'); return false; }
+      return true;
+    }catch(e){
+      console.error('close ticket failed', describeCloudError(e));
+      toast('Could not close — please try again');
+      return false;
+    }
+  }
+  $('dtCloseSubmitBtn').addEventListener('click', async ()=>{
+    if(!dtOverlayTicket) return;
+    const rows = $$('#dtCloseChecklist .dt-close-row');
+    const equipmentList = (dtOverlayTicket.equipmentList||[]).slice();
+    for(let i=0; i<rows.length; i++){
+      const chk = rows[i].querySelector('.dt-notdone-chk');
+      const reasonEl = rows[i].querySelector('.dt-notdone-reason');
+      const notDone = chk.checked;
+      const reason = reasonEl.value.trim();
+      if(notDone && !reason){
+        toast('Add a reason for every unit marked "not completed"');
+        reasonEl.focus();
+        return;
+      }
+      equipmentList[i] = Object.assign({}, equipmentList[i], { notDone, notDoneReason: notDone ? reason : '' });
+    }
+    const exceptionCount = equipmentList.filter(it=>it.notDone).length;
+    const confirmMsg = exceptionCount>0
+      ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed?')
+      : 'Close this Job Order? This marks it as fully done.';
+    if(!confirm(confirmMsg)) return;
+    const remarksEl = $('dtCloseRemarks');
+    const remarks = remarksEl ? remarksEl.value.trim() : '';
+    $('dtCloseSubmitBtn').disabled = true;
+    const ok = await dtCloseTicket(dtOverlayTicket.id, equipmentList, remarks);
+    $('dtCloseSubmitBtn').disabled = false;
+    if(ok){
+      toast('Job Order closed');
+      dtCloseTicketOverlay();
+      if(currentUser && currentUser.role==='admin') dtRenderAdminList(); else dtRenderTechList();
+    }
+  });
+
+  // ---- Job Order inquiry thread ----
+  async function dtLoadMessages(ticketId){
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('dispatch_ticket_messages').select('*')
+        .eq('ticket_id', ticketId).order('created_at', {ascending:true});
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('load JO messages failed', describeCloudError(e)); return []; }
+  }
+  function dtRenderMessages(msgs){
+    const list = $('dtMsgList');
+    if(!list) return;
+    if(msgs.length===0){
+      list.innerHTML = '<div class="empty-state">No messages yet — ask a question about this Job Order here.</div>';
+      return;
+    }
+    list.innerHTML = msgs.map(m=>{
+      const mine = currentUser && m.sender_id===currentUser.id;
+      const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+      return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
+        '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+      '</div>';
+    }).join('');
+    list.scrollTop = list.scrollHeight;
+  }
+  // ---- Unread tracking (device-local — no "read receipts" table exists,
+  // so this is per-device, not synced across a technician's other phones) ----
+  function dtLastReadKey(ticketId){ return 'jo-lastread:'+(currentUser?currentUser.id:'')+':'+ticketId; }
+  function dtGetLastRead(ticketId){ try{ return localStorage.getItem(dtLastReadKey(ticketId)); }catch(e){ return null; } }
+  function dtMarkRead(ticketId, iso){ try{ localStorage.setItem(dtLastReadKey(ticketId), iso); }catch(e){} }
+
+  async function dtRefreshMessages(){
+    if(!dtOverlayTicket) return;
+    const msgs = await dtLoadMessages(dtOverlayTicket.id);
+    dtRenderMessages(msgs);
+    // Viewing the thread marks everything in it read up to this point.
+    if(msgs.length>0){
+      dtMarkRead(dtOverlayTicket.id, msgs[msgs.length-1].created_at);
+      refreshUnreadMsgBadges();
+    }
+  }
+  // Dashboard tile: how many messages across ALL of my tickets arrived after
+  // I last opened that specific ticket's thread, from someone other than me.
+  // One query covers every ticket — RLS on dispatch_ticket_messages already
+  // limits what comes back to messages on tickets I'm actually assigned to
+  // (or every ticket, for admin), so no per-ticket filtering is needed here.
+  async function dtCountUnreadMessages(){
+    if(!currentUser) return 0;
+    if(!(await ensureCloud())) return 0;
+    try{
+      const { data, error } = await db.from('dispatch_ticket_messages').select('ticket_id,sender_id,created_at');
+      if(error) throw error;
+      let count = 0;
+      (data||[]).forEach(m=>{
+        if(m.sender_id===currentUser.id) return;
+        const lastRead = dtGetLastRead(m.ticket_id);
+        if(!lastRead || new Date(m.created_at) > new Date(lastRead)) count++;
+      });
+      return count;
+    }catch(e){ console.error('unread JO message count failed', describeCloudError(e)); return 0; }
+  }
+  async function dtSendMessage(){
+    if(!dtOverlayTicket) return;
+    const input = $('dtMsgInput');
+    const body = input.value.trim();
+    if(!body) return;
+    if(!currentUser){ toast('Please sign in again'); return; }
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return; }
+    $('dtMsgSendBtn').disabled = true;
+    try{
+      const { error } = await db.from('dispatch_ticket_messages').insert({
+        ticket_id: dtOverlayTicket.id, sender_id: currentUser.id,
+        sender_name: currentUser.name, sender_role: currentUser.role,
+        body
+      });
+      if(error) throw error;
+      input.value = '';
+      await dtRefreshMessages();
+    }catch(e){ console.error('send JO message failed', describeCloudError(e)); toast('Could not send — try again'); }
+    $('dtMsgSendBtn').disabled = false;
+  }
+  $('dtMsgSendBtn').addEventListener('click', dtSendMessage);
+  $('dtMsgInput').addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); dtSendMessage(); }
+  });
+
+  // ---------- Schedule Calendar ----------
+  // One rendering engine, used both by the Dispatch > Calendar tab (full
+  // size, admin-only) and the compact widget on the admin dashboard. Each
+  // caller passes its own id "prefix" (e.g. "dtCal" or "homeCal") matching
+  // <prefix>Grid / <prefix>MonthLabel / <prefix>DayDetailHead / <prefix>DayList
+  // in the HTML, plus the ticket list to draw from — the dashboard widget
+  // reuses the tickets renderHomeOverview() already fetched rather than
+  // querying again. State (which month/day is showing) is kept per prefix
+  // so the two widgets can be on different months at once.
+  const DT_CAL_STATUS_COLORS = { open:'#B9791F', acknowledged:'#1F7A50', completed:'#154D34', expired:'#B3402D', closed:'#8A9089' };
+  const dtCalStates = {};
+  function dtCalState(prefix){
+    if(!dtCalStates[prefix]){
+      const n = new Date();
+      dtCalStates[prefix] = { year: n.getFullYear(), month: n.getMonth(), selected: todayISO() };
+    }
+    return dtCalStates[prefix];
+  }
+  function dtCalPrev(prefix){ const s=dtCalState(prefix); s.month--; if(s.month<0){ s.month=11; s.year--; } }
+  function dtCalNext(prefix){ const s=dtCalState(prefix); s.month++; if(s.month>11){ s.month=0; s.year++; } }
+  function dtCalGoToday(prefix){ const s=dtCalState(prefix); const n=new Date(); s.year=n.getFullYear(); s.month=n.getMonth(); s.selected=todayISO(); }
+  function dtBuildTicketsByDate(tickets){
+    const map = {};
+    (tickets||[]).forEach(r=>{ if(r.date) (map[r.date] = map[r.date] || []).push(r); });
+    return map;
+  }
+  function dtCalRenderDayList(prefix, tickets){
+    const state = dtCalState(prefix);
+    const headEl = $(prefix+'DayDetailHead');
+    const listEl = $(prefix+'DayList');
+    if(!listEl) return;
+    const items = dtBuildTicketsByDate(tickets)[state.selected] || [];
+    if(headEl) headEl.textContent = leaveFmtDate(state.selected) + (items.length ? ' \u00b7 '+items.length+' scheduled' : '');
+    items.forEach(r=> dtLastTicketsById[r.id] = r);
+    if(items.length===0){ listEl.innerHTML = '<div class="empty-state">No dispatch tickets scheduled this day.</div>'; return; }
+    listEl.innerHTML = '';
+    items.forEach(r=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      card.innerHTML = dtCardHtml(r, true);
+      listEl.appendChild(card);
+    });
+  }
+  function dtCalRender(prefix, tickets){
+    const grid = $(prefix+'Grid');
+    if(!grid) return;
+    const state = dtCalState(prefix);
+    const byDate = dtBuildTicketsByDate(tickets);
+    const y = state.year, m = state.month;
+    const labelEl = $(prefix+'MonthLabel');
+    if(labelEl) labelEl.textContent = new Date(y,m,1).toLocaleDateString('en-US',{month:'long', year:'numeric'});
+    const firstDow = new Date(y,m,1).getDay();
+    const daysInMonth = new Date(y,m+1,0).getDate();
+    const daysInPrevMonth = new Date(y,m,0).getDate();
+    const today = todayISO();
+    const cells = [];
+    for(let i=0;i<firstDow;i++) cells.push({ label: daysInPrevMonth-firstDow+1+i, otherMonth:true });
+    for(let d=1; d<=daysInMonth; d++){
+      cells.push({ dateStr: y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'), label:d, otherMonth:false });
+    }
+    let trailing = 1;
+    while(cells.length % 7 !== 0){ cells.push({ label: trailing++, otherMonth:true }); }
+    grid.innerHTML = cells.map(c=>{
+      if(c.otherMonth) return '<div class="cal-cell cal-cell-muted"><span class="cal-cell-num">'+c.label+'</span></div>';
+      const dayTickets = byDate[c.dateStr] || [];
+      const statuses = {};
+      dayTickets.forEach(t=> statuses[dtEffectiveStatus(t)] = true);
+      const dots = Object.keys(statuses).slice(0,4)
+        .map(s=> '<span class="cal-dot" style="background:'+(DT_CAL_STATUS_COLORS[s]||'#8A9089')+'"></span>').join('');
+      const isToday = c.dateStr===today, isSelected = c.dateStr===state.selected;
+      return '<button type="button" class="cal-cell'+(isToday?' cal-cell-today':'')+(isSelected?' cal-cell-selected':'')+'" data-date="'+c.dateStr+'">'+
+        '<span class="cal-cell-num">'+c.label+'</span>'+
+        (dayTickets.length ? '<span class="cal-cell-dots">'+dots+'</span><span class="cal-cell-count">'+dayTickets.length+'</span>' : '')+
+        '</button>';
+    }).join('');
+    grid.querySelectorAll('.cal-cell[data-date]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        state.selected = btn.dataset.date;
+        dtCalRender(prefix, tickets);
+      });
+    });
+    dtCalRenderDayList(prefix, tickets);
+  }
+  $('dtCalPrevBtn').addEventListener('click', ()=>{ dtCalPrev('dtCal'); dtCalRender('dtCal', dtCalTicketsCache); });
+  $('dtCalNextBtn').addEventListener('click', ()=>{ dtCalNext('dtCal'); dtCalRender('dtCal', dtCalTicketsCache); });
+  $('dtCalTodayBtn').addEventListener('click', ()=>{ dtCalGoToday('dtCal'); dtCalRender('dtCal', dtCalTicketsCache); });
+  $('dtCalDayList').addEventListener('click', dtHandleEquipRowClick);
+  let dtCalTicketsCache = [];
+  async function dtRenderCalendarTab(){
+    $('dtCalGrid').innerHTML = '<div class="empty-state">Loading…</div>';
+    dtCalTicketsCache = await dtListAll();
+    dtCalRender('dtCal', dtCalTicketsCache);
+  }
+
+  async function showDispatchView(initialTab){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('dispatchView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle(
+      (currentUser && currentUser.role==='admin') ? 'Service Dispatch Ticket' : 'My Job Order',
+      'Assign and track field jobs'
+    );
+    window.scrollTo({top:0});
+    // customersCache (used by the customer combo below) is only populated by
+    // whichever screen happens to load it first — Service Report's startup
+    // sequence, or Manage Customers. If Dispatch is the first screen opened
+    // after logging in, that cache is still empty here, so the customer
+    // suggestion list had nothing to show — looked exactly like a missing
+    // dropdown. Loading it here too means it's always populated by the time
+    // the combo is set up, regardless of what screen was visited first.
+    if(!customersCache || customersCache.length===0) await loadCustomers();
+    dtSetupCustomerCombo();
+    if(currentUser && currentUser.role==='admin'){
+      $('dispatchTechArea').style.display = 'none';
+      $('dispatchAdminArea').style.display = '';
+      dtShowAdminTab(initialTab || 'new');
+    }else{
+      $('dispatchAdminArea').style.display = 'none';
+      $('dispatchTechArea').style.display = '';
+      await dtRenderTechList();
+    }
+  }
+
+  async function showLeaveView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('leaveView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Leave Form', 'File and track leave requests');
+    window.scrollTo({top:0});
+    if(currentUser && currentUser.role==='admin'){
+      $('leaveTechArea').style.display = 'none';
+      $('leaveAdminArea').style.display = '';
+      leaveRenderAdminList();
+    }else{
+      $('leaveTechArea').style.display = '';
+      $('leaveAdminArea').style.display = 'none';
+      leaveShowTab('new');
+    }
+  }
+
+
+// ---------- Service Requests (table: service_requests) ----------
+// Customer-filed, admin-only review — see supabase/migrations/
+// 20260910_02_service_requests.sql for the schema/RLS. Technicians never
+// see this data at all (no RLS policy grants them a row).
+//
+// This module owns:
+//   - reading/writing service_requests rows
+//   - the admin sidebar badge + Overview stat card counts, kept live via
+//     a Supabase realtime channel (same pattern as tracker.js's
+//     technician-locations-admin channel: realtime push, with a polling
+//     fallback so a dropped socket doesn't leave the count stale forever)
+//   - converting a request into a dispatch ticket (hands off to dispatch.js)
+//
+// The admin queue/detail screen itself (full list, filters, per-request
+// actions) is a separate, not-yet-built UI — this module exposes the data
+// functions it will call (srListAll, srSetStatus, srConvertToTicket) plus
+// the live counts already wired into the sidebar/overview.
+
+  // Statuses where ADMIN is the one who needs to act next (badge/overview
+  // count). Deliberately excludes fee_proposed/schedule_proposed — those
+  // are waiting on the customer's response, not admin's — but a cancelled
+  // request admin hasn't yet acknowledged still counts, via the separate
+  // .or() clause in srCountOpen below.
+  const SR_OPEN_STATUSES = ['new', 'acknowledged', 'fee_accepted', 'schedule_confirmed'];
+
+  function srRowToRequest(row){
+    return {
+      id: row.id,
+      customerId: row.customer_id,
+      equipmentId: row.equipment_id,
+      description: row.description,
+      urgency: row.urgency,
+      requestedDate: row.requested_date,
+      status: row.status,
+      adminNotes: row.admin_notes,
+      linkedDispatchTicketId: row.linked_dispatch_ticket_id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      feeAmount: row.fee_amount,
+      feeStatus: row.fee_status,
+      settlementMethod: row.settlement_method,
+      settlementNote: row.settlement_note,
+      proposedScheduleDate: row.proposed_schedule_date,
+      proposedScheduleTime: row.proposed_schedule_time,
+      scheduleConfirmedAt: row.schedule_confirmed_at,
+      cancelReason: row.cancel_reason,
+      cancelAcknowledged: row.cancel_acknowledged,
+      accessGatePass: row.access_gate_pass,
+      accessLadder: row.access_ladder,
+      accessWorkPermit: row.access_work_permit,
+      accessOthers: row.access_others,
+      accessOthersDetail: row.access_others_detail,
+      contactPerson: row.contact_person,
+      contactNumber: row.contact_number,
+      // 'customer' (default, submitted via the request form) or
+      // 'technician_flag' (created off an issue noted on a completed visit —
+      // see 20260912_01_service_requests_origin.sql). Drives the home
+      // screen's D1 vs D2/D3 "needs attention" distinction.
+      origin: row.origin || 'customer',
+      flaggedIssueSummary: row.flagged_issue_summary || ''
+    };
+  }
+
+  // Every service request, newest first. Admin-only — RLS returns nothing
+  // (not an error) for any other role, so callers don't need to gate this
+  // themselves, though the UI still should to avoid a pointless query.
+  async function srListAll(){
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('service_requests')
+        .select('*').order('created_at', { ascending:false });
+      if(error) throw error;
+      return (data||[]).map(srRowToRequest);
+    }catch(e){ console.error('load service requests failed', describeCloudError(e)); return []; }
+  }
+
+  // Just the count of open (new/acknowledged) requests — used by the badge
+  // and Overview stat card, which don't need the full rows.
+  async function srCountOpen(){
+    if(!(await ensureCloud())) return 0;
+    try{
+      const statusList = SR_OPEN_STATUSES.map(s=>'status.eq.'+s).join(',');
+      const { count, error } = await db.from('service_requests')
+        .select('id', { count:'exact', head:true })
+        .or(statusList+',and(status.eq.cancelled,cancel_acknowledged.eq.false)');
+      if(error) throw error;
+      return count || 0;
+    }catch(e){ console.error('count service requests failed', describeCloudError(e)); return 0; }
+  }
+
+  async function srSetStatus(id, status, adminNotes){
+    if(!(await ensureCloud())) return false;
+    try{
+      const patch = { status };
+      if(adminNotes !== undefined) patch.admin_notes = adminNotes;
+      const { error } = await db.from('service_requests').update(patch).eq('id', id);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('update service request failed', describeCloudError(e)); return false; }
+  }
+
+  // Customer-side insert — called from customer-portal.js's "New Request"
+  // form. Returns the inserted row (with its generated id) or null.
+  async function srCreate({ customerId, equipmentId, description, urgency, requestedDate,
+    accessGatePass, accessLadder, accessWorkPermit, accessOthers, accessOthersDetail,
+    contactPerson, contactNumber }){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.from('service_requests').insert({
+        customer_id: customerId,
+        equipment_id: equipmentId || null,
+        description: description,
+        urgency: urgency || 'normal',
+        requested_date: requestedDate || null,
+        access_gate_pass: !!accessGatePass,
+        access_ladder: !!accessLadder,
+        access_work_permit: !!accessWorkPermit,
+        access_others: !!accessOthers,
+        access_others_detail: accessOthersDetail || null,
+        contact_person: contactPerson || null,
+        contact_number: contactNumber || null
+      }).select().single();
+      if(error) throw error;
+      return srRowToRequest(data);
+    }catch(e){ console.error('create service request failed', describeCloudError(e)); return null; }
+  }
+
+  // Admin-side insert for an issue noted on a completed visit — this is the
+  // stand-in for the not-yet-built service-report "issue flag" field (see
+  // 20260912_01_service_requests_origin.sql). Creates a request that starts
+  // life as D2 ("quotation being prepared") on the customer's home screen;
+  // proposing a fee against it (srProposeFee, already built) is what moves
+  // it to D3 ("quotation ready").
+  async function srFlagIssue({ customerId, equipmentId, issueSummary }){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.from('service_requests').insert({
+        customer_id: customerId,
+        equipment_id: equipmentId || null,
+        description: issueSummary,
+        urgency: 'normal',
+        origin: 'technician_flag',
+        flagged_issue_summary: issueSummary
+      }).select().single();
+      if(error) throw error;
+      return srRowToRequest(data);
+    }catch(e){ console.error('flag issue failed', describeCloudError(e)); return null; }
+  }
+
+  // Customer-side history — explicit customer_id filter (RLS would already
+  // scope a customer session's rows to just their own even without it, the
+  // same way srListAll() would, but filtering here too keeps the query
+  // self-explanatory and matches loadCustomerPortalData()'s convention in
+  // customer-portal.js of always filtering by customer_id explicitly).
+  async function srListForCustomer(customerId){
+    if(!customerId || !(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('service_requests')
+        .select('*').eq('customer_id', customerId).order('created_at', { ascending:false });
+      if(error) throw error;
+      return (data||[]).map(srRowToRequest);
+    }catch(e){ console.error('load my service requests failed', describeCloudError(e)); return []; }
+  }
+
+  // Hands off to dispatch.js: opens the (existing, admin-filled) Create
+  // Dispatch Ticket form with this request's customer/equipment/notes
+  // pre-filled, so admin reviews and finishes the ticket themselves the
+  // same way any other ticket gets created — this does not insert a
+  // dispatch_tickets row on its own. dtPrefillCreateFromServiceRequest is
+  // expected to live in dispatch.js; kept as a thin call here so this
+  // module doesn't need to know the create form's field ids.
+  // Once the resulting ticket is actually saved, dispatch.js's own
+  // completion/creation path is responsible for calling srLinkTicket()
+  // below to stamp linked_dispatch_ticket_id and flip the status forward.
+  // Opens the pre-filled Create Dispatch Ticket form — does NOT change the
+  // request's status itself. In the v2 workflow this is only reachable
+  // once a request has already reached 'schedule_confirmed' (see the admin
+  // actions in srOpenDetail), so there's nothing to advance here; the
+  // actual 'dispatched' transition happens in srLinkTicket below, once the
+  // ticket is actually saved. (v1 used to set 'acknowledged' here, back
+  // when this was reachable straight from 'new'/'acknowledged' — that
+  // would now be a backward step in the wider v2 state machine, so it's
+  // gone.)
+  async function srConvertToTicket(request){
+    if(typeof dtPrefillCreateFromServiceRequest !== 'function'){
+      console.error('dispatch.js dtPrefillCreateFromServiceRequest not found');
+      return false;
+    }
+    await dtPrefillCreateFromServiceRequest(request);
+    return true;
+  }
+
+  // Called by dispatch.js once a ticket created from a request is actually
+  // saved — stamps the link and moves the request to 'dispatched'.
+  async function srLinkTicket(requestId, ticketId){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests')
+        .update({ linked_dispatch_ticket_id: ticketId, status: 'dispatched' })
+        .eq('id', requestId);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('link service request to ticket failed', describeCloudError(e)); return false; }
+  }
+
+  // Called by dispatch.js when a linked ticket is marked completed, so the
+  // originating request reflects that without admin having to update both.
+  // Goes through the sync_service_request_ticket_status() RPC since this
+  // can run inside a TECHNICIAN's session (dtComplete is technicians' own
+  // normal flow, not admin-only) — technicians have no UPDATE grant on
+  // service_requests at all, only admin does.
+  async function srMarkCompletedByTicket(ticketId){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'completed' });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('complete-sync service request failed', describeCloudError(e)); return false; }
+  }
+
+  // Called by dispatch.js's new "On my way" button — a technician can tap
+  // this before they tap Acknowledge, purely to give the customer a real
+  // middle state between "assigned" and "work started". Only ever moves a
+  // request that's still at 'dispatched'; harmless (silent no-op) to tap
+  // again or after the request has already moved on.
+  async function srMarkEnRouteByTicket(ticketId){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'en_route' });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('en-route-sync service request failed', describeCloudError(e)); return false; }
+  }
+
+  // Called by dispatch.js's dtAcknowledge() when the assigned technician(s)
+  // acknowledge a ticket that came from a service request — moves the
+  // request from 'dispatched' (or 'en_route', if they'd already tapped
+  // "On my way") to 'in_progress' so the customer's homepage progress
+  // tracker reflects that work has actually started. Same RPC
+  // reasoning as srMarkCompletedByTicket above.
+  async function srMarkInProgressByTicket(ticketId){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'in_progress' });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('in-progress-sync service request failed', describeCloudError(e)); return false; }
+  }
+
+  // ---------- Fee workflow (admin proposes, customer responds) ----------
+  async function srProposeFee(id, amount){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests')
+        .update({ fee_amount: amount, fee_status: 'proposed', status: 'fee_proposed' })
+        .eq('id', id);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('propose fee failed', describeCloudError(e)); return false; }
+  }
+  // Admin can also acknowledge with no fee — moves straight past the fee
+  // step to 'acknowledged', ready for scheduling.
+  async function srAcknowledgeNoFee(id){
+    return srSetStatus(id, 'acknowledged');
+  }
+  // Goes through the customer_respond_service_request_fee() RPC — see
+  // 20260911_02_service_requests_customer_actions.sql for why: there is no
+  // customer UPDATE policy on service_requests, deliberately, since this
+  // project's grants are wide open and a blanket policy would let a
+  // customer session rewrite any column on their own row, not just these.
+  async function srRespondFee(id, accept, settlementMethod, settlementNote){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('customer_respond_service_request_fee', {
+        p_request_id: id, p_accept: accept,
+        p_settlement_method: settlementMethod||null, p_settlement_note: settlementNote||null
+      });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('respond to fee failed', describeCloudError(e)); return false; }
+  }
+
+  // ---------- Schedule workflow (admin proposes, customer confirms) ----------
+  async function srProposeSchedule(id, date, time){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests')
+        .update({ proposed_schedule_date: date, proposed_schedule_time: time||null, status: 'schedule_proposed' })
+        .eq('id', id);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('propose schedule failed', describeCloudError(e)); return false; }
+  }
+  // Goes through the customer_confirm_service_request_schedule() RPC — see
+  // srRespondFee's comment above for why (no customer UPDATE policy).
+  async function srConfirmSchedule(id){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('customer_confirm_service_request_schedule', { p_request_id: id });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('confirm schedule failed', describeCloudError(e)); return false; }
+  }
+
+  // ---------- Cancellation ----------
+  // Customer cancels with a required reason — allowed any time before the
+  // job is actually dispatched. Status flips to 'cancelled' immediately;
+  // cancel_acknowledged tracks whether admin has since seen it (a soft
+  // "seen" flag, not an approval gate — the customer's cancellation takes
+  // effect right away).
+  // Goes through the customer_cancel_service_request() RPC — see
+  // srRespondFee's comment above for why (no customer UPDATE policy).
+  async function srCancel(id, reason){
+    if(!reason || !reason.trim()) return false;
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('customer_cancel_service_request', { p_request_id: id, p_reason: reason.trim() });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('cancel request failed', describeCloudError(e)); return false; }
+  }
+  async function srAcknowledgeCancel(id){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests').update({ cancel_acknowledged: true }).eq('id', id);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('acknowledge cancel failed', describeCloudError(e)); return false; }
+  }
+  function srIsCancellable(status){
+    return ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed'].includes(status);
+  }
+
+  // ---------- Per-request messaging ----------
+  // Mirrors dispatch.js's dtLoadMessages/dtSendMessage pattern exactly,
+  // scoped to service_request_messages/request_id instead of
+  // dispatch_ticket_messages/ticket_id.
+  async function srLoadMessages(requestId){
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('service_request_messages')
+        .select('*').eq('request_id', requestId).order('created_at', {ascending:true});
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('load request messages failed', describeCloudError(e)); return []; }
+  }
+  function srRenderMessages(msgs){
+    const list = $('srMsgList');
+    if(!list) return;
+    if(msgs.length===0){
+      list.innerHTML = '<div class="empty-state">No messages yet — ask a question about this request here.</div>';
+      return;
+    }
+    list.innerHTML = msgs.map(m=>{
+      const mine = currentUser && m.sender_id===currentUser.id;
+      const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+      return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
+        '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+      '</div>';
+    }).join('');
+    list.scrollTop = list.scrollHeight;
+  }
+  async function srRefreshMessages(){
+    if(!srOverlayRequest) return;
+    const msgs = await srLoadMessages(srOverlayRequest.id);
+    srRenderMessages(msgs);
+  }
+  async function srSendMessage(){
+    if(!srOverlayRequest || !currentUser) return;
+    const input = $('srMsgInput');
+    const body = input.value.trim();
+    if(!body) return;
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return; }
+    $('srMsgSendBtn').disabled = true;
+    try{
+      const { error } = await db.from('service_request_messages').insert({
+        request_id: srOverlayRequest.id, sender_id: currentUser.id,
+        sender_name: currentUser.name, sender_role: currentUser.role==='admin' ? 'admin' : 'customer',
+        body
+      });
+      if(error) throw error;
+      input.value = '';
+      await srRefreshMessages();
+    }catch(e){ console.error('send request message failed', describeCloudError(e)); toast('Could not send — try again'); }
+    $('srMsgSendBtn').disabled = false;
+  }
+  $('srMsgSendBtn').addEventListener('click', srSendMessage);
+  $('srMsgInput').addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); srSendMessage(); }
+  });
+
+  // ---------- Shared detail overlay (both roles) ----------
+  let srOverlayRequest = null;
+  let srOverlayMsgChannel = null;
+
+  function srCloseDetail(){
+    const overlay = $('srDetailOverlay');
+    if(overlay) overlay.classList.remove('open');
+    if(srOverlayMsgChannel && db){ try{ db.removeChannel(srOverlayMsgChannel); }catch(e){} }
+    srOverlayMsgChannel = null;
+    srOverlayRequest = null;
+  }
+  $('closeSrDetailOverlay').addEventListener('click', srCloseDetail);
+
+  function srAccessSummary(r){
+    const items = [];
+    if(r.accessGatePass) items.push('Gate Pass');
+    if(r.accessLadder) items.push('Ladder');
+    if(r.accessWorkPermit) items.push('Work Permit');
+    if(r.accessOthers) items.push('Others'+(r.accessOthersDetail ? (' ('+escapeHtml(r.accessOthersDetail)+')') : ''));
+    return items.length ? items.join(', ') : '—';
+  }
+  // Customer-side equipment label — uses cpEquipment (customer-portal.js),
+  // which is only ever populated for whichever customer is currently
+  // logged into the portal, so this path is only correct when the caller
+  // IS that customer. Admin needs srFetchEquipmentLabelForAdmin below
+  // instead, since cpEquipment means nothing in an admin session (it's
+  // either empty or, worse, whichever customer an admin session happened
+  // to view last via some other screen).
+  function srEquipmentLabel(r){
+    if(!r.equipmentId) return 'General inquiry';
+    const eq = (typeof cpEquipment !== 'undefined' ? cpEquipment : []).find(e=> String(e.id)===String(r.equipmentId));
+    return eq ? equipDisplayName(eq) : 'Selected equipment';
+  }
+  // Admin-side equipment label — looks the unit up directly by id rather
+  // than relying on any pre-loaded cache, since admin has no reason to
+  // have this particular customer's equipment already loaded when opening
+  // a request from the queue.
+  async function srFetchEquipmentLabelForAdmin(equipmentId){
+    if(!equipmentId) return 'General inquiry';
+    if(!(await ensureCloud())) return 'Selected equipment';
+    try{
+      const { data, error } = await db.from('customer_equipment').select('*').eq('id', equipmentId).maybeSingle();
+      if(error) throw error;
+      return data ? equipDisplayName(equipRowToObj(data)) : 'Selected equipment (no longer listed)';
+    }catch(e){ console.error('load equipment label failed', describeCloudError(e)); return 'Selected equipment'; }
+  }
+  function srBuildSummaryHtml(r, custName, equipmentLabel){
+    const rows = [];
+    if(custName) rows.push(['Customer', escapeHtml(custName)]);
+    rows.push(['Equipment', escapeHtml(equipmentLabel)]);
+    rows.push(['Description', escapeHtml(r.description||'')]);
+    rows.push(['Urgency', r.urgency==='urgent' ? '<span class="status-pill status-sr-urgent">Urgent</span>' : 'Normal']);
+    if(r.requestedDate) rows.push(['Preferred date', fmtDate(r.requestedDate)]);
+    rows.push(['Access requirements', srAccessSummary(r)]);
+    if(r.contactPerson || r.contactNumber) rows.push(['Site contact', escapeHtml((r.contactPerson||'—')+' · '+(r.contactNumber||'—'))]);
+    rows.push(['Filed', fmtDateTime(r.createdAt)]);
+    return rows.map(([label,val])=> '<div style="margin-bottom:8px;"><div class="cp-row-sub" style="text-transform:uppercase; font-size:10.5px; letter-spacing:.3px;">'+label+'</div><div style="font-size:13.5px;">'+val+'</div></div>').join('');
+  }
+  // Horizontal step tracker — same idea for both roles, driven off status.
+  // Only shown for statuses that are actually on this line (dispatched ->
+  // in_progress -> completed). 'cancelled' is deliberately NOT included:
+  // steps.indexOf('cancelled') would be -1, which used to make every
+  // segment render as "not done" — an all-gray bar indistinguishable from
+  // a request that simply hasn't started yet, instead of communicating
+  // that it was cancelled. The status pill above this section already
+  // conveys "Cancelled" clearly, so cancelled requests just skip this
+  // widget entirely rather than showing a misleading one.
+  function srProgressStepsHtml(status){
+    const steps = ['dispatched','en_route','in_progress','completed'];
+    const labels = {dispatched:'Dispatched', en_route:'On The Way', in_progress:'In Progress', completed:'Completed'};
+    if(!steps.includes(status)) return '';
+    const currentIdx = steps.indexOf(status);
+    return '<div style="display:flex; align-items:center; gap:6px;">'+steps.map((s,i)=>{
+      const done = currentIdx>=0 && i<=currentIdx;
+      return '<div style="flex:1; text-align:center;">'+
+        '<div style="height:6px; border-radius:3px; background:'+(done?'var(--green)':'var(--border)')+'; margin-bottom:4px;"></div>'+
+        '<div style="font-size:10.5px; color:'+(done?'var(--green-dark)':'var(--text-muted)')+';">'+labels[s]+'</div>'+
+      '</div>';
+    }).join('')+'</div>';
+  }
+
+  async function srOpenDetail(request, custNameHint){
+    const overlay = $('srDetailOverlay');
+    if(!overlay) return;
+    srOverlayRequest = request;
+    const isAdmin = currentUser && currentUser.role==='admin';
+    const custName = custNameHint || (isAdmin && typeof customersCache!=='undefined'
+      ? (customersCache.find(c=>String(c.id)===String(request.customerId))||{}).name : null);
+    // Equipment label needs a different source per role — see the two
+    // functions' own comments for why cpEquipment can't be reused for admin.
+    const equipmentLabel = isAdmin
+      ? await srFetchEquipmentLabelForAdmin(request.equipmentId)
+      : srEquipmentLabel(request);
+
+    $('srDetailTitle').textContent = 'Service Request';
+    $('srDetailStatusWrap').innerHTML = '<span class="status-pill '+ (typeof cpReqStatusPillClass==='function' ? cpReqStatusPillClass(request) : '') +'">'+escapeHtml(srStatusLabel(request.status))+'</span>';
+    $('srDetailSummary').innerHTML = srBuildSummaryHtml(request, custName, equipmentLabel);
+
+    // Fee section
+    const feeEl = $('srDetailFeeSection');
+    if(request.feeStatus){
+      let html = '<div class="field"><label>Fee</label><div style="font-size:14px; font-weight:700;">₱'+Number(request.feeAmount||0).toLocaleString()+'</div>';
+      html += '<div class="cp-row-sub">Status: '+escapeHtml(request.feeStatus)+'</div>';
+      if(request.settlementMethod) html += '<div class="cp-row-sub">Settlement: '+escapeHtml(request.settlementMethod)+(request.settlementNote?(' — '+escapeHtml(request.settlementNote)):'')+'</div>';
+      // Gated on status too, not just feeStatus — feeStatus stays
+      // 'proposed' forever if the customer cancels before responding
+      // (srCancel only touches status/cancel_reason), so checking
+      // feeStatus alone would let them "accept" a fee on an already-
+      // cancelled request.
+      if(!isAdmin && request.status==='fee_proposed' && request.feeStatus==='proposed'){
+        html += '<div style="margin-top:10px;">'+
+          '<select id="srFeeSettlementMethod" style="margin-bottom:8px;"><option value="Cash">Cash on-site</option><option value="Bank Transfer">Bank Transfer</option><option value="GCash">GCash</option><option value="Other">Other</option></select>'+
+          '<textarea id="srFeeSettlementNote" rows="2" placeholder="Optional note (e.g. reference number)"></textarea>'+
+          '<div style="display:flex; gap:8px; margin-top:8px;">'+
+            '<button type="button" class="btn btn-primary" id="srFeeAcceptBtn" style="flex:1;">Accept Fee</button>'+
+            '<button type="button" class="btn btn-secondary" id="srFeeDeclineBtn" style="flex:1;">Decline</button>'+
+          '</div></div>';
+      }
+      html += '</div>';
+      feeEl.innerHTML = html; feeEl.style.display = '';
+      if(!isAdmin && request.status==='fee_proposed' && request.feeStatus==='proposed'){
+        $('srFeeAcceptBtn').onclick = async ()=>{
+          const ok = await srRespondFee(request.id, true, $('srFeeSettlementMethod').value, $('srFeeSettlementNote').value.trim());
+          if(ok){
+            toast('Fee accepted'); srCloseDetail();
+            if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId);
+            if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId);
+          } else toast('Could not send response — try again');
+        };
+        $('srFeeDeclineBtn').onclick = async ()=>{
+          const ok = await srRespondFee(request.id, false);
+          if(ok){
+            toast('Fee declined — message us if you\'d like to discuss'); srCloseDetail();
+            if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId);
+            if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId);
+          } else toast('Could not send response — try again');
+        };
+      }
+    } else { feeEl.style.display = 'none'; feeEl.innerHTML=''; }
+
+    // Schedule section
+    const schedEl = $('srDetailScheduleSection');
+    if(request.proposedScheduleDate){
+      let html = '<div class="field"><label>Proposed Schedule</label><div style="font-size:14px; font-weight:700;">'+fmtDate(request.proposedScheduleDate)+(request.proposedScheduleTime?(' · '+escapeHtml(request.proposedScheduleTime)):'')+'</div>';
+      if(request.status==='schedule_confirmed' || request.scheduleConfirmedAt){
+        html += '<div class="cp-row-sub">Confirmed by customer'+(request.scheduleConfirmedAt?(' · '+fmtDateTime(request.scheduleConfirmedAt)):'')+'</div>';
+      } else if(!isAdmin && request.status==='schedule_proposed'){
+        html += '<button type="button" class="btn btn-primary" id="srScheduleConfirmBtn" style="margin-top:8px; width:100%;">Confirm This Schedule</button>';
+      }
+      html += '</div>';
+      schedEl.innerHTML = html; schedEl.style.display = '';
+      if(!isAdmin && request.status==='schedule_proposed'){
+        $('srScheduleConfirmBtn').onclick = async ()=>{
+          const ok = await srConfirmSchedule(request.id);
+          if(ok){
+            toast('Schedule confirmed'); srCloseDetail();
+            if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId);
+            if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId);
+          } else toast('Could not confirm — try again');
+        };
+      }
+    } else { schedEl.style.display = 'none'; schedEl.innerHTML=''; }
+
+    // Progress tracker
+    const progEl = $('srDetailProgressSection');
+    const progHtml = srProgressStepsHtml(request.status);
+    if(progHtml){ progEl.innerHTML = '<div class="field"><label>Progress</label>'+progHtml+'</div>'; progEl.style.display=''; }
+    else { progEl.style.display='none'; progEl.innerHTML=''; }
+
+    // Admin actions
+    const adminEl = $('srDetailAdminActions');
+    if(isAdmin){
+      // Build just the action content first (no wrapper yet) so we can
+      // tell afterward whether any status branch actually matched. Some
+      // statuses (dispatched, in_progress, completed, or an already-
+      // acknowledged cancellation) have nothing for admin to do here —
+      // for those we hide the whole section instead of showing an empty
+      // "Admin Actions" box with no buttons in it.
+      let actionsHtml = '';
+      // Fee proposal — also reachable after a decline (status stays
+      // 'fee_proposed' with fee_status:'declined' — see srRespondFee),
+      // otherwise a declined fee would be a dead end with no way for
+      // admin to come back with a different amount (or waive it outright).
+      if(request.status==='new' || (request.status==='fee_proposed' && request.feeStatus==='declined')){
+        actionsHtml += '<div style="margin-bottom:10px;">'+
+          '<input type="number" id="srAdminFeeAmount" placeholder="Fee amount (₱)" style="margin-bottom:6px;">'+
+          '<button type="button" class="btn btn-primary" id="srAdminProposeFeeBtn" style="width:100%; margin-bottom:6px;">'+(request.feeStatus==='declined' ? 'Propose New Fee' : 'Propose Fee')+'</button>'+
+          '<button type="button" class="btn btn-secondary" id="srAdminNoFeeBtn" style="width:100%;">No Fee — Acknowledge</button>'+
+        '</div>';
+      }
+      if(request.status==='acknowledged' || request.status==='fee_accepted'){
+        actionsHtml += '<div style="margin-bottom:10px;">'+
+          '<input type="date" id="srAdminScheduleDate" style="margin-bottom:6px;">'+
+          '<input type="text" id="srAdminScheduleTime" placeholder="Time (e.g. 2:00 PM)" style="margin-bottom:6px;">'+
+          '<button type="button" class="btn btn-primary" id="srAdminProposeScheduleBtn" style="width:100%;">Propose Schedule</button>'+
+        '</div>';
+      }
+      if(request.status==='schedule_confirmed'){
+        actionsHtml += '<button type="button" class="btn btn-primary" id="srAdminConvertBtn" style="width:100%; margin-bottom:6px;">Create Dispatch Ticket</button>';
+      }
+      if(request.status==='cancelled' && !request.cancelAcknowledged){
+        actionsHtml += '<div class="cp-row-sub" style="margin-bottom:6px;">Cancellation reason: '+escapeHtml(request.cancelReason||'—')+'</div>'+
+          '<button type="button" class="btn btn-secondary" id="srAdminAckCancelBtn" style="width:100%;">Acknowledge Cancellation</button>';
+      }
+      if(actionsHtml){
+        adminEl.innerHTML = '<div class="field"><label>Admin Actions</label>'+actionsHtml+'</div>';
+        adminEl.style.display = '';
+      } else {
+        adminEl.innerHTML = '';
+        adminEl.style.display = 'none';
+      }
+      if($('srAdminProposeFeeBtn')) $('srAdminProposeFeeBtn').onclick = async ()=>{
+        const amt = parseFloat($('srAdminFeeAmount').value);
+        if(!amt || amt<=0){ toast('Enter a valid fee amount'); return; }
+        const ok = await srProposeFee(request.id, amt);
+        if(ok){ toast('Fee proposed'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
+      };
+      if($('srAdminNoFeeBtn')) $('srAdminNoFeeBtn').onclick = async ()=>{
+        const ok = await srAcknowledgeNoFee(request.id);
+        if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
+      };
+      if($('srAdminProposeScheduleBtn')) $('srAdminProposeScheduleBtn').onclick = async ()=>{
+        const date = $('srAdminScheduleDate').value;
+        if(!date){ toast('Pick a date'); return; }
+        const ok = await srProposeSchedule(request.id, date, $('srAdminScheduleTime').value.trim());
+        if(ok){ toast('Schedule proposed'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
+      };
+      if($('srAdminConvertBtn')) $('srAdminConvertBtn').onclick = async ()=>{
+        srCloseDetail();
+        await srConvertToTicket(request);
+      };
+      if($('srAdminAckCancelBtn')) $('srAdminAckCancelBtn').onclick = async ()=>{
+        const ok = await srAcknowledgeCancel(request.id);
+        if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
+      };
+    } else { adminEl.style.display = 'none'; adminEl.innerHTML = ''; }
+
+    // Cancel (customer-only)
+    const cancelEl = $('srDetailCancelSection');
+    if(!isAdmin && srIsCancellable(request.status)){
+      cancelEl.innerHTML = '<div class="field"><label>Change of mind?</label>'+
+        '<textarea id="srCancelReason" rows="2" placeholder="Let us know why you\'re cancelling…"></textarea>'+
+        '<button type="button" class="btn btn-secondary" id="srCancelSubmitBtn" style="width:100%; margin-top:8px; color:var(--danger);">Cancel This Request</button>'+
+      '</div>';
+      cancelEl.style.display = '';
+      $('srCancelSubmitBtn').onclick = async ()=>{
+        const reason = $('srCancelReason').value.trim();
+        if(!reason){ toast('Please tell us why, so we can note it'); return; }
+        const ok = await srCancel(request.id, reason);
+        if(ok){ toast('Request cancelled'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId); }
+        else toast('Could not cancel — try again');
+      };
+    } else { cancelEl.style.display = 'none'; cancelEl.innerHTML = ''; }
+
+    // Messages
+    $('srMsgList').innerHTML = '<div class="empty-state">Loading…</div>';
+    await srRefreshMessages();
+    if(srOverlayMsgChannel && db){ try{ db.removeChannel(srOverlayMsgChannel); }catch(e){} }
+    if(db){
+      srOverlayMsgChannel = db.channel('sr-messages-'+request.id)
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'service_request_messages', filter:'request_id=eq.'+request.id }, ()=> srRefreshMessages())
+        .subscribe();
+    }
+
+    overlay.classList.add('open');
+  }
+
+  // ---------- Admin queue screen ----------
+  function srStatusLabel(status){
+    return { new:'New', acknowledged:'Acknowledged', fee_proposed:'Fee Proposed',
+      fee_accepted:'Fee Accepted', schedule_proposed:'Schedule Proposed',
+      schedule_confirmed:'Schedule Confirmed', dispatched:'Dispatched',
+      en_route:'On The Way', in_progress:'In Progress', completed:'Completed', cancelled:'Cancelled' }[status] || status;
+  }
+  function srRowHtml(r){
+    const cust = (typeof customersCache !== 'undefined' ? customersCache : []).find(c=> String(c.id)===String(r.customerId));
+    const custName = cust ? cust.name : ('Customer #'+r.customerId);
+    const urgentTag = r.urgency==='urgent' ? ' <span class="status-pill status-sr-urgent">Urgent</span>' : '';
+    // Dispatch-ticket creation is only offered once the customer has
+    // confirmed a proposed schedule (see the v2 workflow comment on
+    // srConvertToTicket above) — everything before that (proposing a fee,
+    // proposing a schedule, acknowledging a cancellation) lives inside the
+    // detail overlay instead of as a quick action here, since each of
+    // those needs its own input (an amount, a date) rather than a single
+    // tap.
+    const canConvert = r.status==='schedule_confirmed';
+    return (
+      '<div class="cp-row" style="align-items:flex-start;" data-req-id="'+r.id+'">'+
+        '<div class="cp-row-icon">🛠️</div>'+
+        '<div class="cp-row-body">'+
+          '<div class="cp-row-title">'+escapeHtml(custName)+urgentTag+'</div>'+
+          '<div class="cp-row-sub">'+escapeHtml(r.description||'')+'</div>'+
+          '<div class="cp-row-sub">'+escapeHtml(srStatusLabel(r.status))+' · '+escapeHtml(fmtDateTime(r.createdAt))+'</div>'+
+        '</div>'+
+        (canConvert ? '<button type="button" class="btn btn-secondary sr-convert-btn" data-req-id="'+r.id+'" style="margin-left:8px;">Create Ticket</button>' : '')+
+      '</div>'
+    );
+  }
+  async function srRenderQueueList(){
+    const list = $('srQueueList');
+    if(!list) return;
+    const rows = await srListAll();
+    if(rows.length===0){ list.innerHTML = '<div class="empty-state">No service requests yet.</div>'; return; }
+    list.innerHTML = rows.map(srRowHtml).join('');
+    $$('.cp-row', list).forEach(row=>{
+      row.style.cursor = 'pointer';
+      row.onclick = ()=>{
+        const req = rows.find(r=> String(r.id)===row.dataset.reqId);
+        if(req) srOpenDetail(req);
+      };
+    });
+    $$('.sr-convert-btn', list).forEach(btn=>{
+      btn.onclick = async (e)=>{
+        e.stopPropagation(); // don't also trigger the row's own click-to-open-detail
+        const req = rows.find(r=> String(r.id)===btn.dataset.reqId);
+        if(!req) return;
+        await srConvertToTicket(req);
+      };
+    });
+  }
+  $('srFlagToggleBtn').addEventListener('click', ()=>{
+    const body = $('srFlagFormBody');
+    const opening = body.style.display === 'none';
+    body.style.display = opening ? '' : 'none';
+    if(opening && typeof customersCache !== 'undefined'){
+      $('srFlagCustomer').innerHTML = '<option value="">Select customer…</option>' +
+        customersCache.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''))
+          .map(c=> '<option value="'+c.id+'">'+escapeHtml(c.name||'')+'</option>').join('');
+    }
+  });
+  $('srFlagCustomer').addEventListener('change', async function(){
+    const sel = $('srFlagEquipment');
+    sel.innerHTML = '<option value="">Not tied to a specific unit</option>';
+    const customerId = this.value;
+    if(!customerId || !(await ensureCloud())) return;
+    try{
+      const { data, error } = await db.from('customer_equipment').select('id, equip_type, equip_location').eq('customer_id', customerId);
+      if(error) throw error;
+      (data||[]).forEach(eq=>{
+        const label = [eq.equip_type, eq.equip_location].filter(Boolean).join(' — ') || ('Unit '+eq.id);
+        sel.innerHTML += '<option value="'+eq.id+'">'+escapeHtml(label)+'</option>';
+      });
+    }catch(e){ console.error('load equipment for flag form failed', describeCloudError(e)); }
+  });
+  $('srFlagSubmitBtn').addEventListener('click', async ()=>{
+    const customerId = $('srFlagCustomer').value;
+    const issueSummary = $('srFlagSummary').value.trim();
+    if(!customerId){ toast('Select a customer'); return; }
+    if(!issueSummary){ toast('Describe what was found'); return; }
+    $('srFlagSubmitBtn').disabled = true; $('srFlagSubmitBtn').textContent = 'Creating…';
+    const result = await srFlagIssue({ customerId, equipmentId: $('srFlagEquipment').value || null, issueSummary });
+    $('srFlagSubmitBtn').disabled = false; $('srFlagSubmitBtn').textContent = 'Create Flagged Request';
+    if(!result){ toast('Could not create — check your connection'); return; }
+    toast('Flagged request created — the customer will see it on their home screen');
+    $('srFlagSummary').value = '';
+    $('srFlagEquipment').innerHTML = '<option value="">Not tied to a specific unit</option>';
+    $('srFlagCustomer').value = '';
+    $('srFlagFormBody').style.display = 'none';
+    srRenderQueueList();
+  });
+
+  async function showServiceRequestsView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Service Requests', 'Customer-filed requests awaiting review');
+    window.scrollTo({top:0});
+    $('srQueueList').innerHTML = '<div class="empty-state">Loading…</div>';
+    // Customer names in the queue rows come from customersCache (customers.js)
+    // — make sure it's populated even if admin opened this screen straight
+    // from login without visiting Dispatch/Customers first.
+    if(typeof customersCache !== 'undefined' && customersCache.length===0 && typeof loadCustomers === 'function'){
+      await loadCustomers();
+    }
+    await srRenderQueueList();
+    // No separate realtime channel here — srAdminInit() (called from
+    // renderHomeOverview on every dashboard visit) already keeps one open
+    // on this same table for the badge/overview count. srRefreshAdminCounts
+    // re-renders the queue list too whenever this screen happens to be the
+    // one visible, so a second subscription isn't needed.
+  }
+  if($('sbNavServiceRequests')){
+    $('sbNavServiceRequests').addEventListener('click', ()=>{
+      if(typeof closeMainMenu === 'function') closeMainMenu();
+      if(typeof setSidebarActive === 'function') setSidebarActive('sbNavServiceRequests');
+      showServiceRequestsView();
+    });
+  }
+  // Overview stat card (renderHomeOverview, home.js) — same destination as
+  // the sidebar item above.
+  if($('ovServiceReqCard')){
+    $('ovServiceReqCard').addEventListener('click', ()=>{
+      if(typeof setSidebarActive === 'function') setSidebarActive('sbNavServiceRequests');
+      showServiceRequestsView();
+    });
+  }
+
+  // ---------- Live badge + Overview stat (admin dashboard) ----------
+  let srRealtimeChannel = null;
+  let srPollTimer = null;
+
+  async function srRefreshAdminCounts(){
+    if(!currentUser || currentUser.role !== 'admin') return;
+    const openCount = await srCountOpen();
+    // Sidebar badge (admin-only nav item — see index.html sbNavServiceRequests).
+    const badge = $('sbServiceRequestsBadge');
+    if(badge){
+      if(openCount > 0){ badge.textContent = openCount > 99 ? '99+' : String(openCount); badge.style.display = ''; }
+      else badge.style.display = 'none';
+    }
+    // Overview stat card on the admin homepage (renderHomeOverview, home.js)
+    // — only touch it if that card is actually on screen right now.
+    const statEl = $('ovServiceReqValue');
+    if(statEl){
+      statEl.textContent = String(openCount);
+      const subEl = $('ovServiceReqSub');
+      if(subEl) subEl.textContent = openCount===0 ? 'Nothing pending' : openCount+' awaiting review';
+    }
+    // If the queue screen itself is the one currently on-screen, refresh
+    // its list too — keeps a single realtime channel (opened once by
+    // srAdminInit below) covering both the badge/overview AND the queue,
+    // instead of each screen opening its own subscription to the same table.
+    const queueView = $('serviceRequestsView');
+    if(queueView && queueView.style.display !== 'none') srRenderQueueList();
+    return openCount;
+  }
+
+  // Called once when the admin dashboard is shown (renderHomeOverview in
+  // home.js). Cheap to call repeatedly — channel/poll are only set up once.
+  async function srAdminInit(){
+    if(!currentUser || currentUser.role !== 'admin') return 0;
+    const openCount = await srRefreshAdminCounts();
+    if(!srRealtimeChannel && db){
+      srRealtimeChannel = db.channel('service-requests-admin')
+        .on('postgres_changes', { event:'*', schema:'public', table:'service_requests' }, ()=> srRefreshAdminCounts())
+        .subscribe();
+    }
+    // Offline-safe fallback, same interval as tracker.js's location poll —
+    // catches anything missed if the realtime socket drops silently.
+    if(!srPollTimer) srPollTimer = setInterval(srRefreshAdminCounts, 20000);
+    return openCount || 0;
+  }
+
+  // Called on logout so a signed-out session doesn't keep an open realtime
+  // channel or background poll running (mirrors trackerAdminTeardown()).
+  function srAdminTeardown(){
+    if(srPollTimer){ clearInterval(srPollTimer); srPollTimer = null; }
+    if(srRealtimeChannel && db){ try{ db.removeChannel(srRealtimeChannel); }catch(e){} }
+    srRealtimeChannel = null;
+    // Also close the detail overlay if it happened to be open — otherwise
+    // its own message-thread channel (srOverlayMsgChannel) would keep
+    // running past logout too.
+    srCloseDetail();
+  }
+
+
+// ---------- Cash Advance Form (table: cash_advance_requests) ----------
+  // Fallback UUID v4 generator for browsers without crypto.randomUUID — the
+  // id column requires a real UUID shape, not just any unique-looking string.
+  function genUUIDv4Fallback(){
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{
+      const r = Math.random()*16|0;
+      return (c==='x' ? r : (r&0x3|0x8)).toString(16);
+    });
+  }
+  function caGenId(userId){
+    // This is a real UUID column in Postgres — it must be a single valid UUID,
+    // not the technician's id glued onto a random one (that combined string
+    // fails Postgres's uuid type check on every insert, with no online/offline
+    // difference: it never goes through regardless of connection). The
+    // technician is already recorded separately via technician_id.
+    return (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : genUUIDv4Fallback();
+  }
+
+  // Receipt images live inside the JSONB row as base64 data URLs. That keeps the
+  // app dependency-free but means a row can be megabytes, so cap it: an
+  // oversized row is rejected outright by Postgres/PostgREST and the old code
+  // just showed "could not submit" with no explanation.
+  const CA_ATTACHMENT_MAX_BYTES = 1_500_000; // ~1.5 MB per receipt, post-compression
+  const CA_RECORD_MAX_BYTES = 6_000_000;     // ~6 MB for the whole liquidation
+  function caAttachmentSize(dataUrl){
+    if(!dataUrl) return 0;
+    const comma = dataUrl.indexOf(',');
+    const b64 = comma>=0 ? dataUrl.slice(comma+1) : dataUrl;
+    return Math.floor(b64.length * 3 / 4);
+  }
+
+  async function caSaveRequest(id, data){
+    const payload = {
+      id, technician_id: data.userId, status: data.status || 'pending',
+      submitted_at: data.submittedAt || new Date().toISOString(), data
+    };
+    if(await ensureCloud()){
+      try{
+        const { error } = await db.from('cash_advance_requests').upsert(payload);
+        if(error) throw error;
+        return SAVE_CLOUD;
+      }catch(e){ console.error('cash advance save failed', describeCloudError(e)); }
+    }
+    try{ await window.storage.set('cash:'+id, JSON.stringify(data), false); }
+    catch(e){ return SAVE_FAILED; }
+    return (await outboxQueue('cash-advance', id, payload)) ? SAVE_QUEUED : SAVE_FAILED;
+  }
+  registerOutboxHandler('cash-advance', async (id, payload)=>{
+    const { error } = await db.from('cash_advance_requests').upsert(payload);
+    if(error) throw error;
+  });
+
+  const CA_PAGE = 200;
+  async function caFetchPaged(applyFilter){
+    const out = [];
+    for(let from = 0; ; from += CA_PAGE){
+      let q = db.from('cash_advance_requests').select('data').order('submitted_at',{ascending:false}).range(from, from+CA_PAGE-1);
+      if(applyFilter) q = applyFilter(q);
+      const { data, error } = await q;
+      if(error) throw error;
+      const batch = data || [];
+      batch.forEach(r=> out.push(r.data));
+      if(batch.length < CA_PAGE) break;
+      if(out.length >= 5000) break;
+    }
+    return out;
+  }
+  async function caLocalList(userId){
+    try{
+      const res = await window.storage.list('cash:', false);
+      const items = [];
+      for(const key of (res.keys||[])){
+        try{ const item = await window.storage.get(key, false); items.push(JSON.parse(item.value)); }catch(e){}
+      }
+      const filtered = userId ? items.filter(r=> r && r.userId===userId) : items;
+      filtered.sort((a,b)=> (b.submittedAt||'').localeCompare(a.submittedAt||''));
+      return filtered;
+    }catch(e){ return []; }
+  }
+  // Strips receipt payloads for list views. Rendering a summary list does not
+  // need every technician's base64 receipt images — downloading all of them was
+  // the single most expensive thing the admin screens did, on a mobile
+  // connection, every time the tab was opened.
+  function caStripAttachments(rec){
+    if(!rec) return rec;
+    let out = rec;
+    if(rec.liquidation && Array.isArray(rec.liquidation.items)){
+      out = Object.assign({}, out, {
+        liquidation: Object.assign({}, rec.liquidation, {
+          items: rec.liquidation.items.map(i=> i && i.attachmentData
+            ? Object.assign({}, i, {attachmentData: null, attachmentTruncated: true})
+            : i)
+        })
+      });
+    }
+    // Reimbursement requests carry their own top-level items[] (no liquidation
+    // wrapper — there's no advance to liquidate). Same reasoning as above:
+    // summary list views shouldn't have to download every receipt photo.
+    if(Array.isArray(rec.items)){
+      out = Object.assign({}, out, {
+        items: rec.items.map(i=> i && i.attachmentData
+          ? Object.assign({}, i, {attachmentData: null, attachmentTruncated: true})
+          : i)
+      });
+    }
+    return out;
+  }
+  async function caListAll(opts){
+    const summary = !(opts && opts.full);
+    if(await ensureCloud()){
+      try{
+        const rows = await caFetchPaged(null);
+        return summary ? rows.map(caStripAttachments) : rows;
+      }catch(e){ console.error('cash advance list failed', describeCloudError(e)); }
+    }
+    return await caLocalList(null);
+  }
+  // Server-side filter: a technician's client no longer downloads every
+  // colleague's cash advances (amounts, purposes and receipts) just to hide them
+  // in JavaScript.
+  async function caListForUser(userId, opts){
+    if(!userId) return [];
+    const summary = !(opts && opts.full);
+    if(await ensureCloud()){
+      try{
+        const rows = await caFetchPaged(q=> q.eq('technician_id', userId));
+        return summary ? rows.map(caStripAttachments) : rows;
+      }catch(e){ console.error('cash advance list (user) failed', describeCloudError(e)); }
+    }
+    return await caLocalList(userId);
+  }
+  // Fetches ONE record complete with attachment data, for the detail/attachment
+  // views that actually need it.
+  async function caGetRequest(id){
+    if(await ensureCloud()){
+      try{
+        const { data, error } = await db.from('cash_advance_requests').select('data').eq('id', id).maybeSingle();
+        if(error) throw error;
+        return data ? data.data : null;
+      }catch(e){ console.error('cash advance get failed', describeCloudError(e)); }
+    }
+    try{
+      const item = await window.storage.get('cash:'+id, false);
+      return item ? JSON.parse(item.value) : null;
+    }catch(e){ return null; }
+  }
+  function caFmtPeso(n){
+    const v = Number(n)||0;
+    return '₱'+v.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  // jsPDF's built-in fonts (Helvetica etc.) only cover Latin-1 — the actual
+  // ₱ glyph isn't in that character set, so text containing it renders as a
+  // blank box or breaks the layout entirely. Every amount printed to PDF
+  // uses this "PHP " prefix instead of caFmtPeso's ₱ symbol.
+  function caFmtPesoPdf(n){
+    const v = Number(n)||0;
+    return 'PHP '+v.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+
+  function caResetForm(){
+    $('caAmount').value = '';
+    $('caPurpose').value = '';
+    $('caProject').value = '';
+    $('caDateNeeded').value = '';
+    $('caLiquidationDate').value = '';
+    $('caPaymentMode').value = '';
+  }
+
+  // A cash advance still needs liquidation once it's been given, until its
+  // liquidation has been submitted AND approved by admin. Disapproved or
+  // never-submitted liquidations still count as outstanding.
+  function caNeedsLiquidation(r){
+    return !!(r.disbursed && (!r.liquidation || r.liquidation.status !== 'approved'));
+  }
+  async function caFindActiveLiquidationRecord(userId){
+    // Needs the full record: a disapproved liquidation is reloaded into the form
+    // so the technician can fix it, receipts included.
+    const all = await caListForUser(userId, {full:true});
+    // Reimbursement requests never go through disbursed/liquidate at all —
+    // exclude them so a pending reimbursement can never be mistaken for an
+    // outstanding cash advance here.
+    const outstanding = all.filter(r=> r.kind!=='reimbursement').filter(caNeedsLiquidation);
+    outstanding.sort((a,b)=> (b.disbursedAt||'').localeCompare(a.disbursedAt||''));
+    return outstanding[0] || null;
+  }
+  // A request the technician filed that admin hasn't decided on yet. While one
+  // of these exists, a second "New Request" would let a technician stack up
+  // multiple asks before admin even sees the first one.
+  async function caFindPendingRequest(userId){
+    const all = await caListForUser(userId, {full:true});
+    const pending = all.filter(r=> r.kind!=='reimbursement' && r.status==='pending');
+    pending.sort((a,b)=> (b.submittedAt||'').localeCompare(a.submittedAt||''));
+    return pending[0] || null;
+  }
+
+  // Tracks whichever record is currently shown in the blocked card, so the
+  // Cancel Request button knows what to cancel without a second lookup.
+  let caBlockedPendingRecord = null;
+  let caActiveTab = 'new'; // tracks which of New/Liquidate/History is showing, so an
+                           // in-flight caCheckBlockedState() call (a network round trip)
+                           // that resolves after the technician has already switched
+                           // tabs can tell it's stale and skip touching the DOM instead
+                           // of re-showing the reminder card on top of whatever's there.
+
+  // Toggles the New Request form vs. the blocked-state reminder. Called
+  // whenever the Cash Advance page is opened and whenever the New Request tab
+  // is shown, so the block can never be bypassed by navigating away and back.
+  async function caCheckBlockedState(){
+    if(!currentUser || currentUser.role==='admin') return null;
+    const dot = $('caLiqTabDot');
+    caBlockedPendingRecord = null;
+
+    // A disbursed-but-unliquidated advance takes priority: it's further along
+    // than a pending request can ever be (pending requests are never disbursed).
+    const activeLiq = await caFindActiveLiquidationRecord(currentUser.id);
+    // The technician may have already switched to another tab while that
+    // network round trip was in flight. Only the dot indicator (small,
+    // tab-independent) is safe to update from a stale call — the reminder
+    // card itself must not reappear on top of whatever tab is now showing.
+    const stillOnNewTab = caActiveTab==='new';
+    if(activeLiq){
+      const needsSubmit = !activeLiq.liquidation || activeLiq.liquidation.status==='disapproved';
+      if(dot) dot.style.display = needsSubmit ? '' : 'none';
+      if(stillOnNewTab){
+        $('caFormCard').style.display = 'none';
+        $('caBlockedCard').style.display = '';
+        $('caBlockedBanner').textContent = needsSubmit
+          ? 'Your cash advance request was approved. Submit your liquidation before submitting a new cash advance request.'
+          : 'Liquidation has been submitted for review and approval.';
+        $('caBlockedSummary').innerHTML =
+          '<div class="leave-comment"><b>You Cannot Request a New Cash Advance at the Moment</b>'+
+          (needsSubmit ? 'Needs liquidation — ' : 'Liquidation submitted for review and approval — ')+
+          caFmtPeso(activeLiq.amountGiven)+' given on '+leaveFmtDate(activeLiq.dateGiven)+' — '+escapeHtml(activeLiq.purpose)+'</div>'+
+          (activeLiq.liquidation && activeLiq.liquidation.status==='disapproved' && activeLiq.liquidation.comment
+            ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(activeLiq.liquidation.comment)+'</div>' : '');
+        $('caGoLiquidateBtn').style.display = needsSubmit ? '' : 'none';
+        $('caCancelRequestBtn').style.display = 'none';
+      }
+      return activeLiq;
+    }
+
+    const pending = await caFindPendingRequest(currentUser.id);
+    const stillOnNewTab2 = caActiveTab==='new';
+    if(pending){
+      caBlockedPendingRecord = pending;
+      if(dot) dot.style.display = 'none';
+      if(stillOnNewTab2){
+        $('caFormCard').style.display = 'none';
+        $('caBlockedCard').style.display = '';
+        $('caBlockedBanner').textContent = 'You have a cash advance request awaiting admin approval. Wait for approval, or cancel the request to submit a new one.';
+        $('caBlockedSummary').innerHTML =
+          '<div class="leave-comment"><b>Awaiting Admin Approval</b>'+
+          caFmtPeso(pending.amount)+' requested on '+leaveFmtWhen(pending.submittedAt)+' — '+escapeHtml(pending.purpose)+'</div>';
+        $('caGoLiquidateBtn').style.display = 'none';
+        $('caCancelRequestBtn').style.display = '';
+      }
+      return pending;
+    }
+
+    if(dot) dot.style.display = 'none';
+    if(!stillOnNewTab2) return null;
+    $('caFormCard').style.display = '';
+    $('caBlockedCard').style.display = 'none';
+    return null;
+  }
+  $('caGoLiquidateBtn').addEventListener('click', ()=> caShowTab('liquidate'));
+
+  // Lets a technician withdraw their own request while it's still awaiting a
+  // decision. Once admin approves or disapproves it, this is no longer an
+  // option — the guarded update below (status='pending') is what actually
+  // enforces that, not just the UI.
+  async function caCancelRequest(id){
+    if(!currentUser || currentUser.role==='admin') return;
+    if(!confirm('Cancel this cash advance request? This cannot be undone.')) return;
+    const btn = $('caCancelRequestBtn');
+    if(btn) btn.disabled = true;
+    if(!(await ensureCloud())){
+      toast('This needs a connection — try again when online');
+      if(btn) btn.disabled = false;
+      return;
+    }
+    try{
+      const rec = await caGetRequest(id);
+      if(!rec || rec.userId !== currentUser.id){ toast('Request not found'); return; }
+      if(rec.status !== 'pending'){
+        toast(rec.status==='approved'
+          ? 'This was already approved — it can no longer be cancelled'
+          : 'This request was already decided');
+        return;
+      }
+      const merged = Object.assign({}, rec, {
+        status: 'cancelled',
+        decidedAt: new Date().toISOString(),
+        decidedBy: currentUser.name ? (currentUser.name+' (cancelled)') : 'Cancelled by technician'
+      });
+      const { data: rows, error } = await db.from('cash_advance_requests')
+        .update({ status: 'cancelled', data: merged })
+        .eq('id', id).eq('status', 'pending')
+        .select('id');
+      if(error) throw error;
+      if(!rows || !rows.length){
+        toast('This request was just decided by admin — refreshing');
+      }else{
+        toast('Request cancelled');
+      }
+    }catch(e){
+      console.error('cash advance cancel failed', describeCloudError(e));
+      toast('Could not cancel — please try again');
+    }finally{
+      if(btn) btn.disabled = false;
+      caCheckBlockedState();
+      caRenderHistory();
+    }
+  }
+  $('caCancelRequestBtn').addEventListener('click', ()=>{
+    if(caBlockedPendingRecord) caCancelRequest(caBlockedPendingRecord.id);
+  });
+
+  async function caSubmit(){
+    if(!currentUser || currentUser.role==='admin') return;
+    // Re-check right before submitting — the reminder card should already
+    // prevent this, but this guards against stale UI state.
+    const active = await caFindActiveLiquidationRecord(currentUser.id);
+    if(active){ toast('Liquidate your existing cash advance first'); caCheckBlockedState(); return; }
+    const pending = await caFindPendingRequest(currentUser.id);
+    if(pending){ toast('You already have a cash advance request awaiting approval'); caCheckBlockedState(); return; }
+    const amount = parseFloat($('caAmount').value);
+    const purpose = $('caPurpose').value.trim();
+    const project = $('caProject').value.trim();
+    const dateNeeded = $('caDateNeeded').value;
+    const liquidationDate = $('caLiquidationDate').value;
+    const paymentMode = $('caPaymentMode').value;
+    if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+    if(!purpose){ toast('Enter the purpose of the cash advance'); return; }
+    if(!dateNeeded){ toast('Set the date needed'); return; }
+    if(liquidationDate && liquidationDate < dateNeeded){ toast('Liquidation date cannot be before the date needed'); return; }
+    const id = caGenId(currentUser.id);
+    const data = {
+      id, userId: currentUser.id, userName: currentUser.name,
+      amount, purpose, project, dateNeeded, liquidationDate, paymentMode,
+      status: 'pending', comment: '',
+      submittedAt: new Date().toISOString(),
+      decidedAt: null, decidedBy: null,
+      disbursed: false, dateGiven: null, amountGiven: null, disbursedAt: null, disbursedBy: null,
+      liquidation: null
+    };
+    $('caSubmitBtn').disabled = true;
+    const res = await caSaveRequest(id, data);
+    $('caSubmitBtn').disabled = false;
+    if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+    toast(res===SAVE_CLOUD
+      ? 'Cash advance request submitted for approval'
+      : 'Saved on this device — it will be submitted once you have a connection');
+    caResetForm();
+    caShowTab('history');
+  }
+  $('caSubmitBtn').addEventListener('click', caSubmit);
+
+  function caLiquidationStatusPill(liq){
+    if(!liq) return '<span class="status-pill status-draft">Not Submitted</span>';
+    if(liq.status==='approved') return '<span class="status-pill status-done">Liquidated</span>';
+    if(liq.status==='disapproved') return '<span class="status-pill status-rejected">Needs Revision</span>';
+    return '<span class="status-pill status-draft">Pending Review</span>';
+  }
+
+  async function caRenderHistory(){
+    const list = $('caHistoryList');
+    if(!currentUser || currentUser.role==='admin') return;
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const items = (await caListForUser(currentUser.id)).filter(r=> r.kind!=='reimbursement');
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No cash advance requests yet.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
+      let disbursementLine = '';
+      if(r.status==='approved'){
+        disbursementLine = r.disbursed
+          ? '<div class="leave-comment"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+'</div>'
+          : '<div class="leave-comment"><b>Cash given</b>Not yet released</div>';
+      }
+      const liqLine = r.disbursed
+        ? '<div class="leave-comment"><b>Liquidation</b>'+caLiquidationStatusPill(r.liquidation)+
+          (r.liquidation && r.liquidation.status==='disapproved' && r.liquidation.comment ? '<div style="margin-top:4px;">'+escapeHtml(r.liquidation.comment)+'</div>' : '')+
+          '</div>'+caSettlementLine(r.liquidation)
+        : '';
+      // The four milestones requested at a glance: Requested / Approved / Given / Liquidated.
+      // Each shows "—" until that milestone has actually happened.
+      const datesLine =
+        '<div class="leave-comment" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px;">'+
+          '<div><b>Date Requested</b>'+leaveFmtWhen(r.submittedAt)+'</div>'+
+          '<div><b>Date Approved</b>'+(r.status==='approved' ? leaveFmtWhen(r.decidedAt) : '—')+'</div>'+
+          '<div><b>Date Given</b>'+(r.disbursed ? leaveFmtDate(r.dateGiven) : '—')+'</div>'+
+          '<div><b>Date Liquidated</b>'+(r.liquidation && r.liquidation.status==='approved' ? leaveFmtWhen(r.liquidation.decidedAt) : '—')+'</div>'+
+        '</div>';
+      row.innerHTML =
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">'+
+          '<div class="hist-info"><b>'+caFmtPeso(r.amount)+'</b>'+
+            '<span>Needed '+leaveFmtDate(r.dateNeeded)+(r.project ? (' · '+escapeHtml(r.project)) : '')+'</span>'+
+          '</div>'+
+          (r.status==='approved' && r.disbursed ? '<span class="status-pill status-given">Given</span>' : leaveStatusPill(r.status))+
+        '</div>'+
+        datesLine+
+        '<div class="leave-comment"><b>Purpose</b>'+escapeHtml(r.purpose)+'</div>'+
+        disbursementLine+
+        liqLine+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
+      list.appendChild(row);
+    });
+  }
+
+  function caShowTab(which){
+    caActiveTab = which;
+    $('caTabNew').classList.toggle('active', which==='new');
+    $('caTabLiquidate').classList.toggle('active', which==='liquidate');
+    $('caTabReimburse').classList.toggle('active', which==='reimburse');
+    $('caTabHistory').classList.toggle('active', which==='history');
+    $('caFormCard').style.display = 'none';
+    $('caBlockedCard').style.display = 'none';
+    $('caLiquidateCard').style.display = which==='liquidate' ? '' : 'none';
+    $('caReimburseCard').style.display = which==='reimburse' ? '' : 'none';
+    $('caReimbHistoryCard').style.display = which==='reimburse' ? '' : 'none';
+    $('caHistoryCard').style.display = which==='history' ? '' : 'none';
+    if(which==='new') caCheckBlockedState();
+    if(which==='liquidate') caShowLiqTab();
+    if(which==='reimburse'){ caReimbResetForm(); caRenderReimbHistory(); }
+    if(which==='history') caRenderHistory();
+  }
+  $('caTabNew').addEventListener('click', ()=> caShowTab('new'));
+  $('caTabLiquidate').addEventListener('click', ()=> caShowTab('liquidate'));
+  $('caTabReimburse').addEventListener('click', ()=> caShowTab('reimburse'));
+  $('caTabHistory').addEventListener('click', ()=> caShowTab('history'));
+
+  // ================= Liquidation (technician side) =================
+  let caLiqActiveRecord = null;   // the cash-advance record currently being liquidated
+  let caLiqItems = [];            // in-progress itemized list {id, type, description, amount, attachmentName, attachmentData, attachmentMime, transportRows}
+  let caTransportRows = [];       // in-progress transportation sub-form rows
+
+  function caLiqItemId(){ return 'li_'+Date.now()+'_'+Math.floor(Math.random()*10000); }
+
+  // ---- Local draft auto-save ----
+  // Everything the technician builds up (items, receipt photos, notes) used
+  // to live only in the caLiqItems variable above — nothing was persisted
+  // until the final Submit tap. A killed/backgrounded PWA tab, an accidental
+  // navigation, or a connectivity blip before that tap lost the whole
+  // in-progress liquidation with no warning and no way to recover it. This
+  // mirrors it to on-device storage as the technician works, so it survives
+  // all of that and can be restored the next time they open this tab.
+  function caLiqDraftKey(recordId){
+    return 'caLiqDraft:'+((currentUser && currentUser.id) || 'anon')+':'+recordId;
+  }
+  let caLiqDraftSaveTimer = null;
+  function caLiqSaveDraft(){
+    if(!caLiqActiveRecord) return;
+    // Debounced so fast typing in the notes field doesn't hammer storage.
+    clearTimeout(caLiqDraftSaveTimer);
+    const recordId = caLiqActiveRecord.id;
+    caLiqDraftSaveTimer = setTimeout(async ()=>{
+      try{
+        const notesEl = $('caLiqNotes');
+        const draft = {items: caLiqItems, notes: notesEl ? notesEl.value : '', savedAt: new Date().toISOString()};
+        await window.storage.set(caLiqDraftKey(recordId), JSON.stringify(draft), false);
+      }catch(e){
+        // Best-effort only — e.g. device storage full. Don't block the
+        // technician's editing over it, but don't stay silent either.
+        console.error('liquidation draft save failed', e);
+      }
+    }, 300);
+  }
+  async function caLiqLoadDraft(recordId){
+    try{
+      const res = await window.storage.get(caLiqDraftKey(recordId), false);
+      if(!res || !res.value) return null;
+      const draft = JSON.parse(res.value);
+      return (draft && Array.isArray(draft.items)) ? draft : null;
+    }catch(e){ return null; }
+  }
+  async function caLiqClearDraft(recordId){
+    try{ await window.storage.delete(caLiqDraftKey(recordId), false); }catch(e){ /* nothing to clean up */ }
+  }
+
+  // Downscales & compresses an image file before storing it as base64, to
+  // keep receipt photos from a phone camera small enough to save reliably.
+  function compressImageToDataURL(file, maxDim, quality){
+    maxDim = maxDim || 1000; quality = quality || 0.6;
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onerror = ()=> reject(new Error('read failed'));
+      reader.onload = ()=>{
+        const img = new Image();
+        img.onerror = ()=> reject(new Error('image decode failed'));
+        img.onload = ()=>{
+          let w = img.width, h = img.height;
+          if(w > maxDim || h > maxDim){
+            const scale = maxDim / Math.max(w, h);
+            w = Math.round(w*scale); h = Math.round(h*scale);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ================= Add Item modal flow =================
+  // Items only ever enter caLiqItems through one of the two form modals
+  // below, opened from the chooser modal. Nothing on the Liquidate tab
+  // itself is an editable inline form anymore.
+
+  function caLiqOpenAddItemModal(){ $('liqAddItemModal').classList.add('open'); }
+  function caLiqCloseAddItemModal(){ $('liqAddItemModal').classList.remove('open'); }
+  $('closeLiqAddItemModal').addEventListener('click', caLiqCloseAddItemModal);
+  $('liqAddItemModal').addEventListener('click', (e)=>{ if(e.target.id==='liqAddItemModal') caLiqCloseAddItemModal(); });
+  $('caLiqAddItemBtn').addEventListener('click', caLiqOpenAddItemModal);
+  $('caLiqStartBtn').addEventListener('click', caLiqOpenAddItemModal);
+
+  // ---- "Others" item form (a single receipt) ----
+  function caLiqOpenOthersModal(){
+    $('liqOthersDate').value = todayISO();
+    $('liqOthersParticular').value = '';
+    $('liqOthersQty').value = '1';
+    $('liqOthersAmount').value = '';
+    caLiqOthersAttachment = null;
+    $('liqOthersFileStatus').textContent = '';
+    caLiqCloseAddItemModal();
+    $('liqOthersModal').classList.add('open');
+  }
+  function caLiqCloseOthersModal(){ $('liqOthersModal').classList.remove('open'); }
+  $('liqAddItemTabOthers').addEventListener('click', caLiqOpenOthersModal);
+  $('closeLiqOthersModal').addEventListener('click', caLiqCloseOthersModal);
+  $('liqOthersModal').addEventListener('click', (e)=>{ if(e.target.id==='liqOthersModal') caLiqCloseOthersModal(); });
+
+  let caLiqOthersAttachment = null; // {data, mime, name} for the item currently being built
+  $('liqOthersAttachBtn').addEventListener('click', ()=> $('liqOthersFile').click());
+  $('liqOthersFile').addEventListener('change', async ()=>{
+    const file = $('liqOthersFile').files[0];
+    if(!file) return;
+    try{
+      let dataUrl, mime;
+      if(file.type.startsWith('image/')){
+        dataUrl = await compressImageToDataURL(file, 1000, 0.6);
+        mime = 'image/jpeg';
+      }else{
+        dataUrl = await new Promise((resolve, reject)=>{
+          const r = new FileReader();
+          r.onload = ()=> resolve(r.result);
+          r.onerror = ()=> reject(new Error('read failed'));
+          r.readAsDataURL(file);
+        });
+        mime = file.type || 'application/octet-stream';
+      }
+      if(caAttachmentSize(dataUrl) > CA_ATTACHMENT_MAX_BYTES){
+        toast('That file is too large — take a photo instead of attaching a full-size file');
+        return;
+      }
+      caLiqOthersAttachment = {data: dataUrl, mime, name: file.name};
+      $('liqOthersFileStatus').textContent = '📄 '+file.name;
+    }catch(e){ toast('Could not attach that file'); }
+  });
+  $('liqOthersAddItemBtn').addEventListener('click', ()=>{
+    const date = $('liqOthersDate').value;
+    const description = $('liqOthersParticular').value.trim();
+    const qty = parseInt($('liqOthersQty').value, 10) || 1;
+    const amount = parseFloat($('liqOthersAmount').value) || 0;
+    if(!date){ toast('Set the date'); return; }
+    if(!description){ toast('Enter the particular'); return; }
+    if(qty<1){ toast('Qty must be at least 1'); return; }
+    if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+    if(!caLiqOthersAttachment){ toast('Attach a receipt photo or file'); return; }
+    const newItemId = caLiqItemId();
+    caLiqItems.push({
+      id: newItemId, type:'item', date, description, qty, amount,
+      attachmentName: caLiqOthersAttachment.name,
+      attachmentData: caLiqOthersAttachment.data,
+      attachmentMime: caLiqOthersAttachment.mime
+    });
+    caLiqCloseOthersModal();
+    caLiqRenderForm();
+    caLiqSaveDraft();
+    toast('Item added');
+    caLiqFlashItem(newItemId);
+  });
+
+  // ---- Transportation item form (one or more trip legs, added as a
+  // single liquidation item) ----
+  function caLiqOpenTransportModal(){
+    caTransportRows = [caTransportRowTemplate()];
+    caTransportRenderRows(); caTransportUpdateTotal();
+    caLiqCloseAddItemModal();
+    $('liqTransportModal').classList.add('open');
+  }
+  function caLiqCloseTransportModal(){ $('liqTransportModal').classList.remove('open'); }
+  $('liqAddItemTabTransport').addEventListener('click', caLiqOpenTransportModal);
+  $('closeLiqTransportModal').addEventListener('click', caLiqCloseTransportModal);
+  $('liqTransportModal').addEventListener('click', (e)=>{ if(e.target.id==='liqTransportModal') caLiqCloseTransportModal(); });
+
+  // The item list this scrolls to sits above the modal trigger, off-screen
+  // from wherever the technician just was. Without this, adding an item just
+  // closes the modal with no visible change nearby — reads as "nothing
+  // happened, my data disappeared" — even though the list above did update.
+  // Scroll to the new row and flash it so there's a clear, visible
+  // confirmation right where it's easy to miss otherwise.
+  function caLiqFlashItem(itemId){
+    const row = $('caLiqFormTable').querySelector('[data-item-id="'+itemId+'"]');
+    if(!row) return;
+    row.scrollIntoView({behavior:'smooth', block:'center'});
+    row.style.transition = 'background-color 0.3s';
+    row.style.backgroundColor = '#DFF3E3';
+    setTimeout(()=>{ row.style.backgroundColor = ''; }, 1400);
+  }
+
+  // Computes the running totals shown on the Liquidation Form: the sum of
+  // all items, and — once we know the amount given — whether the technician
+  // owes money back (Unreturned Excess C.A.) or is owed money (Accounts
+  // Receivable), plus that same figure phrased as an action.
+  function caLiqComputeTotals(){
+    const total = caLiqItems.reduce((s,i)=> s + (Number(i.amount)||0), 0);
+    const given = caLiqActiveRecord ? (Number(caLiqActiveRecord.amountGiven)||0) : 0;
+    const diff = given - total; // positive: unspent cash advance; negative: technician spent more than given
+    return { total, given, diff };
+  }
+
+  // The same balance as above (Unreturned Excess C.A. / Accounts Receivable),
+  // but computed from an already-saved record+liquidation rather than the
+  // in-progress form, and turned into something that can actually be tracked
+  // rather than just displayed. Before this, that balance was recalculated
+  // fresh wherever it was shown (the preview, the PDF, the review panel) and
+  // never stored anywhere — once approved, there was no record of whether a
+  // technician's owed excess was ever actually returned, or a company's owed
+  // reimbursement was ever actually paid out.
+  function caComputeSettlement(record){
+    const liq = record && record.liquidation;
+    if(!liq) return null;
+    const given = Number(record.amountGiven)||0;
+    const total = Number(liq.totalAmount)||0;
+    const diff = given - total;
+    if(Math.abs(diff) < 0.005) return { type:'none', amount:0 };
+    return { type: diff>0 ? 'return' : 'reimburse', amount: Math.abs(diff) };
+  }
+
+  // One line of settlement status, reused everywhere a liquidation is shown
+  // (admin's card summary, the review panel, admin's per-technician history,
+  // and the technician's own "My Requests" tab) so the balance doesn't just
+  // disappear once the approval screen is closed.
+  function caSettlementLine(liq){
+    if(!liq || liq.status!=='approved' || !liq.settlement || liq.settlement.type==='none') return '';
+    const s = liq.settlement;
+    const label = s.type==='return' ? 'Technician owes' : 'Reimburse technician';
+    if(s.settled){
+      return '<div class="leave-comment"><b>Settlement</b>✅ '+label+' '+caFmtPeso(s.amount)+
+        ' — settled '+leaveFmtWhen(s.settledAt)+(s.settledBy ? ' by '+escapeHtml(s.settledBy) : '')+
+        (s.method ? ' ('+escapeHtml(s.method)+')' : '')+'</div>';
+    }
+    return '<div class="leave-comment"><b>Settlement</b>⏳ '+label+' '+caFmtPeso(s.amount)+' — not yet settled</div>';
+  }
+
+  // Particular text for an item, folding in Qty when it's more than 1 so the
+  // Liquidation Form's single "Particular" column still carries it.
+  function caLiqItemParticular(item){
+    if(item.type==='transport') return item.description;
+    return item.qty && item.qty>1 ? item.description+' (Qty: '+item.qty+')' : item.description;
+  }
+
+  // First date associated with an item, for the Liquidation Form's Date
+  // column — a transportation item can cover several legs on different
+  // dates, so fall back to a range indicator when they differ.
+  function caLiqItemDate(item){
+    if(item.type==='transport'){
+      const dates = Array.from(new Set((item.transportRows||[]).map(r=> r.date).filter(Boolean)));
+      if(dates.length===0) return '—';
+      if(dates.length===1) return leaveFmtDate(dates[0]);
+      dates.sort();
+      return 'Multiple';
+    }
+    return item.date ? leaveFmtDate(item.date) : '—';
+  }
+
+  function caLiqFormRowsHtml(editable){
+    let html = '<div style="font-size:12px; color:var(--text-muted); display:flex; padding:0 4px 6px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;">'+
+      '<span style="width:28px;">No.</span><span style="flex:1;">Date</span><span style="flex:2;">Particular</span><span style="text-align:right; min-width:70px;">Amount</span></div>';
+    caLiqItems.forEach((item, idx)=>{
+      html += '<div class="hist-item" data-item-id="'+item.id+'" data-view-item="'+item.id+'" style="align-items:flex-start;">'+
+        '<div style="display:flex; flex:1; gap:8px; align-items:center; min-width:0;">'+
+          '<span style="width:28px; color:var(--text-muted);">'+(idx+1)+'</span>'+
+          '<span style="flex:1; font-size:12px; color:var(--text-muted);">'+caLiqItemDate(item)+'</span>'+
+          '<span style="flex:2;"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
+        '</div>'+
+        '<div style="text-align:right; font-weight:700; white-space:nowrap; min-width:70px;">'+caFmtPeso(item.amount)+'</div>'+
+        (editable ? '<button type="button" class="btn btn-secondary" data-act="remove" data-item-id="'+item.id+'" style="flex:0 0 auto; width:auto; margin-left:8px; color:var(--danger); padding:4px 10px; font-size:11px;">✕</button>' : '')+
+      '</div>';
+    });
+    return html;
+  }
+
+  function caLiqTotalsHtml(){
+    const {total, given, diff} = caLiqComputeTotals();
+    const excessLabel = diff >= 0 ? 'Unreturned Excess C.A.' : 'Accounts Receivable';
+    const excessAmount = caFmtPeso(Math.abs(diff));
+    const balanceLabel = diff >= 0 ? 'Balance to be Returned' : 'Balance to be Reimbursed';
+    return (
+      '<div style="display:flex; justify-content:space-between; padding:8px 4px; border-top:1px solid var(--border); font-weight:700;">'+
+        '<span>Total Expenses</span><span>'+caFmtPeso(total)+'</span></div>'+
+      '<div style="display:flex; justify-content:space-between; padding:8px 4px; font-size:13px; color:var(--text-muted);">'+
+        '<span>'+excessLabel+'</span><span>'+excessAmount+'</span></div>'+
+      '<div style="display:flex; justify-content:space-between; padding:8px 4px; border-top:1px dashed var(--border); font-weight:700; font-size:15px;">'+
+        '<span>'+balanceLabel+'</span><span>'+excessAmount+'</span></div>'+
+      (given ? '<div class="leave-note" style="padding:0 4px;">Cash advance given: '+caFmtPeso(given)+'</div>' : '')
+    );
+  }
+
+  function caLiqRenderForm(){
+    const hasItems = caLiqItems.length>0;
+    $('caLiqStartPrompt').style.display = hasItems ? 'none' : '';
+    $('caLiqFormBuilt').style.display = hasItems ? '' : 'none';
+    if(!hasItems) return;
+    const wrap = $('caLiqFormTable');
+    wrap.innerHTML = caLiqFormRowsHtml(true) + caLiqTotalsHtml();
+    caLiqItems.forEach(item=>{
+      const row = wrap.querySelector('[data-view-item="'+CSS.escape(String(item.id))+'"]');
+      if(row){
+        row.addEventListener('click', (e)=>{
+          if(e.target.closest('[data-act="remove"]')) return;
+          openLiquidationAttachment(item);
+        });
+      }
+      const rmBtn = wrap.querySelector('[data-act="remove"][data-item-id="'+CSS.escape(String(item.id))+'"]');
+      if(rmBtn){
+        rmBtn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          caLiqItems = caLiqItems.filter(i=> i.id!==item.id);
+          caLiqRenderForm();
+          caLiqSaveDraft();
+        });
+      }
+    });
+  }
+
+  // ---- Transportation sub-form (rendered inside liqTransportModal) ----
+  function caTransportRowTemplate(){
+    return {date: todayISO(), mode:'', from:'', to:'', amount:0, purpose:''};
+  }
+  function caTransportRenderRows(){
+    const wrap = $('caTransportRowsList');
+    wrap.innerHTML = '';
+    caTransportRows.forEach((row, idx)=>{
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.style.cssText = 'margin-bottom:10px; box-shadow:none; border:1px solid var(--border);';
+      el.innerHTML =
+        '<div class="card-body" style="padding:12px;">'+
+          '<div class="grid2">'+
+            '<div class="field"><label>Date</label><input type="date" data-f="date" value="'+escapeHtml(row.date||'')+'"></div>'+
+            '<div class="field"><label>Mode of Transportation</label><input type="text" data-f="mode" placeholder="e.g. Bus" value="'+escapeHtml(row.mode||'')+'"></div>'+
+          '</div>'+
+          '<div class="grid2">'+
+            '<div class="field"><label>From</label><input type="text" data-f="from" value="'+escapeHtml(row.from||'')+'"></div>'+
+            '<div class="field"><label>To</label><input type="text" data-f="to" value="'+escapeHtml(row.to||'')+'"></div>'+
+          '</div>'+
+          '<div class="grid2">'+
+            '<div class="field"><label>Amount (₱)</label><input type="number" min="0" step="0.01" data-f="amount" value="'+(row.amount||'')+'"></div>'+
+            '<div class="field"><label>Purpose</label><input type="text" data-f="purpose" value="'+escapeHtml(row.purpose||'')+'"></div>'+
+          '</div>'+
+          (caTransportRows.length>1 ? '<button type="button" class="btn btn-secondary" data-act="remove-row" style="width:100%; color:var(--danger);">Remove This Trip</button>' : '')+
+        '</div>';
+      wrap.appendChild(el);
+      el.querySelector('[data-f="date"]').addEventListener('input', (e)=>{ row.date = e.target.value; });
+      const modeInput = el.querySelector('[data-f="mode"]');
+      attachCombo(modeInput, 'transportMode');
+      // The combo suggestion panel fills the input by setting .value directly
+      // and firing 'change' (see attachCombo in customers.js) — it does NOT
+      // fire 'input'. Syncing on 'input' alone left row.mode empty whenever a
+      // suggestion was picked by click: the field looked filled in, but
+      // "Add Item" validation (which reads row.mode, not the DOM) silently
+      // rejected the trip as incomplete. Listen for both so typed text and
+      // picked suggestions are captured the same way.
+      const syncMode = (e)=>{ row.mode = e.target.value; };
+      modeInput.addEventListener('input', syncMode);
+      modeInput.addEventListener('change', syncMode);
+      el.querySelector('[data-f="from"]').addEventListener('input', (e)=>{ row.from = e.target.value; });
+      el.querySelector('[data-f="to"]').addEventListener('input', (e)=>{ row.to = e.target.value; });
+      el.querySelector('[data-f="amount"]').addEventListener('input', (e)=>{ row.amount = parseFloat(e.target.value)||0; caTransportUpdateTotal(); });
+      el.querySelector('[data-f="purpose"]').addEventListener('input', (e)=>{ row.purpose = e.target.value; });
+      const rmBtn = el.querySelector('[data-act="remove-row"]');
+      if(rmBtn) rmBtn.addEventListener('click', ()=>{ caTransportRows.splice(idx,1); caTransportRenderRows(); caTransportUpdateTotal(); });
+    });
+  }
+  function caTransportUpdateTotal(){
+    const total = caTransportRows.reduce((s,r)=> s + (Number(r.amount)||0), 0);
+    $('caTransportTotalDisplay').textContent = caFmtPeso(total);
+    return total;
+  }
+  $('caTransportAddRowBtn').addEventListener('click', ()=>{
+    caTransportRows.push(caTransportRowTemplate());
+    caTransportRenderRows();
+  });
+  $('caTransportAddToLiqBtn').addEventListener('click', ()=>{
+    const valid = caTransportRows.filter(r=> r.date && r.mode && r.from && r.to && r.amount>0);
+    if(valid.length===0){ toast('Fill in at least one complete trip (date, mode, from, to, amount)'); return; }
+    const total = valid.reduce((s,r)=> s + (Number(r.amount)||0), 0);
+    const newItemId = caLiqItemId();
+    caLiqItems.push({
+      id: newItemId, type:'transport',
+      description: 'Transportation Expenses ('+valid.length+' trip'+(valid.length>1?'s':'')+')',
+      amount: total, transportRows: valid
+    });
+    caLiqCloseTransportModal();
+    caLiqRenderForm();
+    caLiqSaveDraft();
+    toast('Item added');
+    caLiqFlashItem(newItemId);
+  });
+
+  // ---- View Liquidation Form (read-only preview of the form above) ----
+  // A dedicated renderer (rather than reusing caLiqFormRowsHtml/caLiqTotalsHtml,
+  // which the editable in-page form also depends on) so this can look like an
+  // actual voucher/receipt document — proper table, header block, boxed
+  // totals — without touching the editable form's layout.
+  function caLiqPreviewHtml(){
+    const {total, given, diff} = caLiqComputeTotals();
+    const excessLabel = diff >= 0 ? 'Unreturned Excess C.A.' : 'Accounts Receivable';
+    const excessAmount = caFmtPeso(Math.abs(diff));
+    const balanceLabel = diff >= 0 ? 'Balance to be Returned' : 'Balance to be Reimbursed';
+    let rows = '';
+    caLiqItems.forEach((item, idx)=>{
+      // Transportation items cover one or more trip legs that don't fit this
+      // table's single Particular column — link the label to the same
+      // trip-leg summary the editable form and admin review already show,
+      // instead of leaving the technician no way to double-check it here.
+      const particular = item.type==='transport'
+        ? '🚕 <a href="#" class="ca-liq-preview-link" data-view-item="'+escapeHtml(String(item.id))+'" style="color:var(--green-dark); font-weight:700; text-decoration:underline;">'+escapeHtml(caLiqItemParticular(item))+'</a>'
+        : '<b>📄 '+escapeHtml(caLiqItemParticular(item))+'</b>';
+      rows +=
+        '<tr>'+
+          '<td class="num">'+(idx+1)+'</td>'+
+          '<td class="date">'+caLiqItemDate(item)+'</td>'+
+          '<td class="particular">'+particular+'</td>'+
+          '<td class="amt">'+caFmtPeso(item.amount)+'</td>'+
+        '</tr>';
+    });
+    return (
+      (caLiqActiveRecord ?
+        '<div class="ca-liq-preview-head">'+
+          '<div class="ca-liq-preview-eyebrow">Cash Advance</div>'+
+          '<div class="ca-liq-preview-amount"><b>'+caFmtPeso(caLiqActiveRecord.amountGiven)+'</b> given on '+leaveFmtDate(caLiqActiveRecord.dateGiven)+'</div>'+
+        '</div>'
+        : '')+
+      '<table class="ca-liq-preview-table">'+
+        '<thead><tr><th class="num">No.</th><th>Date</th><th>Particular</th><th class="amt">Amount</th></tr></thead>'+
+        '<tbody>'+rows+'</tbody>'+
+      '</table>'+
+      '<div class="ca-liq-preview-totals">'+
+        '<div class="row subtotal"><span>Total Expenses</span><span>'+caFmtPeso(total)+'</span></div>'+
+        '<div class="row muted"><span>'+excessLabel+'</span><span>'+excessAmount+'</span></div>'+
+        '<div class="row balance"><span>'+balanceLabel+'</span><span>'+excessAmount+'</span></div>'+
+      '</div>'+
+      (given ? '<div class="ca-liq-preview-footnote">Cash advance given: '+caFmtPeso(given)+'</div>' : '')
+    );
+  }
+  function caLiqOpenFormPreview(){
+    $('liqFormPreviewBody').innerHTML =
+      caLiqPreviewHtml()+
+      '<button type="button" class="btn btn-primary" id="liqFormPreviewSubmitBtn" style="width:100%; margin-top:14px;">Submit</button>';
+    $('liqFormPreviewOverlay').classList.add('open');
+    // Wire up the transportation summary link(s) added above — this preview
+    // used to render items as static text with no way to see a
+    // transportation item's trip-leg breakdown before submitting, unlike
+    // every other place items are shown in this feature.
+    $('liqFormPreviewBody').querySelectorAll('[data-view-item]').forEach(el=>{
+      el.addEventListener('click', (e)=>{
+        e.preventDefault();
+        const item = caLiqItems.find(i=> String(i.id)===el.dataset.viewItem);
+        if(item) openLiquidationAttachment(item);
+      });
+    });
+    $('liqFormPreviewSubmitBtn').addEventListener('click', ()=>{
+      $('liqFormPreviewOverlay').classList.remove('open');
+      caSubmitLiquidation();
+    });
+  }
+  $('caLiqViewFormBtn').addEventListener('click', caLiqOpenFormPreview);
+  $('closeLiqFormPreview').addEventListener('click', ()=> $('liqFormPreviewOverlay').classList.remove('open'));
+  $('liqFormPreviewOverlay').addEventListener('click', (e)=>{ if(e.target.id==='liqFormPreviewOverlay') $('liqFormPreviewOverlay').classList.remove('open'); });
+
+  function openLiquidationAttachment(item){
+    if(item.type==='transport'){
+      $('liqAttachmentTitle').textContent = item.description;
+      $('liqAttachmentImageWrap').style.display = 'none';
+      $('liqAttachmentTransportWrap').style.display = '';
+      const body = $('liqAttachmentTransportBody');
+      body.innerHTML = '';
+      item.transportRows.forEach(r=>{
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid var(--border)';
+        tr.innerHTML =
+          '<td style="padding:6px 4px;">'+leaveFmtDate(r.date)+'</td>'+
+          '<td style="padding:6px 4px;">'+escapeHtml(r.mode)+'</td>'+
+          '<td style="padding:6px 4px;">'+escapeHtml(r.from)+'</td>'+
+          '<td style="padding:6px 4px;">'+escapeHtml(r.to)+'</td>'+
+          '<td style="padding:6px 4px; text-align:right;">'+caFmtPeso(r.amount)+'</td>'+
+          '<td style="padding:6px 4px;">'+escapeHtml(r.purpose||'')+'</td>';
+        body.appendChild(tr);
+      });
+    }else{
+      $('liqAttachmentTitle').textContent = item.description || 'Attachment';
+      $('liqAttachmentTransportWrap').style.display = 'none';
+      if(!item.attachmentData){
+        // List views deliberately fetch records without receipt payloads.
+        $('liqAttachmentImageWrap').style.display = 'none';
+        toast('Opening receipt…');
+        caLoadAttachmentThenOpen(item);
+        return;
+      }
+      if(item.attachmentMime && item.attachmentMime.startsWith('image/')){
+        $('liqAttachmentImageWrap').style.display = '';
+        $('liqAttachmentImg').src = item.attachmentData;
+      }else{
+        // Non-image (e.g. PDF): window.open() on a data: URL is blocked outright
+        // by Chrome and Safari (top-frame navigation to data: URLs), so this
+        // silently did nothing. Convert to a Blob and open an object URL, which
+        // is allowed — and revoke it afterwards so it doesn't leak.
+        try{
+          const blob = caDataUrlToBlob(item.attachmentData, item.attachmentMime);
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if(!win){
+            // Pop-up blocked: fall back to a same-gesture download.
+            const a = document.createElement('a');
+            a.href = url; a.download = item.attachmentName || 'receipt';
+            document.body.appendChild(a); a.click(); a.remove();
+          }
+          setTimeout(()=> URL.revokeObjectURL(url), 60000);
+        }catch(e){
+          console.error('could not open attachment', e);
+          toast('Could not open that file');
+        }
+      }
+    }
+    $('liqAttachmentOverlay').classList.add('open');
+  }
+  function caDataUrlToBlob(dataUrl, fallbackMime){
+    const match = /^data:([^;,]+)?(;base64)?,(.*)$/.exec(dataUrl || '');
+    if(!match) throw new Error('not a data URL');
+    const mime = match[1] || fallbackMime || 'application/octet-stream';
+    const body = match[3];
+    if(match[2]){
+      const bin = atob(body);
+      const bytes = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], {type: mime});
+    }
+    return new Blob([decodeURIComponent(body)], {type: mime});
+  }
+  // Re-fetches the owning record so a summary-loaded item can still show its
+  // receipt on demand. Handles both a liquidation's nested items[] and a
+  // reimbursement request's top-level items[] (no liquidation wrapper).
+  async function caLoadAttachmentThenOpen(item){
+    const recordId = item.__recordId;
+    if(!recordId){ toast('Receipt not available'); return; }
+    const full = await caGetRequest(recordId);
+    const pool = full && full.kind==='reimbursement' ? (full.items||[]) : (full && full.liquidation ? (full.liquidation.items||[]) : []);
+    const match = pool.find(i=> i.id===item.id);
+    if(!match || !match.attachmentData){ toast('Receipt not available'); return; }
+    openLiquidationAttachment(Object.assign({}, match, {__recordId: recordId}));
+  }
+  $('closeLiqAttachment').addEventListener('click', ()=> $('liqAttachmentOverlay').classList.remove('open'));
+  $('liqAttachmentOverlay').addEventListener('click', (e)=>{ if(e.target.id==='liqAttachmentOverlay') $('liqAttachmentOverlay').classList.remove('open'); });
+
+  function caLiqRenderReadonly(record){
+    const wrap = $('caLiqReadonlyItems');
+    const liq = record.liquidation;
+    const given = Number(record.amountGiven)||0;
+    const total = Number(liq.totalAmount)||0;
+    const diff = given - total;
+    const excessLabel = diff >= 0 ? 'Unreturned Excess C.A.' : 'Accounts Receivable';
+    const balanceLabel = diff >= 0 ? 'Balance to be Returned' : 'Balance to be Reimbursed';
+    let html = '<div class="leave-comment" style="margin-bottom:10px;">'+caLiquidationStatusPill(liq)+
+      (liq.comment ? '<div style="margin-top:6px;"><b>Notes</b> '+escapeHtml(liq.comment)+'</div>' : '')+
+      '</div>'+
+      '<div style="font-size:12px; color:var(--text-muted); display:flex; padding:0 4px 6px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;">'+
+        '<span style="width:28px;">No.</span><span style="flex:1;">Date</span><span style="flex:2;">Particular</span><span style="text-align:right;">Amount</span></div>';
+    (liq.items||[]).forEach((item, idx)=>{
+      html += '<div class="hist-item" style="cursor:pointer;" data-view-item="'+escapeHtml(item.id)+'">'+
+        '<div style="display:flex; flex:1; gap:8px; align-items:center;">'+
+          '<span style="width:28px; color:var(--text-muted);">'+(idx+1)+'</span>'+
+          '<span style="flex:1; font-size:12px; color:var(--text-muted);">'+caLiqItemDate(item)+'</span>'+
+          '<span style="flex:2;"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
+        '</div>'+
+        '<span style="font-weight:700; white-space:nowrap;">'+caFmtPeso(item.amount)+'</span></div>';
+    });
+    html +=
+      '<div style="display:flex; justify-content:space-between; padding:8px 4px; border-top:1px solid var(--border); font-weight:700;">'+
+        '<span>Total Expenses</span><span>'+caFmtPeso(total)+'</span></div>'+
+      '<div style="display:flex; justify-content:space-between; padding:8px 4px; font-size:13px; color:var(--text-muted);">'+
+        '<span>'+excessLabel+'</span><span>'+caFmtPeso(Math.abs(diff))+'</span></div>'+
+      '<div style="display:flex; justify-content:space-between; padding:8px 4px; border-top:1px dashed var(--border); font-weight:700; font-size:15px;">'+
+        '<span>'+balanceLabel+'</span><span>'+caFmtPeso(Math.abs(diff))+'</span></div>'+
+      '<div class="leave-note" style="padding:0 4px;">Cash advance given: '+caFmtPeso(given)+'</div>'+
+      caSettlementLine(liq);
+    wrap.innerHTML = html;
+    (liq.items||[]).forEach(item=>{
+      const el = wrap.querySelector('[data-view-item="'+CSS.escape(String(item.id))+'"]');
+      if(el) el.addEventListener('click', ()=> openLiquidationAttachment(Object.assign({}, item, {__recordId: record.id})));
+    });
+
+    const dlBtn = $('caLiqDownloadPdfBtn');
+    if(liq.status==='approved'){
+      dlBtn.style.display = '';
+      dlBtn.onclick = ()=> caDownloadLiquidationPdf(record);
+      // Auto-save a PDF copy the first time the technician sees the approval,
+      // so they end up with a record of it without having to remember to tap
+      // the button. Guarded per-record so it only fires once.
+      caMaybeAutoSaveLiquidationPdf(record);
+    }else{
+      dlBtn.style.display = 'none';
+      dlBtn.onclick = null;
+    }
+  }
+
+  // ---- Liquidation PDF (approved copy — informational, not re-editable) ----
+  async function caBuildLiquidationPdf(record){
+    const liq = record.liquidation;
+    await loadAwesScript('jspdf', awesLibs.jspdf);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p','pt','a4');
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = 44;
+    const headerH = 90;
+    doc.setFillColor(21,77,52);
+    doc.rect(0,0,pageW,headerH,'F');
+    try{ doc.addImage(AWES_LOGO_B64,'PNG', margin, 14, 108, 36); }catch(e){}
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold'); doc.setFontSize(13);
+    doc.text('LIQUIDATION FORM', pageW-margin, 32, {align:'right'});
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text('Approved '+(liq.decidedAt ? leaveFmtWhen(liq.decidedAt) : ''), pageW-margin, 46, {align:'right'});
+    doc.setTextColor(0,0,0);
+    y = headerH + 24;
+    doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text('Technician: '+(record.userName||'—'), margin, y); y += 14;
+    doc.text('Cash Advance: '+caFmtPesoPdf(record.amountGiven)+' given on '+(leaveFmtDate(record.dateGiven)||'—'), margin, y); y += 14;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    const purposeLines = doc.splitTextToSize('Purpose: '+(record.purpose||'—'), pageW-margin*2);
+    doc.text(purposeLines, margin, y); y += purposeLines.length*11 + 10;
+
+    const rows = (liq.items||[]).map((item, idx)=> [String(idx+1), caLiqItemDate(item), caLiqItemParticular(item), caFmtPesoPdf(item.amount)]);
+    await loadAwesScript('autotable', awesLibs.autotable);
+    doc.autoTable({
+      startY: y,
+      head: [['Item No.','Date','Particular','Amount']],
+      body: rows,
+      margin: {left: margin, right: margin},
+      styles: {fontSize: 9},
+      headStyles: {fillColor:[31,122,80]},
+      columnStyles: {0:{cellWidth:40}, 3:{halign:'right', cellWidth:80}}
+    });
+    y = doc.lastAutoTable.finalY + 16;
+
+    const given = Number(record.amountGiven)||0;
+    const total = Number(liq.totalAmount)||0;
+    const diff = given - total;
+    const excessLabel = diff >= 0 ? 'Unreturned Excess C.A.' : 'Accounts Receivable';
+    const balanceLabel = diff >= 0 ? 'Balance to be Returned' : 'Balance to be Reimbursed';
+    doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text('Total Expenses', margin, y); doc.text(caFmtPesoPdf(total), pageW-margin, y, {align:'right'}); y+=16;
+    doc.setFont('helvetica','normal');
+    doc.text(excessLabel, margin, y); doc.text(caFmtPesoPdf(Math.abs(diff)), pageW-margin, y, {align:'right'}); y+=16;
+    doc.setFont('helvetica','bold');
+    doc.text(balanceLabel, margin, y); doc.text(caFmtPesoPdf(Math.abs(diff)), pageW-margin, y, {align:'right'}); y+=20;
+
+    if(liq.comment){
+      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.text('Notes', margin, y); y+=12;
+      doc.setFont('helvetica','normal');
+      const noteLines = doc.splitTextToSize(liq.comment, pageW-margin*2);
+      doc.text(noteLines, margin, y); y += noteLines.length*11 + 8;
+    }
+
+    doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(120,120,120);
+    doc.text('System-generated copy — this document cannot be edited.', margin, 800);
+    return doc;
+  }
+  async function caDownloadLiquidationPdf(record){
+    try{
+      const doc = await caBuildLiquidationPdf(record);
+      await shareOrDownloadPdf(doc, 'Liquidation-'+(record.id||'form')+'.pdf');
+    }catch(e){ console.error('liquidation pdf failed', e); toast('Could not generate the PDF'); }
+  }
+  async function caMaybeAutoSaveLiquidationPdf(record){
+    const flagKey = 'liqpdf:'+record.id;
+    try{
+      const existing = await window.storage.get(flagKey, false);
+      if(existing) return; // already saved once
+    }catch(e){ /* treat a lookup error the same as "not set yet" */ }
+    try{
+      await caDownloadLiquidationPdf(record);
+      await window.storage.set(flagKey, '1', false);
+    }catch(e){ console.error('auto-save liquidation pdf failed', e); }
+  }
+
+  // ---------- Progressive step tracker for the Cash Advance/Liquidation flow ----------
+  // Mirrors dtStepperHtml() in dispatch.js (same visual language: jo-stepper /
+  // jo-step classes) so a technician sees, at a glance, where a cash advance
+  // sits between "Requested" and "Settled" without reading every status pill.
+  function caStepperHtml(active){
+    const disapprovedLiq = active.liquidation && active.liquidation.status==='disapproved';
+    const submittedLiq = active.liquidation && active.liquidation.status==='pending';
+    const approvedLiq = active.liquidation && active.liquidation.status==='approved';
+    let stage = 0; // 0=Requested
+    if(active.status==='approved') stage = 1; // Approved
+    if(active.status==='approved' && active.disbursed) stage = 2; // Given
+    if(submittedLiq || disapprovedLiq) stage = 3; // Liquidation Submitted (disapproved sits here too — action needed)
+    if(approvedLiq) stage = 4; // Settled
+    const steps = ['Requested','Approved','Given','Liquidation Submitted','Settled'];
+    const stepsHtml = steps.map((label,i)=>{
+      const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
+      return '<div class="jo-step '+state+'">'+
+          '<span class="jo-step-line"></span>'+
+          '<span class="jo-step-dot">'+(i<stage ? '\u2713' : (i+1))+'</span>'+
+          '<span class="jo-step-label">'+label+'</span>'+
+        '</div>';
+    }).join('');
+    let nextText;
+    if(approvedLiq) nextText = 'Fully settled — no further action needed.';
+    else if(disapprovedLiq) nextText = 'Disapproved — fix the flagged items below and resubmit.';
+    else if(submittedLiq) nextText = 'Submitted — waiting for your admin to review your liquidation.';
+    else if(stage===2) nextText = 'Cash advance given. Add your itemized expenses below, then Submit Liquidation.';
+    else if(stage===1) nextText = 'Approved. Waiting for your admin to record the disbursement.';
+    else nextText = 'Waiting for your admin to approve this request.';
+    return '<div class="jo-stepper">'+
+      '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
+      '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
+    '</div>';
+  }
+  // caInstructionsHead's click is handled by the global delegated
+  // .collapsible-head listener (see customers.js) — no listener needed here.
+
+  async function caShowLiqTab(){
+    if(!currentUser || currentUser.role==='admin') return;
+    const active = await caFindActiveLiquidationRecord(currentUser.id);
+    caLiqActiveRecord = active;
+    if(!active){
+      $('caLiquidateEmpty').style.display = '';
+      $('caLiquidateActive').style.display = 'none';
+      return;
+    }
+    $('caLiquidateEmpty').style.display = 'none';
+    $('caLiquidateActive').style.display = '';
+    $('caStepperContainer').innerHTML = caStepperHtml(active);
+
+    // A liquidation that's never been started yet duplicates the reminder
+    // card the technician just came from (same amount/date/purpose) — skip
+    // repeating it here. Once there's something to show (a disapproval to
+    // fix, or a submission to review) the summary earns its place again.
+    const isFreshStart = !active.liquidation;
+    $('caLiquidateSummary').style.display = isFreshStart ? 'none' : '';
+    $('caLiquidateSummary').innerHTML = isFreshStart ? '' :
+      '<div class="leave-comment"><b>Cash Advance</b>'+caFmtPeso(active.amountGiven)+' given on '+leaveFmtDate(active.dateGiven)+
+      ' — '+escapeHtml(active.purpose)+(active.project ? ' ('+escapeHtml(active.project)+')' : '')+'</div>';
+
+    const needsForm = !active.liquidation || active.liquidation.status==='disapproved';
+    $('caLiqEditView').style.display = needsForm ? '' : 'none';
+    $('caLiqReadonlyView').style.display = needsForm ? 'none' : '';
+
+    if(needsForm){
+      if(active.liquidation && active.liquidation.status==='disapproved'){
+        // Reload previous items so the technician can fix and resubmit
+        // rather than starting from scratch.
+        caLiqItems = (active.liquidation.items||[]).map(i=> Object.assign({}, i));
+        $('caLiqNotes').value = active.liquidation.comment && active.liquidation.userNotes ? active.liquidation.userNotes : '';
+        // Remove any banner from a previous visit to this tab: the old code
+        // prepend()ed a new one every single time, so the disapproval message
+        // stacked up copy after copy.
+        $('caLiqEditView').querySelectorAll('.ca-liq-disapproval-banner').forEach(el=> el.remove());
+        const banner = document.createElement('div');
+        banner.className = 'dtr-banner dtr-banner-warn ca-liq-disapproval-banner';
+        banner.style.display = 'block';
+        banner.style.marginBottom = '12px';
+        banner.textContent = 'Disapproved — '+(active.liquidation.comment || 'please review and resubmit.');
+        $('caLiqEditView').prepend(banner);
+      }else{
+        // Before starting blank, check for a local draft from an interrupted
+        // previous attempt (tab killed, app backgrounded, lost connection
+        // right before Submit, etc.) and offer it back instead of losing it.
+        const draft = await caLiqLoadDraft(active.id);
+        if(draft && draft.items.length>0){
+          caLiqItems = draft.items.map(i=> Object.assign({}, i));
+          $('caLiqNotes').value = draft.notes || '';
+          toast('Restored your in-progress liquidation draft');
+        }else{
+          caLiqItems = [];
+          $('caLiqNotes').value = '';
+        }
+      }
+      caLiqRenderForm();
+    }else{
+      caLiqRenderReadonly(active);
+      // A liquidation now exists on the server for this record, so any local
+      // draft left over from building it is stale — clear it so it doesn't
+      // resurface on a future disapproval/resubmit cycle for this record.
+      caLiqClearDraft(active.id);
+    }
+  }
+
+  async function caSubmitLiquidation(){
+    if(!caLiqActiveRecord) return;
+    if(caLiqItems.length===0){ toast('Add at least one item'); return; }
+    for(const item of caLiqItems){
+      if(item.type==='transport') continue;
+      if(!item.date){ toast('Every item needs a date'); return; }
+      if(!item.description || !item.description.trim()){ toast('Every item needs a description'); return; }
+      if(!item.amount || item.amount<=0){ toast('Every item needs a valid amount'); return; }
+      if(!item.attachmentData){ toast('Attach a file for every item — "'+item.description+'" is missing one'); return; }
+    }
+    // Reject oversized receipts up front, with a message that says what to do,
+    // instead of letting the whole submission fail opaquely at the database.
+    let totalBytes = 0;
+    for(const item of caLiqItems){
+      const size = caAttachmentSize(item.attachmentData);
+      if(size > CA_ATTACHMENT_MAX_BYTES){
+        toast('"'+(item.description||'An item')+'" attachment is too large — retake the photo or use a smaller file');
+        return;
+      }
+      totalBytes += size;
+    }
+    if(totalBytes > CA_RECORD_MAX_BYTES){
+      toast('These receipts total too much data — remove or retake a few and submit again');
+      return;
+    }
+    const totalAmount = caLiqComputeTotals().total;
+    const notes = $('caLiqNotes').value.trim();
+    // Fetch just this one record rather than pulling the entire table down.
+    const rec = await caGetRequest(caLiqActiveRecord.id);
+    if(!rec){ toast('Cash advance record not found'); return; }
+    const updated = Object.assign({}, rec, {
+      liquidation: {
+        status: 'pending',
+        items: caLiqItems,
+        totalAmount,
+        comment: notes, userNotes: notes,
+        submittedAt: new Date().toISOString(),
+        decidedAt: null, decidedBy: null
+      }
+    });
+    $('caLiqSubmitBtn').disabled = true;
+    try{
+      const res = await caSaveRequest(rec.id, updated);
+      if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+      toast(res===SAVE_CLOUD
+        ? 'Liquidation submitted for approval'
+        : 'Saved on this device — it will be submitted once you have a connection');
+      // Both SAVE_CLOUD and SAVE_QUEUED mean the liquidation is now recorded
+      // (cloud, or the outbox which retries on its own) — the local editing
+      // draft has served its purpose and would only cause confusion if it
+      // resurfaced later, so clear it.
+      await caLiqClearDraft(rec.id);
+      // Land back on the Liquidate tab (not History) so the technician sees
+      // the readonly confirmation — Pending pill, full itemized form, totals —
+      // right away. Jumping to History instead only shows a small status pill
+      // with no items, which reads as "it just disappeared" even though the
+      // submission went through.
+      caShowTab('liquidate');
+    }catch(e){
+      // Anything unexpected here (a thrown error rather than a handled
+      // SAVE_FAILED) used to fail silently with the button stuck disabled
+      // and nothing saved. The draft above still has everything, so this is
+      // now a "try again" rather than a lost liquidation.
+      console.error('liquidation submit threw', e);
+      toast('Something went wrong submitting — your items are saved as a draft, please try again');
+    }finally{
+      $('caLiqSubmitBtn').disabled = false;
+    }
+  }
+  $('caLiqSubmitBtn').addEventListener('click', caSubmitLiquidation);
+  $('caLiqNotes').addEventListener('input', caLiqSaveDraft);
+
+  // ================= Admin: review requests, disbursement, liquidation =================
+  let caAdminFilter = 'pending';
+  // Used for the "No ___ cash advance requests" empty-state message — plain
+  // English instead of the raw filter key (which used to leak through
+  // verbatim as e.g. "No toReviewLiq cash advance requests.").
+  const caAdminFilterLabels = {
+    pending:'pending', approved:'approved', given:'given', disapproved:'disapproved',
+    all:'', toReviewLiq:'liquidation-review', toSettle:'unsettled'
+  };
+  async function caRenderAdminList(){
+    const list = $('caAdminList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = (await caListAll()).filter(r=> r.kind!=='reimbursement');
+    // Surface this count regardless of which filter tab is currently active —
+    // liquidations pending review sit behind a separate tab from the default
+    // "Pending" (request-approval) view, so without a badge they're easy for
+    // admin to miss entirely.
+    const toReviewCount = all.filter(r=> r.liquidation && r.liquidation.status==='pending').length;
+    const badge = $('caToReviewLiqBadge');
+    badge.textContent = String(toReviewCount);
+    badge.style.display = toReviewCount>0 ? '' : 'none';
+    // Same idea for approved liquidations whose return/reimbursement balance
+    // hasn't actually been settled yet — without a badge here, an approved
+    // liquidation with money still owed either way just blends into
+    // "Approved"/"Given"/"All" and is easy to forget about indefinitely.
+    const toSettleCount = all.filter(r=> r.liquidation && r.liquidation.status==='approved' && r.liquidation.settlement && !r.liquidation.settlement.settled).length;
+    const settleBadge = $('caToSettleBadge');
+    settleBadge.textContent = String(toSettleCount);
+    settleBadge.style.display = toSettleCount>0 ? '' : 'none';
+    let items;
+    if(caAdminFilter==='all') items = all;
+    else if(caAdminFilter==='given') items = all.filter(r=> r.disbursed);
+    else if(caAdminFilter==='toReviewLiq') items = all.filter(r=> r.liquidation && r.liquidation.status==='pending');
+    else if(caAdminFilter==='toSettle') items = all.filter(r=> r.liquidation && r.liquidation.status==='approved' && r.liquidation.settlement && !r.liquidation.settlement.settled);
+    else items = all.filter(r=> r.status===caAdminFilter);
+    // Search by technician name — works within whichever tab is active, not
+    // just "All", since admin may want e.g. "this technician's pending
+    // requests" too.
+    const searchText = ($('caAdminSearch').value||'').trim().toLowerCase();
+    if(searchText) items = items.filter(r=> (r.userName||'').toLowerCase().includes(searchText));
+    if(items.length===0){
+      const label = caAdminFilterLabels[caAdminFilter];
+      list.innerHTML = '<div class="empty-state">No '+(label?label+' ':'')+'cash advance requests'+(searchText?' matching "'+escapeHtml(searchText)+'"':'')+'.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      const disbursedSummary = r.disbursed
+        ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
+        : '';
+      let liqSummary = '';
+      if(r.disbursed){
+        if(!r.liquidation){
+          liqSummary = '<div class="leave-comment"><b>Liquidation</b> ⏳ Not yet submitted</div>';
+        }else{
+          liqSummary = '<div class="leave-comment"><b>Liquidation</b> '+caLiquidationStatusPill(r.liquidation)+
+            ' — '+caFmtPeso(r.liquidation.totalAmount)+' across '+r.liquidation.items.length+' item(s)'+
+            (r.liquidation.comment ? '<div style="margin-top:4px;">'+escapeHtml(r.liquidation.comment)+'</div>' : '')+
+            '</div>'+
+            caSettlementLine(r.liquidation);
+        }
+      }
+      card.innerHTML =
+        '<div class="user-card-head">'+
+          '<div>'+
+            '<div class="u-name">'+
+      '<a href="#" class="ca-tech-name-link" data-view-tech="'+escapeHtml(String(r.userId))+'" data-tech-name="'+escapeHtml(r.userName)+'" style="color:inherit; text-decoration:underline;">'+escapeHtml(r.userName)+'</a>'+
+      ' — '+caFmtPeso(r.amount)+'</div>'+
+            '<div class="u-status">Needed '+leaveFmtDate(r.dateNeeded)+(r.project ? (' · '+escapeHtml(r.project)) : '')+' · Filed '+leaveFmtWhen(r.submittedAt)+'</div>'+
+          '</div>'+
+          (r.status==='approved' && r.disbursed ? '<span class="status-pill status-given">Given</span>' : leaveStatusPill(r.status))+
+        '</div>'+
+        '<div class="leave-comment" style="margin-top:8px;"><b>Purpose</b>'+escapeHtml(r.purpose)+'</div>'+
+        (r.liquidationDate ? '<div class="leave-comment"><b>Expected liquidation</b>'+leaveFmtDate(r.liquidationDate)+'</div>' : '')+
+        (r.paymentMode ? '<div class="leave-comment"><b>Preferred payment mode</b>'+escapeHtml(r.paymentMode)+'</div>' : '')+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '')+
+        disbursedSummary+
+        liqSummary+
+        '<div class="user-card-actions">'+
+          (r.status==='cancelled' ? '' : '<button data-act="review" class="primary">'+(r.status==='pending' ? 'Review' : 'Change Decision')+'</button>')+
+          (r.status==='approved' ? '<button data-act="disburse-toggle">'+(r.disbursed ? 'Edit Disbursement' : 'Record Disbursement')+'</button>' : '')+
+          (r.liquidation ? '<button data-act="liq-toggle">'+(r.liquidation.status==='pending' ? 'Review Liquidation' : 'View Liquidation')+'</button>' : '')+
+        '</div>'+
+        (r.status==='cancelled' ? '' :
+        '<div class="user-edit-panel" data-panel="decision">'+
+          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="edit-save-row">'+
+            '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
+            '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
+          '</div>'+
+        '</div>')+
+        (r.status==='approved' ?
+          '<div class="user-edit-panel" data-panel="disbursement">'+
+            '<div class="grid2">'+
+              '<div class="field"><label>Date Given</label><input type="date" data-f="dateGiven" value="'+escapeHtml(r.dateGiven || todayISO())+'"></div>'+
+              '<div class="field"><label>Amount Given (₱)</label><input type="number" min="0" step="0.01" data-f="amountGiven" value="'+(r.amountGiven != null ? r.amountGiven : r.amount)+'"></div>'+
+            '</div>'+
+            '<div class="edit-save-row">'+
+              '<button class="save-btn" data-act="confirm-disburse" type="button">Confirm Given</button>'+
+            '</div>'+
+          '</div>' : '')+
+        (r.liquidation ?
+          '<div class="user-edit-panel" data-panel="liquidation" id="liqPanel_'+r.id+'"></div>' : '');
+      const decisionPanel = card.querySelector('[data-panel="decision"]');
+      const disbursePanel = card.querySelector('[data-panel="disbursement"]');
+      const liqPanel = card.querySelector('[data-panel="liquidation"]');
+      const allPanels = [decisionPanel, disbursePanel, liqPanel].filter(Boolean);
+      const nameLink = card.querySelector('.ca-tech-name-link');
+      if(nameLink){
+        nameLink.addEventListener('click', (e)=>{
+          e.preventDefault();
+          caOpenTechHistory(nameLink.dataset.viewTech, nameLink.dataset.techName);
+        });
+      }
+      const reviewBtn = card.querySelector('[data-act="review"]');
+      if(reviewBtn && decisionPanel){
+        reviewBtn.addEventListener('click', ()=>{
+          allPanels.forEach(p=>{ if(p!==decisionPanel) p.classList.remove('open'); });
+          decisionPanel.classList.toggle('open');
+        });
+        card.querySelector('[data-act="approve"]').addEventListener('click', ()=> caDecide(r.id, 'approved', decisionPanel.querySelector('[data-f="comment"]').value.trim()));
+        card.querySelector('[data-act="disapprove"]').addEventListener('click', ()=> caDecide(r.id, 'disapproved', decisionPanel.querySelector('[data-f="comment"]').value.trim()));
+      }
+      const disburseToggleBtn = card.querySelector('[data-act="disburse-toggle"]');
+      if(disburseToggleBtn){
+        disburseToggleBtn.addEventListener('click', ()=>{
+          allPanels.forEach(p=>{ if(p!==disbursePanel) p.classList.remove('open'); });
+          disbursePanel.classList.toggle('open');
+        });
+      }
+      const confirmDisburseBtn = card.querySelector('[data-act="confirm-disburse"]');
+      if(confirmDisburseBtn){
+        confirmDisburseBtn.addEventListener('click', ()=>{
+          const dateGiven = disbursePanel.querySelector('[data-f="dateGiven"]').value;
+          const amountGiven = parseFloat(disbursePanel.querySelector('[data-f="amountGiven"]').value);
+          caRecordDisbursement(r.id, dateGiven, amountGiven);
+        });
+      }
+      const liqToggleBtn = card.querySelector('[data-act="liq-toggle"]');
+      if(liqToggleBtn && liqPanel){
+        liqToggleBtn.addEventListener('click', ()=>{
+          allPanels.forEach(p=>{ if(p!==liqPanel) p.classList.remove('open'); });
+          const opening = !liqPanel.classList.contains('open');
+          liqPanel.classList.toggle('open');
+          if(opening) caRenderLiqAdminPanel(r, liqPanel);
+        });
+      }
+      list.appendChild(card);
+    });
+  }
+  document.querySelectorAll('#caAdminFilterRow button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#caAdminFilterRow button').forEach(b=> b.classList.remove('active'));
+      btn.classList.add('active');
+      caAdminFilter = btn.dataset.filter;
+      caRenderAdminList();
+    });
+  });
+  // Debounced so every keystroke doesn't refetch/re-render the whole list.
+  let caAdminSearchTimer = null;
+  $('caAdminSearch').addEventListener('input', ()=>{
+    clearTimeout(caAdminSearchTimer);
+    caAdminSearchTimer = setTimeout(caRenderAdminList, 200);
+  });
+
+  // ---------- Admin: one technician's full Cash Advance + Liquidation
+  // history (read-only), reached by tapping a technician's name on any
+  // card in the list above. Same 4-milestone-dates layout as the
+  // technician's own "My Requests" tab, plus a clickable itemized
+  // liquidation breakdown (receipts / transportation trip legs) since
+  // that's useful for an admin double-checking past records and the
+  // technician's own history view doesn't show it. ----------
+  async function caOpenTechHistory(userId, userName){
+    $('caTechHistoryName').textContent = userName ? (userName+' — Cash Advance History') : 'Cash Advance History';
+    $('caAdminArea').style.display = 'none';
+    $('caTechHistoryArea').style.display = '';
+    const list = $('caTechHistoryList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const items = (await caListForUser(userId)).filter(r=> r.kind!=='reimbursement');
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No cash advance requests yet.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
+      let disbursementLine = '';
+      if(r.status==='approved'){
+        disbursementLine = r.disbursed
+          ? '<div class="leave-comment"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+'</div>'
+          : '<div class="leave-comment"><b>Cash given</b>Not yet released</div>';
+      }
+      const datesLine =
+        '<div class="leave-comment" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px;">'+
+          '<div><b>Date Requested</b>'+leaveFmtWhen(r.submittedAt)+'</div>'+
+          '<div><b>Date Approved</b>'+(r.status==='approved' ? leaveFmtWhen(r.decidedAt) : '—')+'</div>'+
+          '<div><b>Date Given</b>'+(r.disbursed ? leaveFmtDate(r.dateGiven) : '—')+'</div>'+
+          '<div><b>Date Liquidated</b>'+(r.liquidation && r.liquidation.status==='approved' ? leaveFmtWhen(r.liquidation.decidedAt) : '—')+'</div>'+
+        '</div>';
+      let liqBlock = '';
+      if(r.disbursed){
+        if(!r.liquidation){
+          liqBlock = '<div class="leave-comment"><b>Liquidation</b> ⏳ Not yet submitted</div>';
+        }else{
+          let itemsHtml = '';
+          (r.liquidation.items||[]).forEach(item=>{
+            itemsHtml += '<div class="hist-item" style="cursor:pointer; padding:6px 8px;" data-view-item="'+escapeHtml(String(item.id))+'">'+
+              '<div class="hist-info"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b>'+
+              '<span>'+caFmtPeso(item.amount)+'</span></div></div>';
+          });
+          liqBlock =
+            '<div class="leave-comment"><b>Liquidation</b>'+caLiquidationStatusPill(r.liquidation)+
+              ' — '+caFmtPeso(r.liquidation.totalAmount)+' across '+r.liquidation.items.length+' item(s)'+
+              (r.liquidation.comment ? '<div style="margin-top:4px;">'+escapeHtml(r.liquidation.comment)+'</div>' : '')+
+            '</div>'+
+            caSettlementLine(r.liquidation)+
+            itemsHtml;
+        }
+      }
+      row.innerHTML =
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">'+
+          '<div class="hist-info"><b>'+caFmtPeso(r.amount)+'</b>'+
+            '<span>Needed '+leaveFmtDate(r.dateNeeded)+(r.project ? (' · '+escapeHtml(r.project)) : '')+'</span>'+
+          '</div>'+
+          (r.status==='approved' && r.disbursed ? '<span class="status-pill status-given">Given</span>' : leaveStatusPill(r.status))+
+        '</div>'+
+        datesLine+
+        '<div class="leave-comment"><b>Purpose</b>'+escapeHtml(r.purpose)+'</div>'+
+        disbursementLine+
+        liqBlock+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
+      list.appendChild(row);
+      if(r.liquidation){
+        (r.liquidation.items||[]).forEach(item=>{
+          const el = row.querySelector('[data-view-item="'+CSS.escape(String(item.id))+'"]');
+          // Same on-demand-fetch pattern as the review panel — this list is
+          // loaded without attachment payloads.
+          if(el) el.addEventListener('click', ()=> openLiquidationAttachment(Object.assign({}, item, {__recordId: r.id})));
+        });
+      }
+    });
+  }
+  $('caTechHistBackBtn').addEventListener('click', ()=>{
+    $('caTechHistoryArea').style.display = 'none';
+    $('caAdminArea').style.display = '';
+    caRenderAdminList();
+  });
+
+  function caRenderLiqAdminPanel(r, panel){
+    const liq = r.liquidation;
+    let html = '<div class="field"><label>Items</label></div>';
+    liq.items.forEach(item=>{
+      html += '<div class="hist-item" style="cursor:pointer;" data-view-item="'+item.id+'">'+
+        '<div class="hist-info"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b>'+
+        '<span>'+caFmtPeso(item.amount)+'</span></div></div>';
+    });
+    html += '<div style="display:flex; justify-content:space-between; font-weight:700; margin:8px 0;"><span>Total</span><span>'+caFmtPeso(liq.totalAmount)+' of '+caFmtPeso(r.amountGiven)+' given</span></div>';
+    if(liq.userNotes) html += '<div class="leave-comment"><b>Technician notes</b>'+escapeHtml(liq.userNotes)+'</div>';
+    if(liq.status==='pending'){
+      html +=
+        '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="liqComment" rows="2" placeholder="Optional for approval, recommended for disapproval"></textarea></div>'+
+        '<div class="edit-save-row">'+
+          '<button class="cancel-btn" data-act="liq-disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
+          '<button class="save-btn" data-act="liq-approve" type="button">Approve Liquidation</button>'+
+        '</div>';
+    }else{
+      html += '<div class="leave-comment">'+caLiquidationStatusPill(liq)+
+        (liq.decidedBy ? ' · decided by '+escapeHtml(liq.decidedBy) : '')+
+        (liq.comment ? '<div style="margin-top:4px;">'+escapeHtml(liq.comment)+'</div>' : '')+'</div>';
+      if(liq.status==='approved' && liq.settlement && liq.settlement.type!=='none'){
+        html += caSettlementLine(liq);
+        if(!liq.settlement.settled){
+          html +=
+            '<div class="field"><label>Settlement method (optional)</label><input type="text" data-f="settleMethod" placeholder="e.g. Cash, GCash, payroll deduction"></div>'+
+            '<div class="edit-save-row">'+
+              '<button class="save-btn" data-act="mark-settled" type="button">Mark as Settled</button>'+
+            '</div>';
+        }
+      }
+    }
+    panel.innerHTML = html;
+    (liq.items||[]).forEach(item=>{
+      const el = panel.querySelector('[data-view-item="'+CSS.escape(String(item.id))+'"]');
+      // Pass the owning record id so the viewer can fetch the receipt on demand
+      // (admin lists are loaded without attachment payloads).
+      if(el) el.addEventListener('click', ()=> openLiquidationAttachment(Object.assign({}, item, {__recordId: r.id})));
+    });
+    const approveBtn = panel.querySelector('[data-act="liq-approve"]');
+    const disapproveBtn = panel.querySelector('[data-act="liq-disapprove"]');
+    if(approveBtn) approveBtn.addEventListener('click', ()=> caDecideLiquidation(r.id, 'approved', panel.querySelector('[data-f="liqComment"]').value.trim()));
+    if(disapproveBtn) disapproveBtn.addEventListener('click', ()=> caDecideLiquidation(r.id, 'disapproved', panel.querySelector('[data-f="liqComment"]').value.trim()));
+    const markSettledBtn = panel.querySelector('[data-act="mark-settled"]');
+    if(markSettledBtn) markSettledBtn.addEventListener('click', ()=> caMarkSettled(r.id, panel.querySelector('[data-f="settleMethod"]').value.trim()));
+  }
+
+  // All three admin actions below now:
+  //   * require a live connection (a decision queued on one phone and replayed
+  //     later would silently clobber whatever happened in between),
+  //   * fetch only the one record they are changing,
+  //   * write a targeted .update() rather than upserting the technician's whole
+  //     record back, and
+  //   * guard against acting twice on the same record.
+  function caAdminGuard(){
+    if(!currentUser || currentUser.role!=='admin'){ toast('Admin only'); return false; }
+    return true;
+  }
+  async function caApplyAdminChange(id, mutate, okMsg){
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    try{
+      const rec = await caGetRequest(id);
+      if(!rec){ toast('Request not found'); return false; }
+      const change = mutate(rec);
+      if(!change) return false;
+      const merged = Object.assign({}, rec, change.data);
+      let q = db.from('cash_advance_requests').update(
+        change.status ? { status: change.status, data: merged } : { data: merged }
+      ).eq('id', id);
+      if(change.expectStatus) q = q.eq('status', change.expectStatus);
+      const { data: rows, error } = await q.select('id');
+      if(error) throw error;
+      if(!rows || !rows.length){
+        toast('This request changed on another device — refreshing');
+        return false;
+      }
+      if(okMsg) toast(okMsg);
+      return true;
+    }catch(e){
+      console.error('cash advance admin update failed', describeCloudError(e));
+      toast('Could not save — please try again');
+      return false;
+    }
+  }
+
+  async function caDecideLiquidation(id, status, comment){
+    if(!caAdminGuard()) return;
+    if(status==='disapproved' && !comment){
+      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+    }
+    await caApplyAdminChange(id, (rec)=>{
+      if(!rec.liquidation){ toast('Liquidation not found'); return null; }
+      if(rec.liquidation.status===status){ toast('Already '+status); return null; }
+      const updatedLiq = Object.assign({}, rec.liquidation, {
+        status, comment: comment || '',
+        decidedAt: new Date().toISOString(),
+        decidedBy: currentUser.name || 'Admin'
+      });
+      if(status==='approved'){
+        // Stamp the return/reimburse balance right when it's approved, so it
+        // becomes a trackable record instead of a number that only ever
+        // existed on-screen. A zero balance is marked settled immediately
+        // since there's nothing to follow up on.
+        const settle = caComputeSettlement(Object.assign({}, rec, {liquidation: updatedLiq}));
+        updatedLiq.settlement = {
+          type: settle.type, amount: settle.amount,
+          settled: settle.type==='none',
+          settledAt: settle.type==='none' ? new Date().toISOString() : null,
+          settledBy: settle.type==='none' ? (currentUser.name || 'Admin') : null,
+          method: null
+        };
+      }
+      return { data: { liquidation: updatedLiq } };
+    }, 'Liquidation '+status);
+    caRenderAdminList();
+  }
+
+  // Admin follow-up once a technician's unreturned excess is actually handed
+  // back, or a company reimbursement is actually paid out. Nothing before
+  // this point ever recorded that — the balance would just sit computed but
+  // untracked forever.
+  async function caMarkSettled(id, method){
+    if(!caAdminGuard()) return;
+    await caApplyAdminChange(id, (rec)=>{
+      if(!rec.liquidation || !rec.liquidation.settlement){ toast('Nothing to settle'); return null; }
+      if(rec.liquidation.settlement.settled){ toast('Already settled'); return null; }
+      return { data: { liquidation: Object.assign({}, rec.liquidation, {
+        settlement: Object.assign({}, rec.liquidation.settlement, {
+          settled: true,
+          settledAt: new Date().toISOString(),
+          settledBy: currentUser.name || 'Admin',
+          method: method || ''
+        })
+      }) } };
+    }, 'Marked as settled');
+    caRenderAdminList();
+  }
+
+  async function caDecide(id, status, comment){
+    if(!caAdminGuard()) return;
+    if(status==='disapproved' && !comment){
+      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+    }
+    await caApplyAdminChange(id, ()=>({
+      status,
+      expectStatus: 'pending',
+      data: {
+        status, comment: comment || '',
+        decidedAt: new Date().toISOString(),
+        decidedBy: currentUser.name || 'Admin'
+      }
+    }), 'Request '+status);
+    caRenderAdminList();
+  }
+  // Monitoring: records that the requested cash was actually handed over, with
+  // the date and amount actually given (which can differ from what was requested).
+  async function caRecordDisbursement(id, dateGiven, amountGiven){
+    if(!caAdminGuard()) return;
+    if(!dateGiven){ toast('Set the date the cash was given'); return; }
+    if(!amountGiven || amountGiven<=0){ toast('Enter a valid amount given'); return; }
+    await caApplyAdminChange(id, (rec)=>{
+      if(rec.status!=='approved'){ toast('Approve the request before recording disbursement'); return null; }
+      if(rec.disbursed){ toast('Already recorded as disbursed'); return null; }
+      return { data: {
+        disbursed: true, dateGiven, amountGiven,
+        disbursedAt: new Date().toISOString(),
+        disbursedBy: currentUser.name || 'Admin'
+      } };
+    }, 'Disbursement recorded');
+    caRenderAdminList();
+  }
+
+  // ================= Reimbursement (out-of-pocket expenses) =================
+  // Deliberately independent of the Cash Advance / Liquidate flow above: there
+  // is no advance to account for, just money the technician already spent and
+  // wants back. Reuses the same cash_advance_requests table — data.kind:
+  // 'reimbursement' marks a row apart from a normal advance (undefined/'advance'
+  // kind) — so it inherits the exact same DB trigger protection on status/
+  // decision/payment fields, the same outbox offline handling (caSaveRequest,
+  // the 'cash-advance' outbox handler), and the same admin action functions
+  // (caDecide, caRecordDisbursement) with zero changes to any of them.
+  let caReimbItems = [];        // in-progress: {id, dateIncurred, description, amount, attachmentName, attachmentData, attachmentMime}
+  let caReimbAttachment = null; // {data, mime, name} for the item currently being built
+  function caReimbItemId(){ return 'ri_'+Date.now()+'_'+Math.floor(Math.random()*10000); }
+
+  function caReimbResetForm(){
+    caReimbItems = [];
+    caReimbAttachment = null;
+    $('caReimbDate').value = todayISO();
+    $('caReimbAmount').value = '';
+    $('caReimbDescription').value = '';
+    $('caReimbFileStatus').textContent = '';
+    $('caReimbNotes').value = '';
+    caReimbRenderList();
+  }
+
+  function caReimbRenderList(){
+    const wrap = $('caReimbItemsList');
+    const totalLine = $('caReimbTotalLine');
+    if(caReimbItems.length===0){ wrap.innerHTML = ''; totalLine.style.display = 'none'; return; }
+    wrap.innerHTML = caReimbItems.map(it=>
+      '<div class="card" data-view-item="'+escapeHtml(it.id)+'" style="margin-bottom:8px; box-shadow:none; border:1px solid var(--border); cursor:pointer;">'+
+        '<div class="card-body" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">'+
+          '<div>'+
+            '<div style="font-weight:600;">'+escapeHtml(it.description)+'</div>'+
+            '<div class="u-status">'+leaveFmtDate(it.dateIncurred)+' · 📎 '+escapeHtml(it.attachmentName||'receipt')+'</div>'+
+          '</div>'+
+          '<div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">'+
+            '<b>'+caFmtPeso(it.amount)+'</b>'+
+            '<button type="button" class="rm-btn" data-act="remove" data-item-id="'+escapeHtml(it.id)+'">\u2212</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'
+    ).join('');
+    const total = caReimbItems.reduce((s,it)=> s+(Number(it.amount)||0), 0);
+    totalLine.style.display = '';
+    totalLine.textContent = 'Total: '+caFmtPeso(total);
+    caReimbItems.forEach(item=>{
+      const row = wrap.querySelector('[data-view-item="'+CSS.escape(String(item.id))+'"]');
+      if(row) row.addEventListener('click', (e)=>{ if(e.target.closest('[data-act="remove"]')) return; openLiquidationAttachment(item); });
+      const rmBtn = wrap.querySelector('[data-act="remove"][data-item-id="'+CSS.escape(String(item.id))+'"]');
+      if(rmBtn) rmBtn.addEventListener('click', (e)=>{ e.stopPropagation(); caReimbItems = caReimbItems.filter(i=> i.id!==item.id); caReimbRenderList(); });
+    });
+  }
+
+  $('caReimbAttachBtn').addEventListener('click', ()=> $('caReimbFile').click());
+  $('caReimbFile').addEventListener('change', async ()=>{
+    const file = $('caReimbFile').files[0];
+    if(!file) return;
+    try{
+      let dataUrl, mime;
+      if(file.type.startsWith('image/')){
+        dataUrl = await compressImageToDataURL(file, 1000, 0.6);
+        mime = 'image/jpeg';
+      }else{
+        dataUrl = await new Promise((resolve, reject)=>{
+          const r = new FileReader();
+          r.onload = ()=> resolve(r.result);
+          r.onerror = ()=> reject(new Error('read failed'));
+          r.readAsDataURL(file);
+        });
+        mime = file.type || 'application/octet-stream';
+      }
+      if(caAttachmentSize(dataUrl) > CA_ATTACHMENT_MAX_BYTES){
+        toast('That file is too large — take a photo instead of attaching a full-size file');
+        return;
+      }
+      caReimbAttachment = {data: dataUrl, mime, name: file.name};
+      $('caReimbFileStatus').textContent = '📄 '+file.name;
+    }catch(e){ toast('Could not attach that file'); }
+  });
+  $('caReimbAddItemBtn').addEventListener('click', ()=>{
+    const dateIncurred = $('caReimbDate').value;
+    const description = $('caReimbDescription').value.trim();
+    const amount = parseFloat($('caReimbAmount').value) || 0;
+    if(!dateIncurred){ toast('Set the date the expense was incurred'); return; }
+    if(!description){ toast('Describe what the expense was for'); return; }
+    if(!amount || amount<=0){ toast('Enter a valid amount'); return; }
+    if(!caReimbAttachment){ toast('Attach a receipt photo or file'); return; }
+    caReimbItems.push({
+      id: caReimbItemId(), dateIncurred, description, amount,
+      attachmentName: caReimbAttachment.name,
+      attachmentData: caReimbAttachment.data,
+      attachmentMime: caReimbAttachment.mime
+    });
+    caReimbAttachment = null;
+    $('caReimbDate').value = todayISO();
+    $('caReimbAmount').value = '';
+    $('caReimbDescription').value = '';
+    $('caReimbFileStatus').textContent = '';
+    caReimbRenderList();
+    toast('Expense added');
+  });
+
+  async function caReimbSubmit(){
+    if(caReimbItems.length===0){ toast('Add at least one expense first'); return; }
+    const totalSize = caReimbItems.reduce((s,it)=> s+caAttachmentSize(it.attachmentData), 0);
+    if(totalSize > CA_RECORD_MAX_BYTES){ toast('These receipts total too much data — remove or retake a few and submit again'); return; }
+    if(!currentUser){ toast('Please sign in again'); return; }
+    const id = caGenId(currentUser.id);
+    const amount = caReimbItems.reduce((s,it)=> s+(Number(it.amount)||0), 0);
+    const data = {
+      id, userId: currentUser.id, userName: currentUser.name, kind: 'reimbursement',
+      items: caReimbItems, amount,
+      notes: ($('caReimbNotes').value||'').trim(),
+      submittedAt: new Date().toISOString(),
+      status: 'pending', comment: '', decidedAt: null, decidedBy: null,
+      disbursed: false, dateGiven: null, amountGiven: null, disbursedAt: null, disbursedBy: null
+    };
+    $('caReimbSubmitBtn').disabled = true;
+    const result = await caSaveRequest(id, data);
+    $('caReimbSubmitBtn').disabled = false;
+    if(result===SAVE_FAILED){ toast('Could not submit — please try again'); return; }
+    toast(result===SAVE_QUEUED ? 'Saved on this device — will submit once online' : 'Reimbursement submitted for approval');
+    caReimbResetForm();
+    caRenderReimbHistory();
+  }
+  $('caReimbSubmitBtn').addEventListener('click', caReimbSubmit);
+
+  // ---- Technician's own reimbursement history ----
+  function caReimbStatusPill(r){
+    if(r.status==='approved' && r.disbursed) return '<span class="status-pill status-given">Paid</span>';
+    return leaveStatusPill(r.status);
+  }
+  async function caRenderReimbHistory(){
+    const list = $('caReimbHistoryList');
+    if(!currentUser || currentUser.role==='admin') return;
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const items = (await caListForUser(currentUser.id)).filter(r=> r.kind==='reimbursement');
+    if(items.length===0){ list.innerHTML = '<div class="empty-state">No reimbursement requests yet.</div>'; return; }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const row = document.createElement('div');
+      row.className = 'hist-item';
+      row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
+      const datesLine =
+        '<div class="leave-comment" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px;">'+
+          '<div><b>Date Submitted</b>'+leaveFmtWhen(r.submittedAt)+'</div>'+
+          '<div><b>Date Decided</b>'+(r.status!=='pending' ? leaveFmtWhen(r.decidedAt) : '—')+'</div>'+
+          '<div><b>Date Given</b>'+(r.disbursed ? leaveFmtDate(r.dateGiven) : '—')+'</div>'+
+        '</div>';
+      const itemsLine = '<div class="leave-comment"><b>Items ('+(r.items||[]).length+')</b>'+
+        (r.items||[]).map(it=> escapeHtml(it.description)+' — '+caFmtPeso(it.amount)).join('<br>')+
+      '</div>';
+      row.innerHTML =
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">'+
+          '<div class="hist-info"><b>'+caFmtPeso(r.amount)+'</b><span>Reimbursement</span></div>'+
+          caReimbStatusPill(r)+
+        '</div>'+
+        datesLine+
+        itemsLine+
+        (r.disbursed ? '<div class="leave-comment"><b>Amount Paid</b>'+caFmtPeso(r.amountGiven)+'</div>' : '')+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
+      $$('[data-view-item]', row).forEach(()=>{}); // no-op, keeps structure consistent with other lists
+      list.appendChild(row);
+    });
+  }
+
+  // ---- Admin: separate list + actions, reusing caDecide/caRecordDisbursement ----
+  let caReimbAdminFilter = 'pending';
+  const caReimbAdminFilterLabels = {pending:'pending', approved:'approved — not yet paid', paid:'paid', disapproved:'disapproved'};
+  async function caRenderReimbAdminList(){
+    const list = $('caReimbAdminList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = (await caListAll()).filter(r=> r.kind==='reimbursement');
+    const pendingBadge = $('caReimbPendingBadge');
+    const pendingCount = all.filter(r=> r.status==='pending').length;
+    pendingBadge.textContent = String(pendingCount);
+    pendingBadge.style.display = pendingCount>0 ? '' : 'none';
+    let items;
+    if(caReimbAdminFilter==='all') items = all;
+    else if(caReimbAdminFilter==='paid') items = all.filter(r=> r.disbursed);
+    else if(caReimbAdminFilter==='approved') items = all.filter(r=> r.status==='approved' && !r.disbursed);
+    else items = all.filter(r=> r.status===caReimbAdminFilter);
+    const searchText = ($('caReimbAdminSearch').value||'').trim().toLowerCase();
+    if(searchText) items = items.filter(r=> (r.userName||'').toLowerCase().includes(searchText));
+    if(items.length===0){
+      const label = caReimbAdminFilterLabels[caReimbAdminFilter];
+      list.innerHTML = '<div class="empty-state">No '+(label?label+' ':'')+'reimbursement requests'+(searchText?' matching "'+escapeHtml(searchText)+'"':'')+'.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    items.forEach(r=>{
+      const card = document.createElement('div');
+      card.className = 'user-card';
+      const paidSummary = r.disbursed
+        ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Paid</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
+        : '';
+      const itemsSummary = '<div class="leave-comment"><b>Items ('+(r.items||[]).length+')</b>'+
+        (r.items||[]).map(it=> escapeHtml(it.description)+' — '+leaveFmtDate(it.dateIncurred)+' — '+caFmtPeso(it.amount)).join('<br>')+
+      '</div>';
+      card.innerHTML =
+        '<div class="user-card-head">'+
+          '<div>'+
+            '<div class="u-name">'+escapeHtml(r.userName)+' — '+caFmtPeso(r.amount)+'</div>'+
+            '<div class="u-status">Filed '+leaveFmtWhen(r.submittedAt)+(r.notes ? (' · '+escapeHtml(r.notes)) : '')+'</div>'+
+          '</div>'+
+          (r.status==='approved' && r.disbursed ? '<span class="status-pill status-given">Paid</span>' : leaveStatusPill(r.status))+
+        '</div>'+
+        itemsSummary+
+        (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '')+
+        paidSummary+
+        '<div class="user-card-actions">'+
+          (r.status==='cancelled' ? '' : '<button data-act="review" class="primary">'+(r.status==='pending' ? 'Review' : 'Change Decision')+'</button>')+
+          (r.status==='approved' ? '<button data-act="disburse-toggle">'+(r.disbursed ? 'Edit Payment' : 'Record Payment')+'</button>' : '')+
+        '</div>'+
+        (r.status==='cancelled' ? '' :
+        '<div class="user-edit-panel" data-panel="decision">'+
+          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="edit-save-row">'+
+            '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
+            '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
+          '</div>'+
+        '</div>')+
+        (r.status==='approved' ?
+          '<div class="user-edit-panel" data-panel="disbursement">'+
+            '<div class="grid2">'+
+              '<div class="field"><label>Date Given</label><input type="date" data-f="dateGiven" value="'+escapeHtml(r.dateGiven || todayISO())+'"></div>'+
+              '<div class="field"><label>Amount Paid (₱)</label><input type="number" min="0" step="0.01" data-f="amountGiven" value="'+(r.amountGiven != null ? r.amountGiven : r.amount)+'"></div>'+
+            '</div>'+
+            '<div class="edit-save-row">'+
+              '<button class="save-btn" data-act="confirm-disburse" type="button">Confirm Paid</button>'+
+            '</div>'+
+          '</div>' : '');
+      const decisionPanel = card.querySelector('[data-panel="decision"]');
+      const disbursePanel = card.querySelector('[data-panel="disbursement"]');
+      const allPanels = [decisionPanel, disbursePanel].filter(Boolean);
+      const reviewBtn = card.querySelector('[data-act="review"]');
+      if(reviewBtn && decisionPanel){
+        reviewBtn.addEventListener('click', ()=>{
+          allPanels.forEach(p=>{ if(p!==decisionPanel) p.classList.remove('open'); });
+          decisionPanel.classList.toggle('open');
+        });
+        card.querySelector('[data-act="approve"]').addEventListener('click', async ()=>{ await caDecide(r.id, 'approved', decisionPanel.querySelector('[data-f="comment"]').value.trim()); caRenderReimbAdminList(); });
+        card.querySelector('[data-act="disapprove"]').addEventListener('click', async ()=>{ await caDecide(r.id, 'disapproved', decisionPanel.querySelector('[data-f="comment"]').value.trim()); caRenderReimbAdminList(); });
+      }
+      const disburseToggleBtn = card.querySelector('[data-act="disburse-toggle"]');
+      if(disburseToggleBtn){
+        disburseToggleBtn.addEventListener('click', ()=>{
+          allPanels.forEach(p=>{ if(p!==disbursePanel) p.classList.remove('open'); });
+          disbursePanel.classList.toggle('open');
+        });
+      }
+      const confirmBtn = card.querySelector('[data-act="confirm-disburse"]');
+      if(confirmBtn){
+        confirmBtn.addEventListener('click', async ()=>{
+          const dateGiven = disbursePanel.querySelector('[data-f="dateGiven"]').value;
+          const amountGiven = parseFloat(disbursePanel.querySelector('[data-f="amountGiven"]').value);
+          await caRecordDisbursement(r.id, dateGiven, amountGiven);
+          caRenderReimbAdminList();
+        });
+      }
+      list.appendChild(card);
+    });
+  }
+  document.querySelectorAll('#caReimbAdminFilterRow button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('#caReimbAdminFilterRow button').forEach(b=> b.classList.remove('active'));
+      btn.classList.add('active');
+      caReimbAdminFilter = btn.dataset.filter;
+      caRenderReimbAdminList();
+    });
+  });
+  let caReimbAdminSearchTimer = null;
+  $('caReimbAdminSearch').addEventListener('input', ()=>{
+    clearTimeout(caReimbAdminSearchTimer);
+    caReimbAdminSearchTimer = setTimeout(caRenderReimbAdminList, 200);
+  });
+
+  // Admin-side section toggle: Cash Advance vs Reimbursement. Kept as its own
+  // small switch (not part of caShowTab, which is technician-only) since the
+  // admin area has never had internal tabs before this.
+  function caShowAdminSection(which){
+    $('caAdminSecRequests').classList.toggle('active', which==='requests');
+    $('caAdminSecReimb').classList.toggle('active', which==='reimb');
+    $('caAdminReqSection').style.display = which==='requests' ? '' : 'none';
+    $('caAdminReimbSection').style.display = which==='reimb' ? '' : 'none';
+    if(which==='requests') caRenderAdminList();
+    else caRenderReimbAdminList();
+  }
+  $('caAdminSecRequests').addEventListener('click', ()=> caShowAdminSection('requests'));
+  $('caAdminSecReimb').addEventListener('click', ()=> caShowAdminSection('reimb'));
+
+  async function showCashAdvanceView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('cashAdvanceView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Cash Advance Form', 'Request and track cash advances');
+    window.scrollTo({top:0});
+    if(currentUser && currentUser.role==='admin'){
+      $('caTechArea').style.display = 'none';
+      $('caAdminArea').style.display = '';
+      $('caTechHistoryArea').style.display = 'none';
+      caShowAdminSection('requests');
+    }else{
+      $('caTechArea').style.display = '';
+      $('caAdminArea').style.display = 'none';
+      $('caTechHistoryArea').style.display = 'none';
+      caShowTab('new');
+    }
+  }
+
+
+// ---------- Header title (changes per feature page) ----------
+  function setHeaderTitle(title, sub){
+    $('brandName').textContent = title;
+    $('brandSub').textContent = sub || '';
+  }
+
+  async function showDtrView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('dtrView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Online DTR', 'Daily Time Record');
+    window.scrollTo({top:0});
+    if(currentUser && currentUser.role==='admin'){
+      // Admin has no DTR of their own — DTR is per-technician. Land on the
+      // attendance table (today's status for everyone); "View DTR" on a
+      // row drills into that one technician's read-only history below.
+      $('dtrTechCard').style.display = 'none';
+      $('dtrAdminTableCard').style.display = '';
+      $('dtrAdminViewingCard').style.display = 'none';
+      $('dtrHistoryCard').style.display = 'none';
+      dtrViewingUser = null;
+      $('dtrHistoryList').innerHTML = '<div class="empty-state">Select a technician to view their DTR.</div>';
+      dtrRenderAdminTable();
+    }else if(currentUser){
+      $('dtrTechCard').style.display = '';
+      $('dtrAdminTableCard').style.display = 'none';
+      $('dtrAdminViewingCard').style.display = 'none';
+      $('dtrHistoryCard').style.display = '';
+      $('dtrTechName').textContent = currentUser.name;
+      dtrViewingUser = null;
+      await dtrRenderDeviceBanner();
+      await dtrRenderTodayStatus();
+      await dtrRenderHistory();
+    }
+  }
+
+  // ---------- Manage Equipment List — full page (admin-only), reached via
+  // the "Equipment" sidebar nav item. Was previously a popup sheet; now its
+  // own dedicated page, same pattern as the other full-page views above. ----------
+  async function showEquipmentManagerView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('equipmentManagerView').style.display = '';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Equipment', 'Manage Equipment List');
+    window.scrollTo({top:0});
+    await openEquipmentManagerPage();
+  }
+  $('menuManageEquipment').addEventListener('click', async ()=>{
+    closeMainMenu();
+    setSidebarActive('menuManageEquipment');
+    if(!(await ensureAdminAuthenticated())) return;
+    showEquipmentManagerView();
+  });
+
+  // ---------- Manage Customers — full page (admin-only), reached via the
+  // "Customers" sidebar nav item. Was previously a popup sheet; now its own
+  // dedicated page, same pattern as the other full-page views above. ----------
+  async function showCustomersManagerView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = '';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Customers', 'Manage Customers');
+    window.scrollTo({top:0});
+    await openCustomersManagerPage();
+  }
+
+  // ---------- Customer History — full page (admin-only), reached via the
+  // "History" action on a customer card in Manage Customers. Lands on the
+  // customer's details plus every equipment record on file; tapping an
+  // equipment record drills into that unit's full service-report history
+  // (same drill-down pattern as the DTR attendance table above). ----------
+  async function showCustomerHistoryView(c){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Customer History', c.name);
+    window.scrollTo({top:0});
+    await openCustomerHistoryPage(c);
+  }
+  $('custHistBackToListBtn').addEventListener('click', ()=> showCustomersManagerView());
+  $('custHistBackToEquipBtn').addEventListener('click', ()=> custHistShowEquipList());
+
+  // ---------- Manage Service Reports — full page (admin-only), reached via
+  // the "Service Reports" sidebar nav item. Was previously the "Saved
+  // Reports" popup sheet; now its own dedicated page with All / Draft /
+  // Completed tabs and a search bar. ----------
+  async function showServiceReportsManagerView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = '';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Service Reports', 'Saved Reports');
+    window.scrollTo({top:0});
+    await openServiceReportsManagerPage();
+  }
+
+  // ---------- Home screen greeting (technicians only) ----------
+  async function renderHomeGreeting(){
+    const card = $('homeGreetingCard');
+    if(!currentUser || currentUser.role==='admin'){ card.style.display = 'none'; return; }
+    card.style.display = '';
+    $('homeGreetingText').innerHTML = '<div class="empty-state">Loading…</div>';
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-PH', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+    const timeStr = now.toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'});
+    const [todayDtr, myTickets] = await Promise.all([
+      dtrGetDay(currentUser.id, todayISO()).catch(()=>null),
+      dtListForWorker(currentUser.id).catch(()=>[])
+    ]);
+    const alreadyTimedIn = !!(todayDtr && todayDtr.timeIn);
+    const alreadyTimedOut = !!(todayDtr && todayDtr.timeOut);
+    const fmt = (iso)=> iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'}) : '—';
+
+    let html =
+      '<p class="greet-line">Good day, <b>'+escapeHtml(currentUser.name)+'</b>!</p>'+
+      '<p class="greet-date">Today is '+dateStr+', '+timeStr+'.</p>';
+
+    // Today's attendance log, right in the greeting — big and hard to miss,
+    // so Time In / Time Out isn't something a technician has to remember to
+    // go check the DTR page for.
+    html +=
+      '<div class="greet-attendance-box">'+
+        '<div class="greet-attendance-item">'+
+          '<span class="greet-attendance-label">Time In</span>'+
+          '<span class="greet-attendance-val'+(alreadyTimedIn?'':' greet-attendance-val-missing')+'">'+fmt(todayDtr && todayDtr.timeIn)+'</span>'+
+        '</div>'+
+        '<div class="greet-attendance-item">'+
+          '<span class="greet-attendance-label">Time Out</span>'+
+          '<span class="greet-attendance-val'+(alreadyTimedOut?'':' greet-attendance-val-missing')+'">'+fmt(todayDtr && todayDtr.timeOut)+'</span>'+
+        '</div>'+
+        (todayDtr && todayDtr.otTimeIn ?
+          '<div class="greet-attendance-item">'+
+            '<span class="greet-attendance-label">OT In</span>'+
+            '<span class="greet-attendance-val">'+fmt(todayDtr.otTimeIn)+'</span>'+
+          '</div>'+
+          '<div class="greet-attendance-item">'+
+            '<span class="greet-attendance-label">OT Out</span>'+
+            '<span class="greet-attendance-val'+(todayDtr.otTimeOut?'':' greet-attendance-val-missing')+'">'+fmt(todayDtr.otTimeOut)+'</span>'+
+          '</div>'
+        : '')+
+      '</div>';
+
+    if(!alreadyTimedIn){
+      html += '<div class="greet-reminder">⏰ Don\'t forget to tap "Time-In" to officially register your attendance.</div>';
+    }else if(!alreadyTimedOut){
+      html += '<div class="greet-reminder">⏰ Don\'t forget to tap "Time-Out" before you head home.</div>';
+    }
+    html += '<p class="greet-thanks">Thank you!</p>';
+
+    // Today's Job Order(s) — sits to the right of the greeting so it's the
+    // first thing a technician's eye lands on, without having to open My
+    // Job Order and scan for today's date. Matched on scheduled date only
+    // (not status), so a same-day ticket still shows here even once it's
+    // been acknowledged or completed.
+    const todaysJo = (myTickets||[]).filter(t=> t.date===todayISO())
+      .sort((a,b)=> (a.expectedTime||'').localeCompare(b.expectedTime||''));
+    const joBody = todaysJo.length===0
+      ? '<div class="greet-jo-empty">No job order scheduled for today.</div>'
+      : todaysJo.map(t=>
+          '<div class="greet-jo-item" data-ticket-id="'+escapeHtml(t.id)+'">'+
+            '<div class="greet-jo-item-head">'+
+              '<span class="greet-jo-no">'+escapeHtml(t.jobOrderNo||t.id)+'</span>'+
+              dtStatusPill(t)+
+            '</div>'+
+            '<div class="greet-jo-cust">'+escapeHtml(t.custName||'')+'</div>'+
+            (t.expectedTime ? '<div class="greet-jo-time">🕒 '+escapeHtml(t.expectedTime)+'</div>' : '')+
+          '</div>'
+        ).join('');
+    const todayJoHtml =
+      '<div class="greet-today-jo">'+
+        '<div class="greet-today-jo-title">📋 Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
+        joBody+
+      '</div>';
+
+    $('homeGreetingText').innerHTML =
+      '<div class="greet-layout">'+
+        '<div class="greet-main">'+html+'</div>'+
+        todayJoHtml+
+      '</div>';
+  }
+
+  // ---------- Home screen overview (technician only) ----------
+  // Same visual language as the admin Overview below, scoped to just this
+  // technician's own numbers. Job Order's subtitle lists whichever teammates
+  // share at least one of this technician's own open tickets — pulled from
+  // assignedWorkerNames on those tickets, not a separate lookup.
+  async function renderHomeTechOverview(){
+    const card = $('homeTechOverviewCard');
+    if(!currentUser || currentUser.role==='admin'){ card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    const [tickets, reports, cashAdvances, leaves, unreadCount] = await Promise.all([
+      dtListForWorker(currentUser.id).catch(()=>[]),
+      cloudListReports().catch(()=>null),
+      caListForUser(currentUser.id).catch(()=>[]),
+      leaveListForUser(currentUser.id).catch(()=>[]),
+      dtCountUnreadMessages().catch(()=>0)
+    ]);
+
+    // Job Order — open tickets (not yet Completed or Closed), plus whichever
+    // teammates are on those same tickets with me.
+    const openTickets = (tickets||[]).filter(t=> !['completed','closed'].includes(dtEffectiveStatus(t)));
+    const mateNames = new Set();
+    openTickets.forEach(t=> (t.assignedWorkerNames||[]).forEach(n=>{
+      if(n && n!==currentUser.name) mateNames.add(n);
+    }));
+    $('ovMyJoValue').textContent = String(openTickets.length);
+    $('ovMyJoSub').textContent = openTickets.length===0
+      ? 'No open job orders'
+      : (mateNames.size>0 ? ('With '+Array.from(mateNames).join(', ')) : 'Solo assignment');
+
+    // Pending Service Reports — my own drafts not yet completed.
+    const draftReportCount = reports===null ? 0 : reports.filter(r=> r.technicianId===currentUser.id && !r.completed).length;
+    $('ovMyReportsValue').textContent = String(draftReportCount);
+    $('ovMyReportsSub').textContent = draftReportCount+' Saved Report'+(draftReportCount===1?'':'s')+' to Complete';
+
+    // Pending Requisitions — my own Cash Advance / Leave requests still
+    // awaiting an admin decision (separate from Liquidation below).
+    const pendingCA = (cashAdvances||[]).filter(r=> r.status==='pending').length;
+    const pendingLeave = (leaves||[]).filter(r=> r.status==='pending').length;
+    $('ovMyReqValue').textContent = String(pendingCA+pendingLeave);
+    $('ovMyReqSub').textContent = pendingCA+' Cash Advance'+(pendingCA===1?'':'s')+' · '+pendingLeave+' Leave Form'+(pendingLeave===1?'':'s');
+
+    // Pending Liquidation — my own approved Cash Advances still needing one.
+    const liqCount = (cashAdvances||[]).filter(caNeedsLiquidation).length;
+    $('ovMyLiqValue').textContent = String(liqCount);
+    $('ovMyLiqSub').textContent = liqCount===0 ? 'Nothing to liquidate' : liqCount+' Cash Advance'+(liqCount===1?'':'s')+' to Liquidate';
+
+    // Finance — my own cash currently out and not yet accounted for
+    // (disbursed, but no approved liquidation on file yet). Same figure as
+    // admin's dashboard Finance tile, scoped down to just this technician.
+    const outstandingMine = (cashAdvances||[]).filter(r=> r.disbursed && (!r.liquidation || r.liquidation.status!=='approved'));
+    const outstandingMineTotal = outstandingMine.reduce((sum,r)=> sum + (r.amountGiven!=null ? r.amountGiven : (r.amount||0)), 0);
+    $('ovMyFinanceValue').textContent = caFmtPeso(outstandingMineTotal);
+    let myFinanceSub = outstandingMine.length===0
+      ? 'Nothing outstanding'
+      : outstandingMine.length+' Cash Advance'+(outstandingMine.length===1?'':'s')+' not yet liquidated';
+    // An approved liquidation can still leave a return/reimburse balance
+    // open — that's a separate, smaller state than "not yet liquidated"
+    // above, and used to have nowhere it stayed visible once the technician
+    // closed the liquidation screen.
+    const unsettledMine = (cashAdvances||[]).filter(r=> r.liquidation && r.liquidation.status==='approved' && r.liquidation.settlement && !r.liquidation.settlement.settled);
+    if(unsettledMine.length>0){
+      const unsettledMineAmount = unsettledMine.reduce((sum,r)=> sum + r.liquidation.settlement.amount, 0);
+      myFinanceSub += ' · '+caFmtPeso(unsettledMineAmount)+' to settle';
+    }
+    $('ovMyFinanceSub').textContent = myFinanceSub;
+
+    // Next Job Order — the soonest-dated open ticket, so a technician sees
+    // what's coming up without opening My Job Order and scanning the list.
+    const nextJo = openTickets.filter(t=>t.date).slice()
+      .sort((a,b)=> a.date.localeCompare(b.date) || (a.expectedTime||'').localeCompare(b.expectedTime||''))[0];
+    if(nextJo){
+      $('ovMyNextJoValue').textContent = nextJo.jobOrderNo || nextJo.id;
+      $('ovMyNextJoSub').textContent = (nextJo.custName||'')+' — '+leaveFmtDate(nextJo.date)+(nextJo.expectedTime ? (' at '+nextJo.expectedTime) : '');
+    }else{
+      $('ovMyNextJoValue').textContent = '—';
+      $('ovMyNextJoSub').textContent = 'Nothing scheduled';
+    }
+
+    // Job Order Messages unread count still drives the notification bell
+    // and sidebar badge below even though its own overview tile was
+    // removed — see dtCountUnreadMessages in dispatch.js.
+
+    // The dashboard top bar's greeting + notification bell are shared with
+    // admin (see renderDashboardGreeting/renderHomeOverview) — technicians
+    // get the same greeting, and their bell reflects their own unread Job
+    // Order messages instead of admin's pending-approvals count.
+    renderDashboardGreeting();
+    const notifEl = $('notifBadge');
+    if(notifEl){
+      notifEl.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+      notifEl.style.display = unreadCount > 0 ? '' : 'none';
+    }
+    const sidebarBadgeEl = $('sidebarMsgBadge');
+    if(sidebarBadgeEl){ sidebarBadgeEl.style.display = unreadCount>0 ? '' : 'none'; sidebarBadgeEl.textContent = String(unreadCount); }
+  }
+
+  // Lightweight badge refresh — called right after a message thread is
+  // marked read (see dtRefreshMessages/dtOpenTicketOverlay in dispatch.js)
+  // so the sidebar/bell badges drop immediately instead of waiting for the
+  // next full Home overview render.
+  async function refreshUnreadMsgBadges(){
+    if(!currentUser) return;
+    const unreadCount = await dtCountUnreadMessages().catch(()=>0);
+    const sidebarBadgeEl = $('sidebarMsgBadge');
+    if(sidebarBadgeEl){ sidebarBadgeEl.style.display = unreadCount>0 ? '' : 'none'; sidebarBadgeEl.textContent = String(unreadCount); }
+    const notifEl = $('notifBadge');
+    if(notifEl && currentUser.role!=='admin'){
+      notifEl.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+      notifEl.style.display = unreadCount > 0 ? '' : 'none';
+    }
+  }
+
+  // ---------- Home screen overview (admin only) ----------
+  // A management snapshot shown above the feature tiles once logged in as
+  // admin — technician check-ins, requests awaiting a decision, dispatch
+  // ticket load, and reports still short of a customer sign-off. Every
+  // number here is a best-effort read of data other screens already own
+  // (DTR, Cash Advance, Leave, Dispatch, Service Reports); nothing new is
+  // stored just for this panel.
+  async function renderHomeOverview(){
+    const card = $('homeOverviewCard');
+    if(!currentUser || currentUser.role!=='admin'){
+      card.style.display = 'none';
+      const trackerCard = $('homeTrackerCard');
+      if(trackerCard) trackerCard.style.display = 'none';
+      const techListCard = $('homeTechListCard');
+      if(techListCard) techListCard.style.display = 'none';
+      const actCard = $('homeActivityCard');
+      if(actCard) actCard.style.display = 'none';
+      const calCard = $('homeScheduleCalendarCard');
+      if(calCard) calCard.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+    renderDashboardGreeting();
+
+    const [users, dtrToday, tickets, cashAdvances, leaves, reports] = await Promise.all([
+      cloudListUsers().catch(()=>[]),
+      dtrListAllForDate(todayISO()).catch(()=>[]),
+      dtListAll().catch(()=>[]),
+      caListAll().catch(()=>[]),
+      leaveListAll().catch(()=>[]),
+      (async ()=>{
+        // Mirrors loadHistory()'s cloud-first / local-fallback read, without
+        // scoping to one technician's device-only drafts.
+        if(await ensureCloud()){
+          const cloudRows = await cloudListReports().catch(()=>null);
+          if(cloudRows) return cloudRows;
+        }
+        const out = [];
+        try{
+          const res = await window.storage.list('report:', false);
+          for(const key of (res.keys||[])){
+            try{ const item = await window.storage.get(key, false); out.push(JSON.parse(item.value)); }catch(e){}
+          }
+        }catch(e){}
+        return out;
+      })()
+    ]);
+
+    // Active Technicians — how many of today's active roster have clocked in.
+    const activeUsers = (users||[]).filter(u=> u.active!==false);
+    const checkedInIds = new Set((dtrToday||[]).filter(d=> d && d.timeIn).map(d=> d.technicianId));
+    const totalTech = activeUsers.length;
+    const checkedInCount = activeUsers.filter(u=> checkedInIds.has(u.id)).length;
+    const pct = totalTech>0 ? Math.round((checkedInCount/totalTech)*100) : 0;
+    $('ovTechValue').textContent = checkedInCount+' / '+totalTech;
+    $('ovTechBar').style.width = pct+'%';
+    $('ovTechSub').textContent = pct+'% Check-in Rate (from Online DTR)';
+
+    // Pending Requisitions — Cash Advance / Leave requests awaiting a decision.
+    // A submitted liquidation lives on an already-approved advance (status
+    // stays 'approved'), so it's invisible to the r.status==='pending' filter
+    // below unless counted separately here — otherwise a technician's
+    // liquidation submission never surfaces on the admin's dashboard at all.
+    const pendingCA = (cashAdvances||[]).filter(r=> r.status==='pending').length;
+    const pendingLiq = (cashAdvances||[]).filter(r=> r.liquidation && r.liquidation.status==='pending').length;
+    const pendingLeave = (leaves||[]).filter(r=> r.status==='pending').length;
+    $('ovReqValue').textContent = String(pendingCA+pendingLiq+pendingLeave);
+    $('ovReqSub').textContent = pendingCA+' Cash Advance'+(pendingCA===1?'':'s')+' · '+pendingLiq+' Liquidation'+(pendingLiq===1?'':'s')+' · '+pendingLeave+' Leave Form'+(pendingLeave===1?'':'s');
+
+    // Finance overview stat removed from the dashboard (layout revision) —
+    // the underlying cash-advance/liquidation figures are still surfaced
+    // via the "To Settle" stat below and the Finance section pages.
+
+    // To Settle — approved liquidations with a return/reimburse balance that
+    // hasn't actually been paid back yet either direction. This is distinct
+    // from "Finance" above: that's money not yet liquidated at all, this is
+    // money whose liquidation IS approved but the leftover balance is still
+    // outstanding — a state that used to have no dashboard visibility
+    // whatsoever, since the balance was only ever computed for display and
+    // never persisted or tracked anywhere.
+    const unsettled = (cashAdvances||[]).filter(r=> r.liquidation && r.liquidation.status==='approved' && r.liquidation.settlement && !r.liquidation.settlement.settled);
+    const toCollect = unsettled.filter(r=> r.liquidation.settlement.type==='return').reduce((sum,r)=> sum + r.liquidation.settlement.amount, 0);
+    const toReimburse = unsettled.filter(r=> r.liquidation.settlement.type==='reimburse').reduce((sum,r)=> sum + r.liquidation.settlement.amount, 0);
+    $('ovSettleValue').textContent = String(unsettled.length);
+    const settleParts = [];
+    if(toCollect>0) settleParts.push('To collect: '+caFmtPeso(toCollect));
+    if(toReimburse>0) settleParts.push('To reimburse: '+caFmtPeso(toReimburse));
+    $('ovSettleSub').textContent = settleParts.length ? settleParts.join(' · ') : 'Nothing pending';
+
+    // Dispatch Status — open tickets, split into assigned/unassigned.
+    const openTickets = (tickets||[]).filter(t=> t.status!=='completed');
+    const unassigned = openTickets.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
+    const inProgress = openTickets.length - unassigned;
+    $('ovDispatchValue').textContent = String(openTickets.length);
+    $('ovDispatchSub').textContent = inProgress+' In Progress · '+unassigned+' Unassigned';
+
+    // Unreviewed Reports — completed drafts still waiting to be finished
+    // (which is where the customer's acknowledgment sign-off happens).
+    const draftReports = (reports||[]).filter(r=> !r.completed).length;
+    $('ovReportsValue').textContent = String(draftReports);
+    $('ovReportsSub').textContent = draftReports+' Service Report'+(draftReports===1?'':'s')+' Pending Sign-off';
+
+    // Service Requests — customer-filed, admin-only (service-requests.js).
+    // srAdminInit() renders the value itself (and keeps it live afterward
+    // via realtime), but it's awaited here so the notification bell total
+    // just below already reflects it on this first render.
+    const openServiceRequests = (typeof srAdminInit === 'function') ? (await srAdminInit()) || 0 : 0;
+
+    // Notification bell in the dashboard top bar — total items anywhere in
+    // the app that are waiting on an admin decision or sign-off.
+    const notifTotal = pendingCA + pendingLiq + pendingLeave + draftReports + openServiceRequests;
+    const notifEl = $('notifBadge');
+    if(notifEl){
+      notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);
+      notifEl.style.display = notifTotal > 0 ? '' : 'none';
+    }
+
+    // Live map of every technician currently sharing a location — see tracker.js.
+    trackerAdminInit();
+    const actCard = $('homeActivityCard');
+    if(actCard){ actCard.style.display = ''; renderRecentActivity(cashAdvances, leaves, tickets); }
+
+    // Schedule Calendar widget — reuses the tickets already fetched above,
+    // via the shared engine in dispatch.js (dtCalRender), so no extra query.
+    const calCard = $('homeScheduleCalendarCard');
+    if(calCard){ calCard.style.display = ''; dtHomeCalTicketsCache = tickets || []; dtCalRender('homeCal', dtHomeCalTicketsCache); }
+  }
+  let dtHomeCalTicketsCache = [];
+  $('homeCalPrevBtn').addEventListener('click', ()=>{ dtCalPrev('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
+  $('homeCalNextBtn').addEventListener('click', ()=>{ dtCalNext('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
+  $('homeCalTodayBtn').addEventListener('click', ()=>{ dtCalGoToday('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
+  $('homeCalDayList').addEventListener('click', dtHandleEquipRowClick);
+  $('homeCalViewAllBtn').addEventListener('click', ()=>{
+    closeMainMenu();
+    setSidebarActive('sbNavDispatch');
+    showDispatchView('calendar');
+  });
+
+  // ---------- Dashboard top bar greeting (admin only) ----------
+  function renderDashboardGreeting(){
+    const el = $('dtGreetingTitle');
+    if(!el) return;
+    const hour = new Date().getHours();
+    const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+    const name = (currentUser && currentUser.name) ? currentUser.name : 'Admin';
+    el.textContent = 'Good '+part+', '+name+'! 👋';
+  }
+
+  // ---------- Recent Activity (admin dashboard, next to the live tracker) ----------
+  // A lightweight, best-effort feed built from data other screens already
+  // own (Cash Advance, Leave, Dispatch) — nothing new is stored just for
+  // this panel. Service reports aren't included since they don't carry a
+  // submission timestamp to sort by.
+  function timeAgo(iso){
+    if(!iso) return '';
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime())/60000));
+    if(mins < 1) return 'Just now';
+    if(mins < 60) return mins+'m ago';
+    const hrs = Math.round(mins/60);
+    if(hrs < 24) return hrs+'h ago';
+    return Math.round(hrs/24)+'d ago';
+  }
+  function renderRecentActivity(cashAdvances, leaves, tickets){
+    const list = $('recentActivityList');
+    if(!list) return;
+    const statusDot = (status)=> status==='pending' ? 'amber' : (status==='approved' ? 'green' : 'gray');
+    const items = [];
+    (cashAdvances||[]).forEach(r=> items.push({
+      name: r.userName || 'Technician', desc: 'Filed a cash advance request',
+      time: r.submittedAt, dot: statusDot(r.status)
+    }));
+    (leaves||[]).forEach(r=> items.push({
+      name: r.userName || 'Technician', desc: 'Filed a leave request',
+      time: r.submittedAt, dot: statusDot(r.status)
+    }));
+    (tickets||[]).forEach(t=> items.push({
+      name: (t.assignedWorkerNames && t.assignedWorkerNames[0]) || t.custName || 'Dispatch',
+      desc: 'Dispatch ticket '+(t.jobOrderNo||'')+' — '+(t.status||'updated'),
+      time: t.createdAt, dot: 'blue'
+    }));
+    items.sort((a,b)=> (b.time||'').localeCompare(a.time||''));
+    const top = items.slice(0,6);
+    if(top.length===0){ list.innerHTML = '<div class="empty-state">No recent activity yet.</div>'; return; }
+    list.innerHTML = top.map(it=>
+      '<div class="activity-row"><span class="activity-dot activity-'+it.dot+'"></span>'+
+      '<div class="activity-body"><div class="activity-name">'+escapeHtml(it.name)+'</div>'+
+      '<div class="activity-desc">'+escapeHtml(it.desc)+'</div></div>'+
+      '<div class="activity-time">'+timeAgo(it.time)+'</div></div>'
+    ).join('');
+  }
+
+  // ---------- Sidebar nav (admin dashboard shell) ----------
+  function setSidebarActive(id){
+    $$('.sidebar-link').forEach(el=> el.classList.toggle('active', el.id===id));
+  }
+  $('sbNavDashboard').addEventListener('click', ()=>{ closeMainMenu(); showHome(); });
+  $('sbNavTechnicians').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavTechnicians'); showDtrView(); });
+  // The Finance section used to be a single "Requisitions" sidebar item; it's
+  // now three (Cash Advance / Liquidation / Reimbursement) so each opens the
+  // same Cash Advance view already highlighted on the relevant tab.
+  $('sbNavCashAdvance').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavCashAdvance'); showCashAdvanceView(); });
+  $('sbNavLiquidation').addEventListener('click', async ()=>{
+    closeMainMenu(); setSidebarActive('sbNavLiquidation');
+    await showCashAdvanceView();
+    caShowTab('liquidate');
+  });
+  $('sbNavReimbursement').addEventListener('click', async ()=>{
+    closeMainMenu(); setSidebarActive('sbNavReimbursement');
+    await showCashAdvanceView();
+    caShowAdminSection('reimb');
+  });
+  $('sbNavDispatch').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavDispatch'); showDispatchView(); });
+  $('menuManageReports').addEventListener('click', ()=>{
+    closeMainMenu();
+    setSidebarActive('menuManageReports');
+    showServiceReportsManagerView();
+  });
+  $('menuManageCustomers').addEventListener('click', async ()=>{
+    closeMainMenu();
+    setSidebarActive('menuManageCustomers');
+    if(!(await ensureAdminAuthenticated())) return;
+    showCustomersManagerView();
+  });
+  $('menuManageUsers').addEventListener('click', ()=> setSidebarActive('menuManageUsers'));
+  $('menuManageDropdowns').addEventListener('click', ()=> setSidebarActive('menuManageDropdowns'));
+
+  // ---------- Technician sidebar nav ----------
+  // Same closeMainMenu()/setSidebarActive() convention as the admin nav
+  // above — this just points each item at the technician's own version of
+  // that screen instead of the admin's management view.
+  $('techNavDispatch').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDispatch'); showDispatchView(); });
+  $('techNavServiceReport').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavServiceReport'); showServiceReport(); });
+  $('techNavCashAdvance').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavCashAdvance'); showCashAdvanceView(); });
+  $('techNavLiquidation').addEventListener('click', async ()=>{
+    closeMainMenu(); setSidebarActive('techNavLiquidation');
+    await showCashAdvanceView();
+    if(currentUser && currentUser.role!=='admin') caShowTab('liquidate');
+  });
+  $('techNavReimbursement').addEventListener('click', async ()=>{
+    closeMainMenu(); setSidebarActive('techNavReimbursement');
+    await showCashAdvanceView();
+    if(currentUser && currentUser.role!=='admin') caShowTab('reimburse');
+  });
+  $('techNavDtr').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDtr'); showDtrView(); });
+  $('techNavLeave').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavLeave'); showLeaveView(); });
+  $('techNavMessages').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavMessages'); showMessagesView(); });
+  $('techNavDocuments').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDocuments'); showDocumentsView(); });
+  $('techNavSettings').addEventListener('click', ()=>{ closeMainMenu(); showChangePasswordScreen(false); });
+
+  // ---------- Messages hub (every Job Order thread, one screen) ----------
+  async function showMessagesView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('messagesView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Job Order Messages', 'Every thread in one place');
+    window.scrollTo({top:0});
+    await dtRenderMessagesHub();
+  }
+  async function dtRenderMessagesHub(){
+    const list = $('messagesHubList');
+    if(!list) return;
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!currentUser){ list.innerHTML = ''; return; }
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Connect to the internet to see Job Order messages.</div>'; return; }
+    const tickets = currentUser.role==='admin' ? await dtListAll().catch(()=>[]) : await dtListForWorker(currentUser.id).catch(()=>[]);
+    let allMsgs = [];
+    try{
+      const { data, error } = await db.from('dispatch_ticket_messages').select('*').order('created_at', {ascending:false});
+      if(error) throw error;
+      allMsgs = data || [];
+    }catch(e){ console.error('messages hub load failed', describeCloudError(e)); }
+    const byTicket = {};
+    allMsgs.forEach(m=>{ (byTicket[m.ticket_id] = byTicket[m.ticket_id] || []).push(m); });
+    const withMsgs = tickets.filter(t=> byTicket[t.id] && byTicket[t.id].length>0)
+      .sort((a,b)=> new Date(byTicket[b.id][0].created_at) - new Date(byTicket[a.id][0].created_at));
+    if(withMsgs.length===0){ list.innerHTML = '<div class="empty-state">No Job Order messages yet.</div>'; return; }
+    list.innerHTML = withMsgs.map(t=>{
+      const msgs = byTicket[t.id];
+      const last = msgs[0];
+      const lastRead = dtGetLastRead(t.id);
+      const unread = msgs.filter(m=> m.sender_id!==currentUser.id && (!lastRead || new Date(m.created_at)>new Date(lastRead))).length;
+      const preview = last.body.length>70 ? last.body.slice(0,70)+'…' : last.body;
+      return '<div class="dt-msghub-row" data-jo-open="'+escapeHtml(t.id)+'">'+
+        '<div class="dt-msghub-main">'+
+          '<div class="u-name">'+escapeHtml(t.jobOrderNo)+' — '+escapeHtml(t.custName)+'</div>'+
+          '<div class="u-status">'+escapeHtml(last.sender_name)+': '+escapeHtml(preview)+'</div>'+
+        '</div>'+
+        (unread>0 ? '<span class="sidebar-badge">'+unread+'</span>' : '')+
+      '</div>';
+    }).join('');
+  }
+  $('messagesHubList').addEventListener('click', (e)=>{
+    const row = e.target.closest('[data-jo-open]');
+    if(row) dtOpenTicketOverlay(row.dataset.joOpen);
+  });
+
+  // ---------- Documents (a technician's own completed Service Reports) ----------
+  async function showDocumentsView(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('My Documents', 'Completed Service Reports');
+    window.scrollTo({top:0});
+    const onlyMe = currentUser && currentUser.role!=='admin' ? currentUser.id : null;
+    await loadHistory('documentsList', 'completed', onlyMe);
+  }
+
+  // ---------- Home screen (feature tiles) ----------
+  // Admin's homepage reads "Field Operations Portal" / "Management &
+  // Administration" instead of the technician's "Technician's Homepage" /
+  // "Field digital form" — shared by showHome() and the coming-soon flash
+  // below so both stay in sync for whichever role is logged in.
+  function homeHeaderTitle(){
+    return (currentUser && currentUser.role==='admin')
+      ? ['Field Operations Portal', 'Management & Administration']
+      : ["Technician's Homepage", 'Field digital form'];
+  }
+  function showHome(){
+    // Customer sessions get their own home screen/router entirely — bail
+    // out here before anything below (which assumes admin/tech-only
+    // elements) runs. See showCustomerHome() in customer-equipment-history.js.
+    if(currentUser && currentUser.role==='customer'){ showCustomerHome(); return; }
+    document.body.classList.add('dashboard-active');
+    setSidebarActive('sbNavDashboard');
+    $('homeScreen').style.display = '';
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('customerHomeScreen').style.display = 'none';
+    $('customerEquipmentDetailScreen').style.display = 'none';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = 'none';
+    setHeaderTitle(...homeHeaderTitle());
+    $('tile_dispatch_label').textContent = (currentUser && currentUser.role==='admin') ? 'Service Dispatch Ticket' : 'My Job Order';
+    renderHomeGreeting();
+    renderHomeTechOverview();
+    renderHomeOverview();
+    renderHomeAnnouncements();
+    window.scrollTo({top:0});
+  }
+  // ---------- Service Report: Create New / Saved Draft / Completed / All tabs ----------
+  // `opts.skipReset` lets a caller switch to the New panel without wiping the
+  // form — used by openReport() (Continue), which already populated the form
+  // with a draft's data and just needs the panel switched, not cleared again.
+  function srShowTab(which, opts){
+    opts = opts || {};
+    $('srTabNewBtn').classList.toggle('active', which==='new');
+    $('srTabDraftBtn').classList.toggle('active', which==='draft');
+    $('srTabCompletedBtn').classList.toggle('active', which==='completed');
+    $('srTabAllBtn').classList.toggle('active', which==='all');
+    const isHistoryTab = which!=='new';
+    $('srNewPanel').style.display = which==='new' ? '' : 'none';
+    $('srHistoryPanel').style.display = isHistoryTab ? '' : 'none';
+    // The footer (Save Draft / Generate Report) and the SR-No./status meta
+    // bar only make sense while actively filling out a report.
+    $('footerBar').style.display = which==='new' ? 'flex' : 'none';
+    $('metaBar').style.display = which==='new' ? '' : 'none';
+    if(which==='new'){
+      // "Create New" is a hard reset, not just a tab switch — same convention
+      // as the Dispatch admin's "New" tab (dtShowAdminTab). Any in-progress
+      // report (blank or partly filled, saved or not) is discarded every time
+      // this tab is opened this way, and the flow always starts over from the
+      // Job Order picker rather than resuming whatever was on screen before.
+      if(!opts.skipReset){
+        resetForm();
+        // Without this, a technician who had scrolled down a long form (or a
+        // long Saved Draft / Completed list) still sees whatever part of the
+        // page they were on after the reset — the panel underneath did switch
+        // and clear, but it looks like nothing happened until they scroll up.
+        window.scrollTo({top:0, behavior:'smooth'});
+      }
+      srRenderJobOrderPicker();
+    }
+    if(isHistoryTab){
+      $('srHistoryPanelTitle').textContent =
+        which==='draft' ? 'Saved Draft Reports' : which==='completed' ? 'Completed Reports' : 'All Reports';
+      loadHistory('srHistoryList', which);
+    }
+  }
+  $('srTabNewBtn').addEventListener('click', ()=> srShowTab('new'));
+  $('srTabDraftBtn').addEventListener('click', ()=> srShowTab('draft'));
+  $('srTabCompletedBtn').addEventListener('click', ()=> srShowTab('completed'));
+  $('srTabAllBtn').addEventListener('click', ()=> srShowTab('all'));
+
+  function showServiceReport(){
+    document.body.classList.remove('dashboard-active');
+    $('homeScreen').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('serviceReportView').style.display = '';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Service Report', 'Field digital form');
+    if(currentUser && currentUser.role==='admin'){
+      // Admin can't author a blank report — the "Create New" tab is hidden
+      // for this role — so land on "All" instead of the now-inaccessible
+      // Create New panel. Admin still reaches the same form panel to edit
+      // an existing report by opening it from a history list.
+      srShowTab('all');
+    }else{
+      // Just entering the section, not the explicit "Create New" tab action —
+      // don't discard whatever the technician was already filling out.
+      srShowTab('new', {skipReset:true});
+    }
+    window.scrollTo({top:0});
+  }
+  // ---------- Remember which screen was open across a refresh ----------
+  // A plain page reload re-runs the whole app from scratch, so without this
+  // every refresh — even just hitting the browser's reload button — landed
+  // back on Home regardless of what the person was actually doing. This
+  // snapshots whichever top-level view is visible right before the page
+  // unloads, and enterApp() (below) tries to reopen that same view instead
+  // of unconditionally calling showHome().
+  const LAST_SCREEN_KEY = 'awes-last-screen';
+  // Screens that need a specific record to reopen correctly (a particular
+  // customer, a particular equipment unit) aren't restorable from just a
+  // screen name alone — restoring to their nearest safe parent instead of
+  // guessing at that record.
+  const RESTORABLE_SCREENS = {
+    homeScreen: {fn: ()=> showHome(), roles: ['admin','tech']},
+    serviceReportView: {fn: ()=> showServiceReport(), roles: ['admin','tech']},
+    dtrView: {fn: ()=> showDtrView(), roles: ['admin','tech']},
+    leaveView: {fn: ()=> showLeaveView(), roles: ['admin','tech']},
+    cashAdvanceView: {fn: ()=> showCashAdvanceView(), roles: ['admin','tech']},
+    dispatchView: {fn: ()=> showDispatchView(), roles: ['admin','tech']},
+    equipmentManagerView: {fn: ()=> showEquipmentManagerView(), roles: ['admin']},
+    customersManagerView: {fn: ()=> showCustomersManagerView(), roles: ['admin']},
+    serviceReportsManagerView: {fn: ()=> showServiceReportsManagerView(), roles: ['admin']},
+    messagesView: {fn: ()=> showMessagesView(), roles: ['admin','tech']},
+    documentsView: {fn: ()=> showDocumentsView(), roles: ['admin','tech']},
+    customerHomeScreen: {fn: ()=> showCustomerHome(), roles: ['customer']},
+    // Needs a customer record to render — fall back to the list it's reached from.
+    customerHistoryView: {fn: ()=> showCustomersManagerView(), roles: ['admin']},
+    // Needs a specific equipment record — fall back to the customer's own home.
+    customerEquipmentDetailScreen: {fn: ()=> showCustomerHome(), roles: ['customer']}
+  };
+  function snapshotCurrentScreen(){
+    // Nobody's signed in (e.g. this fires right after Logout, from a
+    // leftover view that's still technically visible behind the login
+    // overlay) — there's no session to resume, so don't save anything.
+    // Without this guard, a pagehide/visibilitychange firing after
+    // doLogout() clears awes-last-screen could immediately re-write it
+    // with the stale screen, and the next sign-in would land back there
+    // instead of Home.
+    if(!currentUser) return;
+    try{
+      for(const id of Object.keys(RESTORABLE_SCREENS)){
+        const el = $(id);
+        if(el && el.style.display !== 'none'){ localStorage.setItem(LAST_SCREEN_KEY, id); return; }
+      }
+    }catch(e){}
+  }
+  window.addEventListener('pagehide', snapshotCurrentScreen);
+  window.addEventListener('beforeunload', snapshotCurrentScreen);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') snapshotCurrentScreen(); });
+  function restoreLastScreenOrHome(){
+    let key = null;
+    try{ key = localStorage.getItem(LAST_SCREEN_KEY); }catch(e){}
+    const entry = key && RESTORABLE_SCREENS[key];
+    const role = currentUser && currentUser.role;
+    if(entry && role && entry.roles.indexOf(role)!==-1){ entry.fn(); return; }
+    showHome();
+  }
+
+  async function enterApp(opts){
+    // Location sharing follows today's DTR, not just sign-in — see
+    // dtrIsOnClock() and the tracker calls inside dtrDoTimeIn/Out and
+    // dtrDoOtTimeIn/Out in history.js. This lookup only matters for
+    // resuming correctly after the app was closed and reopened mid-shift;
+    // the normal start/stop path is the DTR buttons themselves.
+    if(currentUser && currentUser.role==='tech'){
+      const todayDtr = await dtrGetDay(currentUser.id, todayISO()).catch(()=>null);
+      if(dtrIsOnClock(todayDtr)) trackerStartBroadcasting();
+      else trackerStopBroadcasting();
+    }else{
+      trackerStopBroadcasting();
+    }
+    // Idle-timeout watch (Admin only, 30 min) — see ADMIN_IDLE_MS in
+    // auth.js. startIdleWatch() itself is a no-op for tech/customer, who
+    // only sign out via the explicit Logout button; a page reload/refresh
+    // never signs anyone out either.
+    if(currentUser) startIdleWatch(); else stopIdleWatch();
+    // {freshLogin:true} — passed only by the three login forms themselves
+    // (renderTechnicianLoginForm / renderAdminLoginForm / the customer
+    // form, in auth.js) right after credentials were just typed and
+    // verified. An actual sign-in should always land on Home, never on
+    // wherever a PREVIOUS session happened to leave off — only a same-
+    // session page refresh should restore that. checkLoginGate()'s own
+    // enterApp() calls (session-restore on load, no credentials typed)
+    // deliberately pass nothing here, so that path keeps restoring the
+    // last screen exactly as before.
+    if(opts && opts.freshLogin){
+      // Also clear it here, not just in doLogout() — a tab that was simply
+      // closed (never hit Logout) leaves the old session's last-screen
+      // sitting in localStorage, and without this it would otherwise leak
+      // into whatever screen the NEXT person's fresh sign-in restores on.
+      try{ localStorage.removeItem(LAST_SCREEN_KEY); }catch(e){}
+      showHome();
+    }else{
+      restoreLastScreenOrHome();
+    }
+  }
+  $('tile_serviceReport').addEventListener('click', showServiceReport);
+  $('tile_dtr').addEventListener('click', showDtrView);
+  // Coming-soon tiles don't navigate to a real page yet, so the header title
+  // change is shown briefly alongside the toast, then reverts to the home
+  // title once the toast fades (avoids leaving a mismatched header behind
+  // on a screen that's still showing the home tile grid).
+  function flashComingSoonHeader(title, message){
+    setHeaderTitle(title, 'Field digital form');
+    toast(message);
+    setTimeout(()=>{ if($('homeScreen').style.display !== 'none') setHeaderTitle(...homeHeaderTitle()); }, 2200);
+  }
+  $('tile_cashAdvance').addEventListener('click', showCashAdvanceView);
+  $('tile_dispatch').addEventListener('click', showDispatchView);
+  $('tile_leave').addEventListener('click', showLeaveView);
+  $('tile_materialRequest').addEventListener('click', ()=> flashComingSoonHeader('Material Request Form', 'Material Request Form — coming soon'));
+  $('tile_changePassword').addEventListener('click', ()=> showChangePasswordScreen(false));
+  $('homeBtn').addEventListener('click', showHome);
+
+  // Today's Job Order card(s) in the home greeting — delegated on the
+  // persistent container since renderHomeGreeting() rebuilds its contents
+  // (via innerHTML) on every call, which would otherwise strip any listener
+  // attached directly to a card. Opens My Job Order and jumps straight to
+  // that ticket, reusing the same highlight-and-expand behavior already
+  // used when a technician is sent here from the Service Report picker
+  // (see srGoAcknowledgeTicket).
+  $('homeGreetingText').addEventListener('click', function(e){
+    const item = e.target.closest('.greet-jo-item');
+    if(!item) return;
+    const ticketId = item.getAttribute('data-ticket-id');
+    if(!ticketId) return;
+    showDispatchView().then(()=> dtHighlightTechCard(ticketId));
+  });
+
+
+// ---------- Real-time technician location tracker (table: technician_locations) ----------
+  // Two halves living in one module:
+  //   1. Technician side — while timed in (regular shift or overtime — see
+  //      dtrIsOnClock() in history.js), the device pushes its own position
+  //      (never anyone else's; RLS ties every write to auth.uid()). Starts on
+  //      DTR Time In / OT Time In, stops on DTR Time Out / OT Time Out, and
+  //      always stops on logout as a backstop. Nothing is tracked before
+  //      time-in, between a regular time-out and an overtime time-in, or
+  //      after the day's final time-out.
+  //   2. Admin side — a live map on the Home → Overview screen showing every
+  //      technician currently sharing a position, refreshed by Supabase
+  //      Realtime the instant a row changes, with a 20s poll as a fallback
+  //      for a flaky connection. Tapping a technician's name also draws
+  //      their movement trail for the day from technician_location_history.
+
+  // ---- Technician: broadcast my position ----
+  let trackerWatchId = null;
+  let trackerLastSentAt = 0;
+  let trackerLastSentPos = null; // {lat,lng}
+  const TRACKER_MIN_INTERVAL_MS = 20000; // never push more than once per 20s...
+  const TRACKER_MIN_MOVE_METERS = 25;    // ...unless the technician has moved at least this far
+
+  function trackerHaversineMeters(a, b){
+    if(!a || !b) return Infinity;
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+    const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  async function trackerPushLocation(pos){
+    // Re-check the role on every callback, not just at watch-start — a stale
+    // watcher left running past a role change should never write as someone
+    // it no longer is.
+    if(!currentUser || currentUser.role !== 'tech') return;
+    const now = Date.now();
+    const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    const moved = trackerHaversineMeters(trackerLastSentPos, here);
+    if(now - trackerLastSentAt < TRACKER_MIN_INTERVAL_MS && moved < TRACKER_MIN_MOVE_METERS) return;
+    trackerLastSentAt = now;
+    trackerLastSentPos = here;
+
+    const point = {
+      technician_id: currentUser.id,
+      lat: here.lat, lng: here.lng,
+      accuracy: pos.coords.accuracy != null ? pos.coords.accuracy : null,
+      heading: (pos.coords.heading == null || isNaN(pos.coords.heading)) ? null : pos.coords.heading,
+      speed: (pos.coords.speed == null || isNaN(pos.coords.speed)) ? null : pos.coords.speed,
+      recorded_at: new Date(now).toISOString()
+    };
+
+    if(await ensureCloud()){
+      try{ await trackerWritePoint(point); return; }
+      catch(e){ console.error('tracker push failed, queuing instead', describeCloudError(e)); }
+    }
+    // No signal (or the write above failed): queue it instead of dropping it.
+    // `recorded_at` is the phone's own clock at capture time and travels
+    // with the point, so once this reaches the server the admin's trail
+    // shows where the technician actually was, not just when the phone
+    // next caught a signal.
+    await outboxQueue('geo', currentUser.id+'|'+point.recorded_at, point);
+    updateOutboxBadge();
+  }
+
+  // Shared by the live (online) path above and the outbox replay below —
+  // writes one point to both the append-only trail and the "latest
+  // position" row the live dot reads from.
+  async function trackerWritePoint(point){
+    const { error: histErr } = await db.from('technician_location_history').insert(point);
+    if(histErr) throw histErr;
+    const { error: posErr } = await db.from('technician_locations').upsert({
+      technician_id: point.technician_id,
+      lat: point.lat, lng: point.lng,
+      accuracy: point.accuracy, heading: point.heading, speed: point.speed,
+      updated_at: point.recorded_at
+    }, { onConflict: 'technician_id' });
+    if(posErr) throw posErr;
+  }
+  // Outbox replays items oldest-first (see outboxList), so when a batch of
+  // queued points flushes, the last one applied is genuinely the most
+  // recent — the "latest position" row ends up correct without any extra
+  // bookkeeping here.
+  registerOutboxHandler('geo', async (key, payload)=>{ await trackerWritePoint(payload); });
+
+  function trackerStartBroadcasting(){
+    if(!navigator.geolocation || trackerWatchId != null) return; // already running, or no browser support
+    trackerWatchId = navigator.geolocation.watchPosition(
+      trackerPushLocation,
+      (err)=> console.warn('tracker geolocation unavailable:', err && err.message),
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+    );
+    // One-time heads up — the browser's own permission prompt is the real
+    // consent step; this just explains what it's for.
+    toast('📍 Location sharing is on while you\'re timed in');
+  }
+  function trackerStopBroadcasting(){
+    if(trackerWatchId != null && navigator.geolocation){ navigator.geolocation.clearWatch(trackerWatchId); }
+    trackerWatchId = null;
+    trackerLastSentAt = 0;
+    trackerLastSentPos = null;
+  }
+
+  // ---- Admin: live map ----
+  let trackerMap = null;
+  let trackerMarkers = Object.create(null); // technician_id -> L.Marker
+  let trackerRealtimeChannel = null;
+  let trackerPollTimer = null;
+  let trackerHasFitBounds = false;
+
+  // ---- Admin: movement trail for one selected technician at a time ----
+  // (drawing every technician's trail at once on a small phone map is just
+  // noise; picking one from the list is enough to answer "where did they
+  // actually go", and switching technicians is one tap away.)
+  let trackerTrailTid = null;
+  let trackerTrailLayer = null;
+
+  async function trackerLoadHistory(technicianId, sinceIso){
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('technician_location_history')
+        .select('lat,lng,recorded_at')
+        .eq('technician_id', technicianId)
+        .gte('recorded_at', sinceIso)
+        .order('recorded_at', { ascending: true });
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('tracker history load failed', describeCloudError(e)); return []; }
+  }
+
+  function trackerTodayStartIso(){
+    // Local midnight, not UTC midnight — same reasoning as todayISO() in
+    // core.js: a technician's "today" is their own calendar day.
+    const d = new Date();
+    d.setHours(0,0,0,0);
+    return d.toISOString();
+  }
+
+  async function trackerShowTrail(technicianId, name){
+    if(!trackerMap || !window.L) return;
+    trackerTrailTid = technicianId;
+    trackerHighlightActiveRow();
+    const points = await trackerLoadHistory(technicianId, trackerTodayStartIso());
+    if(trackerTrailTid !== technicianId) return; // admin switched selection mid-fetch
+    if(trackerTrailLayer){ trackerMap.removeLayer(trackerTrailLayer); trackerTrailLayer = null; }
+    if(points.length < 2){
+      toast(points.length ? 'Not enough points yet to draw a path for '+name : 'No movement recorded yet today for '+name);
+      return;
+    }
+    trackerTrailLayer = window.L.polyline(points.map(p=>[p.lat,p.lng]), {
+      color: '#2A6FDB', weight: 3, opacity: 0.75
+    }).addTo(trackerMap);
+    trackerMap.fitBounds(trackerTrailLayer.getBounds().pad(0.2), { maxZoom: 16 });
+  }
+
+  function trackerHideTrail(){
+    trackerTrailTid = null;
+    if(trackerTrailLayer && trackerMap){ trackerMap.removeLayer(trackerTrailLayer); }
+    trackerTrailLayer = null;
+    trackerHighlightActiveRow();
+  }
+
+  function trackerHighlightActiveRow(){
+    const list = $('trackerList');
+    if(!list) return;
+    $$('.tracker-list-item', list).forEach(el=>{
+      el.classList.toggle('active', el.dataset.tid === trackerTrailTid);
+    });
+  }
+
+  const TRACKER_DOT = { live: '#1F7A50', idle: '#B9791F', stale: '#8A8F8A' };
+
+  function trackerFmtAgo(iso){
+    if(!iso) return 'never';
+    const ms = Date.now() - new Date(iso).getTime();
+    if(ms < 0) return 'just now';
+    const s = Math.floor(ms/1000);
+    if(s < 60) return s+'s ago';
+    const m = Math.floor(s/60);
+    if(m < 60) return m+'m ago';
+    const h = Math.floor(m/60);
+    if(h < 24) return h+'h ago';
+    return Math.floor(h/24)+'d ago';
+  }
+  function trackerFreshness(iso){
+    if(!iso) return 'stale';
+    const min = (Date.now() - new Date(iso).getTime()) / 60000;
+    if(min <= 5) return 'live';
+    if(min <= 30) return 'idle';
+    return 'stale';
+  }
+
+  async function trackerEnsureLeaflet(){
+    if(window.L) return;
+    if(window.loadAwesCss && window.awesCss && window.awesCss.leaflet) window.loadAwesCss('leaflet', window.awesCss.leaflet);
+    await loadAwesScript('leaflet', awesLibs.leaflet);
+  }
+
+  async function trackerLoadRows(){
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('technician_locations').select('*');
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('tracker load failed', describeCloudError(e)); return []; }
+  }
+
+  function trackerDotIcon(status){
+    const color = TRACKER_DOT[status] || TRACKER_DOT.stale;
+    return window.L.divIcon({
+      className: 'tracker-marker',
+      html: '<span style="display:block;width:16px;height:16px;border-radius:50%;background:'+color+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></span>',
+      iconSize: [16,16], iconAnchor: [8,8]
+    });
+  }
+  function trackerPopupHtml(name, row){
+    return '<div style="font:13px -apple-system,BlinkMacSystemFont,sans-serif;">'+
+      '<b>'+escapeHtml(name)+'</b><br>'+
+      '<span style="color:#5C6B62;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
+      (row.accuracy != null ? '<br><span style="color:#5C6B62;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
+    '</div>';
+  }
+
+  function trackerRenderList(rows, usersById){
+    const list = $('trackerList');
+    if(!list) return;
+    if(rows.length === 0){
+      list.innerHTML = '<div class="empty-state">No technicians are sharing their location right now.</div>';
+      return;
+    }
+    const sorted = rows.slice().sort((a,b)=> new Date(b.updated_at) - new Date(a.updated_at));
+    list.innerHTML = sorted.map(r=>{
+      const name = (usersById[r.technician_id] && usersById[r.technician_id].name) || 'Unknown technician';
+      const status = trackerFreshness(r.updated_at);
+      return '<div class="tracker-list-item" data-tid="'+escapeHtml(r.technician_id)+'" data-name="'+escapeHtml(name)+'">'+
+        '<span class="tracker-dot" style="background:'+TRACKER_DOT[status]+'"></span>'+
+        '<span class="tracker-list-name">'+escapeHtml(name)+'</span>'+
+        '<span class="tracker-list-time">'+trackerFmtAgo(r.updated_at)+'</span>'+
+      '</div>';
+    }).join('');
+    trackerHighlightActiveRow();
+    $$('.tracker-list-item', list).forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const marker = trackerMarkers[el.dataset.tid];
+        if(marker && trackerMap){ trackerMap.setView(marker.getLatLng(), 16); marker.openPopup(); }
+        // Tap the same technician again to hide their path; tap another to switch to it.
+        if(trackerTrailTid === el.dataset.tid) trackerHideTrail();
+        else trackerShowTrail(el.dataset.tid, el.dataset.name);
+      });
+    });
+  }
+
+  // Runs on a 20s interval while the tracker card is visible, and stops
+  // itself (rather than being stopped from elsewhere) the moment it notices
+  // the admin has navigated away from Home — see the check at the top.
+  async function trackerRefresh(){
+    const card = $('homeTrackerCard');
+    if(!card || card.style.display === 'none' || !currentUser || currentUser.role !== 'admin'){
+      if(trackerPollTimer){ clearInterval(trackerPollTimer); trackerPollTimer = null; }
+      return;
+    }
+    if(!trackerMap) return; // map still loading
+
+    const [rows, users] = await Promise.all([ trackerLoadRows(), cloudListUsers().catch(()=>[]) ]);
+    const usersById = Object.create(null);
+    (users||[]).forEach(u=> usersById[u.id] = u);
+
+    const seen = new Set();
+    rows.forEach(r=>{
+      seen.add(r.technician_id);
+      const name = (usersById[r.technician_id] && usersById[r.technician_id].name) || 'Unknown technician';
+      const status = trackerFreshness(r.updated_at);
+      const latlng = [r.lat, r.lng];
+      let marker = trackerMarkers[r.technician_id];
+      if(!marker){
+        marker = window.L.marker(latlng, { icon: trackerDotIcon(status) }).addTo(trackerMap);
+        trackerMarkers[r.technician_id] = marker;
+      }else{
+        marker.setLatLng(latlng);
+        marker.setIcon(trackerDotIcon(status));
+      }
+      marker.bindPopup(trackerPopupHtml(name, r));
+    });
+    // Drop markers for rows that disappeared (e.g. admin deleted a technician).
+    Object.keys(trackerMarkers).forEach(tid=>{
+      if(!seen.has(tid)){ trackerMap.removeLayer(trackerMarkers[tid]); delete trackerMarkers[tid]; }
+    });
+
+    const countEl = $('trackerCount');
+    if(countEl) countEl.textContent = rows.length + (rows.length===1 ? ' sharing' : ' sharing');
+    trackerRenderList(rows, usersById);
+
+    // Keep a selected technician's path current as new points come in,
+    // without re-fitting the map every cycle (that would fight the admin
+    // zooming/panning to inspect the trail).
+    if(trackerTrailTid && seen.has(trackerTrailTid)){
+      const points = await trackerLoadHistory(trackerTrailTid, trackerTodayStartIso());
+      if(trackerTrailTid && points.length >= 2){
+        const latlngs = points.map(p=>[p.lat,p.lng]);
+        if(trackerTrailLayer) trackerTrailLayer.setLatLngs(latlngs);
+        else trackerTrailLayer = window.L.polyline(latlngs, { color: '#2A6FDB', weight: 3, opacity: 0.75 }).addTo(trackerMap);
+      }
+    }
+
+    // Only auto-fit the very first time markers appear, so the admin panning
+    // or zooming manually afterward isn't fought on every refresh cycle.
+    if(!trackerHasFitBounds && rows.length > 0){
+      const markerList = Object.values(trackerMarkers);
+      if(markerList.length === 1){
+        trackerMap.setView(markerList[0].getLatLng(), 15);
+      }else{
+        trackerMap.fitBounds(window.L.featureGroup(markerList).getBounds().pad(0.25), { maxZoom: 15 });
+      }
+      trackerHasFitBounds = true;
+    }
+  }
+
+  // Called every time the admin's Home Overview renders. Cheap to call
+  // repeatedly — the map, tile layer and realtime channel are each set up
+  // once and reused; this just makes sure the polling loop is (re)running.
+  async function trackerAdminInit(){
+    if(!currentUser || currentUser.role !== 'admin') return;
+    const card = $('homeTrackerCard');
+    if(!card) return;
+    card.style.display = '';
+    const techListCard = $('homeTechListCard');
+    if(techListCard) techListCard.style.display = '';
+
+    if(!trackerMap){
+      try{ await trackerEnsureLeaflet(); }
+      catch(e){
+        console.error('leaflet load failed', e);
+        const mapEl = $('trackerMapEl');
+        if(mapEl) mapEl.innerHTML = '<div class="empty-state">Map could not load — check your connection.</div>';
+        return;
+      }
+      const mapEl = $('trackerMapEl');
+      if(!mapEl || !window.L) return;
+      trackerMap = window.L.map(mapEl, { attributionControl: true }).setView([14.5995, 120.9842], 11); // Metro Manila, until real markers arrive
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(trackerMap);
+    }
+
+    // Realtime push: an update lands the instant a technician's row changes.
+    // The 20s poll below is the offline-safe fallback, not the primary path.
+    if(!trackerRealtimeChannel && db){
+      trackerRealtimeChannel = db.channel('technician-locations-admin')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'technician_locations' }, ()=> trackerRefresh())
+        .subscribe();
+    }
+
+    await trackerRefresh();
+    if(!trackerPollTimer) trackerPollTimer = setInterval(trackerRefresh, 20000);
+    setTimeout(()=>{ if(trackerMap) trackerMap.invalidateSize(); }, 200);
+  }
+
+  // Full teardown — called on logout so a signed-out session doesn't keep an
+  // open realtime channel or a background poll running.
+  function trackerAdminTeardown(){
+    if(trackerPollTimer){ clearInterval(trackerPollTimer); trackerPollTimer = null; }
+    if(trackerRealtimeChannel && db){ try{ db.removeChannel(trackerRealtimeChannel); }catch(e){} }
+    trackerRealtimeChannel = null;
+    trackerTrailTid = null;
+    trackerTrailLayer = null; // the map instance itself is torn down with the view; nothing to remove it from
+  }
+
+
+// ---------- Announcements (table: announcements) ----------
+  // Simple broadcast content: admin writes, everyone reads. No per-user
+  // read-tracking — these are posts, not a conversation to mark unread.
+  function annFmtDate(iso){
+    if(!iso) return '';
+    return new Date(iso).toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'});
+  }
+  async function annLoadAll(){
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('announcements').select('*')
+        .order('pinned', {ascending:false}).order('created_at', {ascending:false});
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('announcements load failed', describeCloudError(e)); return []; }
+  }
+  function annItemHtml(a){
+    const body = a.body || '';
+    const isLong = body.length > 220 || (body.match(/\n/g)||[]).length >= 3;
+    return '<div class="ann-item">'+
+      '<div class="ann-item-head">'+
+        (a.pinned ? '<span class="ann-badge-pinned">Pinned</span>' : '')+
+        '<span class="ann-date">'+annFmtDate(a.created_at)+'</span>'+
+      '</div>'+
+      '<div class="ann-title">'+escapeHtml(a.title)+'</div>'+
+      '<div class="ann-body'+(isLong?' ann-clamped':'')+'">'+escapeHtml(body)+'</div>'+
+      (isLong ? '<button type="button" class="ann-toggle" data-ann-toggle>Read more</button>' : '')+
+    '</div>';
+  }
+
+  // ---- Technician Dashboard card (top 3) + View All overlay ----
+  async function renderHomeAnnouncements(){
+    const card = $('homeAnnouncementsCard');
+    if(!currentUser || currentUser.role==='admin'){ if(card) card.style.display='none'; return; }
+    if(card) card.style.display = '';
+    const list = $('homeAnnouncementsList');
+    if(!list) return;
+    const all = await annLoadAll();
+    if(all.length===0){ list.innerHTML = '<div class="empty-state">No announcements yet.</div>'; return; }
+    list.innerHTML = all.slice(0,3).map(annItemHtml).join('');
+  }
+  async function annOpenViewAll(){
+    $('announcementsViewAllOverlay').classList.add('open');
+    const list = $('announcementsViewAllList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = await annLoadAll();
+    list.innerHTML = all.length===0
+      ? '<div class="empty-state">No announcements yet.</div>'
+      : all.map(annItemHtml).join('');
+  }
+  $('homeAnnViewAllBtn').addEventListener('click', annOpenViewAll);
+  $('closeAnnViewAll').addEventListener('click', ()=> $('announcementsViewAllOverlay').classList.remove('open'));
+  $('announcementsViewAllOverlay').addEventListener('click', (e)=>{
+    if(e.target.id==='announcementsViewAllOverlay') $('announcementsViewAllOverlay').classList.remove('open');
+  });
+
+  // Expand/collapse a single announcement's body — delegated so it works
+  // both on the Home dashboard card and inside the View All overlay.
+  function annBindToggle(containerId){
+    const el = $(containerId);
+    if(!el) return;
+    el.addEventListener('click', (e)=>{
+      const btn = e.target.closest('[data-ann-toggle]');
+      if(!btn) return;
+      const body = btn.previousElementSibling;
+      if(!body || !body.classList.contains('ann-body')) return;
+      const collapsed = body.classList.toggle('ann-clamped');
+      btn.textContent = collapsed ? 'Read more' : 'Show less';
+    });
+  }
+  annBindToggle('homeAnnouncementsList');
+  annBindToggle('announcementsViewAllList');
+
+  // ---- Admin authoring + management ----
+  async function annRenderAdminList(){
+    const list = $('announcementsAdminList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    const all = await annLoadAll();
+    if(all.length===0){ list.innerHTML = '<div class="empty-state">No announcements posted yet.</div>'; return; }
+    list.innerHTML = all.map(a=>
+      '<div class="ann-admin-row">'+
+        '<div>'+
+          (a.pinned ? '<span class="ann-badge-pinned">Pinned</span> ' : '')+
+          '<b>'+escapeHtml(a.title)+'</b>'+
+          '<div class="u-status">'+annFmtDate(a.created_at)+' · '+escapeHtml(a.body.length>80?a.body.slice(0,80)+'…':a.body)+'</div>'+
+        '</div>'+
+        '<button type="button" class="btn" style="color:#B3402D; border-color:#B3402D; flex-shrink:0;" data-ann-delete="'+a.id+'">Delete</button>'+
+      '</div>'
+    ).join('');
+  }
+  $('menuManageAnnouncements').addEventListener('click', async ()=>{
+    closeMainMenu();
+    if(!(await ensureAdminAuthenticated())) return;
+    $('announcementsAdminOverlay').classList.add('open');
+    $('annTitleInput').value = '';
+    $('annBodyInput').value = '';
+    $('annPinnedInput').checked = false;
+    annRenderAdminList();
+  });
+  $('closeAnnAdmin').addEventListener('click', ()=> $('announcementsAdminOverlay').classList.remove('open'));
+  $('announcementsAdminOverlay').addEventListener('click', (e)=>{
+    if(e.target.id==='announcementsAdminOverlay') $('announcementsAdminOverlay').classList.remove('open');
+  });
+  $('annPostBtn').addEventListener('click', async ()=>{
+    const title = $('annTitleInput').value.trim();
+    const body = $('annBodyInput').value.trim();
+    const pinned = $('annPinnedInput').checked;
+    if(!title || !body){ toast('Add a title and message'); return; }
+    if(!currentUser){ toast('Please sign in again'); return; }
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return; }
+    $('annPostBtn').disabled = true;
+    try{
+      const { error } = await db.from('announcements').insert({
+        title, body, pinned, created_by: currentUser.id, created_by_name: currentUser.name
+      });
+      if(error) throw error;
+      $('annTitleInput').value = ''; $('annBodyInput').value = ''; $('annPinnedInput').checked = false;
+      toast('Announcement posted');
+      annRenderAdminList();
+    }catch(e){ console.error('post announcement failed', describeCloudError(e)); toast('Could not post — please try again'); }
+    $('annPostBtn').disabled = false;
+  });
+  $('announcementsAdminList').addEventListener('click', async (e)=>{
+    const btn = e.target.closest('[data-ann-delete]');
+    if(!btn) return;
+    if(!confirm('Delete this announcement?')) return;
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return; }
+    try{
+      const { error } = await db.from('announcements').delete().eq('id', btn.dataset.annDelete);
+      if(error) throw error;
+      annRenderAdminList();
+    }catch(e){ console.error('delete announcement failed', describeCloudError(e)); toast('Could not delete — please try again'); }
+  });
+
+
+// ---------- Customer Portal (customer-facing home screen) ----------
+// Read-only view for logged-in customer accounts: their enrolled equipment,
+// service report history, and open service requests.
+//
+// SCHEMA NOTES / ASSUMPTIONS (please verify against your Supabase project):
+//
+// 1. customer_equipment already exists and is keyed by customer_id — this
+//    module reuses it as-is (see customers.js: EQUIP_FIELD_TO_COLUMN).
+//
+// 2. service_reports is matched to a customer via its `customer_id`
+//    foreign key (added in 20260904_01_customer_portal.sql, set on every
+//    new report by reportToRow() in core.js, and backfilled onto historic
+//    rows by 20260908_02_backfill_report_customer_id.sql). This is also
+//    what the "customers read own reports" RLS policy checks, so the
+//    query below and RLS now agree. Do not switch this back to matching
+//    on cust_name (free text) — that was tried first and is fragile: a
+//    typo'd or inconsistently-cased name silently excludes reports that
+//    RLS would otherwise correctly allow through.
+//
+// 3. "Status" — PM (preventive maintenance) due, overdue, on schedule, or
+//    none scheduled — is derived from customer_equipment.next_pm_date (see
+//    supabase/migrations/20260908_03_customer_equipment_next_pm_date.sql),
+//    an admin-set tentative date, not anything measured off the equipment
+//    itself. See computeEquipmentStatus() below.
+//
+// 4. Requires a `profiles` row with role='customer' and a `customer_id`
+//    column added to profiles, so a logged-in customer account can be
+//    resolved to a customers.id row. See customers table already used by
+//    customers.js. Also needs a Supabase RLS policy scoping
+//    customer_equipment/service_reports SELECT to rows matching the caller's
+//    own customer_id — without RLS, any authenticated customer could query
+//    another customer's data directly via the JS client.
+
+  let cpEquipment = [];   // this customer's equipment, from customer_equipment
+  let cpReports = [];     // this customer's service reports, most recent first
+  let cpCustomer = null;  // {id, name, ...} row from customers
+  let cpMyRequestsCache = []; // this customer's service_requests, kept fresh by
+                              // cpRefreshRequestsBadge() — feeds the home hero,
+                              // the notif bell, and the History screen's
+                              // Requests segment so none of them re-fetch it
+                              // separately on every render.
+
+  async function loadCustomerPortalData(customerId){
+    cpCustomer = null; cpEquipment = []; cpReports = [];
+    if(!customerId) return;
+    if(!(await ensureCloud())) return;
+    try{
+      const { data: custRow, error: custErr } = await db.from('customers')
+        .select('*').eq('id', customerId).maybeSingle();
+      if(custErr) throw custErr;
+      cpCustomer = custRow || null;
+    }catch(e){ console.error('load customer record failed', describeCloudError(e)); }
+
+    try{
+      const { data, error } = await db.from('customer_equipment')
+        .select('*').eq('customer_id', customerId).order('id');
+      if(error) throw error;
+      cpEquipment = (data||[]).map(row => ({
+        id: row.id, equipType: row.equip_type, equipLocation: row.equip_location,
+        brand: row.brand, mountType: row.mount_type, coolCap: row.cool_cap,
+        modelCU: row.model_cu, serialCU: row.serial_cu, modelFCU: row.model_fcu, serialFCU: row.serial_fcu,
+        nextPmDate: row.next_pm_date || '',
+        // Admin-set display name for this unit (see
+        // 20260909_02_customer_equipment_label.sql) — equipDisplayName()
+        // (core.js) shows this instead of the raw id once it's set.
+        label: row.label || ''
+      }));
+      // Photo counts — one query for the whole grid rather than one per
+      // card. Powers the small "📷 N" badge in cpEquipmentCardHtml below;
+      // actual thumbnails only load in the per-unit detail screen (see
+      // renderCustomerEquipmentPhotos, customer-equipment-history.js).
+      const photoCounts = await cloudGetEquipmentPhotoCounts(customerId);
+      cpEquipment.forEach(eq=> eq.photoCount = photoCounts[eq.id] || 0);
+    }catch(e){ console.error('load customer equipment failed', describeCloudError(e)); }
+
+    if(cpCustomer){
+      try{
+        // Matched by service_reports.customer_id, not cust_name — see
+        // schema note #2 above. That column now exists, is set on every
+        // new report (reportToRow() in core.js) and was backfilled onto
+        // historic rows (20260908_02_backfill_report_customer_id.sql), and
+        // it's what the "customers read own reports" RLS policy itself
+        // checks. Matching cust_name here as well was fragile: a report
+        // whose cust_name didn't exactly match customers.name (typo,
+        // different casing/whitespace, a nickname a technician typed in)
+        // was otherwise fully visible under RLS but got filtered out by
+        // this query before ever reaching the equipment history screen —
+        // which is why a unit with real recorded visits could still show
+        // "0 service visits". Selecting the full set of columns here (not
+        // just summary fields) so the equipment history screen can show
+        // findings/recommendations/materials/services done per visit
+        // without a second round-trip per unit.
+        const { data, error } = await db.from('service_reports')
+          .select('id, sr_no, date, cust_name, equipment_id, equip_type, equip_location, model_cu, serial_cu, model_fcu, serial_fcu, trouble_call, remarks, completed, technician_name, findings, recommendations, materials, services_done')
+          .eq('customer_id', cpCustomer.id)
+          .order('date', { ascending:false });
+        if(error) throw error;
+        cpReports = data || [];
+      }catch(e){ console.error('load customer reports failed', describeCloudError(e)); }
+    }
+
+    // Attach each equipment's full matching report history, for the
+    // "Last serviced" date and the equipment detail screen (status itself
+    // is now computed from next_pm_date, not report history — see
+    // computeEquipmentStatus below). Matching logic lives in
+    // matchReportHistoryForEquipment() (core.js) — shared with the admin
+    // equipment detail overlay's own history section.
+    cpEquipment.forEach(eq => {
+      eq.reportHistory = matchReportHistoryForEquipment(cpReports, eq);
+      eq.lastReport = eq.reportHistory[0] || null;
+      eq.status = computeEquipmentStatus(eq);
+    });
+  }
+
+  // ---------- PM (preventive maintenance) due status ----------
+  // Admin sets a tentative next-PM date per unit (Manage Equipment List →
+  // tap a unit → Next PM Date, see admin.js/customers.js). The status pill
+  // below is derived entirely from that date — overdue, due soon, on
+  // schedule, or no date set. This replaces the old heuristic that guessed
+  // "Needs attention" from whatever text happened to land in the last
+  // report's remarks: nobody at AWES is actually monitoring these units
+  // remotely, so that implied a kind of live condition-monitoring that
+  // never existed. If a unit genuinely needs attention, the customer taps
+  // "Request Service" themselves rather than waiting for a pill to notice.
+  const PM_DUE_SOON_DAYS = 30;
+  function daysUntil(iso){
+    if(!iso) return null;
+    const target = new Date(iso+'T00:00:00');
+    const today = new Date(todayISO()+'T00:00:00');
+    return Math.round((target - today) / 86400000);
+  }
+  function computeEquipmentStatus(eq){
+    const days = daysUntil(eq.nextPmDate);
+    if(days === null) return { key:'none', label:'No PM Scheduled' };
+    if(days < 0) return { key:'overdue', label:'PM Overdue' };
+    if(days <= PM_DUE_SOON_DAYS) return { key:'due-soon', label:'PM Due Soon' };
+    return { key:'scheduled', label:'On Schedule' };
+  }
+
+  function cpStatusPillHtml(status){
+    return '<span class="status-pill status-'+status.key+'">'+escapeHtml(status.label)+'</span>';
+  }
+
+  function cpUpdateSidebarBadge(id, count){
+    const el = $(id);
+    if(!el) return;
+    if(count > 0){ el.textContent = String(count); el.style.display = ''; }
+    else { el.style.display = 'none'; }
+  }
+
+  function cpEquipmentCardHtml(eq){
+    // Same field order as the admin/technician equipment lines: Location,
+    // Brand, Mount type, Equipment type, Capacity.
+    const loc = escapeHtml(eq.equipLocation || 'Equipment');
+    const details = [eq.brand, eq.mountType, eq.equipType, eq.coolCap].filter(Boolean).map(escapeHtml).join(' · ') || '—';
+    const lastDate = eq.lastReport ? fmtDate(eq.lastReport.date) : '—';
+    const pmLine = eq.status.key==='none' ? 'No PM scheduled'
+      : eq.status.key==='overdue' ? 'PM was due '+escapeHtml(fmtDate(eq.nextPmDate))
+      : 'Next PM: '+escapeHtml(fmtDate(eq.nextPmDate));
+    // equipDisplayName() (core.js) shows this unit's admin-set label once
+    // one exists (see 20260909_02_customer_equipment_label.sql); until
+    // then it falls back to a shortened form of the fixed equipment id, so
+    // every unit still shows some stable identifier a customer can
+    // reference when requesting service.
+    const idTag = escapeHtml(equipDisplayName(eq)) + (eq.photoCount ? ' &nbsp;<span style="display:inline-flex; width:11px; height:11px; vertical-align:-1px;">'+CP_ICON.camera+'</span> '+eq.photoCount : '');
+    return (
+      '<div class="cp-equip-card" data-equip-id="'+eq.id+'">'+
+        '<div class="cp-equip-card-top">'+
+          '<div class="cp-equip-icon">'+CP_ICON.unit+'</div>'+
+          cpStatusPillHtml(eq.status)+
+        '</div>'+
+        '<div class="cp-unit-tag" style="font-size:11px; font-weight:600; letter-spacing:.02em; color:var(--text-muted); text-transform:uppercase;">'+idTag+'</div>'+
+        '<div class="cp-unit-name">'+loc+'</div>'+
+        '<div class="cp-unit-loc">'+details+'</div>'+
+        '<div class="cp-unit-date">Last serviced '+escapeHtml(lastDate)+'</div>'+
+        '<div class="cp-unit-date">'+pmLine+'</div>'+
+      '</div>'
+    );
+  }
+
+  function cpReportRowHtml(r){
+    const title = escapeHtml((r.trouble_call && r.trouble_call.trim()) ? r.trouble_call : (r.equip_type||'Service report'));
+    const sub = escapeHtml(r.sr_no||'')+' · '+escapeHtml(r.equip_location||'')+' · '+fmtDate(r.date);
+    return (
+      '<div class="cp-row" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(r.id||'')+'">'+
+        '<div class="cp-row-icon">📄</div>'+
+        '<div class="cp-row-body">'+
+          '<div class="cp-row-title">'+title+'</div>'+
+          '<div class="cp-row-sub">'+sub+'</div>'+
+        '</div>'+
+        '<div class="cp-row-chev">›</div>'+
+      '</div>'
+    );
+  }
+
+  // ---------- Icons ----------
+  // Inline SVG only (no emoji, no icon font) so the redesigned screens read
+  // as one consistent system — stroke="currentColor" so each icon just
+  // picks up whatever color its container sets.
+  const CP_ICON = {
+    chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+    home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg>',
+    grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+    clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+    tools:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg>',
+    person:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+    check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
+    alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></svg>',
+    unit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="9" rx="1.5"/><path d="M7 15v3M17 15v3M3 9h18M6 9V7M10 9V7"/></svg>',
+    receipt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg>',
+    history:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5M12 7v5l4 2"/></svg>',
+    bolt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>',
+    ruler:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h18v8H3z"/><path d="M7 8v3M11 8v3M15 8v3"/></svg>',
+    piggy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a6 6 0 0 1 6-6h4a6 6 0 0 1 0 12v3l-3-2H10a6 6 0 0 1-6-6z"/><circle cx="15" cy="10" r=".6" fill="currentColor"/></svg>',
+    leaf:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21c9 0 14-5 14-14V5h-2C8 5 3 10 3 19z"/></svg>',
+    book:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M19 19H6a2 2 0 0 1 0-4h13"/></svg>',
+    chevron:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+    pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+    search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+    camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/></svg>'
+  };
+
+  // ---------- Unit card (photo-led, vertical stack) ----------
+  // Same card is used on Home (capped list) and the Units screen (full
+  // list) — one visual design instead of two, matching this theme's
+  // layout. photoMap is an optional {equipmentId: url} lookup (see
+  // cpFetchCoverPhotoMap in equipment-photos.js); falls back to the
+  // generic tinted unit icon when nothing comes back for a given unit
+  // (no cover photo set, or none uploaded yet).
+  function cpUnitStateClass(eq){
+    if(eq.status.key==='overdue') return 'state-danger';
+    if(eq.status.key==='due-soon') return 'state-active';
+    if(eq.status.key==='scheduled') return 'state-teal';
+    return 'state-good';
+  }
+  function cpUnitCardHtml(eq, photoMap){
+    const stateClass = cpUnitStateClass(eq);
+    const name = escapeHtml(equipDisplayName(eq));
+    const badgeLabel = eq.status.key==='overdue' ? 'Needs attention' : eq.status.key==='due-soon' ? 'Due soon' : eq.status.key==='scheduled' ? 'Scheduled' : 'Operating normally';
+    const specLine = [eq.brand, eq.equipType, eq.coolCap].filter(Boolean).map(escapeHtml).join(' · ') || escapeHtml(eq.equipLocation||'—');
+    const lastLine = eq.lastReport ? 'Last service '+escapeHtml(fmtDate(eq.lastReport.date)) : 'No service on record yet';
+    const photoUrl = photoMap && photoMap[eq.id];
+    return (
+      '<div class="cp-unit-card '+stateClass+'" data-equip-id="'+eq.id+'">'+
+        '<div class="img-wrap">'+
+          (photoUrl
+            ? '<img src="'+escapeHtml(photoUrl)+'" alt="" loading="lazy">'
+            : '<div class="fallback-ic">'+CP_ICON.unit+'</div>')+
+          '<span class="cp-unit-badge-corner '+stateClass+'">'+badgeLabel+'</span>'+
+        '</div>'+
+        '<div class="body">'+
+          '<p class="name">'+name+'</p>'+
+          '<p class="meta">'+specLine+' · '+lastLine+'</p>'+
+          '<div class="foot">'+
+            '<span class="cp-unit-badge '+stateClass+'">'+badgeLabel+'</span>'+
+            '<a class="view-link">View unit details →</a>'+
+          '</div>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+
+  // ---------- Home hero (state engine) ----------
+  // One hero card, one of six looks depending on what's true right now,
+  // in this priority order (highest first): a technician-flagged issue
+  // (D2/D3) > an overdue unit with no request open yet (D1) > active
+  // on-site work (C) > a confirmed upcoming visit (B) > nothing pending (A).
+  // Many units + many flagged issues collapses to a summary card instead of
+  // picking just one. `rows` is this customer's service_requests (may be
+  // empty on the very first paint, before cpRefreshRequestsBadge's fetch
+  // resolves — the hero just reflects equipment status alone until then,
+  // then re-renders with the fuller picture a moment later).
+  function cpEquipLabel(eq){ return eq ? escapeHtml(equipDisplayName(eq)) : 'your unit'; }
+
+  function cpHeroAllClear(){
+    return (
+      '<div class="cp-hero-allclear">'+
+        '<div class="ic">'+CP_ICON.check+'</div>'+
+        '<div><p class="cp-hero-name">Everything is up to date</p><p class="cp-hero-sub">Your unit is operating normally.</p></div>'+
+      '</div>'
+    );
+  }
+  function cpHeroScheduled(req, eq){
+    const dateStr = req.proposedScheduleDate ? fmtDate(req.proposedScheduleDate) : 'a date to be confirmed';
+    const timeStr = req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '';
+    return (
+      '<div class="cp-hero-scheduled" data-req-id="'+req.id+'">'+
+        '<div style="display:flex; align-items:center; gap:12px;">'+
+          '<div class="ic">'+CP_ICON.calendar+'</div>'+
+          '<div><p class="cp-hero-eyebrow teal">Scheduled</p><p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
+          '<p class="cp-hero-sub">'+dateStr+timeStr+'</p></div>'+
+        '</div>'+
+        '<a data-action="reschedule" style="font-size:12px; font-weight:600; color:var(--teal); cursor:pointer;">Details</a>'+
+      '</div>'
+    );
+  }
+  // Deterministic small color per technician so the same person's avatar
+  // is always the same color across renders (not random each time).
+  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
+  function cpAvatarColor(name){
+    let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
+    return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
+  }
+  function cpTechAvatarsHtml(names){
+    if(!names || !names.length) return '';
+    const shown = names.slice(0,2);
+    const extra = names.length - shown.length;
+    return '<div class="cp-hero-techs">' +
+      shown.map(n=> '<div class="cp-hero-tech-avatar" style="background:'+cpAvatarColor(n)+'" title="'+escapeHtml(n)+'">'+escapeHtml((n||'?').trim().charAt(0).toUpperCase())+'</div>').join('') +
+      (extra>0 ? '<div class="cp-hero-tech-avatar" style="background:var(--text-muted)">+'+extra+'</div>' : '') +
+      '</div>';
+  }
+  // Three-stage dot/segment tracker for the Active hero — Received / En
+  // route / In progress (this is what .cp-hero-track/.cp-hero-labels in
+  // app.css are actually styled for). Completed ends the active-service
+  // hero entirely (renderCustomerHero stops treating the request as
+  // "active" once status is completed), so this never needs a 4th stage.
+  // The plain bar tracker in service-requests.js's srProgressStepsHtml is
+  // a separate, simpler version used in the admin/customer detail
+  // overlay, which isn't built to this visual theme.
+  function cpHeroTrackHtml(status){
+    const steps = ['dispatched','en_route','in_progress'];
+    const labels = ['Received','En route','In progress'];
+    const idx = steps.indexOf(status);
+    if(idx<0) return '';
+    let dots = '';
+    steps.forEach((s,i)=>{
+      dots += '<i class="pt'+(i<idx?' on':i===idx?' now':'')+'"></i>';
+      if(i<steps.length-1) dots += '<i class="seg'+(i<idx?' on':'')+'"></i>';
+    });
+    const labelsHtml = labels.map((l,i)=> '<span'+(i===idx?' class="cur"':'')+'>'+l+'</span>').join('');
+    return '<div class="cp-hero-track">'+dots+'</div><div class="cp-hero-labels">'+labelsHtml+'</div>';
+  }
+  function cpHeroActive(req, eq, techNames){
+    const label = srStatusLabel(req.status);
+    const techLine = techNames && techNames.length
+      ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
+      : 'A technician is on the way';
+    return (
+      '<div data-req-id="'+req.id+'">'+
+        '<div class="cp-hero-head">'+
+          '<div>'+
+            '<p class="cp-hero-eyebrow amber">Active service · '+escapeHtml(label)+'</p>'+
+            '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
+            '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
+          '</div>'+
+        '</div>'+
+        (techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
+        cpHeroTrackHtml(req.status)+
+        '<div class="cp-hero-foot">'+
+          '<span class="loc">'+CP_ICON.pin+' '+escapeHtml(techLine)+'</span>'+
+          '<a data-action="message">'+CP_ICON.chat+' Message</a>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+  function cpHeroDanger(kind, req, eq){
+    // kind: 'overdue' (D1, no request open yet) | 'pending' (D2) | 'ready' (D3)
+    const cfg = {
+      overdue:{ title:'Overdue for service', sub:cpEquipLabel(eq)+' — overdue for preventive maintenance.', cta:'Book service now' },
+      pending:{ title:'Issue flagged during last visit', sub:(req&&req.flaggedIssueSummary) || (req&&req.description) || 'A technician noted an issue on '+cpEquipLabel(eq)+'.', cta:null },
+      ready:{ title:'Quotation ready for review', sub:'A quote is ready for '+cpEquipLabel(eq)+'.', cta:'Review quotation' }
+    }[kind];
+    return (
+      '<div data-req-id="'+(req?req.id:'')+'" data-equip-id="'+(eq?eq.id:'')+'" data-kind="'+kind+'">'+
+        '<div class="cp-hero-danger-body">'+
+          '<div class="ic">'+CP_ICON.alert+'</div>'+
+          '<div><p class="cp-hero-eyebrow danger">Needs attention</p><p class="cp-hero-name">'+cfg.title+'</p>'+
+          '<p class="cp-hero-sub">'+escapeHtml(cfg.sub)+'</p></div>'+
+        '</div>'+
+        (cfg.cta
+          ? '<div class="cp-hero-danger-cta"><button type="button" class="cp-hero-btn danger" data-action="'+kind+'">'+cfg.cta+'</button></div>'
+          : '<div class="cp-hero-muted-note">We\'ll notify you as soon as a quotation is ready.</div>')+
+      '</div>'
+    );
+  }
+  function cpHeroSummary(count, kind){
+    // Many units flagged at once (property-management scale case) — link
+    // out to Units (filtered mentally by the person, no separate filtered
+    // view built yet) rather than trying to pick just one to feature.
+    const label = kind==='danger' ? count+' units need attention' : count+' units in service today';
+    const eyebrowClass = kind==='danger' ? 'danger' : 'amber';
+    return (
+      '<div data-action="viewUnits">'+
+        '<div class="cp-hero-danger-body">'+
+          '<div class="ic">'+CP_ICON.alert+'</div>'+
+          '<div><p class="cp-hero-eyebrow '+eyebrowClass+'">Across your units</p><p class="cp-hero-name">'+label+'</p>'+
+          '<p class="cp-hero-sub">Tap to see which units and what\'s needed.</p></div>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+
+  function cpFindEquip(id){ return cpEquipment.find(e=> String(e.id)===String(id)); }
+
+  async function renderCustomerHero(rows){
+    const hero = $('cpHero');
+    if(!hero) return;
+    rows = rows || [];
+
+    const flagged = rows.filter(r=> r.origin==='technician_flag' && !['completed','cancelled','dispatched','en_route','in_progress'].includes(r.status));
+    const active = rows.filter(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress');
+    const overdueNoRequest = cpEquipment.filter(eq=>{
+      if(eq.status.key!=='overdue') return false;
+      return !rows.some(r=> String(r.equipmentId)===String(eq.id) && r.status!=='completed' && r.status!=='cancelled');
+    });
+    const scheduled = rows.filter(r=> r.status==='schedule_confirmed');
+
+    let html, danger = false;
+    if(flagged.length > 1 || overdueNoRequest.length + flagged.length > 1){
+      // More than one thing needs attention at once — summarize rather
+      // than arbitrarily feature one unit over another.
+      html = cpHeroSummary(flagged.length + overdueNoRequest.length, 'danger'); danger = true;
+    } else if(flagged.length === 1){
+      const req = flagged[0];
+      const ready = req.feeStatus === 'proposed';
+      html = cpHeroDanger(ready ? 'ready' : 'pending', req, cpFindEquip(req.equipmentId)); danger = true;
+    } else if(overdueNoRequest.length === 1){
+      html = cpHeroDanger('overdue', null, overdueNoRequest[0]); danger = true;
+    } else if(active.length > 0){
+      // Technician names live on the linked dispatch ticket, not the
+      // request row itself — a separate fetch, so the hero shows without
+      // them for a moment on first paint, then fills in.
+      const techNames = (active[0].linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
+        ? await dtFetchTicketTechNames(active[0].linkedDispatchTicketId) : [];
+      html = cpHeroActive(active[0], cpFindEquip(active[0].equipmentId), techNames);
+    } else if(scheduled.length > 0){
+      html = cpHeroScheduled(scheduled[0], cpFindEquip(scheduled[0].equipmentId));
+    } else {
+      html = cpHeroAllClear();
+    }
+
+    hero.className = 'cp-hero' + (danger ? ' cp-hero-danger' : '');
+    hero.innerHTML = html;
+    hero.onclick = (e)=>{
+      const actionEl = e.target.closest('[data-action]');
+      const action = actionEl ? actionEl.dataset.action : null;
+      if(action==='overdue'){ const eq = overdueNoRequest[0]; if(eq) cpRequestServiceForEquip(eq); return; }
+      if(action==='ready'){ if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]); return; }
+      if(action==='message'){ if(active[0] && typeof srOpenDetail==='function') srOpenDetail(active[0]); return; }
+      if(action==='reschedule'){ if(scheduled[0] && typeof srOpenDetail==='function') srOpenDetail(scheduled[0]); return; }
+      if(action==='viewUnits'){ cpShowScreen('Units'); return; }
+      // Tap anywhere else on the card: open whichever single job it
+      // represents, if any (all-clear has nothing to open).
+      if(active[0] && typeof srOpenDetail==='function') srOpenDetail(active[0]);
+      else if(scheduled[0] && typeof srOpenDetail==='function') srOpenDetail(scheduled[0]);
+      else if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]);
+    };
+  }
+
+  // Time-of-day greeting for the home header — see AWES_App_enroute
+  // redesign spec's "Welcome section" ("Good afternoon, Ms. Jhen").
+  // Local device time; no timezone handling needed since this is a
+  // customer's own portal on their own device.
+  function cpTimeGreeting(){
+    const h = new Date().getHours();
+    if(h < 12) return 'Good morning';
+    if(h < 18) return 'Good afternoon';
+    return 'Good evening';
+  }
+  function cpSetGreetingName(){
+    if($('cpGreetTod')) $('cpGreetTod').textContent = cpTimeGreeting();
+    $('cpGreetingName').textContent = currentUser.name || 'there';
+  }
+
+  function renderCustomerHome(){
+    // Header
+    $('cpGreetSub').textContent = cpEquipment.length
+      ? cpEquipment.length+' unit'+(cpEquipment.length===1?'':'s')+' enrolled'
+      : 'No units enrolled yet';
+    const initials = (currentUser && currentUser.name ? currentUser.name.trim().charAt(0) : '?').toUpperCase();
+    if($('cpAvatarBtn')) $('cpAvatarBtn').textContent = initials;
+
+    // Hero — initial pass off equipment status alone; cpRefreshRequestsBadge
+    // (fired below) re-renders it a moment later with request data too.
+    renderCustomerHero(cpMyRequestsCache);
+
+    // Unit stack — most-attention-needed first, capped at 3 on Home with a
+    // "Manage units" link into the full Units screen (see
+    // cpUnitsSectionTitle below for the many-units retitle). Cover photos
+    // are fetched in one batch and swapped in once they arrive — the
+    // stack renders immediately with icon fallbacks so photos loading
+    // slowly never blocks the rest of the screen.
+    const sorted = cpEquipment.slice().sort((a,b)=>{
+      const rank = { overdue:0, 'due-soon':1, scheduled:2, none:3 };
+      return (rank[a.status.key]??3) - (rank[b.status.key]??3);
+    });
+    const shown = sorted.slice(0,3);
+    const flaggedCount = cpEquipment.filter(e=> e.status.key==='overdue' || e.status.key==='due-soon').length;
+    $('cpUnitsSectionTitle').textContent = flaggedCount>1 ? 'Units needing attention' : 'Your units';
+    function paintUnitStack(photoMap){
+      $('cpUnitScroll').innerHTML = shown.length
+        ? shown.map(eq=> cpUnitCardHtml(eq, photoMap)).join('')
+        : '<div class="empty-state">No equipment enrolled yet.</div>';
+      $$('.cp-unit-card', $('cpUnitScroll')).forEach(card=>{
+        card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
+      });
+    }
+    paintUnitStack({});
+    if(shown.length && typeof cpFetchCoverPhotoMap === 'function'){
+      cpFetchCoverPhotoMap(shown.map(eq=>eq.id)).then(paintUnitStack);
+    }
+
+    // Quick actions — four real destinations only; nothing here is
+    // fabricated (no separate "Invoices" tile, since there's no invoicing
+    // feature distinct from the fee already shown on a request/billing
+    // card — see cpQuickQuotes below).
+    $('cpQuickUnits').innerHTML = ''+CP_ICON.grid+'<div class="cp-quick-text"><p class="t">My units</p><p class="s">'+cpEquipment.length+' enrolled</p></div>';
+    $('cpQuickUnits').onclick = ()=> cpShowScreen('Units');
+    const quoteCount = cpMyRequestsCache.filter(r=> r.feeAmount!=null).length;
+    $('cpQuickQuotes').innerHTML = ''+CP_ICON.receipt+'<div class="cp-quick-text"><p class="t">Quotes and invoices</p><p class="s">'+(quoteCount ? quoteCount+' on file' : 'None yet')+'</p></div>';
+    $('cpQuickQuotes').onclick = ()=> cpShowScreen('History', 'Requests');
+    $('cpQuickHistory').innerHTML = ''+CP_ICON.history+'<div class="cp-quick-text"><p class="t">Service history</p><p class="s">'+(cpReports.length ? cpReports.length+' visits' : 'No visits yet')+'</p></div>';
+    $('cpQuickHistory').onclick = ()=> cpShowScreen('History', 'Visits');
+    $('cpQuickHelp').innerHTML = ''+CP_ICON.chat+'<div class="cp-quick-text"><p class="t">Get help</p><p class="s">Message us</p></div>';
+    // No standalone support inbox exists yet (see the chat-model note on
+    // cpNotifBell) — "Get help" opens the same request form as "Book a
+    // service" so a person can describe their situation either way,
+    // rather than promising a contact channel that isn't built.
+    $('cpQuickHelp').onclick = ()=>{ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); };
+
+    // Billing — a real fee amount if one exists (accepted or awaiting the
+    // customer's response), never a fabricated invoice. Hidden entirely
+    // otherwise; "Pay now" is a placeholder since no payment gateway is
+    // wired up.
+    const billed = cpMyRequestsCache.find(r=> r.feeAmount!=null && r.status!=='completed' && r.status!=='cancelled');
+    const billingCard = $('cpBillingCard');
+    if(billed){
+      $('cpBillingLabel').textContent = '₱'+billed.feeAmount;
+      $('cpBillingSub').textContent = billed.feeStatus==='proposed' ? 'Awaiting your review' : 'Service fee';
+      billingCard.style.display = '';
+      billingCard.onclick = null;
+      $('cpBillingPayBtn').onclick = (e)=>{ e.stopPropagation(); toast('Online payments — coming soon'); };
+    } else {
+      billingCard.style.display = 'none';
+    }
+
+    // Recent activity — last 3 reports, newest first (already sorted by
+    // loadCustomerPortalData's query).
+    $('cpActivityFullHistoryLink').onclick = ()=> cpShowScreen('History', 'Visits');
+    $('cpRecentActivity').innerHTML = cpReports.length
+      ? cpReports.slice(0,3).map(r=>{
+          const title = escapeHtml((r.trouble_call && r.trouble_call.trim()) ? r.trouble_call : (r.equip_type||'Service visit'));
+          const warn = !!(r.trouble_call && r.trouble_call.trim());
+          return '<div class="cp-activity-row" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(r.id||'')+'">'+
+            '<span class="cp-activity-dot'+(warn?' warn':'')+'"></span>'+
+            '<div><p class="t">'+title+'</p><p class="s">'+escapeHtml(r.equip_location||'')+'</p></div>'+
+            '<span class="date">'+fmtDate(r.date)+'</span>'+
+          '</div>';
+        }).join('')
+      : '<div class="empty-state">No activity yet.</div>';
+    $$('.cp-activity-row', $('cpRecentActivity')).forEach(row=>{
+      row.onclick = ()=>{
+        const sr = row.dataset.srNo, reportId = row.dataset.reportId;
+        if((sr||reportId) && typeof openCustomerReportPreview==='function') openCustomerReportPreview(sr, reportId);
+      };
+    });
+
+    if(cpCustomer && cpCustomer.id) cpRefreshRequestsBadge(cpCustomer.id);
+  }
+
+  // "Viewing: [customer ▾]" switcher — only shown when this login is linked
+  // to more than one customer record (see auth.js: currentUser.customerList,
+  // populated at login/session-restore from customer_login_links). Picking
+  // a different customer re-scopes the whole home screen (equipment,
+  // reports, stat strip) to that customer, and is remembered per device so
+  // it's still selected next time this login signs in here.
+  function cpRenderSwitcher(){
+    const field = $('cpSwitcherField');
+    const sel = $('cpCustomerSwitcher');
+    if(!field || !sel) return;
+    const list = currentUser.customerList || [];
+    if(list.length <= 1){ field.style.display = 'none'; return; }
+    field.style.display = '';
+    sel.innerHTML = list.map(c=> '<option value="'+c.id+'" '+(String(c.id)===String(currentUser.customerId)?'selected':'')+'>'+escapeHtml(c.name)+'</option>').join('');
+  }
+  async function cpSwitchActiveCustomer(customerId){
+    currentUser.customerId = customerId;
+    try{ localStorage.setItem('cust-active-customer:'+currentUser.id, customerId); }catch(e){}
+    try{ localStorage.setItem('current-user', JSON.stringify(currentUser)); }catch(e){}
+    $('cpUnitScroll').innerHTML = '<div class="empty-state">Loading…</div>';
+    $('cpRecentActivity').innerHTML = '<div class="empty-state">Loading…</div>';
+    await loadCustomerPortalData(customerId);
+    cpSetGreetingName();
+    renderCustomerHome();
+    cpInitRealtime(customerId);
+  }
+  $('cpCustomerSwitcher').addEventListener('change', (e)=> cpSwitchActiveCustomer(e.target.value));
+
+  // Entry point — call this after a customer logs in and homeScreen (or a
+  // dedicated customerHomeScreen, see the HTML snippet) is shown.
+  // currentUser is expected to carry a `customerId` (the one currently
+  // being viewed) and a `customerList` (every customer this login can see)
+  // when role==='customer' — see auth.js.
+  async function initCustomerHomeScreen(){
+    if(!currentUser || currentUser.role !== 'customer' || !currentUser.customerId) return;
+    cpSetGreetingName();
+    cpRenderSwitcher();
+    await loadCustomerPortalData(currentUser.customerId);
+    renderCustomerHome();
+    cpInitRealtime(currentUser.customerId);
+  }
+
+  // ---------- Live updates (customer portal) ----------
+  // Same push+poll pattern as tracker.js's admin channel: a Supabase
+  // realtime subscription for the instant case, plus a slower poll as the
+  // offline-safe fallback. Scoped with a customer_id filter so a customer
+  // login with access to multiple customers (see cpSwitchActiveCustomer)
+  // only gets pushes for whichever one is currently being viewed — RLS
+  // would block anything else anyway, but the filter also keeps this
+  // login from re-rendering on another of its own customers' changes
+  // while looking at a different one.
+  let cpRealtimeChannel = null;
+  let cpRealtimePollTimer = null;
+  let cpRealtimeCustomerId = null;
+
+  function cpInitRealtime(customerId){
+    if(cpRealtimeChannel && cpRealtimeCustomerId === customerId) return; // already watching this customer
+    cpTeardownRealtime();
+    cpRealtimeCustomerId = customerId;
+    if(!db) return;
+    const onChange = ()=>{
+      // Reload+re-render rather than patch state in place — same as every
+      // other screen's realtime handler (dispatch.js, tracker.js) — so a
+      // push doesn't have to duplicate loadCustomerPortalData's merge logic.
+      loadCustomerPortalData(customerId).then(renderCustomerHome);
+    };
+    // A status change on one of this customer's own requests (e.g. admin
+    // acknowledges/schedules/completes it) should update "My Requests" and
+    // the sidebar badge the instant it happens — cheap to always run both
+    // here since they're no-op-safe even when the requests screen isn't
+    // currently visible.
+    const onRequestChange = ()=>{
+      if(typeof cpRenderMyRequests === 'function') cpRenderMyRequests(customerId);
+      cpRefreshRequestsBadge(customerId);
+    };
+    cpRealtimeChannel = db.channel('customer-portal-'+customerId)
+      .on('postgres_changes', { event:'*', schema:'public', table:'customer_equipment', filter:'customer_id=eq.'+customerId }, onChange)
+      .on('postgres_changes', { event:'*', schema:'public', table:'service_reports', filter:'customer_id=eq.'+customerId }, onChange)
+      .on('postgres_changes', { event:'*', schema:'public', table:'service_requests', filter:'customer_id=eq.'+customerId }, onRequestChange)
+      .subscribe();
+    if(!cpRealtimePollTimer) cpRealtimePollTimer = setInterval(()=>{ onChange(); onRequestChange(); }, 30000);
+  }
+
+  // Called on logout, and internally when switching to a different
+  // customer_id, so no stale channel/poll from a previous session or a
+  // previously-viewed customer keeps running.
+  function cpTeardownRealtime(){
+    if(cpRealtimePollTimer){ clearInterval(cpRealtimePollTimer); cpRealtimePollTimer = null; }
+    if(cpRealtimeChannel && db){ try{ db.removeChannel(cpRealtimeChannel); }catch(e){} }
+    cpRealtimeChannel = null;
+    cpRealtimeCustomerId = null;
+    // The service-request detail overlay is shared with admin (see
+    // srOpenDetail/srCloseDetail in service-requests.js) and can be left
+    // open on logout too — close it so its own message-thread channel
+    // doesn't keep running past this session.
+    if(typeof srCloseDetail === 'function') srCloseDetail();
+  }
+
+  // "My Requests" data refresh — feeds the notif bell, the home hero, and
+  // (when that screen is open) the History screen's Requests segment.
+  async function cpRefreshRequestsBadge(customerId){
+    const rows = await srListForCustomer(customerId);
+    cpMyRequestsCache = rows;
+    cpRefreshNotifBell(rows);
+    renderCustomerHero(rows);
+  }
+
+  // Header chat/notification icon — doubles as the entry point into
+  // messaging, since every job's thread lives inside its service_request's
+  // detail overlay (srOpenDetail/srMsgList) rather than a separate global
+  // inbox — there's no messaging model in this app that isn't tied to a
+  // specific request yet. Badged whenever something is waiting on the
+  // customer specifically (a fee proposed, or a schedule proposed).
+  function cpRefreshNotifBell(rows){
+    const bell = $('cpNotifBell');
+    if(!bell) return;
+    const needsAttention = rows.filter(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed').length;
+    bell.style.display = '';
+    bell.innerHTML = CP_ICON.chat + (needsAttention>0 ? '<span class="cp-badge-dot"></span>' : '');
+  }
+  $('cpNotifBell').addEventListener('click', ()=> cpShowScreen('History', 'Requests'));
+
+  // ---------- Header profile menu ----------
+  // Account settings / Notifications / Sign out — see the redesign spec's
+  // "Header" section ("Replace the standalone profile initial with a
+  // profile menu"). The Profile tab in the shared cp-nav still exists and
+  // still works on its own; this is just a faster path to it (plus
+  // sign-out) from the home screen's own header.
+  function cpCloseProfileMenu(){
+    const menu = $('cpProfileMenu');
+    if(!menu) return;
+    menu.style.display = 'none';
+    if($('cpAvatarBtn')) $('cpAvatarBtn').setAttribute('aria-expanded', 'false');
+  }
+  function cpToggleProfileMenu(e){
+    e.stopPropagation();
+    const menu = $('cpProfileMenu');
+    if(!menu) return;
+    const opening = menu.style.display === 'none';
+    menu.style.display = opening ? '' : 'none';
+    $('cpAvatarBtn').setAttribute('aria-expanded', opening ? 'true' : 'false');
+  }
+  $('cpAvatarBtn').addEventListener('click', cpToggleProfileMenu);
+  document.addEventListener('click', (e)=>{
+    const wrap = $('cpProfileMenuWrap');
+    if(wrap && !wrap.contains(e.target)) cpCloseProfileMenu();
+  });
+  document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') cpCloseProfileMenu(); });
+  if($('cpProfileMenu')) $('cpProfileMenu').addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-menu-action]');
+    if(!btn) return;
+    cpCloseProfileMenu();
+    const action = btn.dataset.menuAction;
+    if(action === 'settings') cpShowScreen('Profile');
+    else if(action === 'notifications') cpShowScreen('History', 'Requests');
+    else if(action === 'signout'){ if(typeof doLogout==='function') doLogout(); }
+  });
+
+  // ---------- Request Service (customer-side) ----------
+  // New Request form + My Requests history, reached via custNavRequests or
+  // cpRequestServiceBtn (see customer-equipment-history.js wiring). Backend
+  // functions (srCreate, srListForCustomer, srStatusLabel) live in
+  // service-requests.js — this is just the customer-facing screen.
+  function cpShowRequestsScreen(){
+    $('customerHomeScreen').style.display = 'none';
+    $('customerEquipmentDetailScreen').style.display = 'none';
+    $('customerUnitsScreen').style.display = 'none';
+    $('customerHistoryScreen').style.display = 'none';
+    $('customerToolsScreen').style.display = 'none';
+    $('customerCalcScreen').style.display = 'none';
+    $('customerProfileScreen').style.display = 'none';
+    $('customerRequestsScreen').style.display = '';
+    cpReqShowTab('new');
+    cpPopulateReqEquipmentOptions();
+    cpRenderMyRequests(currentUser.customerId);
+    window.scrollTo({top:0});
+  }
+  // Opens the New Request form with a specific unit already selected —
+  // called from the "＋ Request Service for This Unit" button on the
+  // equipment detail page (customer-equipment-history.js).
+  function cpRequestServiceForEquip(eq){
+    cpShowRequestsScreen();
+    $('cpReqEquipment').value = eq.id;
+  }
+  $('cpDetailRequestServiceBtn').addEventListener('click', ()=>{
+    if(cpDetailEquip && typeof cpRequestServiceForEquip === 'function') cpRequestServiceForEquip(cpDetailEquip);
+  });
+  function cpReqShowTab(tab){
+    $('cpReqTabNew').classList.toggle('active', tab==='new');
+    $('cpReqTabHistory').classList.toggle('active', tab==='history');
+    $('cpReqNewPanel').style.display = tab==='new' ? '' : 'none';
+    $('cpReqHistoryPanel').style.display = tab==='history' ? '' : 'none';
+  }
+  function cpPopulateReqEquipmentOptions(){
+    const sel = $('cpReqEquipment');
+    const generalOpt = '<option value="">General inquiry (not a specific unit)</option>';
+    sel.innerHTML = generalOpt + cpEquipment.map(eq=>
+      '<option value="'+eq.id+'">'+escapeHtml(equipDisplayName(eq))+' — '+escapeHtml(eq.equipLocation||'')+'</option>'
+    ).join('');
+  }
+  // Takes the full request (not just .status) because a fee_proposed row
+  // reads very differently depending on feeStatus: 'proposed' means a price
+  // is genuinely waiting on the customer to review (needs-attention red,
+  // same as home-screen state D3), while 'declined' just means it looped
+  // back to admin to try again (same "in the queue" teal as a brand-new
+  // request). Colors follow the same rule as the home screen hero:
+  //   teal   = in the queue / waiting, nothing wrong yet
+  //   red    = the customer specifically needs to do something now
+  //   amber  = a technician is actively on the job right now
+  //   green  = done
+  //   gray   = closed (cancelled) — not a problem for the customer anymore
+  function cpReqStatusPillClass(r){
+    if(r.status==='completed') return 'status-sr-done';
+    if(r.status==='cancelled') return 'status-sr-cancelled';
+    if(r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress') return 'status-sr-active';
+    if(r.status==='fee_proposed' && r.feeStatus==='proposed') return 'status-sr-urgent';
+    return 'status-sr-open'; // new, acknowledged, fee_accepted, schedule_proposed/confirmed, or a declined fee back with admin
+  }
+  function cpReqRowHtml(r){
+    // "General inquiry" only when the customer genuinely didn't pick a
+    // unit (equipmentId null). If they did pick one but it's not found in
+    // cpEquipment (e.g. it was later merged/removed), say so distinctly —
+    // showing "General inquiry" in that case would misrepresent what they
+    // actually submitted.
+    let eqLabel;
+    if(!r.equipmentId){
+      eqLabel = 'General inquiry';
+    } else {
+      const eq = cpEquipment.find(e=> String(e.id)===String(r.equipmentId));
+      eqLabel = eq ? escapeHtml(equipDisplayName(eq)) : 'Selected equipment';
+    }
+    return (
+      '<div class="cp-row" style="align-items:flex-start;" data-req-id="'+r.id+'">'+
+        '<div class="cp-row-icon">🛠️</div>'+
+        '<div class="cp-row-body">'+
+          '<div class="cp-row-title">'+eqLabel+'</div>'+
+          '<div class="cp-row-sub">'+escapeHtml(r.description||'')+'</div>'+
+          '<div class="cp-row-sub">'+fmtDateTime(r.createdAt)+
+            (r.feeAmount!=null ? ' · Quote: ₱'+escapeHtml(String(r.feeAmount)) : '')+'</div>'+
+        '</div>'+
+        '<span class="status-pill '+cpReqStatusPillClass(r)+'">'+escapeHtml(srStatusLabel(r.status))+'</span>'+
+      '</div>'
+    );
+  }
+  async function cpRenderMyRequests(customerId, targetId){
+    const list = $(targetId || 'cpReqHistoryList');
+    if(!list || !customerId) return;
+    const rows = await srListForCustomer(customerId);
+    cpMyRequestsCache = rows;
+    list.innerHTML = rows.length
+      ? rows.map(cpReqRowHtml).join('')
+      : '<div class="empty-state">No service requests yet.</div>';
+    $$('.cp-row', list).forEach(row=>{
+      row.style.cursor = 'pointer';
+      row.onclick = ()=>{
+        const req = rows.find(r=> String(r.id)===row.dataset.reqId);
+        if(req && typeof srOpenDetail === 'function') srOpenDetail(req);
+      };
+    });
+  }
+  async function cpSubmitRequest(){
+    const description = $('cpReqDescription').value.trim();
+    if(!description){ toast('Please describe the issue'); return; }
+    if(!currentUser || !currentUser.customerId){ toast('Please sign in again'); return; }
+    $('cpReqSubmitBtn').disabled = true; $('cpReqSubmitBtn').textContent = 'Submitting…';
+    const result = await srCreate({
+      customerId: currentUser.customerId,
+      equipmentId: $('cpReqEquipment').value || null,
+      description,
+      urgency: $('cpReqUrgency').value || 'normal',
+      requestedDate: $('cpReqDate').value || null,
+      accessGatePass: $('cpReqAccessGatePass').checked,
+      accessLadder: $('cpReqAccessLadder').checked,
+      accessWorkPermit: $('cpReqAccessWorkPermit').checked,
+      accessOthers: $('cpReqAccessOthers').checked,
+      accessOthersDetail: $('cpReqAccessOthersDetail').value.trim() || null,
+      contactPerson: $('cpReqContactPerson').value.trim() || null,
+      contactNumber: $('cpReqContactNumber').value.trim() || null
+    });
+    $('cpReqSubmitBtn').disabled = false; $('cpReqSubmitBtn').textContent = 'Submit Request';
+    if(!result){ toast('Could not submit — check your connection and try again'); return; }
+    toast('Request submitted — we\'ll be in touch');
+    $('cpReqDescription').value = '';
+    $('cpReqUrgency').value = 'normal';
+    $('cpReqDate').value = '';
+    $('cpReqEquipment').value = '';
+    ['cpReqAccessGatePass','cpReqAccessLadder','cpReqAccessWorkPermit','cpReqAccessOthers'].forEach(id=> $(id).checked=false);
+    $('cpReqAccessOthersDetail').value = '';
+    $('cpReqAccessOthersDetailWrap').style.display = 'none';
+    $('cpReqContactPerson').value = '';
+    $('cpReqContactNumber').value = '';
+    cpReqShowTab('history');
+    cpRenderMyRequests(currentUser.customerId);
+    cpRefreshRequestsBadge(currentUser.customerId);
+  }
+  $('cpReqBackBtn').addEventListener('click', ()=>{ if(typeof showCustomerHome === 'function') showCustomerHome(); });
+  $('cpReqTabNew').addEventListener('click', ()=> cpReqShowTab('new'));
+  $('cpReqTabHistory').addEventListener('click', ()=>{ cpReqShowTab('history'); cpRenderMyRequests(currentUser.customerId); });
+  $('cpReqSubmitBtn').addEventListener('click', cpSubmitRequest);
+  $('cpReqAccessOthers').addEventListener('change', function(){
+    $('cpReqAccessOthersDetailWrap').style.display = this.checked ? '' : 'none';
+  });
+
+  // ---------- Shared nav (bottom tabs mobile / top bar desktop) ----------
+  const CP_NAV_ITEMS = [
+    { screen:'Home', id:'cpNavHome', icon:'home' },
+    { screen:'Units', id:'cpNavUnits', icon:'grid' },
+    { screen:'History', id:'cpNavHistory', icon:'clock' },
+    { screen:'Tools', id:'cpNavTools', icon:'tools' },
+    { screen:'Profile', id:'cpNavProfile', icon:'person' }
+  ];
+  function cpInitNav(){
+    CP_NAV_ITEMS.forEach(item=>{
+      const btn = $(item.id);
+      if(!btn) return;
+      btn.innerHTML = CP_ICON[item.icon]+'<span>'+item.screen+'</span>';
+      btn.addEventListener('click', ()=> cpShowScreen(item.screen));
+    });
+  }
+  function cpSetNavActive(screen){
+    CP_NAV_ITEMS.forEach(item=> { const btn = $(item.id); if(btn) btn.classList.toggle('active', item.screen===screen); });
+  }
+
+  // Central router for the five redesigned screens. `sub` is an optional
+  // sub-selection some screens understand (History's 'Visits'/'Requests'
+  // segment). Always routes through showCustomerHome() first so the very
+  // long "hide every other view" list only needs to live in one place
+  // (customer-equipment-history.js) — this just re-shows a different
+  // screen than Home immediately after.
+  function cpShowScreen(screen, sub){
+    showCustomerHome();
+    if(screen==='Home') return;
+    $('customerHomeScreen').style.display = 'none';
+    cpSetNavActive(screen);
+    if(screen==='Units'){ $('customerUnitsScreen').style.display = ''; renderCustomerUnitsScreen(); }
+    else if(screen==='History'){ $('customerHistoryScreen').style.display = ''; renderCustomerHistoryScreen(sub); }
+    else if(screen==='Tools'){ $('customerToolsScreen').style.display = ''; renderCustomerToolsScreen(); }
+    else if(screen==='Profile'){ $('customerProfileScreen').style.display = ''; renderCustomerProfileScreen(); }
+    window.scrollTo({top:0});
+  }
+
+  // ---------- Units screen (full grid) ----------
+  function renderCustomerUnitsScreen(){
+    $('cpUnitsScreenSub').textContent = cpEquipment.length+' unit'+(cpEquipment.length===1?'':'s')+' enrolled';
+    function paint(photoMap){
+      $('cpUnitsGrid').innerHTML = cpEquipment.length
+        ? cpEquipment.map(eq=> cpUnitCardHtml(eq, photoMap)).join('')
+        : '<div class="empty-state">No equipment enrolled yet.</div>';
+      $$('.cp-unit-card', $('cpUnitsGrid')).forEach(card=>{
+        card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
+      });
+    }
+    paint({});
+    if(cpEquipment.length && typeof cpFetchCoverPhotoMap === 'function'){
+      cpFetchCoverPhotoMap(cpEquipment.map(eq=>eq.id)).then(paint);
+    }
+  }
+
+  // ---------- History screen (segmented Visits / Requests) ----------
+  function cpHistShowSeg(seg){
+    $('cpHistTabVisits').classList.toggle('active', seg==='Visits');
+    $('cpHistTabRequests').classList.toggle('active', seg==='Requests');
+    $('cpHistVisitsPanel').style.display = seg==='Visits' ? '' : 'none';
+    $('cpHistRequestsPanel').style.display = seg==='Requests' ? '' : 'none';
+  }
+  function renderCustomerHistoryScreen(sub){
+    cpHistShowSeg(sub==='Requests' ? 'Requests' : 'Visits');
+    $('cpHistVisitsList').innerHTML = cpReports.length
+      ? cpReports.map(cpReportRowHtml).join('')
+      : '<div class="empty-state">No service reports yet.</div>';
+    $$('.cp-row', $('cpHistVisitsList')).forEach(row=>{
+      row.style.cursor = 'pointer';
+      row.onclick = ()=>{
+        const sr = row.dataset.srNo, reportId = row.dataset.reportId;
+        if((sr||reportId) && typeof openCustomerReportPreview==='function') openCustomerReportPreview(sr, reportId);
+      };
+    });
+    if(currentUser && currentUser.customerId) cpRenderMyRequests(currentUser.customerId, 'cpHistRequestsList');
+  }
+  $('cpHistTabVisits').addEventListener('click', ()=> cpHistShowSeg('Visits'));
+  $('cpHistTabRequests').addEventListener('click', ()=> cpHistShowSeg('Requests'));
+
+  // ---------- Tools & learning ----------
+  // Kept intentionally simple v1 calculators — real formulas, no account
+  // data required — plus a short reference-guide article list. Both lists
+  // are static content owned here; extend CP_CALCULATORS/CP_ARTICLES to add
+  // more without touching the screen-rendering code below.
+  const CP_CALCULATORS = [
+    { id:'electricity', icon:'bolt', title:'Electricity cost', desc:'Estimate monthly running cost from your unit\'s capacity and hours used.' },
+    { id:'capacity', icon:'ruler', title:'Capacity guide', desc:'How many HP/kW you need for a room of a given size.' },
+    { id:'savings', icon:'piggy', title:'Maintenance savings', desc:'What regular PM saves you vs. reactive repairs over a year.' }
+  ];
+  const CP_ARTICLES = [
+    { id:'filter', icon:'leaf', title:'Cleaning your air filter', desc:'A simple monthly habit that keeps your unit efficient.' },
+    { id:'signs', icon:'alert', title:'Signs your unit needs service', desc:'What to watch and listen for between PM visits.' },
+    { id:'pm', icon:'calendar', title:'Why preventive maintenance matters', desc:'What a PM visit actually covers, and how often you need one.' }
+  ];
+  function renderCustomerToolsScreen(){
+    $('cpCalcGrid').innerHTML = CP_CALCULATORS.map(c=>
+      '<button type="button" class="cp-tool-card" data-calc="'+c.id+'">'+
+        '<div class="ic">'+CP_ICON[c.icon]+'<p class="t">'+c.title+'</p><p class="d">'+c.desc+'</p>'+
+      '</button>'
+    ).join('');
+    $$('.cp-tool-card', $('cpCalcGrid')).forEach(btn=> btn.onclick = ()=> cpOpenCalc(btn.dataset.calc));
+    $('cpArticleList').innerHTML = CP_ARTICLES.map(a=>
+      '<button type="button" class="cp-article-row" data-article="'+a.id+'">'+
+        '<div class="ic">'+CP_ICON[a.icon]+'</div>'+
+        '<div><p class="t">'+a.title+'</p><p class="d">'+a.desc+'</p></div>'+
+        '<span class="chev">'+CP_ICON.chevron+'</span>'+
+      '</button>'
+    ).join('');
+    $$('.cp-article-row', $('cpArticleList')).forEach(btn=> btn.onclick = ()=> cpOpenArticle(btn.dataset.article));
+  }
+  $('cpToolsSearch').addEventListener('input', function(){
+    const q = this.value.trim().toLowerCase();
+    $$('.cp-tool-card', $('cpCalcGrid')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+    $$('.cp-article-row', $('cpArticleList')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+  });
+
+  function cpShowCalcScreen(){
+    $('customerToolsScreen').style.display = 'none';
+    $('customerCalcScreen').style.display = '';
+    window.scrollTo({top:0});
+  }
+  $('cpCalcBackBtn').addEventListener('click', ()=>{
+    $('customerCalcScreen').style.display = 'none';
+    $('customerToolsScreen').style.display = '';
+  });
+
+  function cpOpenArticle(id){
+    const a = CP_ARTICLES.find(x=> x.id===id);
+    if(!a) return;
+    $('cpCalcBody').innerHTML =
+      '<h2 style="font-size:15px; margin:0 0 10px;">'+a.title+'</h2>'+
+      '<p style="font-size:13px; color:var(--text-muted); line-height:1.6;">'+a.desc+'</p>'+
+      '<p style="font-size:13px; line-height:1.6; margin-top:12px;">Full guide content — coming soon. In the meantime, if you\'re unsure about anything with your unit, request a visit and a technician can walk you through it on-site.</p>';
+    cpShowCalcScreen();
+  }
+
+  // Every calculator follows the same shape: render inputs + a live
+  // result, recompute on any input change. Kept as one function per tool
+  // rather than a generic config-driven form, since each one's inputs and
+  // formula are different enough that a generic version would be harder
+  // to read than just writing the three out.
+  function cpOpenCalc(id){
+    if(id==='electricity') return cpCalcElectricity();
+    if(id==='capacity') return cpCalcCapacity();
+    if(id==='savings') return cpCalcSavings();
+  }
+  function cpCalcElectricity(){
+    $('cpCalcBody').innerHTML =
+      '<h2 style="font-size:15px; margin:0 0 12px;">Electricity cost</h2>'+
+      '<div class="field"><label>Unit capacity (HP)</label><input type="number" id="ceHp" value="1.5" step="0.5" min="0.5"></div>'+
+      '<div class="field"><label>Hours used per day</label><input type="number" id="ceHours" value="8" min="0"></div>'+
+      '<div class="field"><label>Rate (₱ per kWh)</label><input type="number" id="ceRate" value="12" step="0.5" min="0"></div>'+
+      '<div class="cp-calc-result"><p class="n" id="ceResult">—</p><p class="l">Estimated cost per month</p></div>'+
+      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Rough estimate — actual draw varies by brand, inverter type, and set temperature.</p>';
+    const calc = ()=>{
+      const hp = parseFloat($('ceHp').value)||0, hours = parseFloat($('ceHours').value)||0, rate = parseFloat($('ceRate').value)||0;
+      const kw = hp * 0.746; // approx kW per HP
+      const monthly = kw * hours * 30 * rate;
+      $('ceResult').textContent = '₱'+monthly.toLocaleString(undefined,{maximumFractionDigits:0});
+    };
+    ['ceHp','ceHours','ceRate'].forEach(id=> $(id).addEventListener('input', calc));
+    calc();
+    cpShowCalcScreen();
+  }
+  function cpCalcCapacity(){
+    $('cpCalcBody').innerHTML =
+      '<h2 style="font-size:15px; margin:0 0 12px;">Capacity guide</h2>'+
+      '<div class="field"><label>Room floor area (sqm)</label><input type="number" id="ccArea" value="15" min="1"></div>'+
+      '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l">Suggested capacity</p></div>'+
+      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">General guide only — ceiling height, sun exposure, and occupancy change the ideal size. A technician can confirm on-site.</p>';
+    const calc = ()=>{
+      const area = parseFloat($('ccArea').value)||0;
+      let hp;
+      if(area<=10) hp = 0.75; else if(area<=15) hp = 1.0; else if(area<=20) hp = 1.5; else if(area<=28) hp = 2.0; else if(area<=35) hp = 2.5; else hp = 3.0;
+      $('ccResult').textContent = hp+' HP';
+    };
+    $('ccArea').addEventListener('input', calc);
+    calc();
+    cpShowCalcScreen();
+  }
+  function cpCalcSavings(){
+    $('cpCalcBody').innerHTML =
+      '<h2 style="font-size:15px; margin:0 0 12px;">Maintenance savings</h2>'+
+      '<div class="field"><label>Number of units</label><input type="number" id="csUnits" value="'+(cpEquipment.length||1)+'" min="1"></div>'+
+      '<div class="field"><label>PM visits per year, per unit</label><input type="number" id="csVisits" value="2" min="1"></div>'+
+      '<div class="field"><label>Typical PM cost per visit (₱)</label><input type="number" id="csPmCost" value="1500" min="0"></div>'+
+      '<div class="field"><label>Typical reactive repair cost (₱)</label><input type="number" id="csRepairCost" value="8000" min="0"></div>'+
+      '<div class="cp-calc-result"><p class="n" id="csResult">—</p><p class="l">Estimated yearly savings vs. skipping PM</p></div>'+
+      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Assumes one avoided major repair per unit per year without regular PM — a common, conservative rule of thumb, not a guarantee.</p>';
+    const calc = ()=>{
+      const units = parseFloat($('csUnits').value)||0, visits = parseFloat($('csVisits').value)||0;
+      const pmCost = parseFloat($('csPmCost').value)||0, repairCost = parseFloat($('csRepairCost').value)||0;
+      const pmTotal = units * visits * pmCost;
+      const avoidedRepairs = units * repairCost;
+      const savings = avoidedRepairs - pmTotal;
+      $('csResult').textContent = '₱'+Math.max(0,savings).toLocaleString(undefined,{maximumFractionDigits:0});
+    };
+    ['csUnits','csVisits','csPmCost','csRepairCost'].forEach(id=> $(id).addEventListener('input', calc));
+    calc();
+    cpShowCalcScreen();
+  }
+
+  // ---------- Profile screen ----------
+  function renderCustomerProfileScreen(){
+    const name = (currentUser && currentUser.name) || 'there';
+    $('cpProfileAvatar').textContent = name.trim().charAt(0).toUpperCase() || '?';
+    $('cpProfileName').textContent = name;
+    $('cpProfileSub').textContent = (cpCustomer && cpCustomer.name) ? cpCustomer.name : '';
+    const field = $('cpProfileSwitcherField');
+    const sel = $('cpProfileSwitcher');
+    const list = (currentUser && currentUser.customerList) || [];
+    if(list.length > 1){
+      field.style.display = '';
+      sel.innerHTML = list.map(c=> '<option value="'+c.id+'" '+(String(c.id)===String(currentUser.customerId)?'selected':'')+'>'+escapeHtml(c.name)+'</option>').join('');
+      sel.onchange = (e)=> cpSwitchActiveCustomer(e.target.value);
+    } else {
+      field.style.display = 'none';
+    }
+  }
+  $('cpProfileRowRequests').addEventListener('click', ()=> cpShowScreen('History', 'Requests'));
+  $('cpProfileRowLogout').addEventListener('click', ()=>{ if(typeof doLogout==='function') doLogout(); });
+
+  // ---------- Wire the pieces the old sidebar used to own ----------
+  $('cpRequestServiceBtn').addEventListener('click', ()=>{
+    if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen();
+  });
+  $('cpUnitsViewAllLink').addEventListener('click', (e)=>{ e.preventDefault(); cpShowScreen('Units'); });
+  cpInitNav();
+
+
+// ---------- Customer Equipment Detail / Service History ----------
+// The "complete patient record" screen for a single piece of equipment:
+// its info, plus every service visit ever recorded against it, each
+// expandable to the full findings/recommendations/materials/services-done
+// detail — not just a list of dates.
+//
+// Depends on customer-portal.js having already run loadCustomerPortalData(),
+// which attaches eq.reportHistory (full, sorted, most-recent-first) to each
+// equipment object in cpEquipment.
+
+  let cpDetailEquip = null; // the equipment currently shown on this screen
+
+  function cpFmtList(arr){
+    if(!arr || !arr.length) return '<div class="cp-visit-empty">None recorded for this visit.</div>';
+    return '<ul class="cp-visit-list">' + arr.map(item => {
+      // findings/recommendations/servicesDone rows are usually {text} or
+      // plain strings depending on how service-report.js stored them;
+      // materials rows carry qty/unit/description. Handle both shapes.
+      if(typeof item === 'string') return '<li>'+escapeHtml(item)+'</li>';
+      if(item && typeof item === 'object'){
+        if('description' in item){
+          const qty = item.qty ? escapeHtml(String(item.qty))+' '+escapeHtml(item.unit||'')+' — ' : '';
+          return '<li>'+qty+escapeHtml(item.description||'')+'</li>';
+        }
+        return '<li>'+escapeHtml(item.text || JSON.stringify(item))+'</li>';
+      }
+      return '';
+    }).join('') + '</ul>';
+  }
+
+  function cpVisitCardHtml(r, idx){
+    const statusLabel = r.completed ? 'Completed' : 'In progress';
+    const statusClass = r.completed ? 'status-ok' : 'status-flag';
+    const title = escapeHtml((r.trouble_call && r.trouble_call.trim()) ? r.trouble_call : 'Scheduled maintenance visit');
+    return (
+      '<div class="cp-visit-card">'+
+        '<div class="cp-visit-head" data-visit-idx="'+idx+'">'+
+          '<div class="cp-visit-dot"></div>'+
+          '<div class="cp-visit-head-body">'+
+            '<div class="cp-visit-title">'+title+'</div>'+
+            '<div class="cp-visit-meta">'+escapeHtml(fmtDate(r.date))+' · '+escapeHtml(r.sr_no||'')+
+              (r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</div>'+
+          '</div>'+
+          '<span class="status-pill '+statusClass+'">'+statusLabel+'</span>'+
+          '<span class="cp-visit-chevron">▾</span>'+
+        '</div>'+
+        '<div class="cp-visit-body" id="cpVisitBody'+idx+'" style="display:none;">'+
+          (r.remarks ? '<div class="cp-visit-remarks">'+escapeHtml(r.remarks)+'</div>' : '')+
+          '<div class="cp-visit-section"><b>Findings / Evaluation</b>'+cpFmtList(r.findings)+'</div>'+
+          '<div class="cp-visit-section"><b>Recommendations</b>'+cpFmtList(r.recommendations)+'</div>'+
+          '<div class="cp-visit-section"><b>Services Done</b>'+cpFmtList(r.services_done)+'</div>'+
+          '<div class="cp-visit-section"><b>Materials Used</b>'+cpFmtList(r.materials)+'</div>'+
+          '<button type="button" class="cp-visit-pdf-btn" data-sr-no="'+escapeHtml(r.sr_no||'')+'">🗎 View Full Report (PDF)</button>'+
+        '</div>'+
+      '</div>'
+    );
+  }
+
+  // ---------- Customer: name their own equipment ----------
+  // The label is the customer's own call — set here, on their own device,
+  // via customer_set_equipment_label() (security-definer RPC, see
+  // 20260909_03_customer_equipment_label_customer_write.sql), which checks
+  // this login is actually linked to the unit's customer_id before writing
+  // anything. Admin sees the result (equipDetailRowsHtml in admin.js) but
+  // has no editable field for it there — naming a unit is the customer's,
+  // not admin's, to do.
+  async function cloudSetEquipmentLabelAsCustomer(equipmentId, label){
+    if(!equipmentId || !(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('customer_set_equipment_label', {
+        p_equipment_id: equipmentId, p_label: (label||'').trim()
+      });
+      if(error) throw error;
+      return data === true;
+    }catch(e){ console.error('set equipment label failed', describeCloudError(e)); return false; }
+  }
+  // Renders the "Unit Label" row as its own little inline editor rather
+  // than a plain spec row (unlike everything else in specs below, this one
+  // the customer can actually change) — tap "Rename"/"Add Label" to swap
+  // in a text input with Save/Cancel, tap Save to write it and refresh
+  // this screen plus the home screen grid so the new name shows up
+  // everywhere immediately.
+  //
+  // Uses classes, not ids, for the elements inside — #cpDetailSpecs gets
+  // fully replaced (innerHTML) every render, and this app's $() helper
+  // caches an id to whichever DOM node it first resolved to (see core.js),
+  // so a second render's same-id button would silently wire up a detached,
+  // already-removed element. Querying by class scoped to the (persistent)
+  // #cpDetailSpecs container each time avoids that.
+  function cpLabelRowHtml(eq){
+    const hasLabel = !!(eq.label||'').trim();
+    const shown = hasLabel ? eq.label : equipShortId(eq);
+    return (
+      '<div class="cp-spec-row">'+
+        '<span class="cp-spec-k">Unit Label</span>'+
+        '<span class="cp-spec-v cp-label-view" style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">'+
+          '<span class="cp-label-text"'+(hasLabel?'':' style="color:var(--text-muted);"')+'>'+escapeHtml(shown)+'</span>'+
+          '<button type="button" class="cp-label-edit-btn" style="font-size:11px; padding:2px 8px; border:1px solid var(--border); border-radius:6px; background:none; cursor:pointer;">'+(hasLabel?'Rename':'Add Label')+'</button>'+
+        '</span>'+
+      '</div>'
+    );
+  }
+  function cpWireLabelEditor(eq){
+    const wrap = $('cpDetailSpecs');
+    const editBtn = wrap.querySelector('.cp-label-edit-btn');
+    if(!editBtn) return;
+    editBtn.onclick = () => {
+      const view = wrap.querySelector('.cp-label-view');
+      const current = (eq.label||'').trim();
+      view.innerHTML =
+        '<input type="text" class="cp-label-input" placeholder="e.g. Server Room AC" value="'+escapeHtml(current)+'" style="border:1px solid var(--border); border-radius:6px; padding:4px 6px; font-size:13px; text-align:right; max-width:150px;">'+
+        '<button type="button" class="cp-label-save-btn" style="font-size:11px; padding:2px 8px; border:1px solid var(--border); border-radius:6px; background:none; cursor:pointer;">Save</button>'+
+        '<button type="button" class="cp-label-cancel-btn" style="font-size:11px; padding:2px 8px; border:none; background:none; color:var(--text-muted); cursor:pointer;">Cancel</button>';
+      const input = view.querySelector('.cp-label-input');
+      input.focus(); input.select();
+      view.querySelector('.cp-label-cancel-btn').onclick = () => renderCustomerEquipmentDetail(eq);
+      const doSave = async () => {
+        const next = input.value.trim();
+        const saveBtn = view.querySelector('.cp-label-save-btn');
+        saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+        const ok = await cloudSetEquipmentLabelAsCustomer(eq.id, next);
+        if(ok){
+          eq.label = next; // same object reference as in cpEquipment — the
+                            // home screen grid picks this up next render
+          toast(next ? 'Label saved' : 'Label cleared');
+          renderCustomerEquipmentDetail(eq);
+          if(typeof renderCustomerHome === 'function') renderCustomerHome();
+        }else{
+          toast('Could not save — check your connection');
+          saveBtn.disabled = false; saveBtn.textContent = 'Save';
+        }
+      };
+      view.querySelector('.cp-label-save-btn').onclick = doSave;
+      input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); doSave(); } });
+    };
+  }
+
+  function renderCustomerEquipmentDetail(eq){
+    cpDetailEquip = eq;
+    $('cpDetailName').textContent = eq.equipType || 'Equipment';
+    $('cpDetailLoc').textContent = eq.equipLocation || '—';
+
+    const specs = [
+      ['Brand', eq.brand], ['Mount type', eq.mountType], ['Cooling capacity', eq.coolCap],
+      ['Model (CU)', eq.modelCU], ['Serial (CU)', eq.serialCU],
+      ['Model (FCU)', eq.modelFCU], ['Serial (FCU)', eq.serialFCU],
+    ].filter(([,v]) => v);
+    // Next PM (preventive maintenance) date — admin-set, see
+    // computeEquipmentStatus() in customer-portal.js. Always shown (unlike
+    // the specs above, which drop blank fields) so a unit with nothing
+    // scheduled yet still says so rather than silently omitting the row.
+    specs.push(['Next PM', eq.nextPmDate
+      ? fmtDate(eq.nextPmDate) + (eq.status && eq.status.key==='overdue' ? ' (overdue)' : '')
+      : 'Not scheduled yet']);
+    // Unit Label leads, and is its own editable row — see cpLabelRowHtml
+    // above — everything after it is the plain, read-only spec list.
+    $('cpDetailSpecs').innerHTML = cpLabelRowHtml(eq) + specs.map(([k,v]) =>
+      '<div class="cp-spec-row"><span class="cp-spec-k">'+escapeHtml(k)+'</span><span class="cp-spec-v">'+escapeHtml(String(v))+'</span></div>'
+    ).join('');
+    cpWireLabelEditor(eq);
+    renderCustomerEquipmentPhotos(eq);
+
+    const history = eq.reportHistory || [];
+    $('cpDetailVisitCount').textContent = String(history.length);
+    $('cpDetailFirstVisit').textContent = history.length ? fmtDate(history[history.length-1].date) : '—';
+    $('cpDetailLastVisit').textContent = history.length ? fmtDate(history[0].date) : '—';
+
+    $('cpVisitTimeline').innerHTML = history.length
+      ? history.map(cpVisitCardHtml).join('')
+      : '<div class="empty-state">No service visits recorded yet for this unit.</div>';
+
+    // Expand/collapse each visit
+    $$('.cp-visit-head', $('customerEquipmentDetailScreen')).forEach(head => {
+      head.onclick = () => {
+        const idx = head.dataset.visitIdx;
+        const body = $('cpVisitBody'+idx);
+        const open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : '';
+        head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
+      };
+    });
+
+    // "View Full Report (PDF)" reuses your existing buildPdf()/preview flow
+    // from pdf.js — same one history.js already uses for completed reports.
+    $$('.cp-visit-pdf-btn', $('customerEquipmentDetailScreen')).forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const sr = btn.dataset.srNo;
+        const full = cpReports.find(r => r.sr_no === sr);
+        if(full && typeof openCustomerReportPreview === 'function') openCustomerReportPreview(sr);
+      };
+    });
+  }
+
+  // Called from customer-portal.js when an equipment card is tapped.
+  // Swap #customerHomeScreen for #customerEquipmentDetailScreen — adjust
+  // ids here to match whatever your screen-switching helper is called.
+  function openCustomerEquipmentDetail(eq){
+    // Clear the photo grid BEFORE the screen becomes visible, not after —
+    // renderCustomerEquipmentPhotos() below does overwrite it synchronously
+    // too, but doing it here as well means there is no DOM state, even for
+    // a single frame, where this screen is visible AND still showing a
+    // previously-viewed unit's photos (whether from this customer's own
+    // last-viewed unit, or — had doLogout() not been fixed to reset this —
+    // a previous customer's session).
+    $('cpDetailPhotoGrid').innerHTML = '';
+    $('customerHomeScreen').style.display = 'none';
+    $('customerEquipmentDetailScreen').style.display = '';
+    renderCustomerEquipmentDetail(eq);
+  }
+
+  // ---------- Photos (read-only) ----------
+  // Same photos admin uploads/organizes from the Manage Equipment List
+  // detail overlay (admin.js) — this just displays them, grouped by the
+  // same folder tags, with no upload/delete/cover controls. See
+  // equipment-photos.js for cloudListEquipmentPhotos()/signed URLs.
+  async function renderCustomerEquipmentPhotos(eq){
+    const grid = $('cpDetailPhotoGrid');
+    grid.innerHTML = '<div class="empty-state">Loading…</div>';
+    const photos = await cloudListEquipmentPhotos(eq.id);
+    // Guard against the customer having tapped into a different unit (or
+    // back out) while this was still in flight.
+    if(cpDetailEquip !== eq) return;
+    if(photos.length===0){
+      grid.innerHTML = '<div class="empty-state">No photos on file for this unit yet.</div>';
+      return;
+    }
+    const byFolder = {};
+    photos.forEach(p=>{ const f = p.folder || 'Uncategorized'; (byFolder[f] = byFolder[f]||[]).push(p); });
+    const folderNames = Object.keys(byFolder).sort((a,b)=> a==='Uncategorized' ? 1 : b==='Uncategorized' ? -1 : a.localeCompare(b));
+    grid.innerHTML = folderNames.map(f=>
+      '<div style="flex-basis:100%; margin-bottom:8px;">'+
+        '<div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px;">'+escapeHtml(f)+'</div>'+
+        '<div style="display:flex; flex-wrap:wrap; gap:8px;">'+byFolder[f].map(p=>
+          '<div class="cp-photo-thumb" data-url="'+escapeHtml(p.signedUrl||'')+'" style="width:100px; height:100px; border-radius:8px; overflow:hidden; cursor:'+(p.signedUrl?'pointer':'default')+'; background:var(--bg-alt,#eee); display:flex; align-items:center; justify-content:center;">'+
+            (p.signedUrl ? '<img src="'+p.signedUrl+'" style="width:100%; height:100%; object-fit:cover;">' : '<span style="font-size:11px; color:var(--text-muted);">—</span>')+
+          '</div>'
+        ).join('')+
+      '</div>'
+    ).join('');
+    $$('.cp-photo-thumb', grid).forEach(el=>{
+      const url = el.dataset.url;
+      if(url) el.addEventListener('click', ()=> window.open(url, '_blank'));
+    });
+  }
+
+  function closeCustomerEquipmentDetail(){
+    $('customerEquipmentDetailScreen').style.display = 'none';
+    $('customerHomeScreen').style.display = '';
+  }
+
+  // Opens a completed report as a PDF preview for a customer — same
+  // preview overlay history.js's "View" action uses for admin/tech, just
+  // reached from the customer portal instead. cpReports only carries the
+  // summary columns customer-portal.js selected (findings/recs/etc. as
+  // plain text lists), not the full row shape buildPdf() needs (before/
+  // after readings, install data, signatures), so this re-fetches the
+  // report fresh via cloudGetReport() rather than reusing the cpReports
+  // entry directly.
+  async function openCustomerReportPreview(sr, reportId){
+    try{
+      // sr_no is the normal lookup, but falls back to the row's own id if
+      // that comes back empty — see the click handler in
+      // customer-portal.js for why (duplicate/edited sr_no elsewhere can
+      // break the single-row assumption cloudGetReport relies on).
+      let d = sr ? await cloudGetReport(sr) : null;
+      if(!d && reportId) d = await cloudGetReportById(reportId);
+      if(!d){ toast('Could not open this report'); return; }
+      const doc = await buildPdf(d);
+      $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
+      $('previewOkBtn').textContent = 'Close';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc);
+    }catch(err){
+      console.error('view customer report failed', err);
+      toast('Could not open this report');
+    }
+  }
+
+  // ---------- Customer Portal wiring ----------
+  // Routes a customer session to the customer home screen, hiding every
+  // other view the same way showHome() does for admin/tech — but kept as
+  // its own function so admin/tech's showHome() only needs a one-line
+  // branch pointing here, with no other changes to its existing logic.
+  function showCustomerHome(){
+    document.body.classList.add('dashboard-active');
+    $('serviceReportView').style.display = 'none';
+    $('dtrView').style.display = 'none';
+    $('leaveView').style.display = 'none';
+    $('cashAdvanceView').style.display = 'none';
+    $('dispatchView').style.display = 'none';
+    $('equipmentManagerView').style.display = 'none';
+    $('customersManagerView').style.display = 'none';
+    $('serviceReportsManagerView').style.display = 'none';
+    $('messagesView').style.display = 'none';
+    $('documentsView').style.display = 'none';
+    $('customerHistoryView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    $('homeScreen').style.display = 'none';
+    $('customerEquipmentDetailScreen').style.display = 'none';
+    $('customerRequestsScreen').style.display = 'none';
+    // New redesigned screens — see cpShowScreen() in customer-portal.js,
+    // which calls this first (to hide everything above) and then swaps in
+    // whichever of these five the person actually asked for.
+    $('customerUnitsScreen').style.display = 'none';
+    $('customerHistoryScreen').style.display = 'none';
+    $('customerToolsScreen').style.display = 'none';
+    $('customerCalcScreen').style.display = 'none';
+    $('customerProfileScreen').style.display = 'none';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = 'none';
+    setSidebarActive('custNavHome');
+    setHeaderTitle('Customer Portal', "Your equipment & service history");
+    $('customerHomeScreen').style.display = '';
+    if($('cpNav')) $('cpNav').style.display = '';
+    if(typeof cpSetNavActive === 'function') cpSetNavActive('Home');
+    initCustomerHomeScreen();
+    window.scrollTo({top:0});
+  }
+
+  $('custNavHome').addEventListener('click', ()=>{ closeMainMenu(); showCustomerHome(); });
+  $('custNavEquipment').addEventListener('click', ()=>{
+    closeMainMenu(); setSidebarActive('custNavEquipment');
+    if(typeof cpShowScreen === 'function') cpShowScreen('Units');
+  });
+  $('custNavReports').addEventListener('click', ()=>{
+    closeMainMenu(); setSidebarActive('custNavReports');
+    if(typeof cpShowScreen === 'function') cpShowScreen('History');
+  });
+  // custNavRequests / cpRequestServiceBtn open the Request Service screen
+  // (New Request + My Requests) — see cpShowRequestsScreen() in
+  // customer-portal.js.
+  $('custNavRequests').addEventListener('click', ()=>{
+    closeMainMenu(); setSidebarActive('custNavRequests');
+    if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen();
+  });
+  $('custNavAccount').addEventListener('click', ()=>{
+    closeMainMenu(); setSidebarActive('custNavAccount');
+    if(typeof cpShowScreen === 'function') cpShowScreen('Profile');
+  });
+  $('cpDetailBackBtn').addEventListener('click', closeCustomerEquipmentDetail);
+
+})();
