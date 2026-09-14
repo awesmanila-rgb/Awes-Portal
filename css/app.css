@@ -1367,7 +1367,9 @@
 
 /* Wrapper for older customer-facing screens that still use the shared
    .card/.field/.seg-tabs components (not the cp-* home-screen redesign) —
-   used by the equipment detail screen and the request-service screen.
+   used by the equipment detail screen and the request-service screen,
+   and (for its balanced/centered inset only, not the .card styling) by
+   the History screen's timeline body.
    Unlike .cp-content, those screens can't rely on each section supplying
    its own inset, so without this their content ran edge-to-edge: .cp-
    screen's -16px margin (which cancels .home-screen's base padding so the
@@ -1780,25 +1782,72 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 @media (min-width:768px){ .cp-units-grid{ padding:16px 44px; } }
 @media (min-width:1000px){ .cp-units-grid{ max-width:1200px; margin:0 auto; padding:16px 24px; grid-template-columns:repeat(3,1fr); } }
 
-/* ---- History screen (segmented Visits / Requests) ---- */
-.cp-history-head{ background:linear-gradient(135deg, var(--green-dark), var(--green)); padding:20px 18px; }
+/* ---- History screen (unified chronological timeline) ----
+   .cp-history-head reuses .cp-tools-head-aligned for its inset (see that
+   class's comment below, near .cp-tools-head) so the "History" heading
+   lines up with Home/Units at every breakpoint instead of the old flat
+   18px gutter; only the gradient background and type styling live here. */
+.cp-history-head{ background:linear-gradient(135deg, var(--green-dark), var(--green)); }
 .cp-history-head h1{ color:#fff; font-size:18px; font-weight:700; margin:0; }
 .cp-history-head p{ color:rgba(255,255,255,.8); font-size:12.5px; margin:4px 0 0; }
-.cp-seg{ display:flex; gap:8px; padding:16px 18px 0; }
-@media (min-width:1000px){ .cp-seg{ max-width:1100px; margin:0 auto; } }
-.cp-seg-btn{ flex:1; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px; font-size:12.5px; font-weight:700; color:var(--text-muted); cursor:pointer; }
-.cp-seg-btn.active{ background:var(--green-dark); border-color:var(--green-dark); color:#fff; }
+
+/* Category filter chips — replaces the old two-item .cp-seg Visits/
+   Requests toggle now that there are six categories (All/Visits/
+   Requests/Quotations/Invoices/Payments). Horizontally scrollable on
+   mobile so it never wraps into a second row; wraps to a plain flex row
+   on desktop once there's room. Inset matches .cp-page-content's gutter
+   below it (20/44/24) so chips line up with the stat cards and list.
+   Explicit appearance/border/font resets below — <button> pulls in
+   native OS chrome (system font, gray gradient face, thin inset border)
+   in some browsers/webviews unless those are stripped, which otherwise
+   fights the pill look no matter what background/border-radius is set. */
+.cp-filter-chips{
+  display:flex; gap:9px; overflow-x:auto; -webkit-overflow-scrolling:touch;
+  scrollbar-width:none; margin:0 -20px 0; padding:2px 20px 6px;
+}
+.cp-filter-chips::-webkit-scrollbar{ display:none; }
+@media (min-width:768px){ .cp-filter-chips{ margin:0 -44px 0; padding:2px 44px 6px; } }
+@media (min-width:1000px){ .cp-filter-chips{ margin:0; padding:2px 0 6px; flex-wrap:wrap; overflow-x:visible; } }
+.cp-filter-chip{
+  -webkit-appearance:none; appearance:none; font-family:inherit; outline:none;
+  flex:0 0 auto; background:var(--green-light); border:1px solid transparent; border-radius:999px;
+  padding:9px 16px; font-size:12.5px; font-weight:700; letter-spacing:.01em;
+  color:var(--green-dark); cursor:pointer; white-space:nowrap;
+  transition:background-color .15s ease, color .15s ease, box-shadow .15s ease, transform .1s ease;
+}
+.cp-filter-chip:hover{ background:#DCEEE3; transform:translateY(-1px); }
+.cp-filter-chip:active{ transform:translateY(0); }
+.cp-filter-chip.active{
+  background:linear-gradient(135deg, var(--green-dark), var(--green)); color:#fff;
+  box-shadow:0 6px 14px rgba(21,77,52,.28);
+}
+.cp-filter-chip.active:hover{ background:linear-gradient(135deg, var(--green-dark), var(--green)); }
+
+/* Category-colored row icons for the merged timeline (see cpHistRowHtml
+   in customer-portal.js) — one glance at the icon tells you which kind
+   of event a row is, echoing the semantic colors used elsewhere in the
+   customer portal (green=done, teal=in-queue/neutral, amber=money/
+   attention). Invoice/Payment get their own tint too even though those
+   categories are empty until this app has real invoicing/payment
+   features (see the data-availability note in customer-portal.js) —
+   so the styling is ready the day real rows show up. */
+.cp-row-icon.cat-visit{ background:var(--green-light); color:var(--green-dark); }
+.cp-row-icon.cat-request{ background:var(--teal-light); color:var(--teal); }
+.cp-row-icon.cat-quotation{ background:#FBEFE4; color:var(--amber); }
+.cp-row-icon.cat-invoice{ background:#EEF1ED; color:var(--text-muted); }
+.cp-row-icon.cat-payment{ background:var(--green-light); color:var(--green-dark); }
 
 /* ---- Tools & learning ---- */
 .cp-tools-head{ background:linear-gradient(135deg, var(--green-dark), var(--green)); padding:20px 20px 18px; }
 .cp-tools-head h1{ color:#fff; font-size:18px; font-weight:700; margin:0; }
 .cp-tools-head p{ color:rgba(255,255,255,.8); font-size:12.5px; margin:4px 0 0; }
-/* Units screen header — the banner background stays full-bleed, but the
+/* Aligned header inset — the banner background stays full-bleed, but the
    text inside it is inset by the same amount as the "Your units" heading
    on Home (.cp-content + .cp-section combined, see above) at every
-   breakpoint, instead of the flat 20px .cp-tools-head uses everywhere
-   else. Scoped to this one screen (.cp-tools-head-aligned) so History/
-   Tools headers, which don't need to line up with Home, are untouched. */
+   breakpoint, instead of the flat 20px .cp-tools-head uses on its own.
+   Opt-in via this modifier class (.cp-tools-head-aligned) — currently
+   used by the Units and History headers; Tools' own header intentionally
+   keeps the plain flat inset. */
 .cp-tools-head-aligned{ padding:20px 0 18px; }
 .cp-tools-head-aligned .cp-tools-head-inner{ padding:0 20px; }
 @media (min-width:768px){ .cp-tools-head-aligned .cp-tools-head-inner{ padding:0 44px; } }
