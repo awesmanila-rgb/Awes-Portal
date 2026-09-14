@@ -9,6 +9,11 @@
 // equipment object in cpEquipment.
 
   let cpDetailEquip = null; // the equipment currently shown on this screen
+  // Which list screen opened the detail view — 'Home' or 'Units' — so the
+  // back arrow (closeCustomerEquipmentDetail below) returns to wherever
+  // the person actually tapped the tile from, instead of always landing
+  // back on Home even when they came from the full Units list.
+  let cpDetailOrigin = 'Home';
 
   function cpFmtList(arr){
     if(!arr || !arr.length) return '<div class="cp-visit-empty">None recorded for this visit.</div>';
@@ -192,10 +197,16 @@
     });
   }
 
-  // Called from customer-portal.js when an equipment card is tapped.
-  // Swap #customerHomeScreen for #customerEquipmentDetailScreen — adjust
-  // ids here to match whatever your screen-switching helper is called.
+  // Called from customer-portal.js when an equipment card is tapped —
+  // from either the Home screen's unit stack or the full Units grid.
+  // Records which of those two screens is currently open (cpDetailOrigin,
+  // for the back button) and then hides EVERY other customer-portal
+  // screen via cpEnterPortalShell(), not just Home — previously this only
+  // ever hid #customerHomeScreen, so tapping a tile from the full Units
+  // list left that grid's markup still displayed underneath/alongside the
+  // detail screen instead of being replaced by it.
   function openCustomerEquipmentDetail(eq){
+    cpDetailOrigin = ($('customerUnitsScreen').style.display !== 'none') ? 'Units' : 'Home';
     // Clear the photo grid BEFORE the screen becomes visible, not after —
     // renderCustomerEquipmentPhotos() below does overwrite it synchronously
     // too, but doing it here as well means there is no DOM state, even for
@@ -204,7 +215,7 @@
     // last-viewed unit, or — had doLogout() not been fixed to reset this —
     // a previous customer's session).
     $('cpDetailPhotoGrid').innerHTML = '';
-    $('customerHomeScreen').style.display = 'none';
+    if(typeof cpEnterPortalShell === 'function') cpEnterPortalShell();
     $('customerEquipmentDetailScreen').style.display = '';
     // Land at the top of the new page. Without this, the browser keeps
     // whatever scroll position the Home/Units list was at (e.g. scrolled
@@ -250,7 +261,13 @@
     });
   }
 
+  // Left-arrow back button. Returns to whichever list actually opened
+  // this screen (see cpDetailOrigin above) — the full Units grid if that's
+  // where the tile was tapped, otherwise Home — instead of unconditionally
+  // going back to Home.
   function closeCustomerEquipmentDetail(){
+    if(cpDetailOrigin==='Units' && typeof cpShowScreen==='function'){ cpShowScreen('Units'); return; }
+    if(typeof showCustomerHome==='function'){ showCustomerHome(); return; }
     $('customerEquipmentDetailScreen').style.display = 'none';
     $('customerHomeScreen').style.display = '';
   }
