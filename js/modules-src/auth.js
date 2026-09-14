@@ -1062,6 +1062,23 @@
     if(custDetailScreenEl) custDetailScreenEl.style.display = 'none';
     const custHomeScreenEl = $('customerHomeScreen');
     if(custHomeScreenEl) custHomeScreenEl.style.display = 'none';
+    // Belt-and-suspenders for every OTHER customer-portal screen too — not
+    // just the two above. These (Units/History/Tools/Calc/Profile/Requests,
+    // plus the account picker) were all added after this logout hide-list
+    // was first written, and none of admin/tech's own screen-show
+    // functions (showHome, showServiceRequestsView, showDispatchView, etc.)
+    // hide them either, since they predate the customer portal entirely and
+    // have no reason to know about it. Without this, a customer session
+    // that logged out while sitting on, say, the Profile tab left that
+    // screen's markup sitting fully visible and un-hidden — the very next
+    // login on this device (even an unrelated Admin/Technician one) then
+    // saw that customer's profile card bleeding into whatever admin/tech
+    // screen it navigated to, since nothing on the admin/tech side ever
+    // thought to hide a screen it doesn't know exists.
+    ['customerRequestsScreen','customerUnitsScreen','customerHistoryScreen',
+     'customerToolsScreen','customerCalcScreen','customerProfileScreen',
+     'customerAccountPickerScreen'
+    ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
     const custPhotoGridEl = $('cpDetailPhotoGrid');
     if(custPhotoGridEl) custPhotoGridEl.innerHTML = '';
     if(typeof cpDetailEquip !== 'undefined') cpDetailEquip = null;

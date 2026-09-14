@@ -2021,6 +2021,23 @@
     if(custDetailScreenEl) custDetailScreenEl.style.display = 'none';
     const custHomeScreenEl = $('customerHomeScreen');
     if(custHomeScreenEl) custHomeScreenEl.style.display = 'none';
+    // Belt-and-suspenders for every OTHER customer-portal screen too — not
+    // just the two above. These (Units/History/Tools/Calc/Profile/Requests,
+    // plus the account picker) were all added after this logout hide-list
+    // was first written, and none of admin/tech's own screen-show
+    // functions (showHome, showServiceRequestsView, showDispatchView, etc.)
+    // hide them either, since they predate the customer portal entirely and
+    // have no reason to know about it. Without this, a customer session
+    // that logged out while sitting on, say, the Profile tab left that
+    // screen's markup sitting fully visible and un-hidden — the very next
+    // login on this device (even an unrelated Admin/Technician one) then
+    // saw that customer's profile card bleeding into whatever admin/tech
+    // screen it navigated to, since nothing on the admin/tech side ever
+    // thought to hide a screen it doesn't know exists.
+    ['customerRequestsScreen','customerUnitsScreen','customerHistoryScreen',
+     'customerToolsScreen','customerCalcScreen','customerProfileScreen',
+     'customerAccountPickerScreen'
+    ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
     const custPhotoGridEl = $('cpDetailPhotoGrid');
     if(custPhotoGridEl) custPhotoGridEl.innerHTML = '';
     if(typeof cpDetailEquip !== 'undefined') cpDetailEquip = null;
@@ -12269,6 +12286,15 @@
     $('serviceRequestsView').style.display = 'none';
     $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = 'none';
+    // Same belt-and-suspenders as doLogout() in auth.js — the newer
+    // customer-portal screens (Units/History/Tools/Calc/Profile/Requests,
+    // account picker) predate none of admin/tech's own hide-lists, so a
+    // leftover customer session's screen could otherwise still be sitting
+    // visible underneath whatever admin/tech screen loads next.
+    ['customerRequestsScreen','customerUnitsScreen','customerHistoryScreen',
+     'customerToolsScreen','customerCalcScreen','customerProfileScreen',
+     'customerAccountPickerScreen'
+    ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = 'none';
@@ -12445,7 +12471,16 @@
       // sitting in localStorage, and without this it would otherwise leak
       // into whatever screen the NEXT person's fresh sign-in restores on.
       try{ localStorage.removeItem(LAST_SCREEN_KEY); }catch(e){}
-      showHome();
+      // A customer login linked to more than one customer record gets the
+      // account-picker cards first (see showCustomerAccountPicker() in
+      // customer-portal.js) instead of landing straight on Home — every
+      // other case (admin, technician, a single-customer login) goes
+      // straight to Home exactly as before.
+      if(currentUser && currentUser.role==='customer' && (currentUser.customerList||[]).length>1 && typeof showCustomerAccountPicker==='function'){
+        showCustomerAccountPicker();
+      } else {
+        showHome();
+      }
     }else{
       restoreLastScreenOrHome();
     }
@@ -13599,6 +13634,65 @@
     cpInitRealtime(customerId);
   }
   $('cpCustomerSwitcher').addEventListener('change', (e)=> cpSwitchActiveCustomer(e.target.value));
+
+  // ---------- Account picker (multi-customer login, shown once at fresh
+  // sign-in) ----------
+  // Cards for every customer this login can see — see enterApp() in
+  // home.js, which calls this instead of showHome() only when
+  // currentUser.customerList has more than one entry. Picking a card is
+  // the same underlying action as the Home screen's own
+  // cpSwitchActiveCustomer switcher (persist the choice per device, then
+  // load that customer's data) — this just fronts it with a one-time,
+  // easier-to-scan chooser instead of dropping the customer straight onto
+  // whichever account happened to be picked last.
+  function cpGreetingTod(){
+    const h = new Date().getHours();
+    return h < 12 ? 'Good morning' : (h < 18 ? 'Good afternoon' : 'Good evening');
+  }
+  function cpRenderAccountPickerCards(){
+    const wrap = $('cpAccountPickerList');
+    if(!wrap) return;
+    const list = currentUser.customerList || [];
+    wrap.innerHTML = list.map(c=>
+      '<button type="button" class="cp-account-card" data-cust-id="'+escapeHtml(String(c.id))+'">'+
+        '<span class="cp-account-card-badge">'+escapeHtml((c.name||'?').trim().charAt(0).toUpperCase()||'?')+'</span>'+
+        '<span class="cp-account-card-name">'+escapeHtml(c.name||'Unnamed account')+'</span>'+
+        '<span class="cp-account-card-chevron">›</span>'+
+      '</button>'
+    ).join('');
+    $$('.cp-account-card', wrap).forEach(btn=>{
+      btn.addEventListener('click', ()=> cpPickAccount(btn.dataset.custId));
+    });
+  }
+  // Picking a card: same persistence cpSwitchActiveCustomer uses (so the
+  // choice sticks for next time on this device), then straight into the
+  // normal home screen, which does its own data load.
+  function cpPickAccount(customerId){
+    currentUser.customerId = customerId;
+    try{ localStorage.setItem('cust-active-customer:'+currentUser.id, customerId); }catch(e){}
+    try{ localStorage.setItem('current-user', JSON.stringify(currentUser)); }catch(e){}
+    $('customerAccountPickerScreen').style.display = 'none';
+    showCustomerHome();
+  }
+  function showCustomerAccountPicker(){
+    document.body.classList.add('dashboard-active');
+    // Hide every other view this session could conceivably still be
+    // showing (belt-and-suspenders — a fresh sign-in should always be a
+    // blank slate, same reasoning as doLogout()'s own explicit hides in
+    // auth.js) plus the shared nav, which has nothing to navigate to yet.
+    ['homeScreen','customerHomeScreen','customerEquipmentDetailScreen','customerRequestsScreen',
+     'customerUnitsScreen','customerHistoryScreen','customerToolsScreen','customerCalcScreen','customerProfileScreen'
+    ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
+    if($('footerBar')) $('footerBar').style.display = 'none';
+    if($('metaBar')) $('metaBar').style.display = 'none';
+    if($('homeBtn')) $('homeBtn').style.display = 'none';
+    if($('cpNav')) $('cpNav').style.display = 'none';
+    $('cpPickerGreetTod').textContent = cpGreetingTod();
+    $('cpPickerGreetName').textContent = (currentUser.name||'there');
+    cpRenderAccountPickerCards();
+    $('customerAccountPickerScreen').style.display = '';
+    window.scrollTo({top:0});
+  }
 
   // Entry point — call this after a customer logs in and homeScreen (or a
   // dedicated customerHomeScreen, see the HTML snippet) is shown.

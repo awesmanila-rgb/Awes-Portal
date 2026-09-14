@@ -1615,6 +1615,34 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 }
 .cp-switcher-box.single::after{ display:none; }
 
+/* ---- Account picker (multi-customer login, shown once after sign-in) ----
+   Cards, not a dropdown — the point of this screen is to make every
+   enrolled account visible up front, versus the compact
+   .cp-switcher-box <select> further up (still used on the Home screen
+   itself for switching afterward). Same overlap-the-header layout as
+   .cp-top-grid so this reads as a continuation of the home screen's own
+   visual language rather than a different screen. */
+.cp-account-picker{
+  display:grid; grid-template-columns:1fr; gap:12px;
+  margin:-34px 24px 24px;
+}
+@media (min-width:1000px){
+  .cp-account-picker{ grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); margin:24px auto; max-width:1200px; }
+}
+.cp-account-card{
+  display:flex; align-items:center; gap:14px; width:100%; text-align:left;
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:16px 18px; box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08));
+  cursor:pointer; font-family:inherit;
+}
+.cp-account-card:hover, .cp-account-card:focus-visible{ border-color:var(--green); outline:none; }
+.cp-account-card-badge{
+  flex-shrink:0; width:44px; height:44px; border-radius:12px; background:var(--green-light);
+  color:var(--green-dark); font-weight:800; font-size:17px; display:flex; align-items:center; justify-content:center;
+}
+.cp-account-card-name{ flex:1; min-width:0; font-size:15px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-account-card-chevron{ flex-shrink:0; color:var(--text-muted); font-size:18px; }
+
 /* ---- Profile menu (Account settings / Notifications / Sign out) ---- */
 .cp-profile-menu-wrap{ position:relative; }
 .cp-profile-menu{

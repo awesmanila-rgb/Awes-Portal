@@ -611,6 +611,65 @@
   }
   $('cpCustomerSwitcher').addEventListener('change', (e)=> cpSwitchActiveCustomer(e.target.value));
 
+  // ---------- Account picker (multi-customer login, shown once at fresh
+  // sign-in) ----------
+  // Cards for every customer this login can see — see enterApp() in
+  // home.js, which calls this instead of showHome() only when
+  // currentUser.customerList has more than one entry. Picking a card is
+  // the same underlying action as the Home screen's own
+  // cpSwitchActiveCustomer switcher (persist the choice per device, then
+  // load that customer's data) — this just fronts it with a one-time,
+  // easier-to-scan chooser instead of dropping the customer straight onto
+  // whichever account happened to be picked last.
+  function cpGreetingTod(){
+    const h = new Date().getHours();
+    return h < 12 ? 'Good morning' : (h < 18 ? 'Good afternoon' : 'Good evening');
+  }
+  function cpRenderAccountPickerCards(){
+    const wrap = $('cpAccountPickerList');
+    if(!wrap) return;
+    const list = currentUser.customerList || [];
+    wrap.innerHTML = list.map(c=>
+      '<button type="button" class="cp-account-card" data-cust-id="'+escapeHtml(String(c.id))+'">'+
+        '<span class="cp-account-card-badge">'+escapeHtml((c.name||'?').trim().charAt(0).toUpperCase()||'?')+'</span>'+
+        '<span class="cp-account-card-name">'+escapeHtml(c.name||'Unnamed account')+'</span>'+
+        '<span class="cp-account-card-chevron">›</span>'+
+      '</button>'
+    ).join('');
+    $$('.cp-account-card', wrap).forEach(btn=>{
+      btn.addEventListener('click', ()=> cpPickAccount(btn.dataset.custId));
+    });
+  }
+  // Picking a card: same persistence cpSwitchActiveCustomer uses (so the
+  // choice sticks for next time on this device), then straight into the
+  // normal home screen, which does its own data load.
+  function cpPickAccount(customerId){
+    currentUser.customerId = customerId;
+    try{ localStorage.setItem('cust-active-customer:'+currentUser.id, customerId); }catch(e){}
+    try{ localStorage.setItem('current-user', JSON.stringify(currentUser)); }catch(e){}
+    $('customerAccountPickerScreen').style.display = 'none';
+    showCustomerHome();
+  }
+  function showCustomerAccountPicker(){
+    document.body.classList.add('dashboard-active');
+    // Hide every other view this session could conceivably still be
+    // showing (belt-and-suspenders — a fresh sign-in should always be a
+    // blank slate, same reasoning as doLogout()'s own explicit hides in
+    // auth.js) plus the shared nav, which has nothing to navigate to yet.
+    ['homeScreen','customerHomeScreen','customerEquipmentDetailScreen','customerRequestsScreen',
+     'customerUnitsScreen','customerHistoryScreen','customerToolsScreen','customerCalcScreen','customerProfileScreen'
+    ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
+    if($('footerBar')) $('footerBar').style.display = 'none';
+    if($('metaBar')) $('metaBar').style.display = 'none';
+    if($('homeBtn')) $('homeBtn').style.display = 'none';
+    if($('cpNav')) $('cpNav').style.display = 'none';
+    $('cpPickerGreetTod').textContent = cpGreetingTod();
+    $('cpPickerGreetName').textContent = (currentUser.name||'there');
+    cpRenderAccountPickerCards();
+    $('customerAccountPickerScreen').style.display = '';
+    window.scrollTo({top:0});
+  }
+
   // Entry point — call this after a customer logs in and homeScreen (or a
   // dedicated customerHomeScreen, see the HTML snippet) is shown.
   // currentUser is expected to carry a `customerId` (the one currently

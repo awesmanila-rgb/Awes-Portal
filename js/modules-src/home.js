@@ -726,6 +726,15 @@
     $('serviceRequestsView').style.display = 'none';
     $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = 'none';
+    // Same belt-and-suspenders as doLogout() in auth.js — the newer
+    // customer-portal screens (Units/History/Tools/Calc/Profile/Requests,
+    // account picker) predate none of admin/tech's own hide-lists, so a
+    // leftover customer session's screen could otherwise still be sitting
+    // visible underneath whatever admin/tech screen loads next.
+    ['customerRequestsScreen','customerUnitsScreen','customerHistoryScreen',
+     'customerToolsScreen','customerCalcScreen','customerProfileScreen',
+     'customerAccountPickerScreen'
+    ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = 'none';
@@ -902,7 +911,16 @@
       // sitting in localStorage, and without this it would otherwise leak
       // into whatever screen the NEXT person's fresh sign-in restores on.
       try{ localStorage.removeItem(LAST_SCREEN_KEY); }catch(e){}
-      showHome();
+      // A customer login linked to more than one customer record gets the
+      // account-picker cards first (see showCustomerAccountPicker() in
+      // customer-portal.js) instead of landing straight on Home — every
+      // other case (admin, technician, a single-customer login) goes
+      // straight to Home exactly as before.
+      if(currentUser && currentUser.role==='customer' && (currentUser.customerList||[]).length>1 && typeof showCustomerAccountPicker==='function'){
+        showCustomerAccountPicker();
+      } else {
+        showHome();
+      }
     }else{
       restoreLastScreenOrHome();
     }
