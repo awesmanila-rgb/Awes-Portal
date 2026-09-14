@@ -635,19 +635,56 @@ window.awesCss = {
   <div class="cp-units-grid" id="cpUnitsGrid"><div class="empty-state">Loading…</div></div>
 </div>
 
-<!-- History — segmented Visits (service reports) / Requests (My Requests,
-     which is also where quotes/invoices live via the fee-proposal flow). -->
+<!-- History — one chronological timeline of everything that's happened on
+     this account (service visits, requests, quotations — Invoices and
+     Payments are real filter categories too, ready for when this app
+     grows an actual invoicing/payment feature, see the "Data
+     availability" note above cpHistTimelineEntries() in
+     customer-portal.js), replacing the old two-tab Visits/Requests
+     segment. Header uses .cp-tools-head-aligned (same as Units) and the
+     body uses .cp-page-content (same as the equipment-detail/request
+     screens) so this page's inset and centered max-width match the rest
+     of the customer portal at every breakpoint instead of the old flat
+     18px/16px insets — see both classes' comments in app.css. -->
 <div id="customerHistoryScreen" class="home-screen cp-screen" style="display:none;">
-  <div class="cp-history-head"><h1>History</h1><p>Past visits and service requests</p></div>
-  <div class="cp-seg">
-    <button type="button" class="cp-seg-btn active" id="cpHistTabVisits">Visits</button>
-    <button type="button" class="cp-seg-btn" id="cpHistTabRequests">Requests</button>
+  <div class="cp-history-head cp-tools-head-aligned">
+    <div class="cp-tools-head-inner">
+      <h1>History</h1>
+      <p id="cpHistorySub">Every visit, request, and quotation for your account, in one place</p>
+    </div>
   </div>
-  <div id="cpHistVisitsPanel" style="padding:14px 16px 0;">
-    <div class="cp-card-list" id="cpHistVisitsList"><div class="empty-state">Loading…</div></div>
-  </div>
-  <div id="cpHistRequestsPanel" style="display:none; padding:14px 16px 0;">
-    <div class="cp-card-list" id="cpHistRequestsList"><div class="empty-state">Loading…</div></div>
+  <div class="cp-page-content">
+    <!-- Dashboard — same at-a-glance stat-card pattern as the equipment
+         detail page's "Total service visits / First visit / Last visit"
+         row (see .cp-stat-grid in app.css), scaled up to the whole
+         account instead of one unit. -->
+    <div class="cp-stat-grid">
+      <div class="cp-stat-card">
+        <div class="cp-stat-num" id="cpHistStatVisits">—</div>
+        <div class="cp-stat-label">Service visits</div>
+      </div>
+      <div class="cp-stat-card">
+        <div class="cp-stat-num" id="cpHistStatOpenReq">—</div>
+        <div class="cp-stat-label">Open requests</div>
+      </div>
+      <div class="cp-stat-card">
+        <div class="cp-stat-num" id="cpHistStatQuotes">—</div>
+        <div class="cp-stat-label">Quotations on file</div>
+      </div>
+    </div>
+    <!-- Category filter — horizontally scrollable chip row (six
+         categories don't fit as equal segmented buttons the way the old
+         two-item Visits/Requests toggle did). See cpHistShowFilter() in
+         customer-portal.js. -->
+    <div class="cp-filter-chips" id="cpHistFilterChips">
+      <button type="button" class="cp-filter-chip active" data-cat="all">All</button>
+      <button type="button" class="cp-filter-chip" data-cat="visit">Visits</button>
+      <button type="button" class="cp-filter-chip" data-cat="request">Requests</button>
+      <button type="button" class="cp-filter-chip" data-cat="quotation">Quotations</button>
+      <button type="button" class="cp-filter-chip" data-cat="invoice">Invoices</button>
+      <button type="button" class="cp-filter-chip" data-cat="payment">Payments</button>
+    </div>
+    <div class="cp-card-list" id="cpHistList" style="margin-top:14px;"><div class="empty-state">Loading…</div></div>
   </div>
 </div>
 

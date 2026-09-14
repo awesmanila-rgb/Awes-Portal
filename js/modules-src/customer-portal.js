@@ -178,21 +178,6 @@
     );
   }
 
-  function cpReportRowHtml(r){
-    const title = escapeHtml((r.trouble_call && r.trouble_call.trim()) ? r.trouble_call : (r.equip_type||'Service report'));
-    const sub = escapeHtml(r.sr_no||'')+' · '+escapeHtml(r.equip_location||'')+' · '+fmtDate(r.date);
-    return (
-      '<div class="cp-row" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(r.id||'')+'">'+
-        '<div class="cp-row-icon">📄</div>'+
-        '<div class="cp-row-body">'+
-          '<div class="cp-row-title">'+title+'</div>'+
-          '<div class="cp-row-sub">'+sub+'</div>'+
-        '</div>'+
-        '<div class="cp-row-chev">›</div>'+
-      '</div>'
-    );
-  }
-
   // ---------- Icons ----------
   // Inline SVG only (no emoji, no icon font) so the redesigned screens read
   // as one consistent system — stroke="currentColor" so each icon just
@@ -539,7 +524,7 @@
     $('cpQuickUnits').onclick = ()=> cpShowScreen('Units');
     const quoteCount = cpMyRequestsCache.filter(r=> r.feeAmount!=null).length;
     $('cpQuickQuotes').innerHTML = ''+CP_ICON.receipt+'<div class="cp-quick-text"><p class="t">Quotes and invoices</p><p class="s">'+(quoteCount ? quoteCount+' on file' : 'None yet')+'</p></div>';
-    $('cpQuickQuotes').onclick = ()=> cpShowScreen('History', 'Requests');
+    $('cpQuickQuotes').onclick = ()=> cpShowScreen('History', 'Quotations');
     $('cpQuickHistory').innerHTML = ''+CP_ICON.history+'<div class="cp-quick-text"><p class="t">Service history</p><p class="s">'+(cpReports.length ? cpReports.length+' visits' : 'No visits yet')+'</p></div>';
     $('cpQuickHistory').onclick = ()=> cpShowScreen('History', 'Visits');
     $('cpQuickHelp').innerHTML = ''+CP_ICON.chat+'<div class="cp-quick-text"><p class="t">Get help</p><p class="s">Message us</p></div>';
@@ -913,8 +898,9 @@
   }
 
   // Central router for the five redesigned screens. `sub` is an optional
-  // sub-selection some screens understand (History's 'Visits'/'Requests'
-  // segment). Routes 'Home' through the real showCustomerHome() (fresh
+  // sub-selection some screens understand (History's initial category
+  // filter — see renderCustomerHistoryScreen's 'Visits'/'Requests' mapping
+  // below). Routes 'Home' through the real showCustomerHome() (fresh
   // data reload + render), and every other tab through the lightweight
   // cpEnterPortalShell() (DOM show/hide only) so the very long "hide every
   // other view" list still only needs to live in one place
@@ -950,29 +936,151 @@
     }
   }
 
-  // ---------- History screen (segmented Visits / Requests) ----------
-  function cpHistShowSeg(seg){
-    $('cpHistTabVisits').classList.toggle('active', seg==='Visits');
-    $('cpHistTabRequests').classList.toggle('active', seg==='Requests');
-    $('cpHistVisitsPanel').style.display = seg==='Visits' ? '' : 'none';
-    $('cpHistRequestsPanel').style.display = seg==='Requests' ? '' : 'none';
+  // ---------- History screen (unified chronological timeline) ----------
+  // Replaces the old two-tab Visits/Requests segment with one merged,
+  // filterable feed — every service visit, request, and quotation for
+  // this account, newest first, with category chips to narrow it down.
+  //
+  // DATA-AVAILABILITY NOTE (please read before adding a category here):
+  // This app has no invoicing or payment-gateway feature — see the
+  // "Quotes and invoices" quick-action comment above (renderCustomerHome)
+  // and the "Pay now — coming soon" placeholder on the billing card.
+  // service_requests.fee_amount + fee_status together ARE the quotation;
+  // there is no separate invoice_sent_at column or payment record
+  // anywhere in the schema. So 'invoice' and 'payment' below are real,
+  // selectable filter categories (the page needs to have them), but they
+  // will only ever contain rows once/if this app grows an actual
+  // invoicing step and a payment gateway on top of service_requests.
+  // Until then they correctly render empty with an honest explanation
+  // (see cpHistEmptyMsg) — do NOT backfill them from fee_amount/
+  // fee_status, since that would misrepresent an unsent, unpaid quote as
+  // a sent invoice or a completed payment.
+  const CP_HIST_CATS = ['all','visit','request','quotation','invoice','payment'];
+  const CP_HIST_ICON = { visit:'check', request:'tools', quotation:'receipt', invoice:'book', payment:'piggy' };
+  let cpHistFilter = 'all';
+
+  // Builds the merged, sorted timeline from data already loaded for this
+  // customer (cpReports, cpMyRequestsCache) — no extra network round trip
+  // beyond the fresh cpMyRequestsCache fetch in renderCustomerHistoryScreen.
+  function cpHistTimelineEntries(){
+    const entries = [];
+    cpReports.forEach(r=>{
+      entries.push({
+        cat:'visit', date:r.date,
+        title: (r.trouble_call && r.trouble_call.trim()) ? r.trouble_call : (r.equip_type||'Service visit'),
+        sub: [r.sr_no, r.equip_location].filter(Boolean).join(' · '),
+        srNo:r.sr_no, reportId:r.id
+      });
+    });
+    cpMyRequestsCache.forEach(r=>{
+      const eq = r.equipmentId ? cpEquipment.find(e=> String(e.id)===String(r.equipmentId)) : null;
+      const eqLabel = r.equipmentId ? (eq ? equipDisplayName(eq) : 'Selected equipment') : 'General inquiry';
+      entries.push({
+        cat:'request', date:r.createdAt,
+        title:'Service requested — '+eqLabel,
+        sub:r.description||'',
+        reqId:r.id
+      });
+      // A quotation exists once admin has proposed a fee, whatever the
+      // customer has since done with it (proposed/accepted/declined) —
+      // this row records that it was sent, not its current state.
+      // updatedAt is the closest timestamp this schema has for "when the
+      // fee was proposed" (there's no dedicated fee_proposed_at column),
+      // so it's an approximation when a request has moved on since.
+      if(r.feeAmount!=null){
+        entries.push({
+          cat:'quotation', date:r.updatedAt||r.createdAt,
+          title:'Quotation sent — ₱'+r.feeAmount,
+          sub:eqLabel,
+          reqId:r.id
+        });
+      }
+    });
+    entries.sort((a,b)=> new Date(b.date) - new Date(a.date));
+    return entries;
   }
-  function renderCustomerHistoryScreen(sub){
-    cpHistShowSeg(sub==='Requests' ? 'Requests' : 'Visits');
-    $('cpHistVisitsList').innerHTML = cpReports.length
-      ? cpReports.map(cpReportRowHtml).join('')
-      : '<div class="empty-state">No service reports yet.</div>';
-    $$('.cp-row', $('cpHistVisitsList')).forEach(row=>{
+
+  function cpHistRowHtml(e){
+    return (
+      '<div class="cp-row" data-cat="'+e.cat+'"'+
+        (e.srNo!=null ? ' data-sr-no="'+escapeHtml(String(e.srNo))+'"' : '')+
+        (e.reportId!=null ? ' data-report-id="'+escapeHtml(String(e.reportId))+'"' : '')+
+        (e.reqId!=null ? ' data-req-id="'+escapeHtml(String(e.reqId))+'"' : '')+'>'+
+        '<div class="cp-row-icon cat-'+e.cat+'">'+CP_ICON[CP_HIST_ICON[e.cat]]+'</div>'+
+        '<div class="cp-row-body">'+
+          '<div class="cp-row-title">'+escapeHtml(e.title)+'</div>'+
+          (e.sub ? '<div class="cp-row-sub">'+escapeHtml(e.sub)+'</div>' : '')+
+          '<div class="cp-row-sub">'+fmtDateTime(e.date)+'</div>'+
+        '</div>'+
+        '<div class="cp-row-chev">›</div>'+
+      '</div>'
+    );
+  }
+
+  function cpHistEmptyMsg(cat){
+    // Invoices/Payments get an honest explanation instead of a generic
+    // "nothing here" — see the data-availability note above.
+    if(cat==='invoice') return 'Invoicing isn\u2019t set up yet \u2014 your quotation serves as your official quote for now.';
+    if(cat==='payment') return 'Online payments aren\u2019t available yet \u2014 see your service fee under Quotations.';
+    if(cat==='visit') return 'No service visits yet.';
+    if(cat==='request') return 'No service requests yet.';
+    if(cat==='quotation') return 'No quotations yet.';
+    return 'No activity yet \u2014 your visits, requests, and quotes will show up here.';
+  }
+
+  function cpRenderHistoryDashboard(){
+    const openStatuses = ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed','dispatched','en_route','in_progress'];
+    $('cpHistStatVisits').textContent = String(cpReports.length);
+    $('cpHistStatOpenReq').textContent = String(cpMyRequestsCache.filter(r=> openStatuses.includes(r.status)).length);
+    $('cpHistStatQuotes').textContent = String(cpMyRequestsCache.filter(r=> r.feeAmount!=null).length);
+  }
+
+  function cpRenderHistoryList(){
+    const all = cpHistTimelineEntries();
+    const filtered = cpHistFilter==='all' ? all : all.filter(e=> e.cat===cpHistFilter);
+    const list = $('cpHistList');
+    list.innerHTML = filtered.length ? filtered.map(cpHistRowHtml).join('') : '<div class="empty-state">'+escapeHtml(cpHistEmptyMsg(cpHistFilter))+'</div>';
+    $$('.cp-row', list).forEach(row=>{
       row.style.cursor = 'pointer';
       row.onclick = ()=>{
-        const sr = row.dataset.srNo, reportId = row.dataset.reportId;
-        if((sr||reportId) && typeof openCustomerReportPreview==='function') openCustomerReportPreview(sr, reportId);
+        if(row.dataset.srNo || row.dataset.reportId){
+          if(typeof openCustomerReportPreview==='function') openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId);
+        } else if(row.dataset.reqId){
+          const req = cpMyRequestsCache.find(r=> String(r.id)===row.dataset.reqId);
+          if(req && typeof srOpenDetail==='function') srOpenDetail(req);
+        }
       };
     });
-    if(currentUser && currentUser.customerId) cpRenderMyRequests(currentUser.customerId, 'cpHistRequestsList');
   }
-  $('cpHistTabVisits').addEventListener('click', ()=> cpHistShowSeg('Visits'));
-  $('cpHistTabRequests').addEventListener('click', ()=> cpHistShowSeg('Requests'));
+
+  function cpHistShowFilter(cat){
+    cpHistFilter = CP_HIST_CATS.includes(cat) ? cat : 'all';
+    $$('.cp-filter-chip', $('cpHistFilterChips')).forEach(chip=> chip.classList.toggle('active', chip.dataset.cat===cpHistFilter));
+    cpRenderHistoryList();
+  }
+
+  async function renderCustomerHistoryScreen(sub){
+    // Old callers pass 'Visits' or 'Requests' (nav shortcuts from before
+    // the unified timeline existed — Home's quick actions, the notif
+    // bell, Profile's "My service requests" row) — map them onto the
+    // closest matching category so those entry points still land
+    // somewhere relevant instead of always opening on "All".
+    const initial = sub==='Requests' ? 'request' : sub==='Visits' ? 'visit' : sub==='Quotations' ? 'quotation' : 'all';
+    cpHistFilter = initial;
+    $$('.cp-filter-chip', $('cpHistFilterChips')).forEach(chip=> chip.classList.toggle('active', chip.dataset.cat===initial));
+    $('cpHistList').innerHTML = '<div class="empty-state">Loading…</div>';
+    // Fetch fresh rather than trusting whatever's already in
+    // cpMyRequestsCache — a customer could land here as their first
+    // screen after signing in, before Home's own load has populated it.
+    if(currentUser && currentUser.customerId){
+      cpMyRequestsCache = await srListForCustomer(currentUser.customerId);
+    }
+    cpRenderHistoryDashboard();
+    cpRenderHistoryList();
+  }
+  $$('.cp-filter-chip', $('cpHistFilterChips')).forEach(chip=>{
+    chip.addEventListener('click', ()=> cpHistShowFilter(chip.dataset.cat));
+  });
 
   // ---------- Tools & learning ----------
   // Kept intentionally simple v1 calculators — real formulas, no account
