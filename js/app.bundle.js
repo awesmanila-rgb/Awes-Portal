@@ -9156,15 +9156,23 @@
       html += '</div>';
       feeEl.innerHTML = html; feeEl.style.display = '';
       if(!isAdmin && request.status==='fee_proposed' && request.feeStatus==='proposed'){
-        $('srFeeAcceptBtn').onclick = async ()=>{
-          const ok = await srRespondFee(request.id, true, $('srFeeSettlementMethod').value, $('srFeeSettlementNote').value.trim());
+        // Scoped to feeEl (querySelector), NOT the global $() cache — $()
+        // memoizes by id forever (see core.js), but this markup is torn
+        // down and rebuilt with the same ids every time this overlay
+        // opens. After the first open, $('srFeeAcceptBtn') would keep
+        // returning the original, by-then-detached button instead of the
+        // one actually on screen, silently wiring the handler to nothing
+        // visible. Same fix applied to every other button rebuilt inside
+        // this function (schedule/admin/cancel sections below).
+        feeEl.querySelector('#srFeeAcceptBtn').onclick = async ()=>{
+          const ok = await srRespondFee(request.id, true, feeEl.querySelector('#srFeeSettlementMethod').value, feeEl.querySelector('#srFeeSettlementNote').value.trim());
           if(ok){
             toast('Fee accepted'); srCloseDetail();
             if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId);
             if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId);
           } else toast('Could not send response — try again');
         };
-        $('srFeeDeclineBtn').onclick = async ()=>{
+        feeEl.querySelector('#srFeeDeclineBtn').onclick = async ()=>{
           const ok = await srRespondFee(request.id, false);
           if(ok){
             toast('Fee declined — message us if you\'d like to discuss'); srCloseDetail();
@@ -9187,7 +9195,7 @@
       html += '</div>';
       schedEl.innerHTML = html; schedEl.style.display = '';
       if(!isAdmin && request.status==='schedule_proposed'){
-        $('srScheduleConfirmBtn').onclick = async ()=>{
+        schedEl.querySelector('#srScheduleConfirmBtn').onclick = async ()=>{
           const ok = await srConfirmSchedule(request.id);
           if(ok){
             toast('Schedule confirmed'); srCloseDetail();
@@ -9246,27 +9254,27 @@
         adminEl.innerHTML = '';
         adminEl.style.display = 'none';
       }
-      if($('srAdminProposeFeeBtn')) $('srAdminProposeFeeBtn').onclick = async ()=>{
-        const amt = parseFloat($('srAdminFeeAmount').value);
+      if(adminEl.querySelector('#srAdminProposeFeeBtn')) adminEl.querySelector('#srAdminProposeFeeBtn').onclick = async ()=>{
+        const amt = parseFloat(adminEl.querySelector('#srAdminFeeAmount').value);
         if(!amt || amt<=0){ toast('Enter a valid fee amount'); return; }
         const ok = await srProposeFee(request.id, amt);
         if(ok){ toast('Fee proposed'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
-      if($('srAdminNoFeeBtn')) $('srAdminNoFeeBtn').onclick = async ()=>{
+      if(adminEl.querySelector('#srAdminNoFeeBtn')) adminEl.querySelector('#srAdminNoFeeBtn').onclick = async ()=>{
         const ok = await srAcknowledgeNoFee(request.id);
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
-      if($('srAdminProposeScheduleBtn')) $('srAdminProposeScheduleBtn').onclick = async ()=>{
-        const date = $('srAdminScheduleDate').value;
+      if(adminEl.querySelector('#srAdminProposeScheduleBtn')) adminEl.querySelector('#srAdminProposeScheduleBtn').onclick = async ()=>{
+        const date = adminEl.querySelector('#srAdminScheduleDate').value;
         if(!date){ toast('Pick a date'); return; }
-        const ok = await srProposeSchedule(request.id, date, $('srAdminScheduleTime').value.trim());
+        const ok = await srProposeSchedule(request.id, date, adminEl.querySelector('#srAdminScheduleTime').value.trim());
         if(ok){ toast('Schedule proposed'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
-      if($('srAdminConvertBtn')) $('srAdminConvertBtn').onclick = async ()=>{
+      if(adminEl.querySelector('#srAdminConvertBtn')) adminEl.querySelector('#srAdminConvertBtn').onclick = async ()=>{
         srCloseDetail();
         await srConvertToTicket(request);
       };
-      if($('srAdminAckCancelBtn')) $('srAdminAckCancelBtn').onclick = async ()=>{
+      if(adminEl.querySelector('#srAdminAckCancelBtn')) adminEl.querySelector('#srAdminAckCancelBtn').onclick = async ()=>{
         const ok = await srAcknowledgeCancel(request.id);
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
@@ -9280,8 +9288,8 @@
         '<button type="button" class="btn btn-secondary" id="srCancelSubmitBtn" style="width:100%; margin-top:8px; color:var(--danger);">Cancel This Request</button>'+
       '</div>';
       cancelEl.style.display = '';
-      $('srCancelSubmitBtn').onclick = async ()=>{
-        const reason = $('srCancelReason').value.trim();
+      cancelEl.querySelector('#srCancelSubmitBtn').onclick = async ()=>{
+        const reason = cancelEl.querySelector('#srCancelReason').value.trim();
         if(!reason){ toast('Please tell us why, so we can note it'); return; }
         const ok = await srCancel(request.id, reason);
         if(ok){ toast('Request cancelled'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId); }
@@ -13555,20 +13563,29 @@
     if(cpCustomer && cpCustomer.id) cpRefreshRequestsBadge(cpCustomer.id);
   }
 
-  // "Viewing: [customer ▾]" switcher — only shown when this login is linked
-  // to more than one customer record (see auth.js: currentUser.customerList,
-  // populated at login/session-restore from customer_login_links). Picking
-  // a different customer re-scopes the whole home screen (equipment,
+  // "Viewing: [customer ▾]" switcher — always shown once currentUser.
+  // customerList is known (populated at login/session-restore from
+  // customer_login_links — see auth.js), even for a login linked to just
+  // one customer. Previously hidden outright below 2 entries, which meant
+  // most customers — anyone with a single-customer login — never saw any
+  // on-screen confirmation of which company/site account they were
+  // viewing. Below 2 entries the <select> is disabled and restyled to
+  // read as a plain name chip (see .cp-switcher-box.single in app.css)
+  // rather than presenting a dropdown with nothing to switch to. Picking a
+  // different customer re-scopes the whole home screen (equipment,
   // reports, stat strip) to that customer, and is remembered per device so
   // it's still selected next time this login signs in here.
   function cpRenderSwitcher(){
     const field = $('cpSwitcherField');
     const sel = $('cpCustomerSwitcher');
+    const box = $('cpSwitcherBox');
     if(!field || !sel) return;
     const list = currentUser.customerList || [];
-    if(list.length <= 1){ field.style.display = 'none'; return; }
+    if(!list.length){ field.style.display = 'none'; return; }
     field.style.display = '';
     sel.innerHTML = list.map(c=> '<option value="'+c.id+'" '+(String(c.id)===String(currentUser.customerId)?'selected':'')+'>'+escapeHtml(c.name)+'</option>').join('');
+    sel.disabled = list.length <= 1;
+    if(box) box.classList.toggle('single', list.length <= 1);
   }
   async function cpSwitchActiveCustomer(customerId){
     currentUser.customerId = customerId;
@@ -13662,12 +13679,31 @@
     renderCustomerHero(rows);
   }
 
-  // Header chat/notification icon — doubles as the entry point into
+  // Header chat/notification icon — the intended entry point into
   // messaging, since every job's thread lives inside its service_request's
   // detail overlay (srOpenDetail/srMsgList) rather than a separate global
   // inbox — there's no messaging model in this app that isn't tied to a
   // specific request yet. Badged whenever something is waiting on the
   // customer specifically (a fee proposed, or a schedule proposed).
+  //
+  // Previously this always routed to the History screen's Requests list —
+  // a browsing/filter view, not a conversation — so a tap on a *chat* icon
+  // never actually opened a chat; it opened a list the customer then had
+  // to tap into themselves. Now it jumps straight into the one request
+  // that's actually live right now (a technician dispatched/en route/on
+  // site) or waiting on the customer's response (fee or schedule
+  // proposed) — same priority order the badge dot above uses to decide
+  // whether to show at all — landing directly in that request's message
+  // thread. Only when nothing fits that (nothing currently active or
+  // awaiting a response) does it fall back to the Requests list, since
+  // there's no single conversation to jump into.
+  function cpOpenCentralChat(){
+    const rows = cpMyRequestsCache || [];
+    const target = rows.find(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress')
+      || rows.find(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed');
+    if(target && typeof srOpenDetail === 'function') srOpenDetail(target);
+    else cpShowScreen('History', 'Requests');
+  }
   function cpRefreshNotifBell(rows){
     const bell = $('cpNotifBell');
     if(!bell) return;
@@ -13675,7 +13711,7 @@
     bell.style.display = '';
     bell.innerHTML = CP_ICON.chat + (needsAttention>0 ? '<span class="cp-badge-dot"></span>' : '');
   }
-  $('cpNotifBell').addEventListener('click', ()=> cpShowScreen('History', 'Requests'));
+  $('cpNotifBell').addEventListener('click', cpOpenCentralChat);
 
   // ---------- Header profile menu ----------
   // Account settings / Notifications / Sign out — see the redesign spec's
@@ -13901,6 +13937,14 @@
   }
 
   // ---------- Units screen (full grid) ----------
+  // Filter used by both the search box below and paint() — pulled out so
+  // paint() (which re-runs once cover photos arrive, see cpFetchCoverPhotoMap
+  // below) can reapply whatever the person already typed instead of the
+  // photo repaint silently wiping it back to "show everything".
+  function cpUnitsApplyFilter(){
+    const q = ($('cpUnitsSearch').value||'').trim().toLowerCase();
+    $$('.cp-unit-card', $('cpUnitsGrid')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+  }
   function renderCustomerUnitsScreen(){
     $('cpUnitsScreenSub').textContent = cpEquipment.length+' unit'+(cpEquipment.length===1?'':'s')+' enrolled';
     function paint(photoMap){
@@ -13910,12 +13954,20 @@
       $$('.cp-unit-card', $('cpUnitsGrid')).forEach(card=>{
         card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
       });
+      cpUnitsApplyFilter();
     }
     paint({});
     if(cpEquipment.length && typeof cpFetchCoverPhotoMap === 'function'){
       cpFetchCoverPhotoMap(cpEquipment.map(eq=>eq.id)).then(paint);
     }
   }
+  // Matches each card's full visible text — name/label, brand, equipment
+  // type, capacity, location, and status — against the query, so searching
+  // "leak" or "3rd floor" or "carrier" all work, not just the unit's name.
+  // Wired once at module load (not inside renderCustomerUnitsScreen, which
+  // re-runs every time this tab is opened) so repeat visits don't stack
+  // duplicate 'input' listeners on the same search box.
+  $('cpUnitsSearch').addEventListener('input', cpUnitsApplyFilter);
 
   // ---------- History screen (unified chronological timeline) ----------
   // Replaces the old two-tab Visits/Requests segment with one merged,
@@ -14237,14 +14289,35 @@
     $('cpCalcBody').innerHTML =
       '<h2 style="font-size:15px; margin:0 0 12px;">Capacity guide</h2>'+
       '<div class="field"><label>Room floor area (sqm)</label><input type="number" id="ccArea" value="15" min="1"></div>'+
-      '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l">Suggested capacity</p></div>'+
+      '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l" id="ccResultLabel">Suggested capacity</p></div>'+
       '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Based on roughly 600 BTU/hr per sqm, rounded to the nearest standard HP size. Higher ceilings, west/afternoon sun exposure, more occupants, or heat-generating equipment in the room push the real requirement higher — a technician can confirm the right size on-site.</p>';
     const calc = ()=>{
       const area = parseFloat($('ccArea').value)||0;
       const btu = area * 600;
-      let hp;
-      if(btu<=6500) hp = 0.75; else if(btu<=9500) hp = 1.0; else if(btu<=13500) hp = 1.5; else if(btu<=18500) hp = 2.0; else if(btu<=22500) hp = 2.5; else hp = 3.0;
-      $('ccResult').textContent = hp+' HP'+(area>0 ? ' (~'+Math.round(btu).toLocaleString()+' BTU/hr)' : '');
+      // Table only covers sizes a single split-type indoor unit actually
+      // ships as. The old version had no upper bound, so anything past
+      // ~35 sqm silently kept returning "3 HP" no matter how large the
+      // area got (e.g. 1500 sqm also came back as "3 HP" — off by
+      // roughly two orders of magnitude, since no single unit that size
+      // exists). Past the largest common single-unit tier, this now
+      // switches to a total-load figure and a rough unit count instead
+      // of pretending one unit covers it.
+      const TIERS = [[6500,0.75],[9500,1.0],[13500,1.5],[18500,2.0],[22500,2.5],[27000,3.0]];
+      const tier = area>0 ? TIERS.find(t=> btu<=t[0]) : null;
+      if(area<=0){
+        $('ccResult').textContent = '—';
+        $('ccResultLabel').textContent = 'Suggested capacity';
+      } else if(tier){
+        $('ccResult').textContent = tier[1]+' HP';
+        $('ccResultLabel').textContent = 'Suggested capacity (~'+Math.round(btu).toLocaleString()+' BTU/hr)';
+      } else {
+        // Beyond one unit's range: give the total load and a ballpark
+        // unit count using a common per-zone size (2.0 HP ≈ 18,000
+        // BTU/hr) rather than one oversized HP number.
+        const zones = Math.ceil(btu/18000);
+        $('ccResult').textContent = '~'+Math.round(btu).toLocaleString()+' BTU/hr total';
+        $('ccResultLabel').textContent = 'Too large for one unit — plan for roughly '+zones+' × 2.0 HP units (or fewer, larger/ducted units) across zones';
+      }
     };
     $('ccArea').addEventListener('input', calc);
     calc();
@@ -14476,11 +14549,18 @@
       ? history.map(cpVisitCardHtml).join('')
       : '<div class="empty-state">No service visits recorded yet for this unit.</div>';
 
-    // Expand/collapse each visit
+    // Expand/collapse each visit. Was `$('cpVisitBody'+idx)` — same stale-
+    // cache hazard as the label editor above: #cpVisitTimeline is rebuilt
+    // every render, so a second render re-numbers the same
+    // "cpVisitBody0"/"cpVisitBody1"/... ids onto brand-new elements, and
+    // $() would keep returning the first (by-then-detached) one, silently
+    // breaking expand/collapse for any unit viewed more than once in a
+    // session. The body is always the very next sibling of its head in
+    // cpVisitCardHtml's markup, so reaching it that way needs no id/cache
+    // at all.
     $$('.cp-visit-head', $('customerEquipmentDetailScreen')).forEach(head => {
       head.onclick = () => {
-        const idx = head.dataset.visitIdx;
-        const body = $('cpVisitBody'+idx);
+        const body = head.nextElementSibling;
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : '';
         head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
@@ -14507,6 +14587,18 @@
   // ever hid #customerHomeScreen, so tapping a tile from the full Units
   // list left that grid's markup still displayed underneath/alongside the
   // detail screen instead of being replaced by it.
+  //
+  // cpEnterPortalShell() itself does NOT hide #customerHomeScreen (that id
+  // isn't in its list — only the unrelated legacy #homeScreen is), so the
+  // fix above traded one bug for another: opening a unit from the HOME
+  // screen's stack left customerHomeScreen visible, stacked above the
+  // detail screen in normal document flow. The detail content was there,
+  // just pushed down below the entire still-visible home screen — "lands
+  // below the page" from the outside, and window.scrollTo(0,0) below
+  // couldn't help, since 0,0 is the top of that still-visible home screen,
+  // not the top of the detail screen underneath it. Hiding it explicitly
+  // here, the same way cpShowScreen()/cpShowRequestsScreen() already do,
+  // closes that gap without reopening the original Units-list bug.
   function openCustomerEquipmentDetail(eq){
     cpDetailOrigin = ($('customerUnitsScreen').style.display !== 'none') ? 'Units' : 'Home';
     // Clear the photo grid BEFORE the screen becomes visible, not after —
@@ -14518,6 +14610,7 @@
     // a previous customer's session).
     $('cpDetailPhotoGrid').innerHTML = '';
     if(typeof cpEnterPortalShell === 'function') cpEnterPortalShell();
+    $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = '';
     // Land at the top of the new page. Without this, the browser keeps
     // whatever scroll position the Home/Units list was at (e.g. scrolled

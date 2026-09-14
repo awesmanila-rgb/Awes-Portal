@@ -36,6 +36,18 @@
      except the few explicit font-family:inherit rules, which already inherit
      this. */
   html{ font-family:"Google Sans","Product Sans",Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+  /* Stops the page from rubber-banding/bouncing (and, on Android Chrome,
+     triggering a pull-to-refresh) when a touch drag reaches the top or
+     bottom of the scrollable content — without this, a normal upward or
+     downward swipe visibly shifts the whole screen by a few pixels before
+     it "catches" and scrolls the actual content, which reads as "the
+     screen moves a little" every time you touch and drag, on an app this
+     locked-down (pinch-zoom is already disabled above) otherwise feels
+     like it should behave like a native screen. Chrome/Android reads this
+     from html; Safari/iOS reads it from body — set both so it's covered
+     either way. This only removes the overscroll bounce/refresh gesture;
+     normal scrolling within the page is unaffected. */
+  html{ overscroll-behavior:none; }
   body{
     margin:0;
     font-family:inherit;
@@ -43,6 +55,7 @@
     color:var(--text);
     -webkit-tap-highlight-color:transparent;
     padding-bottom:96px;
+    overscroll-behavior:none;
   }
   header.app-top{
     position:sticky; top:0; z-index:30;
@@ -485,6 +498,11 @@
   .sheet{
     background:#fff; width:100%; max-width:900px; max-height:85vh; overflow-y:auto;
     border-radius:16px 16px 0 0; padding:16px;
+    /* Contain the same drag-bounce fixed on html/body (see there) to this
+       sheet's own scroll boundary too — otherwise scrolling to the top/
+       bottom of a long sheet and continuing to drag chains into the page
+       behind it and reproduces the same "screen moves a little" bounce. */
+    overscroll-behavior:contain;
   }
   .sheet-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
   .sheet-head h3{margin:0; font-size:16px;}
@@ -1377,13 +1395,15 @@
    it back. 20px matches the header/home-screen inset on mobile; wider +
    centered on desktop so cards/forms don't stretch full-bleed on a large
    viewport. */
-/* Max-width and horizontal inset now match .cp-content/.cp-section (Home)
-   and .cp-units-grid (Units) — 1200px cap, 20 / 44 / 24px gutter — instead
-   of the old one-off 900px/20-32px scheme, so a unit's detail page (and
-   the request-service page, which shares this wrapper) opens with the
-   same margins and the same balanced, centered column as the rest of the
-   customer portal rather than its own narrower layout. */
-.cp-page-content{ max-width:1200px; margin:0 auto; padding:16px 20px 24px; }
+/* Max-width and horizontal inset match .cp-content/.cp-section (Home) —
+   1200px cap, 20 / 44 / 24px gutter — so a unit's detail page (and the
+   request-service page, which shares this wrapper) opens with the same
+   margins and the same balanced, centered column as the rest of the
+   customer portal rather than its own narrower layout. The Units screen's
+   search bar + grid now sit inside this same wrapper too (see index.html),
+   rather than .cp-units-grid keeping its own separate copy of this exact
+   gutter scheme. */
+.cp-page-content{ max-width:1200px; margin:0 auto; padding:16px 24px 24px; }
 @media (min-width:768px){ .cp-page-content{ padding:16px 44px 24px; } }
 @media (min-width:1000px){ .cp-page-content{ padding:28px 24px 40px; } }
 /* Inline SVG icons replacing the emoji that used to sit next to the
@@ -1531,13 +1551,18 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    was deliberately understated; this reference explicitly asks for the
    bolder, connected look instead. */
 .cp-header.cp-header-soft{
-  /* 20px horizontal, matched below by .cp-hero/.cp-booking-banner's margin
-     and .cp-section's padding — was 18px here vs 16px on the cards, which
-     made the greeting text sit closer to the edge than everything below
-     it. Keeping one shared inset value so the whole page reads as one
-     aligned column instead of each block picking its own. Extra bottom
-     padding (vs. top) makes room for the hero card to overlap upward. */
-  padding:20px 20px 54px; min-height:72px; box-sizing:border-box;
+  /* 24px horizontal, matched below by .cp-hero/.cp-booking-banner's margin,
+     .cp-switcher-field/.cp-billing-card's margin/padding, and .cp-section's
+     padding — bumped up from 20px (which itself replaced an even tighter
+     18px/16px mismatch, see older git blame) for a more comfortably
+     balanced edge gutter, and to match .cp-page-content's own mobile inset
+     (Units/History/Tools/detail screens) so the whole customer portal
+     reads as one consistent column rather than Home having its own
+     slightly tighter margin. Keeping one shared inset value across all of
+     these so the page reads as one aligned column instead of each block
+     picking its own. Extra bottom padding (vs. top) makes room for the
+     hero card to overlap upward. */
+  padding:20px 24px 54px; min-height:72px; box-sizing:border-box;
   background:var(--green-dark); border-radius:0 0 28px 28px;
   display:flex; align-items:center;
 }
@@ -1556,7 +1581,39 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3);
   color:#fff; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
-.cp-switcher-field{ padding:12px 20px 0; }
+.cp-switcher-field{ padding:12px 24px 0; }
+/* Custom control instead of a bare browser <select> — a plain native
+   select here rendered with each platform's own OS/webview chrome (font,
+   arrow glyph, sometimes a stray clear icon on some Android webviews),
+   which fought the card look used everywhere else and, worse, floated
+   right up against/behind the dark header above it with no breathing
+   room, since a lone form field had never been given the same card
+   treatment as .cp-hero/.cp-booking-banner right below it. This wraps it
+   in the same look instead: a rounded, bordered chip with our own chevron
+   drawn via ::after (::after because -webkit-appearance:none/appearance:
+   none strips the OS's native one, and support for styling the native
+   arrow directly is inconsistent across mobile browsers). */
+.cp-switcher-box{ position:relative; }
+.cp-switcher-box select{
+  width:100%; -webkit-appearance:none; appearance:none; -moz-appearance:none;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:11px 34px 11px 14px; font-size:13.5px; font-weight:700; color:var(--text);
+  font-family:inherit; cursor:pointer;
+}
+.cp-switcher-box select:focus{ outline:2px solid var(--green); outline-offset:0; border-color:var(--green); }
+.cp-switcher-box::after{
+  content:'▾'; position:absolute; right:14px; top:50%; transform:translateY(-50%);
+  font-size:11px; color:var(--text-muted); pointer-events:none;
+}
+/* Single-customer login (the overwhelming majority): the select is
+   disabled — there's nothing to switch to — so it's restyled to read as
+   a plain, non-interactive name chip rather than a grayed-out disabled
+   form control, and the chevron (which would otherwise imply it opens
+   something) is hidden. */
+.cp-switcher-box.single select{
+  background:var(--green-light); border-color:transparent; color:var(--green-dark); cursor:default; padding-right:14px; opacity:1; -webkit-text-fill-color:var(--green-dark);
+}
+.cp-switcher-box.single::after{ display:none; }
 
 /* ---- Profile menu (Account settings / Notifications / Sign out) ---- */
 .cp-profile-menu-wrap{ position:relative; }
@@ -1590,7 +1647,7 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 
 /* ---- Unit status card ---- */
 .cp-hero{
-  margin:0 20px; background:var(--surface); border-radius:18px;
+  margin:0 24px; background:var(--surface); border-radius:18px;
   box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08)); border:1px solid var(--border); overflow:hidden; position:relative; cursor:pointer;
 }
 @media (min-width:1000px){ .cp-hero{ margin:0; } }
@@ -1656,7 +1713,7 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-hero-btn.primary{ background:var(--green-dark); box-shadow:0 6px 14px rgba(21,77,52,.19); }
 .cp-hero-muted-note{ font-size:12px; color:var(--text-muted); padding:0 18px 18px; }
 
-.cp-section{ padding:24px 20px 0; }
+.cp-section{ padding:24px 24px 0; }
 @media (min-width:1000px){ .cp-section{ max-width:1200px; margin:0 auto; padding:24px 0 0; } }
 .cp-section-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
 .cp-section-head h2{ font-size:15px; font-weight:700; margin:0; letter-spacing:-.01em; }
@@ -1747,7 +1804,7 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    copy, button) rather than the old horizontal strip, since on desktop
    it now occupies a narrower side column rather than the full width. */
 .cp-booking-banner{
-  margin:0 20px; padding:20px; border-radius:16px; display:flex; flex-direction:column;
+  margin:0 24px; padding:20px; border-radius:16px; display:flex; flex-direction:column;
   justify-content:space-between; gap:16px;
   background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08));
 }
@@ -1763,7 +1820,7 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 /* ---- Billing card — only rendered when there's a real fee amount to
    show (see renderCustomerHome in customer-portal.js); never fabricated. ---- */
 .cp-billing-card{
-  margin:20px 20px 0; border:1px solid #f0d18c; background:linear-gradient(135deg,#fff9ea,#fffcf6);
+  margin:20px 24px 0; border:1px solid #f0d18c; background:linear-gradient(135deg,#fff9ea,#fffcf6);
   border-radius:15px; padding:15px;
 }
 @media (min-width:1000px){ .cp-billing-card{ max-width:1200px; margin:20px auto 0; } }
@@ -1777,10 +1834,12 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 /* Horizontal padding mirrors .cp-tools-head-aligned above (20 / 44 / 24)
    so the grid's left edge lines up with the "Your units" heading above it
    at every breakpoint, rather than the old flat 16px. */
-.cp-units-grid{ display:grid; grid-template-columns:1fr; gap:12px; padding:16px 20px; }
+/* Horizontal gutter now comes from the enclosing .cp-page-content wrapper
+   (same 20/44/24px + 1200px-cap convention as Tools/History), so this only
+   needs to own its own vertical rhythm and column counts. */
+.cp-units-grid{ display:grid; grid-template-columns:1fr; gap:12px; padding:16px 0; }
 @media (min-width:640px){ .cp-units-grid{ grid-template-columns:repeat(2,1fr); } }
-@media (min-width:768px){ .cp-units-grid{ padding:16px 44px; } }
-@media (min-width:1000px){ .cp-units-grid{ max-width:1200px; margin:0 auto; padding:16px 24px; grid-template-columns:repeat(3,1fr); } }
+@media (min-width:1000px){ .cp-units-grid{ grid-template-columns:repeat(3,1fr); } }
 
 /* ---- History screen (unified chronological timeline) ----
    .cp-history-head reuses .cp-tools-head-aligned for its inset (see that
@@ -1796,14 +1855,14 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    Requests/Quotations/Invoices/Payments). Horizontally scrollable on
    mobile so it never wraps into a second row; wraps to a plain flex row
    on desktop once there's room. Inset matches .cp-page-content's gutter
-   below it (20/44/24) so chips line up with the stat cards and list.
+   below it (24/44/24) so chips line up with the stat cards and list.
    Explicit appearance/border/font resets below — <button> pulls in
    native OS chrome (system font, gray gradient face, thin inset border)
    in some browsers/webviews unless those are stripped, which otherwise
    fights the pill look no matter what background/border-radius is set. */
 .cp-filter-chips{
   display:flex; gap:9px; overflow-x:auto; -webkit-overflow-scrolling:touch;
-  scrollbar-width:none; margin:0 -20px 0; padding:2px 20px 6px;
+  scrollbar-width:none; margin:0 -24px 0; padding:2px 24px 6px;
 }
 .cp-filter-chips::-webkit-scrollbar{ display:none; }
 @media (min-width:768px){ .cp-filter-chips{ margin:0 -44px 0; padding:2px 44px 6px; } }
@@ -1846,9 +1905,11 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    on Home (.cp-content + .cp-section combined, see above) at every
    breakpoint, instead of the flat 20px .cp-tools-head uses on its own.
    Opt-in via this modifier class (.cp-tools-head-aligned) — used by the
-   Units, History, and Tools & learning headers. */
+   Units, History, and Tools & learning headers. Mobile value matches
+   .cp-page-content/.cp-header-soft's 24px (bumped up from 20px for a more
+   comfortably balanced edge gutter — see those rules' own comments). */
 .cp-tools-head-aligned{ padding:20px 0 18px; }
-.cp-tools-head-aligned .cp-tools-head-inner{ padding:0 20px; }
+.cp-tools-head-aligned .cp-tools-head-inner{ padding:0 24px; }
 @media (min-width:768px){ .cp-tools-head-aligned .cp-tools-head-inner{ padding:0 44px; } }
 @media (min-width:1000px){ .cp-tools-head-aligned .cp-tools-head-inner{ max-width:1200px; margin:0 auto; padding:0 24px; } }
 /* Horizontal inset now comes from the enclosing .cp-page-content wrapper

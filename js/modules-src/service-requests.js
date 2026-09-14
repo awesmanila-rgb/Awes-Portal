@@ -511,15 +511,23 @@
       html += '</div>';
       feeEl.innerHTML = html; feeEl.style.display = '';
       if(!isAdmin && request.status==='fee_proposed' && request.feeStatus==='proposed'){
-        $('srFeeAcceptBtn').onclick = async ()=>{
-          const ok = await srRespondFee(request.id, true, $('srFeeSettlementMethod').value, $('srFeeSettlementNote').value.trim());
+        // Scoped to feeEl (querySelector), NOT the global $() cache — $()
+        // memoizes by id forever (see core.js), but this markup is torn
+        // down and rebuilt with the same ids every time this overlay
+        // opens. After the first open, $('srFeeAcceptBtn') would keep
+        // returning the original, by-then-detached button instead of the
+        // one actually on screen, silently wiring the handler to nothing
+        // visible. Same fix applied to every other button rebuilt inside
+        // this function (schedule/admin/cancel sections below).
+        feeEl.querySelector('#srFeeAcceptBtn').onclick = async ()=>{
+          const ok = await srRespondFee(request.id, true, feeEl.querySelector('#srFeeSettlementMethod').value, feeEl.querySelector('#srFeeSettlementNote').value.trim());
           if(ok){
             toast('Fee accepted'); srCloseDetail();
             if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId);
             if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId);
           } else toast('Could not send response — try again');
         };
-        $('srFeeDeclineBtn').onclick = async ()=>{
+        feeEl.querySelector('#srFeeDeclineBtn').onclick = async ()=>{
           const ok = await srRespondFee(request.id, false);
           if(ok){
             toast('Fee declined — message us if you\'d like to discuss'); srCloseDetail();
@@ -542,7 +550,7 @@
       html += '</div>';
       schedEl.innerHTML = html; schedEl.style.display = '';
       if(!isAdmin && request.status==='schedule_proposed'){
-        $('srScheduleConfirmBtn').onclick = async ()=>{
+        schedEl.querySelector('#srScheduleConfirmBtn').onclick = async ()=>{
           const ok = await srConfirmSchedule(request.id);
           if(ok){
             toast('Schedule confirmed'); srCloseDetail();
@@ -601,27 +609,27 @@
         adminEl.innerHTML = '';
         adminEl.style.display = 'none';
       }
-      if($('srAdminProposeFeeBtn')) $('srAdminProposeFeeBtn').onclick = async ()=>{
-        const amt = parseFloat($('srAdminFeeAmount').value);
+      if(adminEl.querySelector('#srAdminProposeFeeBtn')) adminEl.querySelector('#srAdminProposeFeeBtn').onclick = async ()=>{
+        const amt = parseFloat(adminEl.querySelector('#srAdminFeeAmount').value);
         if(!amt || amt<=0){ toast('Enter a valid fee amount'); return; }
         const ok = await srProposeFee(request.id, amt);
         if(ok){ toast('Fee proposed'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
-      if($('srAdminNoFeeBtn')) $('srAdminNoFeeBtn').onclick = async ()=>{
+      if(adminEl.querySelector('#srAdminNoFeeBtn')) adminEl.querySelector('#srAdminNoFeeBtn').onclick = async ()=>{
         const ok = await srAcknowledgeNoFee(request.id);
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
-      if($('srAdminProposeScheduleBtn')) $('srAdminProposeScheduleBtn').onclick = async ()=>{
-        const date = $('srAdminScheduleDate').value;
+      if(adminEl.querySelector('#srAdminProposeScheduleBtn')) adminEl.querySelector('#srAdminProposeScheduleBtn').onclick = async ()=>{
+        const date = adminEl.querySelector('#srAdminScheduleDate').value;
         if(!date){ toast('Pick a date'); return; }
-        const ok = await srProposeSchedule(request.id, date, $('srAdminScheduleTime').value.trim());
+        const ok = await srProposeSchedule(request.id, date, adminEl.querySelector('#srAdminScheduleTime').value.trim());
         if(ok){ toast('Schedule proposed'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
-      if($('srAdminConvertBtn')) $('srAdminConvertBtn').onclick = async ()=>{
+      if(adminEl.querySelector('#srAdminConvertBtn')) adminEl.querySelector('#srAdminConvertBtn').onclick = async ()=>{
         srCloseDetail();
         await srConvertToTicket(request);
       };
-      if($('srAdminAckCancelBtn')) $('srAdminAckCancelBtn').onclick = async ()=>{
+      if(adminEl.querySelector('#srAdminAckCancelBtn')) adminEl.querySelector('#srAdminAckCancelBtn').onclick = async ()=>{
         const ok = await srAcknowledgeCancel(request.id);
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
@@ -635,8 +643,8 @@
         '<button type="button" class="btn btn-secondary" id="srCancelSubmitBtn" style="width:100%; margin-top:8px; color:var(--danger);">Cancel This Request</button>'+
       '</div>';
       cancelEl.style.display = '';
-      $('srCancelSubmitBtn').onclick = async ()=>{
-        const reason = $('srCancelReason').value.trim();
+      cancelEl.querySelector('#srCancelSubmitBtn').onclick = async ()=>{
+        const reason = cancelEl.querySelector('#srCancelReason').value.trim();
         if(!reason){ toast('Please tell us why, so we can note it'); return; }
         const ok = await srCancel(request.id, reason);
         if(ok){ toast('Request cancelled'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId); }

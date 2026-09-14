@@ -174,11 +174,18 @@
       ? history.map(cpVisitCardHtml).join('')
       : '<div class="empty-state">No service visits recorded yet for this unit.</div>';
 
-    // Expand/collapse each visit
+    // Expand/collapse each visit. Was `$('cpVisitBody'+idx)` — same stale-
+    // cache hazard as the label editor above: #cpVisitTimeline is rebuilt
+    // every render, so a second render re-numbers the same
+    // "cpVisitBody0"/"cpVisitBody1"/... ids onto brand-new elements, and
+    // $() would keep returning the first (by-then-detached) one, silently
+    // breaking expand/collapse for any unit viewed more than once in a
+    // session. The body is always the very next sibling of its head in
+    // cpVisitCardHtml's markup, so reaching it that way needs no id/cache
+    // at all.
     $$('.cp-visit-head', $('customerEquipmentDetailScreen')).forEach(head => {
       head.onclick = () => {
-        const idx = head.dataset.visitIdx;
-        const body = $('cpVisitBody'+idx);
+        const body = head.nextElementSibling;
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : '';
         head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
@@ -205,6 +212,18 @@
   // ever hid #customerHomeScreen, so tapping a tile from the full Units
   // list left that grid's markup still displayed underneath/alongside the
   // detail screen instead of being replaced by it.
+  //
+  // cpEnterPortalShell() itself does NOT hide #customerHomeScreen (that id
+  // isn't in its list — only the unrelated legacy #homeScreen is), so the
+  // fix above traded one bug for another: opening a unit from the HOME
+  // screen's stack left customerHomeScreen visible, stacked above the
+  // detail screen in normal document flow. The detail content was there,
+  // just pushed down below the entire still-visible home screen — "lands
+  // below the page" from the outside, and window.scrollTo(0,0) below
+  // couldn't help, since 0,0 is the top of that still-visible home screen,
+  // not the top of the detail screen underneath it. Hiding it explicitly
+  // here, the same way cpShowScreen()/cpShowRequestsScreen() already do,
+  // closes that gap without reopening the original Units-list bug.
   function openCustomerEquipmentDetail(eq){
     cpDetailOrigin = ($('customerUnitsScreen').style.display !== 'none') ? 'Units' : 'Home';
     // Clear the photo grid BEFORE the screen becomes visible, not after —
@@ -216,6 +235,7 @@
     // a previous customer's session).
     $('cpDetailPhotoGrid').innerHTML = '';
     if(typeof cpEnterPortalShell === 'function') cpEnterPortalShell();
+    $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = '';
     // Land at the top of the new page. Without this, the browser keeps
     // whatever scroll position the Home/Units list was at (e.g. scrolled

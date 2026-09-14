@@ -574,20 +574,29 @@
     if(cpCustomer && cpCustomer.id) cpRefreshRequestsBadge(cpCustomer.id);
   }
 
-  // "Viewing: [customer ▾]" switcher — only shown when this login is linked
-  // to more than one customer record (see auth.js: currentUser.customerList,
-  // populated at login/session-restore from customer_login_links). Picking
-  // a different customer re-scopes the whole home screen (equipment,
+  // "Viewing: [customer ▾]" switcher — always shown once currentUser.
+  // customerList is known (populated at login/session-restore from
+  // customer_login_links — see auth.js), even for a login linked to just
+  // one customer. Previously hidden outright below 2 entries, which meant
+  // most customers — anyone with a single-customer login — never saw any
+  // on-screen confirmation of which company/site account they were
+  // viewing. Below 2 entries the <select> is disabled and restyled to
+  // read as a plain name chip (see .cp-switcher-box.single in app.css)
+  // rather than presenting a dropdown with nothing to switch to. Picking a
+  // different customer re-scopes the whole home screen (equipment,
   // reports, stat strip) to that customer, and is remembered per device so
   // it's still selected next time this login signs in here.
   function cpRenderSwitcher(){
     const field = $('cpSwitcherField');
     const sel = $('cpCustomerSwitcher');
+    const box = $('cpSwitcherBox');
     if(!field || !sel) return;
     const list = currentUser.customerList || [];
-    if(list.length <= 1){ field.style.display = 'none'; return; }
+    if(!list.length){ field.style.display = 'none'; return; }
     field.style.display = '';
     sel.innerHTML = list.map(c=> '<option value="'+c.id+'" '+(String(c.id)===String(currentUser.customerId)?'selected':'')+'>'+escapeHtml(c.name)+'</option>').join('');
+    sel.disabled = list.length <= 1;
+    if(box) box.classList.toggle('single', list.length <= 1);
   }
   async function cpSwitchActiveCustomer(customerId){
     currentUser.customerId = customerId;
@@ -681,12 +690,31 @@
     renderCustomerHero(rows);
   }
 
-  // Header chat/notification icon — doubles as the entry point into
+  // Header chat/notification icon — the intended entry point into
   // messaging, since every job's thread lives inside its service_request's
   // detail overlay (srOpenDetail/srMsgList) rather than a separate global
   // inbox — there's no messaging model in this app that isn't tied to a
   // specific request yet. Badged whenever something is waiting on the
   // customer specifically (a fee proposed, or a schedule proposed).
+  //
+  // Previously this always routed to the History screen's Requests list —
+  // a browsing/filter view, not a conversation — so a tap on a *chat* icon
+  // never actually opened a chat; it opened a list the customer then had
+  // to tap into themselves. Now it jumps straight into the one request
+  // that's actually live right now (a technician dispatched/en route/on
+  // site) or waiting on the customer's response (fee or schedule
+  // proposed) — same priority order the badge dot above uses to decide
+  // whether to show at all — landing directly in that request's message
+  // thread. Only when nothing fits that (nothing currently active or
+  // awaiting a response) does it fall back to the Requests list, since
+  // there's no single conversation to jump into.
+  function cpOpenCentralChat(){
+    const rows = cpMyRequestsCache || [];
+    const target = rows.find(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress')
+      || rows.find(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed');
+    if(target && typeof srOpenDetail === 'function') srOpenDetail(target);
+    else cpShowScreen('History', 'Requests');
+  }
   function cpRefreshNotifBell(rows){
     const bell = $('cpNotifBell');
     if(!bell) return;
@@ -694,7 +722,7 @@
     bell.style.display = '';
     bell.innerHTML = CP_ICON.chat + (needsAttention>0 ? '<span class="cp-badge-dot"></span>' : '');
   }
-  $('cpNotifBell').addEventListener('click', ()=> cpShowScreen('History', 'Requests'));
+  $('cpNotifBell').addEventListener('click', cpOpenCentralChat);
 
   // ---------- Header profile menu ----------
   // Account settings / Notifications / Sign out — see the redesign spec's
@@ -920,6 +948,14 @@
   }
 
   // ---------- Units screen (full grid) ----------
+  // Filter used by both the search box below and paint() — pulled out so
+  // paint() (which re-runs once cover photos arrive, see cpFetchCoverPhotoMap
+  // below) can reapply whatever the person already typed instead of the
+  // photo repaint silently wiping it back to "show everything".
+  function cpUnitsApplyFilter(){
+    const q = ($('cpUnitsSearch').value||'').trim().toLowerCase();
+    $$('.cp-unit-card', $('cpUnitsGrid')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+  }
   function renderCustomerUnitsScreen(){
     $('cpUnitsScreenSub').textContent = cpEquipment.length+' unit'+(cpEquipment.length===1?'':'s')+' enrolled';
     function paint(photoMap){
@@ -929,12 +965,20 @@
       $$('.cp-unit-card', $('cpUnitsGrid')).forEach(card=>{
         card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
       });
+      cpUnitsApplyFilter();
     }
     paint({});
     if(cpEquipment.length && typeof cpFetchCoverPhotoMap === 'function'){
       cpFetchCoverPhotoMap(cpEquipment.map(eq=>eq.id)).then(paint);
     }
   }
+  // Matches each card's full visible text — name/label, brand, equipment
+  // type, capacity, location, and status — against the query, so searching
+  // "leak" or "3rd floor" or "carrier" all work, not just the unit's name.
+  // Wired once at module load (not inside renderCustomerUnitsScreen, which
+  // re-runs every time this tab is opened) so repeat visits don't stack
+  // duplicate 'input' listeners on the same search box.
+  $('cpUnitsSearch').addEventListener('input', cpUnitsApplyFilter);
 
   // ---------- History screen (unified chronological timeline) ----------
   // Replaces the old two-tab Visits/Requests segment with one merged,
@@ -1256,14 +1300,35 @@
     $('cpCalcBody').innerHTML =
       '<h2 style="font-size:15px; margin:0 0 12px;">Capacity guide</h2>'+
       '<div class="field"><label>Room floor area (sqm)</label><input type="number" id="ccArea" value="15" min="1"></div>'+
-      '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l">Suggested capacity</p></div>'+
+      '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l" id="ccResultLabel">Suggested capacity</p></div>'+
       '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Based on roughly 600 BTU/hr per sqm, rounded to the nearest standard HP size. Higher ceilings, west/afternoon sun exposure, more occupants, or heat-generating equipment in the room push the real requirement higher — a technician can confirm the right size on-site.</p>';
     const calc = ()=>{
       const area = parseFloat($('ccArea').value)||0;
       const btu = area * 600;
-      let hp;
-      if(btu<=6500) hp = 0.75; else if(btu<=9500) hp = 1.0; else if(btu<=13500) hp = 1.5; else if(btu<=18500) hp = 2.0; else if(btu<=22500) hp = 2.5; else hp = 3.0;
-      $('ccResult').textContent = hp+' HP'+(area>0 ? ' (~'+Math.round(btu).toLocaleString()+' BTU/hr)' : '');
+      // Table only covers sizes a single split-type indoor unit actually
+      // ships as. The old version had no upper bound, so anything past
+      // ~35 sqm silently kept returning "3 HP" no matter how large the
+      // area got (e.g. 1500 sqm also came back as "3 HP" — off by
+      // roughly two orders of magnitude, since no single unit that size
+      // exists). Past the largest common single-unit tier, this now
+      // switches to a total-load figure and a rough unit count instead
+      // of pretending one unit covers it.
+      const TIERS = [[6500,0.75],[9500,1.0],[13500,1.5],[18500,2.0],[22500,2.5],[27000,3.0]];
+      const tier = area>0 ? TIERS.find(t=> btu<=t[0]) : null;
+      if(area<=0){
+        $('ccResult').textContent = '—';
+        $('ccResultLabel').textContent = 'Suggested capacity';
+      } else if(tier){
+        $('ccResult').textContent = tier[1]+' HP';
+        $('ccResultLabel').textContent = 'Suggested capacity (~'+Math.round(btu).toLocaleString()+' BTU/hr)';
+      } else {
+        // Beyond one unit's range: give the total load and a ballpark
+        // unit count using a common per-zone size (2.0 HP ≈ 18,000
+        // BTU/hr) rather than one oversized HP number.
+        const zones = Math.ceil(btu/18000);
+        $('ccResult').textContent = '~'+Math.round(btu).toLocaleString()+' BTU/hr total';
+        $('ccResultLabel').textContent = 'Too large for one unit — plan for roughly '+zones+' × 2.0 HP units (or fewer, larger/ducted units) across zones';
+      }
     };
     $('ccArea').addEventListener('input', calc);
     calc();

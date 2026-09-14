@@ -559,11 +559,20 @@ window.awesCss = {
     </div>
   </div>
 
-  <!-- Shown only when this login is linked to more than one customer
-       record (see cpRenderSwitcher() in customer-portal.js). -->
+  <!-- Always shown once this login's customer list is known (see
+       cpRenderSwitcher() in customer-portal.js) — previously hidden
+       outright unless this login was linked to more than one customer
+       record, which meant the overwhelming majority of single-customer
+       logins never got any on-screen confirmation of which company/site
+       account they were viewing. A single-customer login still gets this
+       same "Viewing" label, just with a plain, non-interactive name
+       instead of a dropdown (nothing to switch to) — see cpRenderSwitcher
+       toggling the .single class below. -->
   <div class="cp-switcher-field field" id="cpSwitcherField" style="display:none;">
     <label>Viewing</label>
-    <select id="cpCustomerSwitcher"></select>
+    <div class="cp-switcher-box" id="cpSwitcherBox">
+      <select id="cpCustomerSwitcher"></select>
+    </div>
   </div>
 
   <div class="cp-content">
@@ -632,7 +641,10 @@ window.awesCss = {
      customerEquipmentDetailScreen, unchanged). -->
 <div id="customerUnitsScreen" class="home-screen cp-screen" style="display:none;">
   <div class="cp-tools-head cp-tools-head-aligned"><div class="cp-tools-head-inner"><h1>Your units</h1><p id="cpUnitsScreenSub">&nbsp;</p></div></div>
-  <div class="cp-units-grid" id="cpUnitsGrid"><div class="empty-state">Loading…</div></div>
+  <div class="cp-page-content" style="padding-top:0; padding-bottom:0;">
+    <div class="cp-search"><span></span><input type="text" id="cpUnitsSearch" placeholder="Search your units — name, brand, location…"></div>
+    <div class="cp-units-grid" id="cpUnitsGrid"><div class="empty-state">Loading…</div></div>
+  </div>
 </div>
 
 <!-- History — one chronological timeline of everything that's happened on
