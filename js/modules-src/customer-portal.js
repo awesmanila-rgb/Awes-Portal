@@ -1093,14 +1093,68 @@
     { id:'savings', icon:'piggy', title:'Maintenance savings', desc:'What regular PM saves you vs. reactive repairs over a year.' }
   ];
   const CP_ARTICLES = [
-    { id:'filter', icon:'leaf', title:'Cleaning your air filter', desc:'A simple monthly habit that keeps your unit efficient.' },
-    { id:'signs', icon:'alert', title:'Signs your unit needs service', desc:'What to watch and listen for between PM visits.' },
-    { id:'pm', icon:'calendar', title:'Why preventive maintenance matters', desc:'What a PM visit actually covers, and how often you need one.' }
+    { id:'filter', icon:'leaf', title:'Cleaning your air filter', desc:'A simple monthly habit that keeps your unit efficient.', body:[
+      'The air filter is the mesh screen just behind the front panel of the indoor unit. Its job is to catch dust and lint before air passes over the evaporator coil. When it clogs, less air moves through the unit — it cools less, runs longer to hit your set temperature, and uses more electricity in the process. A dirty filter is also one of the most common causes of a coil icing up.',
+      '<b>How often:</b> every 2–4 weeks with regular daily use, more often if the unit runs constantly, if the room is dusty, or if there\'s ongoing construction or pets nearby. Once a month is a safe default for most households.',
+      '<b>How to clean it:</b>',
+      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
+        '<li>Turn off the unit at the remote and, if possible, at the breaker.</li>'+
+        '<li>Open the front panel and slide the filter(s) out — most split-type indoor units have one or two.</li>'+
+        '<li>Vacuum off loose dust first, then rinse with running water. A soft brush helps with caked-on grime.</li>'+
+        '<li>Let it air-dry completely out of direct sunlight before reinserting — sunlight can warp the plastic frame, and reinserting it wet encourages mold.</li>'+
+        '<li>Close the panel and power the unit back on.</li>'+
+      '</ul>',
+      'If the filter looks torn, brittle, or won\'t come clean after washing, it\'s time to replace it rather than keep reusing it.'
+    ]},
+    { id:'signs', icon:'alert', title:'Signs your unit needs service', desc:'What to watch and listen for between PM visits.', body:[
+      'Most breakdowns give some warning first. If you notice any of the following, it\'s worth requesting a visit rather than waiting for the next scheduled PM:',
+      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
+        '<li><b>Weaker airflow or warm air</b> blowing even with the unit set to cool — can point to a dirty filter/coil, a fan issue, or low refrigerant.</li>'+
+        '<li><b>Unusual noises</b> — rattling or buzzing often means a loose part; a hissing sound can indicate a refrigerant leak and is worth flagging promptly.</li>'+
+        '<li><b>Water dripping or pooling</b> from the indoor unit — usually a clogged condensate drain line.</li>'+
+        '<li><b>Musty or foul odor</b> when the unit runs — often mold or mildew buildup inside the unit.</li>'+
+        '<li><b>Ice forming</b> on the indoor coil or outdoor pipes — a sign of restricted airflow or a refrigerant problem, and running it further in that state can damage the compressor.</li>'+
+        '<li><b>Short cycling</b> — the unit turns on and off in short bursts instead of running a normal cycle.</li>'+
+        '<li><b>A noticeably higher bill</b> without a change in how much you\'re using the unit.</li>'+
+      '</ul>',
+      'None of these are emergencies on their own, but they\'re cheaper to fix early than after they cause a bigger failure — a stuck-open drain line, for instance, is a quick fix; the water damage it eventually causes isn\'t.'
+    ]},
+    { id:'pm', icon:'calendar', title:'Why preventive maintenance matters', desc:'What a PM visit actually covers, and how often you need one.', body:[
+      'A preventive maintenance (PM) visit is a scheduled check-up rather than a repair — the goal is to catch small issues and keep the unit running efficiently before something forces a breakdown.',
+      '<b>What\'s typically covered:</b>',
+      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
+        '<li>Cleaning/washing the indoor evaporator coil and outdoor condenser coil</li>'+
+        '<li>Cleaning or replacing air filters</li>'+
+        '<li>Checking refrigerant pressure and topping up if needed</li>'+
+        '<li>Clearing the condensate drain line</li>'+
+        '<li>Inspecting electrical connections, the capacitor, and the fan motor</li>'+
+        '<li>Checking overall airflow and cooling performance</li>'+
+      '</ul>',
+      '<b>How often:</b> as a general guide, every 3 months for units that run heavily or continuously (e.g. commercial or always-on residential use), and every 4–6 months for typical household use. Units in dusty areas, near construction, or with visible performance dips benefit from more frequent visits — your technician can recommend an interval based on how the unit is actually used.',
+      'Regular PM matters because dust buildup on the coils is one of the biggest, most avoidable drags on efficiency, and because most manufacturers require documented maintenance to honor a compressor warranty. It also tends to extend how long the unit lasts before a major repair or replacement is needed.'
+    ]},
+    { id:'inverter', icon:'bolt', title:'Inverter vs. non-inverter: what it means for your bill', desc:'The one spec that changes your electricity cost the most.', body:[
+      'Both types cool the room the same way — the difference is how the compressor runs.',
+      '<b>Non-inverter:</b> the compressor runs at a fixed speed. To hold your set temperature, it switches fully on and off in cycles. It\'s cheaper to buy, but running at full power every time it kicks in uses more electricity over the course of a day.',
+      '<b>Inverter:</b> the compressor speed adjusts continuously to match how much cooling the room actually needs, instead of switching fully off. Once the room reaches temperature, it idles at a low speed rather than cycling — which is why inverter units commonly use meaningfully less electricity than a non-inverter unit of the same HP rating, especially when it runs for long stretches. They cost more upfront, and that gap is usually made up over a few years of regular use through lower bills.',
+      'When comparing units, the Philippine Energy Label on the box or spec sheet lists the CSPF/EER rating — a higher number means more cooling per watt, which is a more precise gauge than "inverter" alone since efficiency also varies by brand and model.'
+    ]},
+    { id:'repair-replace', icon:'piggy', title:'When to repair vs. replace your unit', desc:'How to decide once a repair estimate is on the table.', body:[
+      'A few practical factors, together, usually make the decision clearer than any single rule:',
+      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
+        '<li><b>Age.</b> A well-maintained split-type unit typically lasts around 10–15 years before efficiency drops off and parts get harder to source. A costly repair on a unit already near or past that range is worth weighing against a new, more efficient replacement.</li>'+
+        '<li><b>Repair cost relative to a new unit.</b> If a single repair runs close to a large fraction of what a new comparable unit costs, replacement often makes more sense, especially on an older unit.</li>'+
+        '<li><b>Repair frequency.</b> A unit needing repeat service calls within a year is usually cheaper to replace than to keep patching.</li>'+
+        '<li><b>Refrigerant type.</b> Older units using phased-out refrigerants (like R-22) can be more expensive to service since the refrigerant itself is costlier and less available.</li>'+
+      '</ul>',
+      'If you\'re unsure where a specific repair estimate falls, it\'s worth asking your technician directly — they can tell you what shape the rest of the unit is in, not just the part that failed.'
+    ]}
   ];
   function renderCustomerToolsScreen(){
     $('cpCalcGrid').innerHTML = CP_CALCULATORS.map(c=>
       '<button type="button" class="cp-tool-card" data-calc="'+c.id+'">'+
-        '<div class="ic">'+CP_ICON[c.icon]+'<p class="t">'+c.title+'</p><p class="d">'+c.desc+'</p>'+
+        '<div class="ic">'+CP_ICON[c.icon]+'</div>'+
+        '<p class="t">'+c.title+'</p><p class="d">'+c.desc+'</p>'+
       '</button>'
     ).join('');
     $$('.cp-tool-card', $('cpCalcGrid')).forEach(btn=> btn.onclick = ()=> cpOpenCalc(btn.dataset.calc));
@@ -1132,10 +1186,14 @@
   function cpOpenArticle(id){
     const a = CP_ARTICLES.find(x=> x.id===id);
     if(!a) return;
+    const bodyHtml = (a.body||[]).map(block=>
+      block.trim().startsWith('<ul') ? block : '<p style="font-size:13px; line-height:1.7; margin:0 0 12px;">'+block+'</p>'
+    ).join('');
     $('cpCalcBody').innerHTML =
       '<h2 style="font-size:15px; margin:0 0 10px;">'+a.title+'</h2>'+
-      '<p style="font-size:13px; color:var(--text-muted); line-height:1.6;">'+a.desc+'</p>'+
-      '<p style="font-size:13px; line-height:1.6; margin-top:12px;">Full guide content — coming soon. In the meantime, if you\'re unsure about anything with your unit, request a visit and a technician can walk you through it on-site.</p>';
+      '<p style="font-size:13px; color:var(--text-muted); line-height:1.6; margin:0 0 14px;">'+a.desc+'</p>'+
+      bodyHtml+
+      '<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">General guidance for typical split-type units — your unit\'s manual may have model-specific instructions. If anything is unclear or your unit needs attention, request a visit and a technician can take a look on-site.</p>';
     cpShowCalcScreen();
   }
 
@@ -1150,34 +1208,62 @@
     if(id==='savings') return cpCalcSavings();
   }
   function cpCalcElectricity(){
+    // Previous v1 formula multiplied HP by 0.746 (the pure mechanical
+    // HP→kW conversion) and treated that as the electrical draw. That
+    // understates real consumption — a compressor's electrical input is
+    // higher than its mechanical output — and it ignored the single
+    // biggest factor in real bills: inverter units modulate compressor
+    // speed instead of running at full rated draw the whole time, so
+    // they use meaningfully less power than a non-inverter unit of the
+    // same HP. This version uses typical input-wattage-per-HP figures
+    // for each type instead of the mechanical conversion, and lets the
+    // person pick which kind of unit they have.
     $('cpCalcBody').innerHTML =
       '<h2 style="font-size:15px; margin:0 0 12px;">Electricity cost</h2>'+
       '<div class="field"><label>Unit capacity (HP)</label><input type="number" id="ceHp" value="1.5" step="0.5" min="0.5"></div>'+
+      '<div class="field"><label>Unit type</label><select id="ceType"><option value="inverter" selected>Inverter</option><option value="noninverter">Non-inverter (window/standard split)</option></select></div>'+
       '<div class="field"><label>Hours used per day</label><input type="number" id="ceHours" value="8" min="0"></div>'+
-      '<div class="field"><label>Rate (₱ per kWh)</label><input type="number" id="ceRate" value="12" step="0.5" min="0"></div>'+
+      '<div class="field"><label>Your rate (₱ per kWh, from your bill)</label><input type="number" id="ceRate" value="12" step="0.5" min="0"></div>'+
       '<div class="cp-calc-result"><p class="n" id="ceResult">—</p><p class="l">Estimated cost per month</p></div>'+
-      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Rough estimate — actual draw varies by brand, inverter type, and set temperature.</p>';
+      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Estimate based on typical input wattage per HP for each unit type, assuming it runs continuously at that load for the hours entered. Actual draw varies by brand, EER/CSPF rating, set temperature, insulation, and how often the compressor cycles or idles once the room is cool — so real bills are often lower than this, especially for inverter units in a well-sized room.</p>';
     const calc = ()=>{
       const hp = parseFloat($('ceHp').value)||0, hours = parseFloat($('ceHours').value)||0, rate = parseFloat($('ceRate').value)||0;
-      const kw = hp * 0.746; // approx kW per HP
-      const monthly = kw * hours * 30 * rate;
+      const type = $('ceType').value;
+      // Typical full-load electrical input for a non-inverter unit runs
+      // roughly 750-900W per HP (not the ~746W mechanical-only figure);
+      // 800W/HP is the midpoint. Inverter units modulate and average
+      // roughly 55-65% of that once steady, vs the 30-50% savings
+      // commonly cited for inverter over non-inverter — 60% is used here.
+      const wattsPerHp = 800;
+      const watts = hp * wattsPerHp * (type === 'inverter' ? 0.6 : 1);
+      const monthly = (watts/1000) * hours * 30 * rate;
       $('ceResult').textContent = '₱'+monthly.toLocaleString(undefined,{maximumFractionDigits:0});
     };
     ['ceHp','ceHours','ceRate'].forEach(id=> $(id).addEventListener('input', calc));
+    $('ceType').addEventListener('change', calc);
     calc();
     cpShowCalcScreen();
   }
   function cpCalcCapacity(){
+    // Rule-of-thumb sizing: ~600 BTU/hr of cooling per sqm for a
+    // standard Philippine room (moderate ceiling height, typical sun
+    // exposure), rounded up to the nearest standard aircon HP rating
+    // (1 HP ≈ 9,000 BTU/hr). This is a starting point, not a load
+    // calculation — a proper one accounts for ceiling height, window
+    // area/orientation, insulation, and occupancy/heat-generating
+    // equipment, which is why the guide below still points to a
+    // technician for anything borderline or unusual.
     $('cpCalcBody').innerHTML =
       '<h2 style="font-size:15px; margin:0 0 12px;">Capacity guide</h2>'+
       '<div class="field"><label>Room floor area (sqm)</label><input type="number" id="ccArea" value="15" min="1"></div>'+
       '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l">Suggested capacity</p></div>'+
-      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">General guide only — ceiling height, sun exposure, and occupancy change the ideal size. A technician can confirm on-site.</p>';
+      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Based on roughly 600 BTU/hr per sqm, rounded to the nearest standard HP size. Higher ceilings, west/afternoon sun exposure, more occupants, or heat-generating equipment in the room push the real requirement higher — a technician can confirm the right size on-site.</p>';
     const calc = ()=>{
       const area = parseFloat($('ccArea').value)||0;
+      const btu = area * 600;
       let hp;
-      if(area<=10) hp = 0.75; else if(area<=15) hp = 1.0; else if(area<=20) hp = 1.5; else if(area<=28) hp = 2.0; else if(area<=35) hp = 2.5; else hp = 3.0;
-      $('ccResult').textContent = hp+' HP';
+      if(btu<=6500) hp = 0.75; else if(btu<=9500) hp = 1.0; else if(btu<=13500) hp = 1.5; else if(btu<=18500) hp = 2.0; else if(btu<=22500) hp = 2.5; else hp = 3.0;
+      $('ccResult').textContent = hp+' HP'+(area>0 ? ' (~'+Math.round(btu).toLocaleString()+' BTU/hr)' : '');
     };
     $('ccArea').addEventListener('input', calc);
     calc();

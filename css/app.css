@@ -1845,17 +1845,19 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    text inside it is inset by the same amount as the "Your units" heading
    on Home (.cp-content + .cp-section combined, see above) at every
    breakpoint, instead of the flat 20px .cp-tools-head uses on its own.
-   Opt-in via this modifier class (.cp-tools-head-aligned) — currently
-   used by the Units and History headers; Tools' own header intentionally
-   keeps the plain flat inset. */
+   Opt-in via this modifier class (.cp-tools-head-aligned) — used by the
+   Units, History, and Tools & learning headers. */
 .cp-tools-head-aligned{ padding:20px 0 18px; }
 .cp-tools-head-aligned .cp-tools-head-inner{ padding:0 20px; }
 @media (min-width:768px){ .cp-tools-head-aligned .cp-tools-head-inner{ padding:0 44px; } }
 @media (min-width:1000px){ .cp-tools-head-aligned .cp-tools-head-inner{ max-width:1200px; margin:0 auto; padding:0 24px; } }
-.cp-search{ margin:16px 18px 0; background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:11px 13px; display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:13px; box-shadow:var(--cp-soft); }
-@media (min-width:1000px){ .cp-search, .cp-tools-section{ max-width:1100px; margin-left:auto; margin-right:auto; } }
+/* Horizontal inset now comes from the enclosing .cp-page-content wrapper
+   (same 20/44/24 gutters as Units/History) so the search box, the
+   calculator grid, and the header title all line up at every breakpoint
+   instead of the old flat 18px this used to carry on its own. */
+.cp-search{ margin:16px 0 0; background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:11px 13px; display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:13px; box-shadow:var(--cp-soft); }
 .cp-search input{ border:none; outline:none; flex:1; font-size:13px; background:none; }
-.cp-tools-section{ padding:20px 18px 0; }
+.cp-tools-section{ padding:20px 0 0; }
 .cp-tools-section h2{ font-size:13.5px; font-weight:700; color:var(--text-muted); margin:0 0 11px; }
 .cp-tool-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
 @media (min-width:640px){ .cp-tool-grid{ grid-template-columns:repeat(3,1fr); } }
