@@ -206,6 +206,12 @@
     $('cpDetailPhotoGrid').innerHTML = '';
     $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = '';
+    // Land at the top of the new page. Without this, the browser keeps
+    // whatever scroll position the Home/Units list was at (e.g. scrolled
+    // down to reach the tapped tile), so the detail screen — despite being
+    // a real page swap, not an in-place expansion — visually opens
+    // scrolled to its bottom instead of showing the unit name/specs first.
+    window.scrollTo(0, 0);
     renderCustomerEquipmentDetail(eq);
   }
 

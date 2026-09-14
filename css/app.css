@@ -1375,8 +1375,15 @@
    it back. 20px matches the header/home-screen inset on mobile; wider +
    centered on desktop so cards/forms don't stretch full-bleed on a large
    viewport. */
-.cp-page-content{ max-width:900px; margin:0 auto; padding:16px 20px 24px; }
-@media (min-width:1000px){ .cp-page-content{ padding:28px 32px 40px; } }
+/* Max-width and horizontal inset now match .cp-content/.cp-section (Home)
+   and .cp-units-grid (Units) — 1200px cap, 20 / 44 / 24px gutter — instead
+   of the old one-off 900px/20-32px scheme, so a unit's detail page (and
+   the request-service page, which shares this wrapper) opens with the
+   same margins and the same balanced, centered column as the rest of the
+   customer portal rather than its own narrower layout. */
+.cp-page-content{ max-width:1200px; margin:0 auto; padding:16px 20px 24px; }
+@media (min-width:768px){ .cp-page-content{ padding:16px 44px 24px; } }
+@media (min-width:1000px){ .cp-page-content{ padding:28px 24px 40px; } }
 /* Inline SVG icons replacing the emoji that used to sit next to the
    detail screen's card-head labels (❄️/📍/📷/📋/＋) — sized and aligned
    to sit on the text baseline the same way an emoji glyph would. */
@@ -1765,9 +1772,13 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-billing-bottom button{ border:none; border-radius:9px; background:var(--green-dark); color:#fff; padding:9px 12px; font-weight:700; font-size:11.5px; cursor:pointer; }
 
 /* ---- Units screen (full grid) ---- */
-.cp-units-grid{ display:grid; grid-template-columns:1fr; gap:12px; padding:16px; }
+/* Horizontal padding mirrors .cp-tools-head-aligned above (20 / 44 / 24)
+   so the grid's left edge lines up with the "Your units" heading above it
+   at every breakpoint, rather than the old flat 16px. */
+.cp-units-grid{ display:grid; grid-template-columns:1fr; gap:12px; padding:16px 20px; }
 @media (min-width:640px){ .cp-units-grid{ grid-template-columns:repeat(2,1fr); } }
-@media (min-width:1000px){ .cp-units-grid{ max-width:1100px; margin:0 auto; grid-template-columns:repeat(3,1fr); } }
+@media (min-width:768px){ .cp-units-grid{ padding:16px 44px; } }
+@media (min-width:1000px){ .cp-units-grid{ max-width:1200px; margin:0 auto; padding:16px 24px; grid-template-columns:repeat(3,1fr); } }
 
 /* ---- History screen (segmented Visits / Requests) ---- */
 .cp-history-head{ background:linear-gradient(135deg, var(--green-dark), var(--green)); padding:20px 18px; }
@@ -1782,6 +1793,16 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-tools-head{ background:linear-gradient(135deg, var(--green-dark), var(--green)); padding:20px 20px 18px; }
 .cp-tools-head h1{ color:#fff; font-size:18px; font-weight:700; margin:0; }
 .cp-tools-head p{ color:rgba(255,255,255,.8); font-size:12.5px; margin:4px 0 0; }
+/* Units screen header — the banner background stays full-bleed, but the
+   text inside it is inset by the same amount as the "Your units" heading
+   on Home (.cp-content + .cp-section combined, see above) at every
+   breakpoint, instead of the flat 20px .cp-tools-head uses everywhere
+   else. Scoped to this one screen (.cp-tools-head-aligned) so History/
+   Tools headers, which don't need to line up with Home, are untouched. */
+.cp-tools-head-aligned{ padding:20px 0 18px; }
+.cp-tools-head-aligned .cp-tools-head-inner{ padding:0 20px; }
+@media (min-width:768px){ .cp-tools-head-aligned .cp-tools-head-inner{ padding:0 44px; } }
+@media (min-width:1000px){ .cp-tools-head-aligned .cp-tools-head-inner{ max-width:1200px; margin:0 auto; padding:0 24px; } }
 .cp-search{ margin:16px 18px 0; background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:11px 13px; display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:13px; box-shadow:var(--cp-soft); }
 @media (min-width:1000px){ .cp-search, .cp-tools-section{ max-width:1100px; margin-left:auto; margin-right:auto; } }
 .cp-search input{ border:none; outline:none; flex:1; font-size:13px; background:none; }
