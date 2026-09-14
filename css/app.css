@@ -1339,8 +1339,9 @@
 .cp-row:last-child{border-bottom:none;}
 .cp-row-icon{
   width:32px; height:32px; border-radius:9px; background:var(--green-light);
-  display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; color:var(--green-dark); flex-shrink:0;
 }
+.cp-row-icon svg{ width:16px; height:16px; }
 .cp-row-title{font-size:13px; font-weight:700;}
 .cp-row-sub{font-size:11.5px; color:var(--text-muted); margin-top:2px;}
 .cp-row-chev{color:var(--text-muted); font-size:13px; margin-left:auto;}
@@ -1350,10 +1351,36 @@
 /* ---------- Equipment Detail / Service History additions ---------- */
 /* Append to css/app.css (after the customer-portal.css additions). */
 
+/* Back button — an icon-only, circular button now (was a plain "‹ Back to
+   Home" text link) so it reads as a clear, tappable back action rather
+   than blending into the page's body text. Styled like the header's
+   .cp-icon-btn (same size/shape language) but on a solid green-dark fill
+   so it stands out clearly against the light background here, where
+   there's no dark header behind it to give it contrast for free. */
 .cp-back-btn{
-  background:none; border:none; color:var(--green-dark); font-size:13px; font-weight:700;
-  cursor:pointer; padding:8px 0; margin-bottom:8px;
+  width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:var(--green-dark); border:none; color:#fff; cursor:pointer;
+  box-shadow:0 6px 14px rgba(21,77,52,.22); margin-bottom:16px;
 }
+.cp-back-btn svg{ width:20px; height:20px; }
+.cp-back-btn:active{ transform:scale(.94); }
+
+/* Wrapper for older customer-facing screens that still use the shared
+   .card/.field/.seg-tabs components (not the cp-* home-screen redesign) —
+   used by the equipment detail screen and the request-service screen.
+   Unlike .cp-content, those screens can't rely on each section supplying
+   its own inset, so without this their content ran edge-to-edge: .cp-
+   screen's -16px margin (which cancels .home-screen's base padding so the
+   redesigned Home screen can control its own spacing) left nothing to put
+   it back. 20px matches the header/home-screen inset on mobile; wider +
+   centered on desktop so cards/forms don't stretch full-bleed on a large
+   viewport. */
+.cp-page-content{ max-width:900px; margin:0 auto; padding:16px 20px 24px; }
+@media (min-width:1000px){ .cp-page-content{ padding:28px 32px 40px; } }
+/* Inline SVG icons replacing the emoji that used to sit next to the
+   detail screen's card-head labels (❄️/📍/📷/📋/＋) — sized and aligned
+   to sit on the text baseline the same way an emoji glyph would. */
+.cp-inline-ic{ width:16px; height:16px; vertical-align:-3px; margin-right:6px; flex-shrink:0; }
 
 .cp-spec-grid{display:flex; flex-direction:column;}
 .cp-spec-row{display:flex; justify-content:space-between; gap:10px; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);}
@@ -1487,33 +1514,40 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 }
 
 /* ---- Home screen header ----
-   Compact, pale welcome block (AWES_App_enroute redesign spec, "Welcome
-   section") — replaces the old full-bleed saturated green banner so the
-   unit status card below reads as the primary thing on the page, not the
-   header. Kept as a distinct .cp-header-soft modifier rather than editing
-   .cp-header's other historical use-cases (there aren't any left, but the
-   soft look is specific to this redesign — see git blame if that changes). */
+/* Solid dark-green header with rounded bottom corners, overlapped by the
+   hero card below it (see .cp-top-grid's negative margin-top further
+   down) — matches the reference mock's look of the greeting and the
+   status card reading as one connected piece rather than two separate
+   blocks. Replaces an earlier pale/bordered header (see git blame) that
+   was deliberately understated; this reference explicitly asks for the
+   bolder, connected look instead. */
 .cp-header.cp-header-soft{
-  padding:16px 18px; min-height:72px; box-sizing:border-box;
-  background:var(--green-light); border-bottom:1px solid var(--border);
+  /* 20px horizontal, matched below by .cp-hero/.cp-booking-banner's margin
+     and .cp-section's padding — was 18px here vs 16px on the cards, which
+     made the greeting text sit closer to the edge than everything below
+     it. Keeping one shared inset value so the whole page reads as one
+     aligned column instead of each block picking its own. Extra bottom
+     padding (vs. top) makes room for the hero card to overlap upward. */
+  padding:20px 20px 54px; min-height:72px; box-sizing:border-box;
+  background:var(--green-dark); border-radius:0 0 28px 28px;
   display:flex; align-items:center;
 }
 .cp-header-inner{ width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; }
 @media (min-width:1000px){ .cp-header-inner{ max-width:1200px; margin:0 auto; } }
-.cp-greet{ color:var(--text); font-size:17px; font-weight:700; margin:0; letter-spacing:-.02em; }
-.cp-greet-sub{ color:var(--text-muted); font-size:12.5px; margin:3px 0 0; }
+.cp-greet{ color:#fff; font-size:19px; font-weight:700; margin:0; letter-spacing:-.02em; }
+.cp-greet-sub{ color:rgba(255,255,255,.72); font-size:12.5px; margin:3px 0 0; }
 .cp-header-actions{ display:flex; align-items:center; gap:9px; position:relative; }
 .cp-icon-btn{
-  width:38px; height:38px; border-radius:50%; background:var(--surface); border:1px solid var(--border);
-  color:var(--green-dark); display:flex; align-items:center; justify-content:center; position:relative; cursor:pointer;
+  width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.2);
+  color:#fff; display:flex; align-items:center; justify-content:center; position:relative; cursor:pointer;
 }
 .cp-icon-btn svg{ width:18px; height:18px; }
-.cp-badge-dot{ position:absolute; top:1px; right:0; width:9px; height:9px; border-radius:50%; background:#ff754d; border:2px solid var(--green-light); }
+.cp-badge-dot{ position:absolute; top:1px; right:0; width:9px; height:9px; border-radius:50%; background:#ff754d; border:2px solid var(--green-dark); }
 .cp-avatar{
-  width:38px; height:38px; border-radius:50%; background:var(--green-dark); border:1px solid var(--green-dark);
+  width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3);
   color:#fff; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
-.cp-switcher-field{ padding:12px 16px 0; }
+.cp-switcher-field{ padding:12px 20px 0; }
 
 /* ---- Profile menu (Account settings / Notifications / Sign out) ---- */
 .cp-profile-menu-wrap{ position:relative; }
@@ -1534,14 +1568,20 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 
 /* ---- Status card + service callout: two-column on desktop, stacked on
    mobile (AWES_App_enroute redesign spec, "Redesigned desktop layout"). ---- */
-.cp-top-grid{ display:grid; grid-template-columns:1fr; gap:16px; padding-top:20px; }
+.cp-top-grid{
+  /* Negative margin pulls the hero card up so it overlaps the header's
+     rounded bottom (see .cp-header-soft's extra bottom padding above) —
+     the "connected card" look from the reference mock. Reset on desktop,
+     where the header/content split is a different, wider layout. */
+  display:grid; grid-template-columns:1fr; gap:16px; margin-top:-34px;
+}
 @media (min-width:1000px){
-  .cp-top-grid{ grid-template-columns:minmax(0,1.25fr) minmax(300px,0.75fr); gap:24px; align-items:stretch; padding-top:24px; }
+  .cp-top-grid{ grid-template-columns:minmax(0,1.25fr) minmax(300px,0.75fr); gap:24px; align-items:stretch; margin-top:0; padding-top:24px; }
 }
 
 /* ---- Unit status card ---- */
 .cp-hero{
-  margin:0 16px; background:var(--surface); border-radius:18px;
+  margin:0 20px; background:var(--surface); border-radius:18px;
   box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08)); border:1px solid var(--border); overflow:hidden; position:relative; cursor:pointer;
 }
 @media (min-width:1000px){ .cp-hero{ margin:0; } }
@@ -1582,8 +1622,20 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   display:flex; align-items:center; gap:5px; color:var(--teal); font-weight:700; text-decoration:none;
   flex-shrink:0; background:var(--teal-light); padding:7px 10px; border-radius:8px; font-size:11.5px; cursor:pointer;
 }
-.cp-hero-allclear{ padding:20px 18px; display:flex; align-items:center; gap:14px; }
-.cp-hero-allclear .ic{ width:46px; height:46px; border-radius:50%; background:var(--green-light); color:var(--green); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+/* All-clear state: centered icon/heading/subtext stack with the primary
+   CTA built into the card (see cpHeroAllClear() in customer-portal.js) —
+   matches the reference mock, where this is the only card on screen for
+   this state (no separate booking banner underneath it). */
+.cp-hero-allclear{ padding:32px 26px 26px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px; }
+.cp-hero-allclear .ic{
+  width:64px; height:64px; border-radius:18px; background:var(--teal-light); color:var(--teal);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-bottom:8px;
+}
+.cp-hero-allclear .ic svg{ width:28px; height:28px; }
+.cp-hero-allclear .cp-hero-name{ font-size:19px; }
+.cp-hero-allclear .cp-hero-sub{ max-width:320px; margin:2px 0 14px; }
+.cp-hero-allclear .cp-hero-btn{ display:flex; align-items:center; justify-content:center; gap:8px; }
+.cp-hero-allclear .cp-hero-btn svg{ width:16px; height:16px; }
 .cp-hero-scheduled{ padding:18px 18px 15px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .cp-hero-scheduled .ic{ width:46px; height:46px; border-radius:13px; background:var(--teal-light); color:var(--teal); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .cp-hero-danger{ box-shadow:0 6px 18px rgba(179,64,45,.12); border:1px solid #eeb3b3; }
@@ -1592,9 +1644,10 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-hero-danger-cta{ padding:0 18px 18px; }
 .cp-hero-btn{ width:100%; border:none; padding:12px; border-radius:10px; font-size:13.5px; font-weight:700; cursor:pointer; color:#fff; box-shadow:0 6px 14px rgba(179,64,45,.19); }
 .cp-hero-btn.danger{ background:var(--danger); }
+.cp-hero-btn.primary{ background:var(--green-dark); box-shadow:0 6px 14px rgba(21,77,52,.19); }
 .cp-hero-muted-note{ font-size:12px; color:var(--text-muted); padding:0 18px 18px; }
 
-.cp-section{ padding:24px 18px 0; }
+.cp-section{ padding:24px 20px 0; }
 @media (min-width:1000px){ .cp-section{ max-width:1200px; margin:0 auto; padding:24px 0 0; } }
 .cp-section-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
 .cp-section-head h2{ font-size:15px; font-weight:700; margin:0; letter-spacing:-.01em; }
@@ -1602,37 +1655,44 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 
 /* ---- Unit cards — vertical stack, photo-left (replaces the old
    horizontal carousel to match this theme's layout) ---- */
-.cp-unit-stack{ display:grid; gap:12px; }
+/* Photo + name/spec on top, a status badge floating above the card's
+   top-left corner, and a full-width footer row (status pill + view link)
+   below — matches the reference mock: a shorter, inset photo instead of a
+   full-height edge-to-edge one, and a footer that spans the whole card
+   instead of being squeezed into the text column. See cpUnitCardHtml() in
+   customer-portal.js for the two-label (cornerLabel/footLabel) split. */
+.cp-unit-stack{ display:grid; gap:16px; }
 .cp-unit-card{
-  background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden;
-  box-shadow:var(--cp-soft); display:grid; grid-template-columns:110px 1fr; height:132px;
+  position:relative; background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  box-shadow:var(--cp-soft); padding:18px 14px 14px;
   cursor:pointer; transition:transform .15s ease, box-shadow .15s ease;
 }
 .cp-unit-card:hover{ transform:translateY(-2px); box-shadow:0 12px 24px rgba(21,77,52,.12); }
-.cp-unit-card .img-wrap{ position:relative; height:100%; background:var(--green-light); overflow:hidden; }
+.cp-unit-card .top{ display:flex; gap:14px; align-items:flex-start; }
+.cp-unit-card .img-wrap{ position:relative; width:104px; height:78px; border-radius:12px; overflow:hidden; background:var(--green-light); flex-shrink:0; }
 .cp-unit-card .img-wrap img{ width:100%; height:100%; object-fit:cover; display:block; }
 .cp-unit-card .img-wrap .fallback-ic{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--green-dark); }
-.cp-unit-card .img-wrap .fallback-ic svg{ width:44px; height:44px; }
+.cp-unit-card .img-wrap .fallback-ic svg{ width:36px; height:36px; }
 .cp-unit-card.state-active .img-wrap{ background:#fdf1de; } .cp-unit-card.state-active .fallback-ic{ color:var(--amber); }
 .cp-unit-card.state-danger .img-wrap{ background:#fbeaea; } .cp-unit-card.state-danger .fallback-ic{ color:var(--danger); }
 .cp-unit-card.state-teal .img-wrap{ background:var(--teal-light); } .cp-unit-card.state-teal .fallback-ic{ color:var(--teal); }
+.cp-unit-card .info{ flex:1; min-width:0; padding-top:2px; }
+.cp-unit-card .name{ font-size:14.5px; font-weight:700; margin:0 0 4px; }
+.cp-unit-card .meta{ font-size:11.5px; color:var(--text-muted); margin:0; line-height:1.45; }
 .cp-unit-badge-corner{
-  position:absolute; left:8px; top:8px; background:#fff; padding:4px 8px; border-radius:12px;
-  font-size:9px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; box-shadow:0 2px 8px rgba(0,0,0,.08);
+  position:absolute; left:14px; top:-11px; background:#fff; padding:5px 10px; border-radius:20px;
+  font-size:9px; text-transform:uppercase; letter-spacing:.05em; font-weight:800; box-shadow:0 3px 10px rgba(0,0,0,.1);
 }
 .cp-unit-badge-corner.state-good{ color:var(--green); } .cp-unit-badge-corner.state-teal{ color:var(--teal); }
 .cp-unit-badge-corner.state-active{ color:var(--amber); } .cp-unit-badge-corner.state-danger{ color:var(--danger); }
-.cp-unit-card .body{ padding:15px 14px; display:flex; flex-direction:column; justify-content:center; }
-.cp-unit-card .name{ font-size:13.5px; font-weight:700; margin:0 0 3px; }
-.cp-unit-card .meta{ font-size:11px; color:var(--text-muted); margin:0 0 11px; }
-.cp-unit-card .foot{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.cp-unit-badge{ font-size:10px; font-weight:700; padding:5px 8px; border-radius:7px; }
+.cp-unit-card .foot{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:14px; }
+.cp-unit-badge{ font-size:11px; font-weight:700; padding:7px 11px; border-radius:9px; line-height:1.3; }
 .cp-unit-badge.state-good{ background:var(--green-light); color:var(--green-dark); }
 .cp-unit-badge.state-teal{ background:var(--teal-light); color:var(--teal); }
 .cp-unit-badge.state-active{ background:#fdf1de; color:var(--amber); }
 .cp-unit-badge.state-danger{ background:#fbeaea; color:var(--danger); }
-.cp-unit-card .view-link{ color:var(--teal); font-size:11px; font-weight:700; text-decoration:none; flex-shrink:0; }
-@media (min-width:640px){ .cp-unit-card{ grid-template-columns:150px 1fr; height:148px; } }
+.cp-unit-card .view-link{ color:var(--teal); font-size:11.5px; font-weight:700; text-decoration:none; flex-shrink:0; }
+@media (min-width:640px){ .cp-unit-card .img-wrap{ width:140px; height:104px; } }
 
 /* ---- Recent activity ---- */
 .cp-card-list{ background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--cp-soft); overflow:hidden; }
@@ -1678,7 +1738,7 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    copy, button) rather than the old horizontal strip, since on desktop
    it now occupies a narrower side column rather than the full width. */
 .cp-booking-banner{
-  margin:0 16px; padding:20px; border-radius:16px; display:flex; flex-direction:column;
+  margin:0 20px; padding:20px; border-radius:16px; display:flex; flex-direction:column;
   justify-content:space-between; gap:16px;
   background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08));
 }
@@ -1694,7 +1754,7 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 /* ---- Billing card — only rendered when there's a real fee amount to
    show (see renderCustomerHome in customer-portal.js); never fabricated. ---- */
 .cp-billing-card{
-  margin:20px 18px 0; border:1px solid #f0d18c; background:linear-gradient(135deg,#fff9ea,#fffcf6);
+  margin:20px 20px 0; border:1px solid #f0d18c; background:linear-gradient(135deg,#fff9ea,#fffcf6);
   border-radius:15px; padding:15px;
 }
 @media (min-width:1000px){ .cp-billing-card{ max-width:1200px; margin:20px auto 0; } }

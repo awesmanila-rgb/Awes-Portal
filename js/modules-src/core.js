@@ -84,17 +84,18 @@
     return 'EQ-' + (id.length>8 ? id.slice(0,8) : id).toUpperCase();
   }
   // The name to show for a unit wherever an equipment list or title needs
-  // ONE identifying string. Prefers the admin-set customer_equipment.label
-  // (see 20260909_02_customer_equipment_label.sql and the "Customer Label"
-  // field in admin.js's equipment detail overlay) — once a customer's unit
-  // has a plain-language label, that's what should appear everywhere
-  // instead of a meaningless id. Falls back to equipShortId() when no
-  // label has been set yet, so every list row still shows *some* stable
-  // identifier rather than nothing.
+  // ONE identifying string. Priority: the customer-set label (see
+  // 20260909_02_customer_equipment_label.sql and the "Customer Label"
+  // field in admin.js's equipment detail overlay) → the unit's location
+  // (e.g. "Living Room") → equipShortId() as a last resort, so every list
+  // row still shows *some* stable identifier rather than nothing.
   function equipDisplayName(eq){
     if(!eq) return '';
     const label = (eq.label||'').trim();
-    return label || equipShortId(eq);
+    if(label) return label;
+    const loc = (eq.equipLocation||'').trim();
+    if(loc) return loc;
+    return equipShortId(eq);
   }
 
   // ---------- shared cloud (Supabase) ----------

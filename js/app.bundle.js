@@ -86,17 +86,18 @@
     return 'EQ-' + (id.length>8 ? id.slice(0,8) : id).toUpperCase();
   }
   // The name to show for a unit wherever an equipment list or title needs
-  // ONE identifying string. Prefers the admin-set customer_equipment.label
-  // (see 20260909_02_customer_equipment_label.sql and the "Customer Label"
-  // field in admin.js's equipment detail overlay) — once a customer's unit
-  // has a plain-language label, that's what should appear everywhere
-  // instead of a meaningless id. Falls back to equipShortId() when no
-  // label has been set yet, so every list row still shows *some* stable
-  // identifier rather than nothing.
+  // ONE identifying string. Priority: the customer-set label (see
+  // 20260909_02_customer_equipment_label.sql and the "Customer Label"
+  // field in admin.js's equipment detail overlay) → the unit's location
+  // (e.g. "Living Room") → equipShortId() as a last resort, so every list
+  // row still shows *some* stable identifier rather than nothing.
   function equipDisplayName(eq){
     if(!eq) return '';
     const label = (eq.label||'').trim();
-    return label || equipShortId(eq);
+    if(label) return label;
+    const loc = (eq.equipLocation||'').trim();
+    if(loc) return loc;
+    return equipShortId(eq);
   }
 
   // ---------- shared cloud (Supabase) ----------
@@ -13198,7 +13199,11 @@
     chevron:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
     pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
     search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
-    camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/></svg>'
+    camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/></svg>',
+    // Booking/"no active service" icon — a card-like tile with a horizontal
+    // band, matching the reference mock's rounded booking icon.
+    card:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg>',
+    plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>'
   };
 
   // ---------- Unit card (photo-led, vertical stack) ----------
@@ -13214,28 +13219,40 @@
     if(eq.status.key==='scheduled') return 'state-teal';
     return 'state-good';
   }
+  // ---------- Unit card ----------
+  // Photo + name/spec row on top, a status badge floating above the card's
+  // top-left corner, and a full-width footer row (status pill + view link)
+  // below — matches the reference mock's layout (a shorter, inset photo
+  // rather than a full-height edge-to-edge one, and the footer no longer
+  // squeezed into the text column). cornerLabel (the floating badge) stays
+  // the broad ALL-CAPS state; footLabel is a more specific, friendlier
+  // phrase for the same state — two different pieces of copy for two
+  // different jobs, not the same label repeated twice like the old design.
   function cpUnitCardHtml(eq, photoMap){
     const stateClass = cpUnitStateClass(eq);
     const name = escapeHtml(equipDisplayName(eq));
-    const badgeLabel = eq.status.key==='overdue' ? 'Needs attention' : eq.status.key==='due-soon' ? 'Due soon' : eq.status.key==='scheduled' ? 'Scheduled' : 'Operating normally';
+    const cornerLabel = eq.status.key==='overdue' ? 'NEEDS ATTENTION' : eq.status.key==='due-soon' ? 'DUE SOON' : eq.status.key==='scheduled' ? 'SCHEDULED' : 'OPERATING WELL';
+    const footLabel = eq.status.key==='overdue' ? 'Needs attention' : eq.status.key==='due-soon' ? 'Filter check needed' : eq.status.key==='scheduled' ? 'Visit scheduled' : 'Good health';
     const specLine = [eq.brand, eq.equipType, eq.coolCap].filter(Boolean).map(escapeHtml).join(' · ') || escapeHtml(eq.equipLocation||'—');
     const lastLine = eq.lastReport ? 'Last service '+escapeHtml(fmtDate(eq.lastReport.date)) : 'No service on record yet';
     const photoUrl = photoMap && photoMap[eq.id];
     return (
       '<div class="cp-unit-card '+stateClass+'" data-equip-id="'+eq.id+'">'+
-        '<div class="img-wrap">'+
-          (photoUrl
-            ? '<img src="'+escapeHtml(photoUrl)+'" alt="" loading="lazy">'
-            : '<div class="fallback-ic">'+CP_ICON.unit+'</div>')+
-          '<span class="cp-unit-badge-corner '+stateClass+'">'+badgeLabel+'</span>'+
-        '</div>'+
-        '<div class="body">'+
-          '<p class="name">'+name+'</p>'+
-          '<p class="meta">'+specLine+' · '+lastLine+'</p>'+
-          '<div class="foot">'+
-            '<span class="cp-unit-badge '+stateClass+'">'+badgeLabel+'</span>'+
-            '<a class="view-link">View unit details →</a>'+
+        '<span class="cp-unit-badge-corner '+stateClass+'">'+cornerLabel+'</span>'+
+        '<div class="top">'+
+          '<div class="img-wrap">'+
+            (photoUrl
+              ? '<img src="'+escapeHtml(photoUrl)+'" alt="" loading="lazy">'
+              : '<div class="fallback-ic">'+CP_ICON.unit+'</div>')+
           '</div>'+
+          '<div class="info">'+
+            '<p class="name">'+name+'</p>'+
+            '<p class="meta">'+specLine+' · '+lastLine+'</p>'+
+          '</div>'+
+        '</div>'+
+        '<div class="foot">'+
+          '<span class="cp-unit-badge '+stateClass+'">'+footLabel+'</span>'+
+          '<a class="view-link">View details →</a>'+
         '</div>'+
       '</div>'
     );
@@ -13254,10 +13271,18 @@
   function cpEquipLabel(eq){ return eq ? escapeHtml(equipDisplayName(eq)) : 'your unit'; }
 
   function cpHeroAllClear(){
+    // Matches the reference mock: icon + heading + subtext + the primary
+    // CTA all live inside this one card now, instead of the CTA sitting in
+    // a separate "Need service for another unit?" banner below — see
+    // renderCustomerHero()'s cpBookingBanner toggle, which hides that
+    // separate banner specifically for this state so the CTA isn't
+    // duplicated on screen.
     return (
       '<div class="cp-hero-allclear">'+
-        '<div class="ic">'+CP_ICON.check+'</div>'+
-        '<div><p class="cp-hero-name">Everything is up to date</p><p class="cp-hero-sub">Your unit is operating normally.</p></div>'+
+        '<div class="ic">'+CP_ICON.card+'</div>'+
+        '<p class="cp-hero-name">No active service right now</p>'+
+        '<p class="cp-hero-sub">Your AC units are being monitored. When you need help, you can book a service in just a few taps.</p>'+
+        '<button type="button" class="cp-hero-btn primary" data-action="requestService">'+CP_ICON.plus+' Book a service</button>'+
       '</div>'
     );
   }
@@ -13387,7 +13412,7 @@
     });
     const scheduled = rows.filter(r=> r.status==='schedule_confirmed');
 
-    let html, danger = false;
+    let html, danger = false, isAllClear = false;
     if(flagged.length > 1 || overdueNoRequest.length + flagged.length > 1){
       // More than one thing needs attention at once — summarize rather
       // than arbitrarily feature one unit over another.
@@ -13408,14 +13433,19 @@
     } else if(scheduled.length > 0){
       html = cpHeroScheduled(scheduled[0], cpFindEquip(scheduled[0].equipmentId));
     } else {
-      html = cpHeroAllClear();
+      html = cpHeroAllClear(); isAllClear = true;
     }
 
     hero.className = 'cp-hero' + (danger ? ' cp-hero-danger' : '');
     hero.innerHTML = html;
+    // The all-clear card now carries its own "Book a service" CTA (see
+    // cpHeroAllClear()), so the separate banner would just be a duplicate
+    // button sitting right underneath it — hide it for this state only.
+    if($('cpBookingBanner')) $('cpBookingBanner').style.display = isAllClear ? 'none' : '';
     hero.onclick = (e)=>{
       const actionEl = e.target.closest('[data-action]');
       const action = actionEl ? actionEl.dataset.action : null;
+      if(action==='requestService'){ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); return; }
       if(action==='overdue'){ const eq = overdueNoRequest[0]; if(eq) cpRequestServiceForEquip(eq); return; }
       if(action==='ready'){ if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]); return; }
       if(action==='message'){ if(active[0] && typeof srOpenDetail==='function') srOpenDetail(active[0]); return; }
@@ -13773,7 +13803,7 @@
     }
     return (
       '<div class="cp-row" style="align-items:flex-start;" data-req-id="'+r.id+'">'+
-        '<div class="cp-row-icon">🛠️</div>'+
+        '<div class="cp-row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg></div>'+
         '<div class="cp-row-body">'+
           '<div class="cp-row-title">'+eqLabel+'</div>'+
           '<div class="cp-row-sub">'+escapeHtml(r.description||'')+'</div>'+
@@ -13865,13 +13895,16 @@
 
   // Central router for the five redesigned screens. `sub` is an optional
   // sub-selection some screens understand (History's 'Visits'/'Requests'
-  // segment). Always routes through showCustomerHome() first so the very
-  // long "hide every other view" list only needs to live in one place
-  // (customer-equipment-history.js) — this just re-shows a different
-  // screen than Home immediately after.
+  // segment). Routes 'Home' through the real showCustomerHome() (fresh
+  // data reload + render), and every other tab through the lightweight
+  // cpEnterPortalShell() (DOM show/hide only) so the very long "hide every
+  // other view" list still only needs to live in one place
+  // (customer-equipment-history.js) — without re-triggering a full data
+  // reload (and the cpEquipment=[] reset it starts with) on every tab tap.
+  // See cpEnterPortalShell()'s comment for the bug this fixes.
   function cpShowScreen(screen, sub){
-    showCustomerHome();
-    if(screen==='Home') return;
+    if(screen==='Home'){ showCustomerHome(); return; }
+    if(typeof cpEnterPortalShell === 'function') cpEnterPortalShell();
     $('customerHomeScreen').style.display = 'none';
     cpSetNavActive(screen);
     if(screen==='Units'){ $('customerUnitsScreen').style.display = ''; renderCustomerUnitsScreen(); }
@@ -14357,7 +14390,18 @@
   // other view the same way showHome() does for admin/tech — but kept as
   // its own function so admin/tech's showHome() only needs a one-line
   // branch pointing here, with no other changes to its existing logic.
-  function showCustomerHome(){
+  // Pure DOM housekeeping: hide every other view in the app and reveal the
+  // customer-portal shell. Deliberately does NOT touch cpEquipment/cpReports
+  // or call initCustomerHomeScreen() — this must be safe to call on every
+  // tab switch (see cpShowScreen() in customer-portal.js). Split out of
+  // showCustomerHome() below after a bug where re-running the data reload
+  // on every tab tap raced against renderCustomerUnitsScreen(): reload
+  // resets cpEquipment=[] synchronously before awaiting the fetch, so a
+  // "Units" tap that went through the old combined function could paint
+  // the grid with that momentarily-empty array and never re-paint once
+  // the real data came back — "My units" showing "No equipment enrolled"
+  // even though the person has units.
+  function cpEnterPortalShell(){
     document.body.classList.add('dashboard-active');
     $('serviceReportView').style.display = 'none';
     $('dtrView').style.display = 'none';
@@ -14387,8 +14431,12 @@
     $('homeBtn').style.display = 'none';
     setSidebarActive('custNavHome');
     setHeaderTitle('Customer Portal', "Your equipment & service history");
-    $('customerHomeScreen').style.display = '';
     if($('cpNav')) $('cpNav').style.display = '';
+  }
+
+  function showCustomerHome(){
+    cpEnterPortalShell();
+    $('customerHomeScreen').style.display = '';
     if(typeof cpSetNavActive === 'function') cpSetNavActive('Home');
     initCustomerHomeScreen();
     window.scrollTo({top:0});

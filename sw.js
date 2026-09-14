@@ -1,3 +1,76 @@
+// Bumped to v48 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/app.bundle.js again — applied the same
+// treatment as the equipment detail screen to the request-service screen
+// (customerRequestsScreen): wrapped its content in the shared
+// .cp-page-content inset (was edge-to-edge, same root cause as the
+// equipment detail screen's earlier fix — renamed .cp-detail-content to
+// .cp-page-content since it's now shared by both), replaced its emoji
+// (🛠️/📋) with inline SVGs, and gave its "‹ Back to Home" text button the
+// same emphasized circular icon treatment as the equipment detail screen
+// (it had been left as plain text when that change was made, which broke
+// under the new .cp-back-btn circle sizing).
+//
+// Bumped to v47 to force every installed device to drop its old cache and
+// re-fetch index.html again — pinch-to-zoom is now disabled
+// (maximum-scale=1.0, user-scalable=no on the viewport meta tag), per
+// explicit request, reversing an earlier deliberate accessibility
+// tradeoff (see the comment on that meta tag in index.html).
+//
+// Bumped to v46 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css again — the equipment detail screen's
+// "‹ Back to Home" text link is now an icon-only, emphasized circular
+// back button (solid green-dark fill, arrow icon) instead of blending in
+// as plain body text.
+//
+// Bumped to v45 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css again — replaced the equipment detail
+// screen's emoji (❄️/📍/📷/📋/＋) with inline SVG icons for a consistent
+// look across platforms (emoji rendering varies a lot by OS/browser font).
+//
+// Bumped to v44 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css again — the equipment detail screen
+// (customerEquipmentDetailScreen) still used the older shared .card
+// component with no side inset of its own, so with .cp-screen's -16px
+// margin cancelling the base padding, its cards ran edge-to-edge with no
+// side margin at all on mobile, and unbounded-width on desktop. Wrapped
+// its content in a new .cp-detail-content container (20px inset on
+// mobile matching the header/home-screen, wider + centered on desktop).
+//
+// Bumped to v43 to force every installed device to drop its old cache and
+// re-fetch app.bundle.js again — equipDisplayName() now falls back to the
+// unit's location before the EQ-XXXXXXXX short id, so an un-labeled unit
+// shows something like "Living Room" instead of a raw id whenever a
+// location has been recorded for it. See core.js.
+//
+// Bumped to v42 to force every installed device to drop its old cache and
+// re-fetch app.bundle.js again — unit card link now reads "View details"
+// instead of "View unit".
+//
+// Bumped to v41 to force every installed device to drop its old cache and
+// re-fetch css/app.css/app.bundle.js again — reworked the home screen to
+// match a reference mock: the header is now solid dark green with rounded
+// bottom corners and the hero card overlaps up into it as one connected
+// block; the "no active service" state now carries its own icon/heading/
+// button (the separate booking banner is hidden for that state only); and
+// the unit-card layout changed from a full-height edge-to-edge photo to an
+// inset photo with a floating state badge and a full-width status/footer
+// row. See cpHeroAllClear()/cpUnitCardHtml() in customer-portal.js.
+//
+// Bumped to v40 to force every installed device to drop its old cache and
+// re-fetch css/app.css again — unified the customer portal home screen's
+// horizontal spacing (header/hero/booking-banner/sections/billing-card
+// were a mix of 16px and 18px insets) to one consistent 20px so the
+// greeting text isn't tighter to the edge than the cards below it.
+//
+// Bumped to v39 to force every installed device to drop its old cache and
+// re-fetch app.bundle.js again — fixed "My units" (and every other bottom
+// nav tab) sometimes opening to an empty/"No equipment enrolled" screen:
+// cpShowScreen() was re-running the full customer-data reload (which
+// resets cpEquipment to [] before its fetch resolves) on every tab
+// switch, and could paint the tab with that empty array before the real
+// data came back. See cpEnterPortalShell() in
+// js/modules-src/customer-equipment-history.js.
+//
 // Bumped to v38 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/app.bundle.js again — a stale cached shell
 // on some devices was showing a mismatched customer-portal layout (bottom
@@ -28,7 +101,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v38';
+const CACHE_NAME = 'awes-sr-v48';
 
 // Split into two lists on purpose.
 //

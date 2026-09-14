@@ -282,7 +282,18 @@
   // other view the same way showHome() does for admin/tech — but kept as
   // its own function so admin/tech's showHome() only needs a one-line
   // branch pointing here, with no other changes to its existing logic.
-  function showCustomerHome(){
+  // Pure DOM housekeeping: hide every other view in the app and reveal the
+  // customer-portal shell. Deliberately does NOT touch cpEquipment/cpReports
+  // or call initCustomerHomeScreen() — this must be safe to call on every
+  // tab switch (see cpShowScreen() in customer-portal.js). Split out of
+  // showCustomerHome() below after a bug where re-running the data reload
+  // on every tab tap raced against renderCustomerUnitsScreen(): reload
+  // resets cpEquipment=[] synchronously before awaiting the fetch, so a
+  // "Units" tap that went through the old combined function could paint
+  // the grid with that momentarily-empty array and never re-paint once
+  // the real data came back — "My units" showing "No equipment enrolled"
+  // even though the person has units.
+  function cpEnterPortalShell(){
     document.body.classList.add('dashboard-active');
     $('serviceReportView').style.display = 'none';
     $('dtrView').style.display = 'none';
@@ -312,8 +323,12 @@
     $('homeBtn').style.display = 'none';
     setSidebarActive('custNavHome');
     setHeaderTitle('Customer Portal', "Your equipment & service history");
-    $('customerHomeScreen').style.display = '';
     if($('cpNav')) $('cpNav').style.display = '';
+  }
+
+  function showCustomerHome(){
+    cpEnterPortalShell();
+    $('customerHomeScreen').style.display = '';
     if(typeof cpSetNavActive === 'function') cpSetNavActive('Home');
     initCustomerHomeScreen();
     window.scrollTo({top:0});
