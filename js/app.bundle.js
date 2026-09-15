@@ -14093,20 +14093,37 @@
       }
     }
 
-    // Billing — a real fee amount if one exists (accepted or awaiting the
-    // customer's response), never a fabricated invoice. Hidden entirely
-    // otherwise; "Pay now" is a placeholder since no payment gateway is
-    // wired up.
-    const billed = cpMyRequestsCache.find(r=> r.feeAmount!=null && r.status!=='completed' && r.status!=='cancelled');
-    const billingCard = $('cpBillingCard');
-    if(billed){
-      $('cpBillingLabel').textContent = '₱'+billed.feeAmount;
-      $('cpBillingSub').textContent = billed.feeStatus==='proposed' ? 'Awaiting your review' : 'Service fee';
-      billingCard.style.display = '';
-      billingCard.onclick = null;
-      $('cpBillingPayBtn').onclick = (e)=>{ e.stopPropagation(); toast('Online payments — coming soon'); };
-    } else {
-      billingCard.style.display = 'none';
+    // Request Status — beside the hero, in the top-grid's second slot
+    // (shares it with #cpBookingBanner; only one of the two shows at a
+    // time). Generalizes the old fee-only billing card: surfaces whatever
+    // is actually awaiting the CUSTOMER'S review right now — a proposed
+    // fee or a proposed schedule — not just a fee. Deliberately narrower
+    // than "any active request" (dispatched/en_route/in_progress already
+    // has its own full treatment in the hero itself; nothing extra for
+    // the customer to review there). Only ever a real request's own
+    // numbers — never fabricated.
+    const needsReview = cpMyRequestsCache.find(r=>
+      (r.status==='fee_proposed' && r.feeStatus==='proposed') || r.status==='schedule_proposed'
+    );
+    const statusCard = $('cpRequestStatusCard');
+    if(statusCard){
+      if(needsReview){
+        const isFee = needsReview.status==='fee_proposed';
+        $('cpReqStatusLabel').textContent = isFee ? 'Service Fee' : 'Proposed Schedule';
+        $('cpReqStatusValue').textContent = isFee
+          ? '₱'+needsReview.feeAmount
+          : (needsReview.proposedScheduleDate ? fmtDate(needsReview.proposedScheduleDate) : 'Date to be confirmed')+
+            (needsReview.proposedScheduleTime ? ' · '+needsReview.proposedScheduleTime : '');
+        $('cpReqStatusSub').textContent = 'Awaiting your review';
+        $('cpReqStatusBtn').onclick = (e)=>{
+          e.stopPropagation();
+          if(typeof srOpenDetail==='function') srOpenDetail(needsReview);
+        };
+        statusCard.style.display = '';
+        if($('cpBookingBanner')) $('cpBookingBanner').style.display = 'none';
+      } else {
+        statusCard.style.display = 'none';
+      }
     }
 
     // Recent activity — last 3 reports, newest first (already sorted by

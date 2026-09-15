@@ -1996,6 +1996,12 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   border-radius:15px; padding:15px;
 }
 @media (min-width:1000px){ .cp-billing-card{ max-width:1200px; margin:20px auto 0; } }
+/* Now doubles as the "Request Status" companion inside .cp-top-grid,
+   beside the hero (see index.html/renderCustomerHome) — needs the same
+   margin pattern as .cp-hero/.cp-booking-banner there, not its old
+   standalone-block margin/max-width. */
+.cp-billing-card.cp-status-companion{ margin:0 24px; }
+@media (min-width:1000px){ .cp-billing-card.cp-status-companion{ margin:0; max-width:none; } }
 .cp-billing-card small{ display:block; text-transform:uppercase; letter-spacing:.06em; font-size:9.5px; font-weight:800; color:var(--amber); }
 .cp-billing-card b{ display:block; margin:5px 0 13px; font-size:15px; }
 .cp-billing-bottom{ display:flex; justify-content:space-between; align-items:center; }

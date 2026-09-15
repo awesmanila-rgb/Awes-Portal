@@ -1,3 +1,13 @@
+// Bumped to v59 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — replaced the
+// standalone "Service Fee" billing card (shown below Units) with a
+// "Request Status" card in the top-grid, beside the hero, sharing its
+// slot with the booking banner. Generalized beyond fee-only: shows
+// whichever of fee_proposed/schedule_proposed a request is actually
+// awaiting the customer's review on. See cpRequestStatusCard in
+// index.html and the Request Status block in renderCustomerHome()
+// (customer-portal.js).
+//
 // Bumped to v58 to force every installed device to drop its old cache and
 // re-fetch css/app.css again — the account picker screen (multi-account
 // login) was packing 4 cards per row at a 260px minimum width with the
@@ -210,7 +220,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v58';
+const CACHE_NAME = 'awes-sr-v59';
 
 // Split into two lists on purpose.
 //

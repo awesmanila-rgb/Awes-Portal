@@ -620,13 +620,34 @@ window.awesCss = {
            card. Layout skeleton below never changes, only this block. -->
       <div class="cp-hero" id="cpHero"></div>
 
-      <!-- Primary CTA — matches this theme's "booking banner" treatment. -->
+      <!-- Primary CTA — matches this theme's "booking banner" treatment.
+           Mutually exclusive with #cpRequestStatusCard right below it (see
+           renderCustomerHome in customer-portal.js) — whenever a request
+           needs the customer's review (fee proposed, schedule proposed),
+           the status card takes this slot instead of the generic "book
+           another unit" prompt. -->
       <div class="cp-booking-banner" id="cpBookingBanner">
         <div>
           <h2>Need service for another unit?</h2>
           <p>Book a visit at a time that works for you.</p>
         </div>
         <button type="button" id="cpRequestServiceBtn">Book a service</button>
+      </div>
+
+      <!-- Request Status — replaces the old fee-only Billing card, and
+           moved up here beside the hero instead of its old spot below
+           Units. Generalized beyond just a proposed fee: shows whichever
+           stage of the customer's active request is actually awaiting
+           their review (fee or schedule), same visual treatment either
+           way. Only a real, live request's own numbers ever show here —
+           see renderCustomerHome. -->
+      <div class="cp-billing-card cp-status-companion" id="cpRequestStatusCard" style="display:none;">
+        <small id="cpReqStatusLabel">Request status</small>
+        <b id="cpReqStatusValue">—</b>
+        <div class="cp-billing-bottom">
+          <span id="cpReqStatusSub"></span>
+          <button type="button" id="cpReqStatusBtn">Review</button>
+        </div>
       </div>
     </div>
 
@@ -636,18 +657,6 @@ window.awesCss = {
         <a id="cpUnitsViewAllLink">Manage units</a>
       </div>
       <div class="cp-unit-stack" id="cpUnitScroll"></div>
-    </div>
-
-    <!-- Billing — only shown when a real fee amount exists on one of this
-         customer's requests (see renderCustomerHome in customer-portal.js).
-         "Pay now" is a placeholder — no payment gateway is wired up yet. -->
-    <div class="cp-billing-card" id="cpBillingCard" style="display:none;">
-      <small>Service fee</small>
-      <b id="cpBillingLabel">—</b>
-      <div class="cp-billing-bottom">
-        <span id="cpBillingSub"></span>
-        <button type="button" id="cpBillingPayBtn">Pay now</button>
-      </div>
     </div>
 
     <div class="cp-section">
