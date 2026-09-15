@@ -587,12 +587,23 @@ window.awesCss = {
        record, which meant the overwhelming majority of single-customer
        logins never got any on-screen confirmation of which company/site
        account they were viewing. A single-customer login still gets this
-       same "Viewing" label, just with a plain, non-interactive name
-       instead of a dropdown (nothing to switch to) — see cpRenderSwitcher
-       toggling the .single class below. -->
-  <div class="cp-switcher-field field" id="cpSwitcherField" style="display:none;">
-    <label>Viewing</label>
-    <div class="cp-switcher-box" id="cpSwitcherBox">
+       same "Viewing" label, just without the Switch badge (nothing to
+       switch to).
+       The native <select> that used to be the switch control is kept in
+       the DOM but hidden: on mobile it rendered as an easy-to-miss inline
+       dropdown, so the visible control is now the name + "Switch" badge
+       below, which opens the same full account-picker screen used at
+       sign-in. The element stays so its existing change handler and any
+       other reference to it keep working. -->
+  <div class="cp-viewing-bar" id="cpSwitcherField" style="display:none;">
+    <div class="cp-viewing-main">
+      <span class="cp-viewing-label">Viewing</span>
+      <span class="cp-viewing-name" id="cpViewingName">—</span>
+    </div>
+    <button type="button" class="cp-viewing-switch" id="cpViewingSwitchBtn" style="display:none;">
+      <span class="cp-viewing-switch-count" id="cpViewingSwitchCount">2</span>Switch
+    </button>
+    <div class="cp-switcher-box" id="cpSwitcherBox" hidden>
       <select id="cpCustomerSwitcher"></select>
     </div>
   </div>

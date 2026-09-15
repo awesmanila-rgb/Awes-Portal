@@ -54,10 +54,21 @@
      a pixel wider than the viewport (a shadow, a negative margin, a
      100vw element — easy to end up with one somewhere in an app this
      size). Elements that are deliberately horizontally scrollable, like
-     .cp-filter-chips, keep working — overflow-x:hidden on html/body only
+     .cp-filter-chips, keep working — overflow-x:hidden on body only
      clips the outer page, it doesn't reach into a descendant that sets
      its own overflow-x:auto. */
-  html{ overscroll-behavior:none; overflow-x:hidden; }
+  /* overflow-x:hidden is set on body ONLY, deliberately — NOT on html as
+     well. Setting it on both is what caused the "nothing scrolls at all,
+     on every screen" bug: per spec, an element with overflow-x:hidden and
+     overflow-y:visible has its overflow-y computed to auto, which turns
+     <html> into its own scroll container instead of letting the viewport
+     scroll the page. On iOS Safari (and some Android webviews) that
+     container then doesn't respond to touch drags at all, so the whole
+     app reads as frozen. On body alone it behaves as intended: the page
+     still can't drift sideways, and vertical scrolling is untouched.
+     If a sideways drift ever comes back, fix the specific element that's
+     wider than the viewport — don't re-add overflow-x here. */
+  html{ overscroll-behavior:none; }
   body{
     margin:0;
     font-family:inherit;
@@ -1593,6 +1604,47 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   color:#fff; font-weight:800; font-size:14px; display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
 .cp-switcher-field{ padding:12px 24px 0; }
+
+/* "Viewing <account name>  [Switch]" bar — sits directly under the dark
+   header, so the account currently in view is always the first thing on
+   Home. The switch control is a badge-style button rather than the
+   native <select> this replaced (that select is still in the DOM but
+   hidden): on mobile the inline dropdown read as part of the page and
+   was routinely missed, and it also duplicated the account-picker cards
+   shown at sign-in. The badge opens that same picker, so there's one
+   account-choosing screen instead of two different UIs. */
+.cp-viewing-bar{
+  display:flex; align-items:center; gap:10px;
+  margin:12px 24px 0; padding:10px 12px 10px 14px;
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  box-shadow:var(--cp-soft);
+}
+@media (min-width:1000px){ .cp-viewing-bar{ max-width:1200px; margin:12px auto 0; } }
+.cp-viewing-main{ display:flex; align-items:baseline; gap:8px; min-width:0; flex:1; }
+.cp-viewing-label{
+  font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--text-muted); flex-shrink:0;
+}
+.cp-viewing-name{
+  font-size:13.5px; font-weight:700; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+/* Teal, matching .cp-quick-badge — a linked-account count is neutral
+   info, not the red "needs attention" state used by this app's status
+   badges. */
+.cp-viewing-switch{
+  display:flex; align-items:center; gap:6px; flex-shrink:0;
+  background:var(--green-light); color:var(--green-dark);
+  border:1px solid transparent; border-radius:999px;
+  padding:6px 12px; font-size:12px; font-weight:700; font-family:inherit; cursor:pointer;
+}
+.cp-viewing-switch:hover, .cp-viewing-switch:focus-visible{ border-color:var(--green); outline:none; }
+.cp-viewing-switch-count{
+  background:var(--teal); color:#fff; border-radius:999px;
+  min-width:17px; height:17px; font-size:10px; font-weight:800;
+  display:flex; align-items:center; justify-content:center; padding:0 5px;
+}
+
 /* Custom control instead of a bare browser <select> — a plain native
    select here rendered with each platform's own OS/webview chrome (font,
    arrow glyph, sometimes a stray clear icon on some Android webviews),

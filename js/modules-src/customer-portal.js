@@ -559,13 +559,7 @@
         cpAccountsTile.style.display = '';
         cpAccountsTile.innerHTML = ''+CP_ICON.swap+'<span class="cp-quick-badge">'+acctList.length+'</span><p class="t">Switch account</p>';
         cpAccountsTile.onclick = ()=>{
-          const field = $('cpSwitcherField');
-          if(field && field.scrollIntoView) field.scrollIntoView({behavior:'smooth', block:'center'});
-          const sel = $('cpCustomerSwitcher');
-          if(sel){
-            sel.focus();
-            if(typeof sel.showPicker === 'function'){ try{ sel.showPicker(); }catch(e){} }
-          }
+          if(typeof showCustomerAccountPicker === 'function') showCustomerAccountPicker();
         };
       } else {
         cpAccountsTile.style.display = 'none';
@@ -635,6 +629,26 @@
     sel.innerHTML = list.map(c=> '<option value="'+c.id+'" '+(String(c.id)===String(currentUser.customerId)?'selected':'')+'>'+escapeHtml(c.name)+'</option>').join('');
     sel.disabled = list.length <= 1;
     if(box) box.classList.toggle('single', list.length <= 1);
+
+    // Visible name + Switch badge (the <select> above is hidden — see the
+    // markup comment on .cp-viewing-bar). The badge carries the linked-
+    // account count and opens the same picker screen sign-in uses, so
+    // there's exactly one account-choosing UI in the app rather than a
+    // dropdown here and cards there.
+    const active = list.find(c=> String(c.id)===String(currentUser.customerId));
+    const nameEl = $('cpViewingName');
+    if(nameEl) nameEl.textContent = (active && active.name) ? active.name : 'Unnamed account';
+    const switchBtn = $('cpViewingSwitchBtn');
+    if(switchBtn){
+      if(list.length > 1){
+        switchBtn.style.display = '';
+        const countEl = $('cpViewingSwitchCount');
+        if(countEl) countEl.textContent = list.length;
+        switchBtn.onclick = ()=>{ if(typeof showCustomerAccountPicker === 'function') showCustomerAccountPicker(); };
+      } else {
+        switchBtn.style.display = 'none';
+      }
+    }
   }
   async function cpSwitchActiveCustomer(customerId){
     currentUser.customerId = customerId;

@@ -145,7 +145,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v52';
+const CACHE_NAME = 'awes-sr-v54';
 
 // Split into two lists on purpose.
 //
