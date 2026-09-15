@@ -361,6 +361,7 @@
     $('customerToolsScreen').style.display = 'none';
     $('customerCalcScreen').style.display = 'none';
     $('customerProfileScreen').style.display = 'none';
+    $('customerLegalScreen').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = 'none';

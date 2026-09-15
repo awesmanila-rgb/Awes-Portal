@@ -563,7 +563,7 @@
       const activeId = pickActiveCustomerId(custList, data.user.id);
       submit.disabled = false;
       currentUser = {
-        id: data.user.id, name: prof.name || 'there', role:'customer',
+        id: data.user.id, name: prof.name || 'there', role:'customer', email: data.user.email,
         customerId: activeId, customerIds: custList.map(c=> c.id), customerList: custList
       };
       localStorage.setItem('current-user', JSON.stringify(currentUser));
@@ -918,7 +918,7 @@
       }catch(e){}
       const activeId = pickActiveCustomerId(custList, verified.id);
       currentUser = {
-        id: verified.id, name: custName, role:'customer',
+        id: verified.id, name: custName, role:'customer', email: verified.email,
         customerId: activeId, customerIds: custList.map(c=> c.id), customerList: custList
       };
       localStorage.setItem('current-user', JSON.stringify(currentUser));
@@ -933,7 +933,7 @@
         // Cloud unreachable — trust the cache rather than forcing a login
         // screen on a plain reload, same leniency as the technician branch.
         currentUser = {
-          id:saved.id, name:saved.name, role:'customer', customerId:saved.customerId,
+          id:saved.id, name:saved.name, role:'customer', email:saved.email, customerId:saved.customerId,
           customerIds:saved.customerIds||[], customerList:saved.customerList||[]
         };
         updateUserBadge();

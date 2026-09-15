@@ -713,7 +713,8 @@
     // blank slate, same reasoning as doLogout()'s own explicit hides in
     // auth.js) plus the shared nav, which has nothing to navigate to yet.
     ['homeScreen','customerHomeScreen','customerEquipmentDetailScreen','customerRequestsScreen',
-     'customerUnitsScreen','customerHistoryScreen','customerToolsScreen','customerCalcScreen','customerProfileScreen'
+     'customerUnitsScreen','customerHistoryScreen','customerToolsScreen','customerCalcScreen','customerProfileScreen',
+     'customerLegalScreen'
     ].forEach(id=>{ const el = $(id); if(el) el.style.display = 'none'; });
     if($('footerBar')) $('footerBar').style.display = 'none';
     if($('metaBar')) $('metaBar').style.display = 'none';
@@ -888,6 +889,7 @@
     $('customerToolsScreen').style.display = 'none';
     $('customerCalcScreen').style.display = 'none';
     $('customerProfileScreen').style.display = 'none';
+    $('customerLegalScreen').style.display = 'none';
     $('customerRequestsScreen').style.display = '';
     cpReqShowTab('new');
     cpPopulateReqEquipmentOptions();
@@ -1487,9 +1489,88 @@
     } else {
       field.style.display = 'none';
     }
+
+    // Personal/account information card — currentUser carries the login
+    // identity (name + auth email, see auth.js), cpCustomer is the raw
+    // `customers` row (select('*')) already loaded by
+    // loadCustomerPortalData for the property currently being viewed, so
+    // switching accounts via the switcher above also updates these fields.
+    // No self-serve editing here (read-only login) — anything missing
+    // shows "Not on file" rather than being hidden, as a cue to contact
+    // the service provider to have it added.
+    const na = 'Not on file';
+    $('cpInfoName').textContent = name;
+    $('cpInfoEmail').textContent = (currentUser && currentUser.email) || na;
+    $('cpInfoContactPerson').textContent = (cpCustomer && cpCustomer.contact_person) || na;
+    $('cpInfoContactNo').textContent = (cpCustomer && cpCustomer.contact_no) || na;
+    $('cpInfoAddress').textContent = (cpCustomer && cpCustomer.address) || na;
   }
   $('cpProfileRowRequests').addEventListener('click', ()=> cpShowScreen('History', 'Requests'));
+  $('cpProfileRowTerms').addEventListener('click', ()=> cpShowLegalScreen('terms'));
+  $('cpProfileRowPrivacy').addEventListener('click', ()=> cpShowLegalScreen('privacy'));
   $('cpProfileRowLogout').addEventListener('click', ()=>{ if(typeof doLogout==='function') doLogout(); });
+
+  // ---------- Terms and Conditions / Privacy Notice ----------
+  // Static, generated copy describing what the customer portal itself
+  // actually does (equipment records, service history, service requests
+  // and their message threads, account credentials) — not a generic
+  // boilerplate template. Content lives here as data so it's one place to
+  // update if the portal's scope changes; nothing here is fetched or
+  // user-editable.
+  const CP_LEGAL_UPDATED = 'Last updated September 2026';
+  const CP_LEGAL = {
+    terms: {
+      title: 'Terms and Conditions',
+      body: [
+        ['Purpose of this portal',
+         'This Customer Portal is provided by your HVAC and fire protection service provider so you can review your enrolled equipment, service history, and service reports, and submit and track service requests for your property.'],
+        ['Your account',
+         'Portal logins are issued by your service provider and linked to one or more of your properties. Keep your email and password confidential — you are responsible for activity under your login. Contact your service provider if you suspect unauthorized access.'],
+        ['Service requests',
+         'Submitting a request through this portal is a request for service, not a confirmed appointment. Scheduling, fees, and completion are coordinated through the request\u2019s message thread and confirmed by your service provider.'],
+        ['Accuracy of information',
+         'Equipment records, service history, and account details shown here are maintained by your service provider based on completed service visits and account setup. If something looks incorrect or out of date, let your service provider know so it can be corrected.'],
+        ['Availability',
+         'The portal is offered as a convenience and may be occasionally unavailable for maintenance or connectivity reasons. It is not a substitute for calling your service provider directly in an urgent situation.'],
+        ['Changes to these terms',
+         'These terms may be updated from time to time as the portal\u2019s features change. Continued use of the portal after an update means you accept the revised terms.']
+      ]
+    },
+    privacy: {
+      title: 'Privacy Notice',
+      body: [
+        ['Information we hold',
+         'Your service provider maintains your contact information (name, email, contact number, and property address), your enrolled equipment records, service reports and history, and any service requests and messages you submit through this portal.'],
+        ['How it\u2019s used',
+         'This information is used to schedule and carry out HVAC and fire protection service at your property, to respond to your service requests, to keep an accurate maintenance history for your equipment, and to contact you about visits, quotes, and account matters.'],
+        ['Who can see it',
+         'Your account and property information is visible only to your own portal login and to your service provider\u2019s admin and technician staff who work on your account. It is not sold or shared with unrelated third parties.'],
+        ['Photos and service records',
+         'Photos, findings, and notes attached to a service visit or a service request are kept as part of your equipment\u2019s maintenance record and are visible to you in this portal and to your service provider\u2019s staff.'],
+        ['Data retention',
+         'Your records are retained for as long as you remain an active customer of your service provider, and as needed afterward for warranty, maintenance-history, and legal/record-keeping purposes.'],
+        ['Your choices',
+         'You can ask your service provider to review, correct, or remove your account information at any time; some information (such as completed service history) may need to be retained as part of the equipment\u2019s maintenance record even after a request is honored.']
+      ]
+    }
+  };
+  function cpShowLegalScreen(type){
+    const doc = CP_LEGAL[type] || CP_LEGAL.terms;
+    $('cpLegalTitle').textContent = doc.title;
+    $('cpLegalUpdated').textContent = CP_LEGAL_UPDATED;
+    $('cpLegalBody').innerHTML = doc.body.map(function(section){
+      return '<h3>'+escapeHtml(section[0])+'</h3><p>'+escapeHtml(section[1])+'</p>';
+    }).join('');
+    $('customerProfileScreen').style.display = 'none';
+    $('customerLegalScreen').style.display = '';
+    window.scrollTo({top:0});
+  }
+  $('cpLegalBackBtn').addEventListener('click', ()=>{
+    $('customerLegalScreen').style.display = 'none';
+    $('customerProfileScreen').style.display = '';
+    if(typeof cpSetNavActive === 'function') cpSetNavActive('Profile');
+    window.scrollTo({top:0});
+  });
 
   // ---------- Wire the pieces the old sidebar used to own ----------
   $('cpRequestServiceBtn').addEventListener('click', ()=>{
