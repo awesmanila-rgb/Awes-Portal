@@ -58,6 +58,9 @@
       scheduleConfirmedAt: row.schedule_confirmed_at,
       cancelReason: row.cancel_reason,
       cancelAcknowledged: row.cancel_acknowledged,
+      cancelRequested: row.cancel_requested,
+      cancelRequestedReason: row.cancel_requested_reason,
+      cancelRequestedAt: row.cancel_requested_at,
       accessGatePass: row.access_gate_pass,
       accessLadder: row.access_ladder,
       accessWorkPermit: row.access_work_permit,
@@ -344,6 +347,86 @@
     return ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed'].includes(status);
   }
 
+  // ---------- Cancelling an ONGOING dispatch (already dispatched/en_route/
+  // in_progress) — a different, later stage than srCancel/srIsCancellable
+  // above, which only ever apply before dispatch. Past that point the
+  // customer can only REQUEST cancellation (pending admin); admin can
+  // accept that request, reject it, or cancel outright on their own. Any
+  // actual cancellation has to cancel the linked dispatch ticket too, not
+  // just the request — see dtCancelTicket in dispatch.js.
+  function srIsActiveForCancelRequest(status){
+    return ['dispatched','en_route','in_progress'].includes(status);
+  }
+  // Customer-side — via customer_request_cancel_dispatched_service() RPC
+  // (see 20260915_01_dispatch_cancellation.sql), same no-blanket-UPDATE
+  // reasoning as srCancel/srRespondFee above.
+  async function srRequestCancelActive(id, reason){
+    if(!reason || !reason.trim()) return false;
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('customer_request_cancel_dispatched_service', { p_request_id: id, p_reason: reason.trim() });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('request cancel failed', describeCloudError(e)); return false; }
+  }
+  async function srWithdrawCancelRequest(id){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('customer_withdraw_cancel_request', { p_request_id: id });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('withdraw cancel request failed', describeCloudError(e)); return false; }
+  }
+  // Admin-side — plain update, admin already has a blanket UPDATE policy on
+  // service_requests (see the RLS comment at the top of this file). Cancels
+  // the request AND, best-effort, the linked dispatch ticket (dtCancelTicket
+  // in dispatch.js) so nothing is left dangling as still "active" on the
+  // technician's side. Used for both a direct admin cancel and for
+  // accepting a pending customer request (reason passed in either way).
+  async function srAdminCancelActive(request, reason){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests').update({
+        status: 'cancelled', cancel_reason: reason, cancel_acknowledged: true,
+        cancel_requested: false, cancel_requested_reason: null, cancel_requested_at: null
+      }).eq('id', request.id);
+      if(error) throw error;
+      if(request.linkedDispatchTicketId && typeof dtCancelTicket === 'function'){
+        dtCancelTicket(request.linkedDispatchTicketId, reason).catch(()=>{});
+      }
+      return true;
+    }catch(e){ console.error('admin cancel active request failed', describeCloudError(e)); return false; }
+  }
+  async function srAdminAcceptCancelRequest(request){
+    return srAdminCancelActive(request, request.cancelRequestedReason || 'Cancellation request accepted');
+  }
+  async function srAdminRejectCancelRequest(id){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests').update({
+        cancel_requested: false, cancel_requested_reason: null, cancel_requested_at: null
+      }).eq('id', id);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('reject cancel request failed', describeCloudError(e)); return false; }
+  }
+  // Called by dispatch.js's dtCancelSection handler when ADMIN cancels a
+  // ticket directly from the Job Order overlay (rather than from the
+  // request side) — mirrors srMarkCompletedByTicket's pattern exactly:
+  // best-effort, matches by linked_dispatch_ticket_id, silent no-op if
+  // nothing is linked.
+  async function srCancelByTicket(ticketId, reason){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_requests').update({
+        status: 'cancelled', cancel_reason: reason, cancel_acknowledged: true,
+        cancel_requested: false, cancel_requested_reason: null, cancel_requested_at: null
+      }).eq('linked_dispatch_ticket_id', ticketId);
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('cancel-by-ticket sync failed', describeCloudError(e)); return false; }
+  }
+
   // ---------- Per-request messaging ----------
   // Mirrors dispatch.js's dtLoadMessages/dtSendMessage pattern exactly,
   // scoped to service_request_messages/request_id instead of
@@ -615,6 +698,25 @@
         actionsHtml += '<div class="cp-row-sub" style="margin-bottom:6px;">Cancellation reason: '+escapeHtml(request.cancelReason||'—')+'</div>'+
           '<button type="button" class="btn btn-secondary" id="srAdminAckCancelBtn" style="width:100%;">Acknowledge Cancellation</button>';
       }
+      if(request.cancelRequested){
+        actionsHtml += '<div class="field" style="border:1px solid var(--danger); border-radius:8px; padding:10px;">'+
+          '<label style="color:var(--danger);">Customer requested cancellation</label>'+
+          '<div class="cp-row-sub" style="margin-bottom:8px;">'+escapeHtml(request.cancelRequestedReason||'—')+
+            (request.cancelRequestedAt ? (' · '+fmtDateTime(request.cancelRequestedAt)) : '')+'</div>'+
+          '<div style="display:flex; gap:8px;">'+
+            '<button type="button" class="btn btn-secondary" id="srAdminAcceptCancelReqBtn" style="flex:1; color:var(--danger);">Accept</button>'+
+            '<button type="button" class="btn btn-secondary" id="srAdminRejectCancelReqBtn" style="flex:1;">Reject</button>'+
+          '</div></div>';
+      } else if(srIsActiveForCancelRequest(request.status)){
+        actionsHtml += '<div class="field">'+
+          '<label style="color:var(--danger);">Cancel this dispatch</label>'+
+          '<select id="srAdminCancelReasonSelect" style="margin-bottom:8px;"><option value="">Select a reason…</option>'+
+            SR_CANCEL_REASONS.map(r=> '<option value="'+r.value+'">'+escapeHtml(r.label)+'</option>').join('')+
+          '</select>'+
+          '<textarea id="srAdminCancelReasonOther" rows="2" placeholder="Please specify…" style="display:none; margin-bottom:8px;"></textarea>'+
+          '<button type="button" class="btn btn-secondary" id="srAdminCancelActiveBtn" style="width:100%; color:var(--danger);">Cancel Dispatch</button>'+
+        '</div>';
+      }
       if(actionsHtml){
         adminEl.innerHTML = '<div class="field"><label>Admin Actions</label>'+actionsHtml+'</div>';
         adminEl.style.display = '';
@@ -646,6 +748,35 @@
         const ok = await srAcknowledgeCancel(request.id);
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
+      if(adminEl.querySelector('#srAdminAcceptCancelReqBtn')) adminEl.querySelector('#srAdminAcceptCancelReqBtn').onclick = async ()=>{
+        if(!confirm('Accept this cancellation? This also cancels the dispatch ticket.')) return;
+        const ok = await srAdminAcceptCancelRequest(request);
+        if(ok){ toast('Cancellation accepted'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
+      };
+      if(adminEl.querySelector('#srAdminRejectCancelReqBtn')) adminEl.querySelector('#srAdminRejectCancelReqBtn').onclick = async ()=>{
+        const ok = await srAdminRejectCancelRequest(request.id);
+        if(ok){ toast('Cancellation request rejected — job stays active'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
+      };
+      if(adminEl.querySelector('#srAdminCancelActiveBtn')) adminEl.querySelector('#srAdminCancelActiveBtn').onclick = async ()=>{
+        const selEl = adminEl.querySelector('#srAdminCancelReasonSelect');
+        const otherEl = adminEl.querySelector('#srAdminCancelReasonOther');
+        const picked = SR_CANCEL_REASONS.find(r=> r.value===selEl.value);
+        if(!picked){ toast('Select a reason'); return; }
+        let reason = picked.label;
+        if(picked.value==='other'){
+          const other = otherEl.value.trim();
+          if(!other){ toast('Please specify a reason'); otherEl.focus(); return; }
+          reason = 'Other: '+other;
+        }
+        if(!confirm('Cancel this dispatch? This also cancels the dispatch ticket and cannot be undone.')) return;
+        const ok = await srAdminCancelActive(request, reason);
+        if(ok){ toast('Dispatch cancelled'); srCloseDetail(); srRenderQueueList(); } else toast('Could not cancel — try again');
+      };
+      const srAdminCancelSelect = adminEl.querySelector('#srAdminCancelReasonSelect');
+      if(srAdminCancelSelect) srAdminCancelSelect.onchange = ()=>{
+        const otherEl = adminEl.querySelector('#srAdminCancelReasonOther');
+        otherEl.style.display = srAdminCancelSelect.value==='other' ? '' : 'none';
+      };
     } else { adminEl.style.display = 'none'; adminEl.innerHTML = ''; }
 
     // Cancel (customer-only)
@@ -676,6 +807,46 @@
         if(ok){ toast('Request cancelled'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId); }
         else toast('Could not cancel — try again');
       };
+    } else if(!isAdmin && srIsActiveForCancelRequest(request.status)){
+      if(request.cancelRequested){
+        cancelEl.innerHTML = '<div class="field"><label>Cancellation requested</label>'+
+          '<div class="cp-row-sub" style="margin-bottom:8px;">Waiting for admin to review — '+escapeHtml(request.cancelRequestedReason||'')+'</div>'+
+          '<button type="button" class="btn btn-secondary" id="srWithdrawCancelBtn" style="width:100%;">Withdraw Request</button>'+
+        '</div>';
+        cancelEl.style.display = '';
+        cancelEl.querySelector('#srWithdrawCancelBtn').onclick = async ()=>{
+          const ok = await srWithdrawCancelRequest(request.id);
+          if(ok){ toast('Cancellation request withdrawn'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); }
+          else toast('Could not withdraw — try again');
+        };
+      } else {
+        cancelEl.innerHTML = '<div class="field"><label>Need to cancel?</label>'+
+          '<p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">This job is already dispatched — cancelling now needs admin\'s okay.</p>'+
+          '<select id="srCancelActiveReasonSelect" style="margin-bottom:8px;">'+
+            '<option value="">Select a reason…</option>'+
+            SR_CANCEL_REASONS.map(r=> '<option value="'+r.value+'">'+escapeHtml(r.label)+'</option>').join('')+
+          '</select>'+
+          '<textarea id="srCancelActiveReasonOther" rows="2" placeholder="Please specify…" style="display:none;"></textarea>'+
+          '<button type="button" class="btn btn-secondary" id="srCancelActiveSubmitBtn" style="width:100%; margin-top:8px; color:var(--danger);">Request Cancellation</button>'+
+        '</div>';
+        cancelEl.style.display = '';
+        const reasonSelect = cancelEl.querySelector('#srCancelActiveReasonSelect');
+        const reasonOther = cancelEl.querySelector('#srCancelActiveReasonOther');
+        reasonSelect.onchange = ()=>{ reasonOther.style.display = reasonSelect.value==='other' ? '' : 'none'; };
+        cancelEl.querySelector('#srCancelActiveSubmitBtn').onclick = async ()=>{
+          const picked = SR_CANCEL_REASONS.find(r=> r.value===reasonSelect.value);
+          if(!picked){ toast('Select a reason'); return; }
+          let reason = picked.label;
+          if(picked.value==='other'){
+            const other = reasonOther.value.trim();
+            if(!other){ toast('Please tell us why, so we can note it'); reasonOther.focus(); return; }
+            reason = 'Other: '+other;
+          }
+          const ok = await srRequestCancelActive(request.id, reason);
+          if(ok){ toast('Cancellation requested — we\'ll confirm shortly'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); }
+          else toast('Could not send request — try again');
+        };
+      }
     } else { cancelEl.style.display = 'none'; cancelEl.innerHTML = ''; }
 
     // Messages

@@ -1,3 +1,20 @@
+// Bumped to v57 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js/index.html again — adds a way to cancel an
+// ONGOING dispatch (previously: no cancel path at all past 'dispatched'):
+//   - Customer, while dispatched/en_route/in_progress: "Request
+//     Cancellation" (customer_request_cancel_dispatched_service RPC) sets
+//     a pending flag, doesn't change status by itself. Can withdraw it
+//     (customer_withdraw_cancel_request RPC) before admin acts.
+//   - Admin: sees any pending request (Accept/Reject) in the service
+//     request's Admin Actions, or can cancel directly from there, or from
+//     the dispatch ticket's own overlay (new Cancel Dispatch section,
+//     dtCancelTicket in dispatch.js) — only while the ticket is still
+//     'open'/'acknowledged' (before Mark Completed; past that, Close Job
+//     Order's per-unit notDone checklist is the right tool instead).
+//     Either path cancels BOTH the service request and its linked
+//     dispatch ticket, via srAdminCancelActive / srCancelByTicket in
+//     service-requests.js. Needs 20260915_01_dispatch_cancellation.sql.
+//
 // Bumped to v56 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js again — three changes to the request-service /
 // dispatch flow:
@@ -184,7 +201,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v56';
+const CACHE_NAME = 'awes-sr-v57';
 
 // Split into two lists on purpose.
 //

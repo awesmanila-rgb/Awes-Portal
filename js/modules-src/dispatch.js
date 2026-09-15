@@ -1014,12 +1014,13 @@
   // completed/closed, this stops applying on its own — no cleanup needed.
   function dtIsPastDue(r){ return !!r.date && r.date < todayISO(); }
   function dtEffectiveStatus(r){
-    if(r.status==='completed' || r.status==='closed') return r.status;
+    if(r.status==='completed' || r.status==='closed' || r.status==='cancelled') return r.status;
     if(dtIsPastDue(r)) return 'expired';
     return r.status || 'open';
   }
   function dtStatusPill(r){
     const status = dtEffectiveStatus(r);
+    if(status==='cancelled') return '<span class="status-pill" style="background:#F8D7DA; color:#B02A37;">Status: Cancelled</span>';
     if(status==='completed') return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: Completed</span>';
     if(status==='closed'){
       const hasExceptions = (r.equipmentList||[]).some(it=> it.notDone);
@@ -1197,6 +1198,10 @@
   // dtEffectiveStatus) that can appear at any stage before Closed, not a
   // step the ticket passes through.
   function dtStepperHtml(r){
+    if(r.status==='cancelled'){
+      return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);"><b>Cancelled</b>'+
+        (r.cancelReason ? (' — '+escapeHtml(r.cancelReason)) : '')+'</div></div>';
+    }
     const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
     const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
     const completed = r.status==='completed';
@@ -1367,9 +1372,9 @@
     // is what's useful once a ticket is done — dtSortTechTickets's own
     // ascending date tie-break is aimed at the Active tab's upcoming work.
     const items = dtTechListTab==='closed'
-      ? sorted.filter(r=> r.status==='closed').sort((a,b)=>
-          (b.closedAt||b.date||'').localeCompare(a.closedAt||a.date||''))
-      : sorted.filter(r=> r.status!=='closed');
+      ? sorted.filter(r=> r.status==='closed' || r.status==='cancelled').sort((a,b)=>
+          (b.closedAt||b.cancelledAt||b.date||'').localeCompare(a.closedAt||a.cancelledAt||a.date||''))
+      : sorted.filter(r=> r.status!=='closed' && r.status!=='cancelled');
     dtLastTicketsById = {};
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
@@ -1604,6 +1609,7 @@
     dtLastTicketsById[rec.id] = rec; // so equipment "View details" rows inside this overlay resolve
     const canAct = dtCanActOnTicket(rec);
     const alreadyClosed = dtEffectiveStatus(rec)==='closed';
+    const isCancelled = rec.status==='cancelled';
 
     $('dtTicketTitle').textContent = rec.jobOrderNo+' — '+rec.custName;
     $('dtTicketStatusWrap').innerHTML = dtStatusPill(rec);
@@ -1616,7 +1622,53 @@
     const joSummaryHead = $('dtTicketSummary').querySelector('.jo-card-toggle');
     if(joSummaryHead){ joSummaryHead.classList.remove('jo-card-toggle'); joSummaryHead.removeAttribute('data-jo-toggle'); }
 
-    if(alreadyClosed){
+    // Cancel Dispatch — admin-only, only reachable before Mark Completed
+    // (see dtCancelTicket's own comment for why). Independent container
+    // from dtCloseSection since its visibility condition is different.
+    const cancelSecEl = $('dtCancelSection');
+    if(cancelSecEl){
+      if(currentUser && currentUser.role==='admin' && !isCancelled && !alreadyClosed && (rec.status==='open' || rec.status==='acknowledged')){
+        cancelSecEl.innerHTML = '<div class="field"><label style="color:var(--danger);">Cancel this dispatch</label>'+
+          '<select id="dtCancelReasonSelect" style="margin-bottom:8px;"><option value="">Select a reason…</option>'+
+            (typeof SR_CANCEL_REASONS!=='undefined' ? SR_CANCEL_REASONS.map(r=>'<option value="'+r.value+'">'+escapeHtml(r.label)+'</option>').join('') : '')+
+          '</select>'+
+          '<textarea id="dtCancelReasonOther" rows="2" placeholder="Please specify…" style="display:none; margin-bottom:8px;"></textarea>'+
+          '<button type="button" class="btn btn-secondary" id="dtCancelSubmitBtn" style="width:100%; color:var(--danger);">Cancel Dispatch</button>'+
+        '</div>';
+        cancelSecEl.style.display = '';
+        const dtCancelSelect = cancelSecEl.querySelector('#dtCancelReasonSelect');
+        const dtCancelOther = cancelSecEl.querySelector('#dtCancelReasonOther');
+        dtCancelSelect.onchange = ()=>{ dtCancelOther.style.display = dtCancelSelect.value==='other' ? '' : 'none'; };
+        cancelSecEl.querySelector('#dtCancelSubmitBtn').onclick = async ()=>{
+          const picked = (typeof SR_CANCEL_REASONS!=='undefined' ? SR_CANCEL_REASONS : []).find(r=> r.value===dtCancelSelect.value);
+          if(!picked){ toast('Select a reason'); return; }
+          let reason = picked.label;
+          if(picked.value==='other'){
+            const other = dtCancelOther.value.trim();
+            if(!other){ toast('Please specify a reason'); dtCancelOther.focus(); return; }
+            reason = 'Other: '+other;
+          }
+          if(!confirm('Cancel this dispatch? The customer will be notified and this cannot be undone.')) return;
+          const ok = await dtCancelTicket(rec.id, reason);
+          if(ok){
+            if(typeof srCancelByTicket==='function') srCancelByTicket(rec.id, reason).catch(()=>{});
+            toast('Dispatch cancelled');
+            dtCloseTicketOverlay();
+            if(currentUser.role==='admin') dtRenderAdminList(); else dtRenderTechList();
+          } else toast('Could not cancel — try again');
+        };
+      } else {
+        cancelSecEl.style.display = 'none';
+        cancelSecEl.innerHTML = '';
+      }
+    }
+
+    if(isCancelled){
+      $('dtCloseSection').innerHTML = '<div class="leave-comment"><b>Cancelled</b>'+
+        escapeHtml(rec.cancelledBy||'—')+' · '+(rec.cancelledAt ? leaveFmtDate(rec.cancelledAt.slice(0,10)) : '')+
+        (rec.cancelReason ? ('<br>'+escapeHtml(rec.cancelReason)) : '')+'</div>';
+      $('dtCloseSubmitBtn').style.display = 'none';
+    }else if(alreadyClosed){
       const closedNote = '<div class="leave-comment"><b>Closed</b>'+
         escapeHtml(rec.closedBy||'—')+' · '+(rec.closedAt ? leaveFmtDate(rec.closedAt.slice(0,10)) : '')+
         (rec.closeRemarks ? ('<br>'+escapeHtml(rec.closeRemarks)) : '')+'</div>';
@@ -1737,6 +1789,42 @@
     });
     dtEquipCountLabel();
     toast('Review and create the continuation job order for the '+notDoneItems.length+' remaining unit'+(notDoneItems.length===1?'':'s'));
+  }
+
+  // Admin aborts an ongoing dispatch outright — wrong dispatch, customer
+  // unreachable, no longer needed, etc. Deliberately only reachable while
+  // status is 'open' or 'acknowledged' (before Mark Completed): once
+  // technicians have actually done work, Close Job Order (with its
+  // per-unit notDone checklist) is the correct way to wind it down, not a
+  // blunt cancel. Called from dtCancelSection's button below, and
+  // cross-called from service-requests.js's srAdminCancelActive when
+  // admin cancels from the request side instead of the ticket side.
+  async function dtCancelTicket(ticketId, reason){
+    if(!currentUser || currentUser.role!=='admin'){ toast('Only admin can cancel a dispatch'); return false; }
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec){ toast('Ticket not found'); return false; }
+      if(rec.status!=='open' && rec.status!=='acknowledged'){
+        toast('This dispatch has already moved past the point it can be cancelled directly'); return false;
+      }
+      const merged = Object.assign({}, rec, {
+        status: 'cancelled',
+        cancelledBy: currentUser.name,
+        cancelledById: currentUser.id,
+        cancelledAt: new Date().toISOString(),
+        cancelReason: reason || ''
+      });
+      const { data: rows, error } = await db.from('dispatch_tickets')
+        .update({ status: 'cancelled', data: merged }).eq('id', ticketId).select('id');
+      if(error) throw error;
+      if(!rows || !rows.length){ toast('This ticket changed elsewhere — refreshing'); return false; }
+      return true;
+    }catch(e){
+      console.error('cancel ticket failed', describeCloudError(e));
+      toast('Could not cancel — please try again');
+      return false;
+    }
   }
 
   async function dtCloseTicket(ticketId, equipmentList, remarks){
