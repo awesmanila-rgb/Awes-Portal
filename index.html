@@ -790,13 +790,54 @@ window.awesCss = {
       <label>Viewing (property/account)</label>
       <select id="cpProfileSwitcher"></select>
     </div>
+
+    <!-- Personal/account information — the data actually on file for this
+         login (auth email + the linked customers row), laid out as
+         label-over-value pairs. Any field with nothing on file falls back
+         to "Not on file" rather than being hidden, so the row's presence
+         itself hints that it can be filled in (ask your service provider
+         to update it — this portal is read-only, no self-serve edit yet). -->
+    <div class="cp-info-card">
+      <p class="cp-info-card-title">Profile Information</p>
+      <div class="cp-info-row"><p class="l">Full Name</p><p class="v" id="cpInfoName">—</p></div>
+      <div class="cp-info-row"><p class="l">Login Email</p><p class="v" id="cpInfoEmail">—</p></div>
+      <div class="cp-info-row"><p class="l">Contact Person</p><p class="v" id="cpInfoContactPerson">—</p></div>
+      <div class="cp-info-row"><p class="l">Contact Number</p><p class="v" id="cpInfoContactNo">—</p></div>
+      <div class="cp-info-row"><p class="l">Property / Site Address</p><p class="v" id="cpInfoAddress">—</p></div>
+    </div>
+
     <div class="cp-profile-row" id="cpProfileRowRequests">
       <div><p class="t">My service requests</p><p class="s">Status, quotes, and messages</p></div>
+      <span>›</span>
+    </div>
+    <div class="cp-profile-row" id="cpProfileRowTerms">
+      <div><p class="t">Terms and Conditions</p></div>
+      <span>›</span>
+    </div>
+    <div class="cp-profile-row" id="cpProfileRowPrivacy">
+      <div><p class="t">Privacy Notice</p></div>
       <span>›</span>
     </div>
     <div class="cp-profile-row" id="cpProfileRowLogout">
       <div><p class="t">Log out</p></div>
       <span>›</span>
+    </div>
+  </div>
+</div>
+
+<!-- Terms and Conditions / Privacy Notice — reached only from the Profile
+     screen's two links above, never from the bottom nav, so it follows the
+     same "screen nested under a screen" pattern as customerCalcScreen
+     (back button just re-shows Profile, no full cpShowScreen/nav-reset
+     round trip). cpShowLegalScreen(type) in customer-portal.js swaps the
+     title/body between the two documents rather than duplicating markup. -->
+<div id="customerLegalScreen" class="home-screen cp-screen" style="display:none;">
+  <div class="cp-calc-wrap">
+    <button type="button" class="cp-calc-back" id="cpLegalBackBtn">‹ Back to Profile</button>
+    <div class="cp-calc-card">
+      <h2 id="cpLegalTitle" style="margin:0 0 4px; font-size:17px;">—</h2>
+      <p id="cpLegalUpdated" style="margin:0 0 16px; font-size:11.5px; color:var(--text-muted);"></p>
+      <div id="cpLegalBody" class="cp-legal-body"></div>
     </div>
   </div>
 </div>
