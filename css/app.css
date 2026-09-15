@@ -1566,11 +1566,11 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 
 /* ---- Home screen header ----
 /* Solid dark-green header with rounded bottom corners, overlapped by the
-   hero card below it (see .cp-top-grid's negative margin-top further
-   down) — matches the reference mock's look of the greeting and the
-   status card reading as one connected piece rather than two separate
-   blocks. Replaces an earlier pale/bordered header (see git blame) that
-   was deliberately understated; this reference explicitly asks for the
+   "Viewing" bar below it (see .cp-viewing-bar's negative margin-top) —
+   matches the reference mock's look of the greeting and the status card
+   reading as one connected piece rather than two separate blocks.
+   Replaces an earlier pale/bordered header (see git blame) that was
+   deliberately understated; this reference explicitly asks for the
    bolder, connected look instead. */
 .cp-header.cp-header-soft{
   /* 24px horizontal, matched below by .cp-hero/.cp-booking-banner's margin,
@@ -1612,10 +1612,17 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    hidden): on mobile the inline dropdown read as part of the page and
    was routinely missed, and it also duplicated the account-picker cards
    shown at sign-in. The badge opens that same picker, so there's one
-   account-choosing screen instead of two different UIs. */
+   account-choosing screen instead of two different UIs.
+   Negative margin-top pulls this bar up to overlap the header's rounded
+   bottom edge (see .cp-header-soft's extra bottom padding) — the
+   "connected card" look originally applied to .cp-top-grid below, back
+   when this bar didn't exist and the hero card sat directly under the
+   header. Now that this bar is the first thing under the header, the
+   overlap belongs here instead; .cp-top-grid uses a normal top margin so
+   the hero card sits below this bar rather than overlapping it. */
 .cp-viewing-bar{
   display:flex; align-items:center; gap:10px;
-  margin:12px 24px 0; padding:10px 12px 10px 14px;
+  margin:-34px 24px 0; padding:10px 12px 10px 14px;
   background:var(--surface); border:1px solid var(--border); border-radius:12px;
   box-shadow:var(--cp-soft);
 }
@@ -1683,8 +1690,8 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    enrolled account visible up front, versus the compact
    .cp-switcher-box <select> further up (still used on the Home screen
    itself for switching afterward). Label sits fully in the white area
-   below the header (not overlapping the green curve like .cp-top-grid's
-   hero card does elsewhere) — muted grey-on-green there was unreadable;
+   below the header (not overlapping the green curve like .cp-viewing-bar
+   does on Home) — muted grey-on-green there was unreadable;
    dark text needs to stay off the dark-green background.
    .cp-header-picker / .cp-greet-lg / .cp-greet-sub-lg are this screen's
    own modifiers on the shared .cp-header-soft/.cp-greet/.cp-greet-sub
@@ -1721,6 +1728,17 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 }
 .cp-account-card-name{ flex:1; min-width:0; font-size:16px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cp-account-card-chevron{ flex-shrink:0; color:var(--text-muted); font-size:20px; }
+
+/* "To add another account, please contact Admin." — sits directly below
+   the .cp-account-picker grid (see showCustomerAccountPicker() /
+   cpRenderAccountPickerCards() in customer-portal.js). Plain centered
+   text rather than a button, since there's no self-service action here
+   at all (not even a "coming soon" one) — this is purely pointing the
+   customer at who can help. */
+.cp-account-picker-note{
+  margin:0 24px 24px; text-align:center; font-size:13px; color:var(--text-muted);
+}
+@media (min-width:1000px){ .cp-account-picker-note{ max-width:1200px; margin:0 auto 24px; } }
 
 /* ---- Pull-to-refresh ----
    overscroll-behavior:none above (deliberately, see its own comment) kills
@@ -1766,11 +1784,13 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 /* ---- Status card + service callout: two-column on desktop, stacked on
    mobile (AWES_App_enroute redesign spec, "Redesigned desktop layout"). ---- */
 .cp-top-grid{
-  /* Negative margin pulls the hero card up so it overlaps the header's
-     rounded bottom (see .cp-header-soft's extra bottom padding above) —
-     the "connected card" look from the reference mock. Reset on desktop,
-     where the header/content split is a different, wider layout. */
-  display:grid; grid-template-columns:1fr; gap:16px; margin-top:-34px;
+  /* Normal top margin — the "pull up and overlap the header" treatment
+     now belongs to .cp-viewing-bar above (see its comment), which is the
+     element that actually sits adjacent to the header. This just needs
+     to clear that bar with the same gap used elsewhere on this screen,
+     not overlap it. Reset on desktop, where the header/content split is
+     a different, wider layout. */
+  display:grid; grid-template-columns:1fr; gap:16px; margin-top:16px;
 }
 @media (min-width:1000px){
   .cp-top-grid{ grid-template-columns:minmax(0,1.25fr) minmax(300px,0.75fr); gap:24px; align-items:stretch; margin-top:0; padding-top:24px; }

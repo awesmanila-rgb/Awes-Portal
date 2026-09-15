@@ -524,13 +524,13 @@ window.awesCss = {
   </div>
 </div>
 
-<!-- Account picker — shown once, right after a fresh sign-in, only for a
-     customer login linked to MORE than one customer record (see
+<!-- Account picker — shown once, right after every fresh customer sign-in,
+     including a login linked to just a single customer record (see
      showCustomerAccountPicker() in customer-portal.js, called from
      enterApp() in home.js). Picking a card sets currentUser.customerId and
-     proceeds into #customerHomeScreen below; a single-customer login skips
-     this screen entirely and lands on the home screen directly, same as
-     before. -->
+     proceeds into #customerHomeScreen below. No self-service way to link an
+     additional account yet, so the note below the card(s) points to Admin
+     instead of a dead-end "Add account" control. -->
 <div id="customerAccountPickerScreen" class="home-screen cp-screen" style="display:none;">
   <div class="cp-header cp-header-soft cp-header-picker">
     <div class="cp-header-inner">
@@ -543,6 +543,7 @@ window.awesCss = {
   <div class="cp-content">
     <p class="cp-account-picker-label">Select an account to view</p>
     <div class="cp-account-picker" id="cpAccountPickerList"></div>
+    <p class="cp-account-picker-note">To add another account, please contact Admin.</p>
   </div>
 </div>
 
@@ -660,11 +661,11 @@ window.awesCss = {
              guides) — that tab only otherwise lives in the bottom nav, so
              this gives it a second, more visible entry point from Home. -->
         <button type="button" class="cp-quick-tile" id="cpQuickTools"></button>
-        <!-- Only shown for a login linked to more than one customer (see
-             cpRenderSwitcher's list.length<=1 "nothing to switch to"
-             reasoning) — populated and toggled in renderCustomerHome().
-             Jumps to the existing "Viewing" switcher above rather than
-             duplicating its logic. -->
+        <!-- Always shown for any logged-in customer, including a
+             single-account login — populated and toggled in
+             renderCustomerHome(). Opens the account picker screen, which
+             also carries "+ Add account" below the enrolled-account
+             cards. -->
         <button type="button" class="cp-quick-tile" id="cpQuickAccounts" style="display:none;"></button>
       </div>
     </div>

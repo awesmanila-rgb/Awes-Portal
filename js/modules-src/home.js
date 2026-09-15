@@ -911,12 +911,14 @@
       // sitting in localStorage, and without this it would otherwise leak
       // into whatever screen the NEXT person's fresh sign-in restores on.
       try{ localStorage.removeItem(LAST_SCREEN_KEY); }catch(e){}
-      // A customer login linked to more than one customer record gets the
-      // account-picker cards first (see showCustomerAccountPicker() in
-      // customer-portal.js) instead of landing straight on Home — every
-      // other case (admin, technician, a single-customer login) goes
+      // A customer login always gets the greeting + account-picker screen
+      // first (see showCustomerAccountPicker() in customer-portal.js)
+      // instead of landing straight on Home — including a login linked to
+      // just one customer record, so every customer sees the same
+      // "Viewing this account" confirmation on sign-in rather than only
+      // the ones with 2+ linked accounts. Admin and technician logins go
       // straight to Home exactly as before.
-      if(currentUser && currentUser.role==='customer' && (currentUser.customerList||[]).length>1 && typeof showCustomerAccountPicker==='function'){
+      if(currentUser && currentUser.role==='customer' && (currentUser.customerList||[]).length && typeof showCustomerAccountPicker==='function'){
         showCustomerAccountPicker();
       } else {
         showHome();

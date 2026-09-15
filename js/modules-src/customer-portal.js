@@ -544,18 +544,21 @@
     $('cpQuickTools').innerHTML = ''+CP_ICON.tools+'<p class="t">Calculators</p>';
     $('cpQuickTools').onclick = ()=> cpShowScreen('Tools');
 
-    // Accounts — a fifth tile, only shown for a login linked to more than
-    // one customer (same "nothing to switch to" condition cpRenderSwitcher
-    // uses to disable/relabel its own dropdown for single-customer logins,
-    // just applied to whether this tile appears at all). Jumps to that
-    // same switcher rather than duplicating its logic in a second place;
-    // the badge shows the linked-account count, which is useful context
-    // in itself once there are 2+, not just a "something's new" flag like
+    // Accounts — a fifth tile, always shown for any logged-in customer
+    // (previously hidden below 2 linked customers, same condition
+    // cpRenderSwitcher uses for its own dropdown — but that "nothing to
+    // switch to" reasoning doesn't hold here: the destination screen also
+    // carries the "contact Admin to add an account" note, so even a
+    // single-account login has somewhere useful to land). Jumps to the
+    // same picker screen shown at every customer sign-in rather than
+    // duplicating its logic in a second place; the badge shows the
+    // linked-account count (1 when there's just the one), which is
+    // useful context in itself, not just a "something's new" flag like
     // this app's other badges.
     const cpAccountsTile = $('cpQuickAccounts');
     if(cpAccountsTile){
       const acctList = currentUser.customerList || [];
-      if(acctList.length > 1){
+      if(acctList.length){
         cpAccountsTile.style.display = '';
         cpAccountsTile.innerHTML = ''+CP_ICON.swap+'<span class="cp-quick-badge">'+acctList.length+'</span><p class="t">Switch account</p>';
         cpAccountsTile.onclick = ()=>{
@@ -663,16 +666,17 @@
   }
   $('cpCustomerSwitcher').addEventListener('change', (e)=> cpSwitchActiveCustomer(e.target.value));
 
-  // ---------- Account picker (multi-customer login, shown once at fresh
+  // ---------- Account picker (every customer login, shown once at fresh
   // sign-in) ----------
   // Cards for every customer this login can see — see enterApp() in
-  // home.js, which calls this instead of showHome() only when
-  // currentUser.customerList has more than one entry. Picking a card is
-  // the same underlying action as the Home screen's own
-  // cpSwitchActiveCustomer switcher (persist the choice per device, then
-  // load that customer's data) — this just fronts it with a one-time,
-  // easier-to-scan chooser instead of dropping the customer straight onto
-  // whichever account happened to be picked last.
+  // home.js, which now calls this instead of showHome() for any customer
+  // login (including one linked to just a single customer record), not
+  // only logins with 2+ linked accounts. Picking a card is the same
+  // underlying action as the Home screen's own cpSwitchActiveCustomer
+  // switcher (persist the choice per device, then load that customer's
+  // data) — this just fronts it with a one-time, easier-to-scan chooser
+  // instead of dropping the customer straight onto whichever account
+  // happened to be picked last.
   function cpGreetingTod(){
     const h = new Date().getHours();
     return h < 12 ? 'Good morning' : (h < 18 ? 'Good afternoon' : 'Good evening');
