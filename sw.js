@@ -1,3 +1,25 @@
+// Bumped to v56 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — three changes to the request-service /
+// dispatch flow:
+//   1. A dispatch ticket's Close Job Order step is now the moment a linked
+//      service request is synced to 'completed' — moved off "Mark
+//      Completed", which only ever meant "my part of today's visit is
+//      done," not "the whole job is done." If Close Job Order finishes with
+//      any equipment unit still checked "not completed," the linked request
+//      now stays exactly where it was instead of being marked done early.
+//   2. New "Continue Tomorrow" action on a closed ticket that still has
+//      notDone units — opens a fresh Create Dispatch Ticket form prefilled
+//      from that ticket (customer, site, contact, access requirements),
+//      seeded with just the outstanding equipment (each carrying its
+//      notDoneReason into its scope), and re-links the new ticket to the
+//      same originating service request so the customer sees one
+//      continuous job across however many visits it takes.
+//   3. The customer's cancel-request reason is now a dropdown of suggested
+//      reasons (schedule conflict, cost, found another provider, resolved,
+//      duplicate) plus an "Other" option that reveals a required free-text
+//      box — replacing the old free-text-only textarea. See
+//      SR_CANCEL_REASONS in service-requests.js.
+//
 // Bumped to v55 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/app.bundle.js again — three changes that
 // all need a fresh shell:
@@ -162,7 +184,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v55';
+const CACHE_NAME = 'awes-sr-v56';
 
 // Split into two lists on purpose.
 //

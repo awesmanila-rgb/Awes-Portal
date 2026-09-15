@@ -802,6 +802,7 @@
 
   function dtResetForm(){
     dtSourceServiceRequestId = null;
+    dtContinuedFromTicketId = null;
     $('dtJobOrderNo').value = '—';
     $('dtDate').value = todayISO();
     $('dtExpectedTime').value = '';
@@ -828,6 +829,13 @@
   // ticket (see also the completion-sync hook in dtComplete). Cleared by
   // dtResetForm so it never leaks onto an unrelated, later ticket.
   let dtSourceServiceRequestId = null;
+
+  // Set by dtContinueClosedTicket below when the Create form was opened as
+  // a "Continue Tomorrow" follow-up to an earlier, closed ticket that still
+  // had unfinished equipment on it. dtCreateTicket's success path uses this
+  // to stamp continuedTicketId back onto that earlier ticket. Cleared by
+  // dtResetForm so it never leaks onto an unrelated, later ticket.
+  let dtContinuedFromTicketId = null;
 
   // Opens the Create Dispatch Ticket tab with a customer service request's
   // details pre-filled, so admin can review/adjust and finish creating the
@@ -942,7 +950,17 @@
       },
       createdAt: new Date().toISOString(),
       createdBy: currentUser ? currentUser.name : 'Admin',
-      acknowledgedBy: [], completedBy: [], completedAt: null
+      acknowledgedBy: [], completedBy: [], completedAt: null,
+      // Denormalized so a later "Continue Tomorrow" (see dtContinueClosedTicket)
+      // can prefill straight from this ticket and re-link the follow-up ticket
+      // to the same originating request, without a round trip to fetch it.
+      custId: custId || null,
+      sourceServiceRequestId: dtSourceServiceRequestId || null,
+      // Set only when this ticket was itself created via "Continue Tomorrow"
+      // from an earlier, closed ticket — see dtContinueClosedTicket below,
+      // which stamps the reverse pointer (continuedTicketId) onto that
+      // earlier ticket right after this one saves successfully.
+      continuedFromTicketId: dtContinuedFromTicketId || null
     };
     const res = await dtSaveTicket(id, data);
     $('dtCreateBtn').disabled = false; $('dtCreateBtn').textContent = 'Create Dispatch Ticket';
@@ -959,6 +977,18 @@
     // ordinary ticket with no source request just leaves this as a no-op.
     if(dtSourceServiceRequestId && typeof srLinkTicket === 'function'){
       srLinkTicket(dtSourceServiceRequestId, id).catch(()=>{});
+    }
+    // Mirrors the srLinkTicket call above, for the "Continue Tomorrow" case:
+    // best-effort, never blocks the ticket that DID just save successfully.
+    if(dtContinuedFromTicketId){
+      (async ()=>{
+        try{
+          const prev = await dtGetTicket(dtContinuedFromTicketId);
+          if(!prev) return;
+          const merged = Object.assign({}, prev, { continuedTicketId: id });
+          await db.from('dispatch_tickets').update({ data: merged }).eq('id', dtContinuedFromTicketId);
+        }catch(e){ console.error('stamp continuedTicketId failed', describeCloudError(e)); }
+      })();
     }
     dtResetForm();
     $('dtJobOrderNo').value = '—';
@@ -1517,15 +1547,13 @@
       return { completedBy: list, status: 'completed', completedAt: new Date().toISOString() };
     });
     if(ok) toast('Marked completed');
-    // If this ticket originated from a customer's service request (see
-    // service-requests.js srConvertToTicket/srLinkTicket), flip that
-    // request to 'completed' too so the admin's requests queue doesn't
-    // show a job that's actually done as still open. Best-effort — a
-    // ticket not linked to any request is the normal case and this is a
-    // silent no-op then.
-    if(ok && becameCompleted && typeof srMarkCompletedByTicket === 'function'){
-      srMarkCompletedByTicket(id).catch(()=>{});
-    }
+    // NOTE: this used to also sync the linked service request to
+    // 'completed' here. Moved to dtCloseTicket() below — "Mark Completed"
+    // only means every assigned technician has finished their part for
+    // today; whether the job is ACTUALLY done (no equipment left with
+    // notDone checked) is only known once Close Job Order runs its
+    // per-unit checklist, which is also where a multi-day job's next
+    // visit gets carved off via dtContinueClosedTicket.
     dtRenderTechList();
   }
 
@@ -1592,9 +1620,20 @@
       const closedNote = '<div class="leave-comment"><b>Closed</b>'+
         escapeHtml(rec.closedBy||'—')+' · '+(rec.closedAt ? leaveFmtDate(rec.closedAt.slice(0,10)) : '')+
         (rec.closeRemarks ? ('<br>'+escapeHtml(rec.closeRemarks)) : '')+'</div>';
-      $('dtCloseSection').innerHTML = closedNote + '<div style="margin-top:10px;">'+dtRenderCloseChecklist(rec)+'</div>';
+      const exceptionItems = (rec.equipmentList||[]).filter(it=> it.notDone);
+      let continueHtml = '';
+      if(exceptionItems.length>0){
+        continueHtml = rec.continuedTicketId
+          ? '<div class="leave-comment"><b>Continuation</b>Continued as '+escapeHtml(rec.continuedTicketId)+'</div>'
+          : (dtCanActOnTicket(rec)
+              ? '<button type="button" class="btn btn-primary" id="dtContinueBtn" style="width:100%; margin-top:8px;">Continue Tomorrow ('+exceptionItems.length+' unit'+(exceptionItems.length===1?'':'s')+' remaining)</button>'
+              : '');
+      }
+      $('dtCloseSection').innerHTML = closedNote + continueHtml + '<div style="margin-top:10px;">'+dtRenderCloseChecklist(rec)+'</div>';
       $$('#dtCloseSection .dt-notdone-chk, #dtCloseSection .dt-close-row textarea', document).forEach(el=> el.disabled = true);
       $('dtCloseSubmitBtn').style.display = 'none';
+      const continueBtn = $('dtCloseSection').querySelector('#dtContinueBtn');
+      if(continueBtn) continueBtn.onclick = ()=>{ dtCloseTicketOverlay(); dtContinueClosedTicket(rec); };
     }else if(canAct){
       // Closing used to be reachable straight from "Open", skipping
       // Acknowledge and Mark Completed entirely — which made those two
@@ -1648,6 +1687,58 @@
     if(ta) ta.style.display = e.target.checked ? '' : 'none';
   });
 
+  // "Continue Tomorrow" — opens a fresh Create Dispatch Ticket form for the
+  // remaining work on a closed ticket that had one or more units marked
+  // "scope not completed" (see dtRenderCloseChecklist/dtCloseTicket above).
+  // Unlike dtPrefillCreateFromServiceRequest (which prefills from a
+  // customer's original request), this prefills straight from the CLOSED
+  // TICKET itself — customer, site, contact, access requirements are all
+  // already sitting on it, no need to go back to the request. Only the
+  // outstanding equipment items are carried forward, each seeded with a
+  // scope line built from its notDoneReason so the next technician knows
+  // exactly what's left. Admin reviews/adjusts (date, workers) and saves
+  // it through the normal dtCreateTicket() path, same as any other ticket.
+  async function dtContinueClosedTicket(ticket){
+    const notDoneItems = (ticket.equipmentList||[]).filter(it=> it.notDone);
+    if(notDoneItems.length===0){ toast('Nothing left to continue — every unit was completed'); return; }
+    if(ticket.continuedTicketId){ toast('Already continued as '+ticket.continuedTicketId); return; }
+    await showDispatchView('new'); // resets the form via dtResetForm()
+    dtSourceServiceRequestId = ticket.sourceServiceRequestId || null;
+    dtContinuedFromTicketId = ticket.id;
+    $('dtCustName').value = ticket.custName || '';
+    if(ticket.custId) $('dtCustName').dataset.customerId = ticket.custId;
+    $('dtSiteAddress').value = ticket.siteAddress || '';
+    $('dtContactName').value = ticket.contactName || '';
+    $('dtContactNo').value = ticket.contactNo || '';
+    if(ticket.custId) await dtLoadCustomerEquipment(ticket.custId);
+    $('dtDate').value = todayISO(); // next visit — admin adjusts if it's not tomorrow specifically
+    $('dtRemarks').value = 'Continuation of '+ticket.jobOrderNo+' — remaining work:\n'+
+      notDoneItems.map(it=> '\u2022 '+dtEquipSummaryLine(it)+': '+(it.notDoneReason||'\u2014')).join('\n');
+    if(ticket.requirements){
+      $('dtReqWorkPermit').checked = !!ticket.requirements.workPermit;
+      $('dtReqGatePass').checked = !!ticket.requirements.gatePass;
+      $('dtReqSafety').checked = !!ticket.requirements.safety;
+      $('dtReqOthers').checked = !!ticket.requirements.others;
+      if(ticket.requirements.others){
+        $('dtReqOthersDetail').value = ticket.requirements.othersDetail || '';
+        $('dtReqOthersDetailWrap').style.display = '';
+      }
+    }
+    notDoneItems.forEach(oldItem=>{
+      const item = Object.assign({id: dtGenEquipId(), equipmentId: oldItem.equipmentId || null}, dtPickEquipFields(oldItem));
+      dtDraftEquipItems.push(item);
+      dtAppendEquipItemCard(item); // auto-seeds one empty scope row from Default Scope (empty here)
+      const scopeBox = $('dtEquipScope-'+item.id);
+      if(scopeBox){
+        scopeBox.innerHTML = ''; // drop the auto-seeded empty row
+        dtAddSimpleRow(scopeBox.id, 'Remaining from '+ticket.jobOrderNo+': '+(oldItem.notDoneReason||'not completed'));
+        (oldItem.scope||[]).forEach(s=> dtAddSimpleRow(scopeBox.id, s));
+      }
+    });
+    dtEquipCountLabel();
+    toast('Review and create the continuation job order for the '+notDoneItems.length+' remaining unit'+(notDoneItems.length===1?'':'s'));
+  }
+
   async function dtCloseTicket(ticketId, equipmentList, remarks){
     if(!currentUser){ toast('Please sign in again'); return false; }
     if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
@@ -1675,6 +1766,15 @@
         .update({ status: 'closed', data: merged }).eq('id', ticketId).select('id');
       if(error) throw error;
       if(!rows || !rows.length){ toast('This ticket changed elsewhere — refreshing'); return false; }
+      // This ticket's own status only ever tracks TODAY's job order. The
+      // linked service request (the customer-facing job as a whole) only
+      // moves to 'completed' if every unit closed out clean — otherwise it
+      // stays exactly where it was (normally 'in_progress'), and admin picks
+      // up the outstanding units via Continue Tomorrow (dtContinueClosedTicket).
+      const stillHasWork = equipmentList.some(it=> it.notDone);
+      if(!stillHasWork && typeof srMarkCompletedByTicket === 'function'){
+        srMarkCompletedByTicket(ticketId).catch(()=>{});
+      }
       return true;
     }catch(e){
       console.error('close ticket failed', describeCloudError(e));
@@ -1700,8 +1800,8 @@
     }
     const exceptionCount = equipmentList.filter(it=>it.notDone).length;
     const confirmMsg = exceptionCount>0
-      ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed?')
-      : 'Close this Job Order? This marks it as fully done.';
+      ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed? The customer\'s service request will stay in progress — you can open the next visit for the remaining unit(s) with Continue Tomorrow once this closes.')
+      : 'Close this Job Order? This marks it — and the customer\'s service request — as fully done.';
     if(!confirm(confirmMsg)) return;
     const remarksEl = $('dtCloseRemarks');
     const remarks = remarksEl ? remarksEl.value.trim() : '';

@@ -23,6 +23,19 @@
   // .or() clause in srCountOpen below.
   const SR_OPEN_STATUSES = ['new', 'acknowledged', 'fee_accepted', 'schedule_confirmed'];
 
+  // Suggested reasons shown in the customer's cancel dropdown (srOpenDetail's
+  // cancel section, below) — 'other' opens a required free-text box instead
+  // of using its own label. Kept as {value,label} so the stored cancel_reason
+  // text stays human-readable in the admin queue without a lookup.
+  const SR_CANCEL_REASONS = [
+    { value: 'schedule', label: "Schedule no longer works for me" },
+    { value: 'other_provider', label: 'Found another service provider' },
+    { value: 'cost', label: 'Cost / fee concern' },
+    { value: 'resolved', label: 'Issue resolved on our end already' },
+    { value: 'duplicate', label: 'Filed by mistake / duplicate request' },
+    { value: 'other', label: 'Other (please specify)' }
+  ];
+
   function srRowToRequest(row){
     return {
       id: row.id,
@@ -639,13 +652,26 @@
     const cancelEl = $('srDetailCancelSection');
     if(!isAdmin && srIsCancellable(request.status)){
       cancelEl.innerHTML = '<div class="field"><label>Change of mind?</label>'+
-        '<textarea id="srCancelReason" rows="2" placeholder="Let us know why you\'re cancelling…"></textarea>'+
+        '<select id="srCancelReasonSelect" style="margin-bottom:8px;">'+
+          '<option value="">Select a reason…</option>'+
+          SR_CANCEL_REASONS.map(r=> '<option value="'+r.value+'">'+escapeHtml(r.label)+'</option>').join('')+
+        '</select>'+
+        '<textarea id="srCancelReasonOther" rows="2" placeholder="Please specify…" style="display:none;"></textarea>'+
         '<button type="button" class="btn btn-secondary" id="srCancelSubmitBtn" style="width:100%; margin-top:8px; color:var(--danger);">Cancel This Request</button>'+
       '</div>';
       cancelEl.style.display = '';
+      const reasonSelect = cancelEl.querySelector('#srCancelReasonSelect');
+      const reasonOther = cancelEl.querySelector('#srCancelReasonOther');
+      reasonSelect.onchange = ()=>{ reasonOther.style.display = reasonSelect.value==='other' ? '' : 'none'; };
       cancelEl.querySelector('#srCancelSubmitBtn').onclick = async ()=>{
-        const reason = cancelEl.querySelector('#srCancelReason').value.trim();
-        if(!reason){ toast('Please tell us why, so we can note it'); return; }
+        const picked = SR_CANCEL_REASONS.find(r=> r.value===reasonSelect.value);
+        if(!picked){ toast('Select a reason'); return; }
+        let reason = picked.label;
+        if(picked.value==='other'){
+          const other = reasonOther.value.trim();
+          if(!other){ toast('Please tell us why, so we can note it'); reasonOther.focus(); return; }
+          reason = 'Other: '+other;
+        }
         const ok = await srCancel(request.id, reason);
         if(ok){ toast('Request cancelled'); srCloseDetail(); if(typeof cpRenderMyRequests==='function') cpRenderMyRequests(currentUser.customerId); if(typeof cpRefreshRequestsBadge==='function') cpRefreshRequestsBadge(currentUser.customerId); }
         else toast('Could not cancel — try again');
