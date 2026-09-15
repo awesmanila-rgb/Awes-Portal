@@ -46,8 +46,18 @@
      like it should behave like a native screen. Chrome/Android reads this
      from html; Safari/iOS reads it from body — set both so it's covered
      either way. This only removes the overscroll bounce/refresh gesture;
-     normal scrolling within the page is unaffected. */
-  html{ overscroll-behavior:none; }
+     normal scrolling within the page is unaffected.
+     overflow-x:hidden alongside it covers the same "screen moves a
+     little" complaint in the sideways direction — overscroll-behavior
+     only stops the bounce at a scroll boundary, it doesn't stop the page
+     from scrolling sideways in the first place if anything on it is even
+     a pixel wider than the viewport (a shadow, a negative margin, a
+     100vw element — easy to end up with one somewhere in an app this
+     size). Elements that are deliberately horizontally scrollable, like
+     .cp-filter-chips, keep working — overflow-x:hidden on html/body only
+     clips the outer page, it doesn't reach into a descendant that sets
+     its own overflow-x:auto. */
+  html{ overscroll-behavior:none; overflow-x:hidden; }
   body{
     margin:0;
     font-family:inherit;
@@ -56,6 +66,7 @@
     -webkit-tap-highlight-color:transparent;
     padding-bottom:96px;
     overscroll-behavior:none;
+    overflow-x:hidden;
   }
   header.app-top{
     position:sticky; top:0; z-index:30;
@@ -1619,20 +1630,36 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
    Cards, not a dropdown — the point of this screen is to make every
    enrolled account visible up front, versus the compact
    .cp-switcher-box <select> further up (still used on the Home screen
-   itself for switching afterward). Same overlap-the-header layout as
-   .cp-top-grid so this reads as a continuation of the home screen's own
-   visual language rather than a different screen. */
+   itself for switching afterward). Label sits fully in the white area
+   below the header (not overlapping the green curve like .cp-top-grid's
+   hero card does elsewhere) — muted grey-on-green there was unreadable;
+   dark text needs to stay off the dark-green background.
+   .cp-header-picker / .cp-greet-lg / .cp-greet-sub-lg are this screen's
+   own modifiers on the shared .cp-header-soft/.cp-greet/.cp-greet-sub
+   classes (also used by Home's header) — scoped rather than changed
+   globally, since Home's header/hero-card overlap math is sized around
+   its current smaller type. Greeting/subtitle/label sizes here are a
+   deliberate 28/15/15 scale — close enough that the subtitle and label
+   read as one connected line of copy rather than the subtitle
+   disappearing next to an oversized greeting above it. */
+.cp-header-picker{ padding-top:32px; padding-bottom:60px; }
+.cp-greet.cp-greet-lg{ font-size:28px; line-height:1.18; letter-spacing:-.03em; }
+.cp-greet-sub.cp-greet-sub-lg{ font-size:15px; margin-top:5px; }
+.cp-account-picker-label{
+  margin:18px 24px 10px; font-size:15px; font-weight:700; color:var(--text);
+}
+@media (min-width:1000px){ .cp-account-picker-label{ max-width:1200px; margin:24px auto 10px; padding:0 24px; } }
 .cp-account-picker{
   display:grid; grid-template-columns:1fr; gap:12px;
-  margin:-34px 24px 24px;
+  margin:0 24px 24px;
 }
 @media (min-width:1000px){
-  .cp-account-picker{ grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); margin:24px auto; max-width:1200px; }
+  .cp-account-picker{ grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); margin:0 auto 24px; max-width:1200px; }
 }
 .cp-account-card{
   display:flex; align-items:center; gap:14px; width:100%; text-align:left;
   background:var(--surface); border:1px solid var(--border); border-radius:16px;
-  padding:16px 18px; box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08));
+  padding:18px 20px; box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08));
   cursor:pointer; font-family:inherit;
 }
 .cp-account-card:hover, .cp-account-card:focus-visible{ border-color:var(--green); outline:none; }
@@ -1640,8 +1667,32 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   flex-shrink:0; width:44px; height:44px; border-radius:12px; background:var(--green-light);
   color:var(--green-dark); font-weight:800; font-size:17px; display:flex; align-items:center; justify-content:center;
 }
-.cp-account-card-name{ flex:1; min-width:0; font-size:15px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cp-account-card-chevron{ flex-shrink:0; color:var(--text-muted); font-size:18px; }
+.cp-account-card-name{ flex:1; min-width:0; font-size:16px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-account-card-chevron{ flex-shrink:0; color:var(--text-muted); font-size:20px; }
+
+/* ---- Pull-to-refresh ----
+   overscroll-behavior:none above (deliberately, see its own comment) kills
+   the native bounce/refresh gesture app-wide, so this is a hand-rolled
+   replacement — a fixed indicator plus a transform on the active screen's
+   own container, both driven by JS as the drag happens (attachPullToRefresh()
+   in customer-portal.js), not by a CSS animation. Everything here is just
+   the two resting/visual states; the actual pull motion is inline styles
+   set per-frame from JS. */
+.ptr-indicator{
+  position:fixed; top:10px; left:50%; z-index:60;
+  width:36px; height:36px; border-radius:50%;
+  background:var(--surface); box-shadow:0 4px 14px rgba(20,65,48,.18);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none;
+  transform:translate(-50%,-46px) rotate(0deg);
+}
+.ptr-indicator.ptr-animating{ transition:transform .25s ease, opacity .25s ease; }
+.ptr-spinner{
+  width:18px; height:18px; border-radius:50%;
+  border:2.5px solid var(--green-light); border-top-color:var(--green);
+}
+.ptr-indicator.ptr-refreshing .ptr-spinner{ animation:ptr-spin .7s linear infinite; }
+@keyframes ptr-spin{ to{ transform:rotate(360deg); } }
 
 /* ---- Profile menu (Account settings / Notifications / Sign out) ---- */
 .cp-profile-menu-wrap{ position:relative; }
@@ -1799,30 +1850,33 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-activity-row .date{ font-size:11px; color:var(--text-muted); font-weight:600; flex-shrink:0; margin-left:auto; }
 
 /* ---- Quick actions ----
-   Equal-sized cards (redesign spec: "three equal cards" — this app has
-   a fourth real destination, Get help, so the grid is built to hold any
-   number of equal tiles rather than hard-coding three). Row layout on
-   narrow phones per the spec's mobile guidance ("convert quick-action
-   cards into horizontal list rows"); a proper card grid from tablet up. */
-.cp-quick-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-@media (min-width:640px){ .cp-quick-grid{ grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; } }
+   Centered icon-grid tiles (icon on top, single label below, no
+   subtitle) — matches a reference screenshot's "My Account"/"My Tools"
+   menu format: a consistent 3-column grid at every width, rather than
+   this app's earlier "cards on tablet+, horizontal list rows under
+   ~480px" responsive behavior. Labels wrap to two lines when needed
+   (e.g. "Quotes and invoices") instead of truncating, same as the
+   reference's own "Meralco Business Centers Directory" tile. */
+.cp-quick-grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+@media (min-width:640px){ .cp-quick-grid{ gap:16px; } }
 .cp-quick-tile{
+  position:relative;
   border:1px solid var(--border); border-radius:15px; background:var(--surface); min-height:104px;
-  padding:16px 13px; text-align:left; cursor:pointer; transition:.15s ease;
+  padding:16px 8px; cursor:pointer; transition:.15s ease;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:10px;
 }
-@media (min-width:640px){ .cp-quick-tile{ min-height:150px; padding:20px 18px; } }
+@media (min-width:640px){ .cp-quick-tile{ min-height:130px; padding:20px 14px; } }
 .cp-quick-tile:hover{ border-color:#9ccedb; transform:translateY(-2px); box-shadow:var(--cp-soft); }
-.cp-quick-tile svg{ width:24px; height:24px; color:var(--teal); margin-bottom:13px; }
-.cp-quick-tile .t{ font-size:12.5px; font-weight:700; margin:0; }
-.cp-quick-tile .s{ font-size:10.5px; color:var(--text-muted); margin:2px 0 0; }
-@media (max-width:479px){
-  /* Horizontal list rows below ~480px, per the redesign spec's mobile
-     guidance — icon + text on one line instead of a stacked card. */
-  .cp-quick-grid{ grid-template-columns:1fr; gap:10px; }
-  .cp-quick-tile{ min-height:44px; display:flex; align-items:center; gap:12px; padding:14px 15px; }
-  .cp-quick-tile svg{ margin-bottom:0; flex-shrink:0; }
-  .cp-quick-tile .cp-quick-text{ min-width:0; }
-  .cp-quick-tile .t{ font-size:13px; }
+.cp-quick-tile svg{ width:26px; height:26px; color:var(--teal); flex-shrink:0; }
+.cp-quick-tile .t{ font-size:12px; font-weight:600; margin:0; line-height:1.3; }
+@media (min-width:640px){ .cp-quick-tile .t{ font-size:13px; } }
+/* Accounts count badge (cpQuickAccounts) — teal, not the red "needs
+   attention" danger color used elsewhere in this app's status system,
+   since a linked-account count is neutral info, not an alert. */
+.cp-quick-badge{
+  position:absolute; top:8px; right:8px; background:var(--teal); color:#fff;
+  font-size:10px; font-weight:800; border-radius:999px; min-width:18px; height:18px;
+  display:flex; align-items:center; justify-content:center; padding:0 5px;
 }
 
 /* ---- Booking banner / service callout ----

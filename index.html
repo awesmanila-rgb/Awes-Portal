@@ -532,15 +532,16 @@ window.awesCss = {
      this screen entirely and lands on the home screen directly, same as
      before. -->
 <div id="customerAccountPickerScreen" class="home-screen cp-screen" style="display:none;">
-  <div class="cp-header cp-header-soft">
+  <div class="cp-header cp-header-soft cp-header-picker">
     <div class="cp-header-inner">
       <div>
-        <p class="cp-greet"><span id="cpPickerGreetTod">Good day</span>, <span id="cpPickerGreetName">there</span></p>
-        <p class="cp-greet-sub">Choose an account to view</p>
+        <p class="cp-greet cp-greet-lg"><span id="cpPickerGreetTod">Good day</span>, <span id="cpPickerGreetName">there</span></p>
+        <p class="cp-greet-sub cp-greet-sub-lg">Welcome to AWES customer portal</p>
       </div>
     </div>
   </div>
   <div class="cp-content">
+    <p class="cp-account-picker-label">Select an account to view</p>
     <div class="cp-account-picker" id="cpAccountPickerList"></div>
   </div>
 </div>
@@ -644,6 +645,16 @@ window.awesCss = {
         <button type="button" class="cp-quick-tile" id="cpQuickQuotes"></button>
         <button type="button" class="cp-quick-tile" id="cpQuickHistory"></button>
         <button type="button" class="cp-quick-tile" id="cpQuickHelp"></button>
+        <!-- Shortcut into the Tools tab (calculators, savings estimator,
+             guides) — that tab only otherwise lives in the bottom nav, so
+             this gives it a second, more visible entry point from Home. -->
+        <button type="button" class="cp-quick-tile" id="cpQuickTools"></button>
+        <!-- Only shown for a login linked to more than one customer (see
+             cpRenderSwitcher's list.length<=1 "nothing to switch to"
+             reasoning) — populated and toggled in renderCustomerHome().
+             Jumps to the existing "Viewing" switcher above rather than
+             duplicating its logic. -->
+        <button type="button" class="cp-quick-tile" id="cpQuickAccounts" style="display:none;"></button>
       </div>
     </div>
 
@@ -2667,6 +2678,14 @@ window.awesCss = {
 
 </div><!-- /#mainWrap -->
 </div><!-- /#appShell -->
+
+<!-- Pull-to-refresh indicator — see attachPullToRefresh() in
+     customer-portal.js. Fixed/global (not inside any one screen) since the
+     same indicator is reused by every screen that opts in; its own
+     position/opacity are driven entirely from JS as the user drags,
+     capped and eased there rather than via a CSS animation, since the
+     drag distance itself is the input. -->
+<div class="ptr-indicator" id="ptrIndicator" aria-hidden="true"><div class="ptr-spinner"></div></div>
 
 <div class="toast" id="toast"></div>
 

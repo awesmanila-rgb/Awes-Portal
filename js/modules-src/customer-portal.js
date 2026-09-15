@@ -207,7 +207,10 @@
     // Booking/"no active service" icon — a card-like tile with a horizontal
     // band, matching the reference mock's rounded booking icon.
     card:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg>',
-    plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>'
+    plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+    // Swap/exchange arrows — cpQuickAccounts tile (switching between this
+    // login's linked customer accounts).
+    swap:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3 3 7l4 4"/><path d="M3 7h13a4 4 0 0 1 4 4v1"/><path d="M17 21l4-4-4-4"/><path d="M21 17H8a4 4 0 0 1-4-4v-1"/></svg>'
   };
 
   // ---------- Unit card (photo-led, vertical stack) ----------
@@ -520,19 +523,54 @@
     // fabricated (no separate "Invoices" tile, since there's no invoicing
     // feature distinct from the fee already shown on a request/billing
     // card — see cpQuickQuotes below).
-    $('cpQuickUnits').innerHTML = ''+CP_ICON.grid+'<div class="cp-quick-text"><p class="t">My units</p><p class="s">'+cpEquipment.length+' enrolled</p></div>';
+    // Icon + single label only (no subtitle) — matches the reference
+    // screenshot's icon-grid format (centered icon, label below, no
+    // secondary line). The live counts these subtitles used to show
+    // ("3 enrolled", "2 on file") are still visible one tap away, inside
+    // each tile's own destination screen — nothing is lost, just moved
+    // off the tile itself to match the requested look.
+    $('cpQuickUnits').innerHTML = ''+CP_ICON.grid+'<p class="t">My units</p>';
     $('cpQuickUnits').onclick = ()=> cpShowScreen('Units');
-    const quoteCount = cpMyRequestsCache.filter(r=> r.feeAmount!=null).length;
-    $('cpQuickQuotes').innerHTML = ''+CP_ICON.receipt+'<div class="cp-quick-text"><p class="t">Quotes and invoices</p><p class="s">'+(quoteCount ? quoteCount+' on file' : 'None yet')+'</p></div>';
+    $('cpQuickQuotes').innerHTML = ''+CP_ICON.receipt+'<p class="t">Quotes and invoices</p>';
     $('cpQuickQuotes').onclick = ()=> cpShowScreen('History', 'Quotations');
-    $('cpQuickHistory').innerHTML = ''+CP_ICON.history+'<div class="cp-quick-text"><p class="t">Service history</p><p class="s">'+(cpReports.length ? cpReports.length+' visits' : 'No visits yet')+'</p></div>';
+    $('cpQuickHistory').innerHTML = ''+CP_ICON.history+'<p class="t">Service history</p>';
     $('cpQuickHistory').onclick = ()=> cpShowScreen('History', 'Visits');
-    $('cpQuickHelp').innerHTML = ''+CP_ICON.chat+'<div class="cp-quick-text"><p class="t">Get help</p><p class="s">Message us</p></div>';
+    $('cpQuickHelp').innerHTML = ''+CP_ICON.chat+'<p class="t">Get help</p>';
     // No standalone support inbox exists yet (see the chat-model note on
     // cpNotifBell) — "Get help" opens the same request form as "Book a
     // service" so a person can describe their situation either way,
     // rather than promising a contact channel that isn't built.
     $('cpQuickHelp').onclick = ()=>{ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); };
+    $('cpQuickTools').innerHTML = ''+CP_ICON.tools+'<p class="t">Calculators</p>';
+    $('cpQuickTools').onclick = ()=> cpShowScreen('Tools');
+
+    // Accounts — a fifth tile, only shown for a login linked to more than
+    // one customer (same "nothing to switch to" condition cpRenderSwitcher
+    // uses to disable/relabel its own dropdown for single-customer logins,
+    // just applied to whether this tile appears at all). Jumps to that
+    // same switcher rather than duplicating its logic in a second place;
+    // the badge shows the linked-account count, which is useful context
+    // in itself once there are 2+, not just a "something's new" flag like
+    // this app's other badges.
+    const cpAccountsTile = $('cpQuickAccounts');
+    if(cpAccountsTile){
+      const acctList = currentUser.customerList || [];
+      if(acctList.length > 1){
+        cpAccountsTile.style.display = '';
+        cpAccountsTile.innerHTML = ''+CP_ICON.swap+'<span class="cp-quick-badge">'+acctList.length+'</span><p class="t">Switch account</p>';
+        cpAccountsTile.onclick = ()=>{
+          const field = $('cpSwitcherField');
+          if(field && field.scrollIntoView) field.scrollIntoView({behavior:'smooth', block:'center'});
+          const sel = $('cpCustomerSwitcher');
+          if(sel){
+            sel.focus();
+            if(typeof sel.showPicker === 'function'){ try{ sel.showPicker(); }catch(e){} }
+          }
+        };
+      } else {
+        cpAccountsTile.style.display = 'none';
+      }
+    }
 
     // Billing — a real fee amount if one exists (accepted or awaiting the
     // customer's response), never a fabricated invoice. Hidden entirely
@@ -1441,3 +1479,102 @@
   });
   $('cpUnitsViewAllLink').addEventListener('click', (e)=>{ e.preventDefault(); cpShowScreen('Units'); });
   cpInitNav();
+
+  // ---------- Pull-to-refresh ----------
+  // overscroll-behavior:none in app.css deliberately kills the native
+  // bounce (and, on Android Chrome, the native pull-to-refresh that rides
+  // on top of it — see that CSS rule's own comment for why it's disabled
+  // app-wide). This is the hand-rolled replacement: drag down from the
+  // very top of a screen that's opted in, and this reproduces the same
+  // gesture — indicator + a bit of content travel — without bringing the
+  // rubber-band jitter back everywhere else. Generic so any screen can opt
+  // in later with one call; only Home does for now.
+  function attachPullToRefresh(screenId, onRefresh){
+    const THRESHOLD = 56;   // px of drag before a release triggers a refresh
+    const MAX_PULL = 90;    // px cap on how far the screen visually travels
+    const SETTLE_PULL = 48; // px the screen holds at while the refresh runs
+    const indicator = $('ptrIndicator');
+    if(!indicator) return;
+    let startY = null, dragging = false, moved = false, refreshing = false, lastPull = 0;
+
+    function screenEl(){ return $(screenId); }
+    function isEligible(){
+      const el = screenEl();
+      return el && el.style.display !== 'none' && !refreshing;
+    }
+    function atTop(){
+      return (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+    }
+    function setPull(px){
+      lastPull = px;
+      const el = screenEl();
+      if(el) el.style.transform = px ? 'translateY('+px+'px)' : '';
+      const ratio = Math.min(1, px / THRESHOLD);
+      indicator.style.opacity = String(ratio);
+      indicator.style.transform = 'translate(-50%,'+(-46 + ratio*56)+'px) rotate('+(ratio*180)+'deg)';
+    }
+    function setAnimated(on){
+      const el = screenEl();
+      if(el) el.style.transition = on ? 'transform .22s ease' : '';
+      indicator.classList.toggle('ptr-animating', on);
+    }
+
+    window.addEventListener('touchstart', (e)=>{
+      if(!isEligible() || !atTop() || e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      dragging = true; moved = false;
+    }, {passive:true});
+
+    window.addEventListener('touchmove', (e)=>{
+      if(!dragging || startY == null) return;
+      const dy = e.touches[0].clientY - startY;
+      if(dy <= 0 || !atTop()){ dragging = false; if(moved){ setAnimated(true); setPull(0); moved=false; } return; }
+      moved = true;
+      setAnimated(false);
+      setPull(Math.min(MAX_PULL, dy * 0.5));
+      e.preventDefault();
+    }, {passive:false});
+
+    window.addEventListener('touchend', ()=>{
+      if(!dragging){ return; }
+      dragging = false; startY = null;
+      if(!moved) return;
+      moved = false;
+      if(lastPull >= THRESHOLD){
+        refreshing = true;
+        indicator.classList.add('ptr-refreshing');
+        setAnimated(true);
+        setPull(SETTLE_PULL);
+        const started = Date.now();
+        Promise.resolve(onRefresh()).catch(()=>{}).then(()=>{
+          // Hold the spinner for a minimum stretch even if the reload was
+          // instant (e.g. served from a warm cache) — releasing the instant
+          // the promise resolves would read as a flicker, not a refresh.
+          const wait = Math.max(0, 400 - (Date.now() - started));
+          setTimeout(()=>{
+            setAnimated(true);
+            setPull(0);
+            indicator.classList.remove('ptr-refreshing');
+            setTimeout(()=>{ setAnimated(false); refreshing = false; }, 240);
+          }, wait);
+        });
+      } else {
+        setAnimated(true);
+        setPull(0);
+        setTimeout(()=> setAnimated(false), 240);
+      }
+    }, {passive:true});
+  }
+  attachPullToRefresh('customerHomeScreen', initCustomerHomeScreen);
+  // Account picker (see showCustomerAccountPicker() above) refetches this
+  // login's customer list rather than just re-rendering the cards already
+  // in currentUser.customerList — the point of a refresh here is to pick
+  // up an account that was just linked/unlinked server-side, not to
+  // redraw what's already in memory.
+  async function cpRefreshAccountPicker(){
+    if(!currentUser || !currentUser.id) return;
+    const list = await fetchCustomerLinks(currentUser.id);
+    if(list && list.length) currentUser.customerList = list;
+    cpRenderAccountPickerCards();
+  }
+  attachPullToRefresh('customerAccountPickerScreen', cpRefreshAccountPicker);

@@ -1,3 +1,47 @@
+// Bumped to v52 to force every installed device to drop its old cache and
+// re-fetch css/app.css/app.bundle.js again — reworked the customer Home
+// screen's Quick Actions section (My units / Quotes and invoices /
+// Service history / Get help) to match a reference screenshot's icon-grid
+// menu format: a consistent 3-column grid at every screen width (was
+// 2-column cards on tablet+ that collapsed into horizontal list rows
+// under ~480px), each tile now centered icon-on-top with a single label
+// below and no subtitle. The dynamic counts the old subtitles showed
+// ("3 enrolled", "2 on file") are still visible one tap away inside each
+// tile's destination screen. See the quick-actions block in
+// initCustomerHomeScreen()/renderCustomerHome() (customer-portal.js) and
+// .cp-quick-grid/.cp-quick-tile (app.css).
+//
+// Bumped to v51 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css again — rebalanced the account-picker
+// screen's type scale (greeting/subtitle/label): greeting eased down from
+// 32px to 28px, subtitle bumped up from 12.5px to 15px (new
+// .cp-greet-sub-lg modifier, scoped to this screen), label eased down
+// from 17px to 15px — closer sizes so the subtitle and label read as one
+// connected line of copy instead of the subtitle all but disappearing
+// under an oversized greeting.
+//
+// Bumped to v50 to force every installed device to drop its old cache and
+// re-fetch index.html again — customer account-picker screen's header now
+// also shows "Welcome to AWES customer portal" as a subtitle under the
+// greeting, same .cp-greet-sub style already used on Home's own header.
+//
+// Bumped to v49 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css again — customer account-picker screen
+// (shown once at fresh sign-in for a login linked to more than one
+// customer): removed a redundant duplicate instruction ("Choose an
+// account to view" in the header subtitle vs. a separate label saying
+// almost the same thing), fixed that label sitting on the dark-green
+// header with unreadable muted-grey text, then made it bigger/darker and
+// bumped the greeting itself up to a large bold headline style (scoped to
+// this screen only via .cp-header-picker/.cp-greet-lg — Home's own
+// header/hero-card overlap sizing is untouched). Also in this pass:
+// app.css now sets overflow-x:hidden on html/body alongside the existing
+// overscroll-behavior:none, since the page could still drift sideways on
+// a touch drag if anything on it was a pixel wider than the viewport, and
+// customer-portal.js adds a hand-rolled pull-to-refresh (drag down from
+// the top of Home or the account picker) since overscroll-behavior:none
+// also kills Android's native pull-to-refresh as a side effect.
+//
 // Bumped to v48 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/app.bundle.js again — applied the same
 // treatment as the equipment detail screen to the request-service screen
@@ -101,7 +145,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v48';
+const CACHE_NAME = 'awes-sr-v52';
 
 // Split into two lists on purpose.
 //
