@@ -380,6 +380,12 @@
     document.body.classList.toggle('role-admin', isAdmin);
     document.body.classList.toggle('role-tech', isTech);
     document.body.classList.toggle('role-customer', isCustomer);
+    // Technician bottom nav (#techNav) replaces the sidebar for this role
+    // only — see the role-tech CSS overrides at the end of app.css and
+    // techSetNavActive()/the techNav*/techFh*/techMore* handlers in
+    // home.js. Toggled right here since this function already runs on
+    // every login/logout/role change.
+    if($('techNav')) $('techNav').style.display = isTech ? '' : 'none';
     if(!currentUser) document.body.classList.remove('dashboard-active');
     // Sidebar nav: each role only sees its own group of links (My Work vs.
     // Operations/Management vs. My Account) — see the #sidebarTechGroup /

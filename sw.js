@@ -1,3 +1,26 @@
+// Bumped to v62 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — relayout of
+// the technician home screen:
+//   1. Greeting card compacted to a single-column, minimal-space layout
+//      (Time In/Out/OT shown as plain text, never tappable).
+//   2. Overview card is now a swipeable carousel (one stat per slide,
+//      CSS scroll-snap) with dot indicators — replaces the static grid
+//      for this role. Along the way, fixed a real pre-existing bug:
+//      renderHomeTechOverview() referenced ovMyFinanceValue/Sub elements
+//      that didn't exist in index.html, throwing mid-function and
+//      silently skipping everything after it (including populating Next
+//      Job Order) on every single render.
+//   3. Quick Actions is now one card with 4 tiles in a 2x2 grid (Service
+//      Report, Job Order, Finance & HR, Materials Request) — Finance & HR
+//      opens a sheet bundling what used to be 5 separate sidebar entries
+//      (Attendance/Cash Advance/Leave/Liquidation/Reimbursement).
+//   4. The technician sidebar is gone — replaced by a bottom nav bar
+//      (#techNav) reusing the customer portal's own .cp-nav component
+//      (bottom bar on mobile, top bar on desktop): Home / Job Orders /
+//      Report / Finance / More, with a "More" sheet for Messages/
+//      Documents/Settings/Logout. Admin's sidebar is completely
+//      unaffected — every override is scoped to body.role-tech only.
+//
 // Bumped to v61 to force every installed device to drop its old cache and
 // re-fetch css/app.css/js/app.bundle.js again — the "Active service"
 // hero card (dispatched/en route/in progress) now shows the scheduled
@@ -242,7 +265,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v61';
+const CACHE_NAME = 'awes-sr-v62';
 
 // Split into two lists on purpose.
 //

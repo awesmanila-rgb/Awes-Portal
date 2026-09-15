@@ -254,6 +254,40 @@
     border-radius:999px; padding:3px 9px; margin-top:2px;
   }
 
+  /* Technician Quick Actions — one card, 4 tiles, 2x2, all visible at once
+     (no swipe). Modern/icon-forward treatment, distinct from the older
+     .home-tile row style still used elsewhere. */
+  .tech-qa-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .tech-qa-tile{
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+    background:#fff; border:1px solid var(--border); border-radius:18px; padding:22px 10px;
+    cursor:pointer; text-align:center; box-shadow:0 1px 3px rgba(0,0,0,.05); min-height:104px;
+  }
+  .tech-qa-tile:active{ background:var(--green-light); }
+  .tech-qa-icon{
+    width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .tech-qa-icon .ic{ width:24px; height:24px; }
+  .tech-qa-tile.qa-purple .tech-qa-icon{ background:#EDE4FB; color:#7C4DBD; }
+  .tech-qa-tile.qa-orange .tech-qa-icon{ background:#FCEBD9; color:#C2680E; }
+  .tech-qa-tile.qa-teal .tech-qa-icon{ background:#D9F0EC; color:#0D9488; }
+  .tech-qa-tile.qa-brown .tech-qa-icon{ background:#F1E4D6; color:#8A5A2B; }
+  .tech-qa-label{ font-size:12.5px; font-weight:700; color:var(--text); line-height:1.3; }
+
+  /* Shared bottom-sheet list style — Finance & HR sheet + More sheet. */
+  .tech-sheet-list{ display:flex; flex-direction:column; }
+  .tech-sheet-item{
+    display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+    background:none; border:none; border-top:1px solid var(--border); padding:14px 4px;
+    font-size:14px; font-weight:600; color:var(--text); cursor:pointer;
+  }
+  .tech-sheet-item:first-child{ border-top:none; }
+  .tech-sheet-item:active{ background:var(--green-light); }
+  .tech-sheet-item .ic{ width:20px; height:20px; color:var(--text-muted); flex-shrink:0; }
+  .tech-sheet-item-danger{ color:var(--danger); }
+  .tech-sheet-item-danger .ic{ color:var(--danger); }
+
   .meta-bar{
     background:var(--surface); border-bottom:1px solid var(--border);
     padding:10px 16px; display:flex; gap:16px; flex-wrap:wrap; align-items:center;
@@ -292,6 +326,20 @@
   .overview-grid{display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:16px;}
   @media (max-width:820px){ .overview-grid{grid-template-columns:repeat(2,1fr);} }
   @media (max-width:480px){ .overview-grid{grid-template-columns:1fr; gap:14px;} }
+  /* Swipeable variant (technician Overview card) — one .overview-stat per
+     slide, native touch swipe via scroll-snap (no JS needed for the
+     gesture itself). Dots below are built/wired by
+     techInitOverviewCarousel() in home.js. Same .overview-stat markup and
+     ids either way — only the container differs. */
+  .overview-carousel{
+    display:flex; overflow-x:auto; scroll-snap-type:x mandatory; gap:0;
+    -webkit-overflow-scrolling:touch; scrollbar-width:none; margin:0 -2px;
+  }
+  .overview-carousel::-webkit-scrollbar{ display:none; }
+  .overview-carousel .overview-stat{ flex:0 0 100%; scroll-snap-align:start; margin:0 2px; }
+  .overview-dots{ display:flex; justify-content:center; gap:6px; margin-top:10px; }
+  .overview-dot{ width:6px; height:6px; border-radius:50%; background:var(--border); border:none; padding:0; cursor:pointer; transition:width .15s, border-radius .15s; }
+  .overview-dot.active{ background:var(--green-dark); width:16px; border-radius:3px; }
   .overview-stat{
     border:1px solid var(--border); border-top:4px solid var(--border); border-radius:12px;
     padding:18px; background:#fff;
@@ -595,53 +643,34 @@
   .dtr-banner-warn{background:#FBF0DC; color:var(--amber); border:1px solid #F0DBA8;}
   .dtr-banner-info{background:var(--green-light); color:var(--green-dark); border:1px solid #C7E3D3;}
 
-  /* Home greeting card */
-  .greet-line{font-size:14px; color:var(--text); line-height:1.5; margin:0 0 4px;}
-  .greet-line b{color:var(--green-dark);}
-  .greet-date{font-size:12px; color:var(--text-muted); margin:0 0 14px;}
-  .greet-attendance-box{
-    display:flex; flex-wrap:wrap; gap:18px; background:var(--green-light);
-    border:1px solid #C7E3D3; border-radius:10px; padding:14px 16px; margin:0 0 14px;
+  /* Home greeting card — compact: name+date on one line, attendance shown
+     as a plain inline text row (display only, never tappable), Today's
+     Job Order as a tight list. Replaces the old two-column/boxed layout —
+     see renderHomeGreeting() in home.js. */
+  .greet-compact{ display:flex; flex-direction:column; gap:8px; }
+  .greet-row1{ display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:6px; }
+  .greet-name{ font-size:14px; color:var(--text); }
+  .greet-name b{ color:var(--green-dark); }
+  .greet-datetime{ font-size:11.5px; color:var(--text-muted); }
+  .greet-attend-line{
+    display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; color:var(--text-muted);
+    background:var(--green-light); border:1px solid #C7E3D3; border-radius:8px; padding:8px 12px;
   }
-  .greet-attendance-item{display:flex; flex-direction:column; gap:3px;}
-  .greet-attendance-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted);}
-  .greet-attendance-val{font-size:24px; font-weight:800; color:var(--green-dark); line-height:1.1;}
-  .greet-attendance-val-missing{color:var(--amber);}
-  .greet-summary-label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted); margin:0 0 8px;}
-  .greet-summary-list{display:flex; flex-direction:column; gap:8px; margin:0 0 14px;}
-  .greet-summary-item{
-    display:flex; align-items:center; gap:10px; background:var(--green-light);
-    border:1px solid #C7E3D3; border-radius:9px; padding:10px 12px;
+  .greet-attend-line b{ color:var(--green-dark); font-weight:800; }
+  .greet-attend-line b.greet-missing{ color:var(--amber); }
+  .greet-reminder-compact{
+    font-size:12px; font-weight:700; color:#8A6716; background:#FBF0DC;
+    border:1px solid #F0DBA8; border-radius:8px; padding:6px 10px;
   }
-  .greet-summary-icon{font-size:18px; flex-shrink:0; width:24px; text-align:center;}
-  .greet-summary-count{font-weight:700; color:var(--green-dark); font-size:15px;}
-  .greet-summary-text{font-size:13px; color:var(--text); flex:1;}
-  .greet-allclear{font-size:13px; color:var(--text-muted); margin:0 0 14px; font-style:italic;}
-  .greet-reminder{
-    display:flex; align-items:center; gap:10px; background:#FBF0DC; color:#8A6716;
-    border:1px solid #F0DBA8; border-radius:9px; padding:12px 14px; font-size:15px; font-weight:700; margin:0;
-  }
-  .greet-thanks{font-size:12px; color:var(--text-muted); margin:12px 0 0; text-align:right;}
-
-  /* ---------- Home greeting: two-column layout with today's job order ---------- */
-  .greet-layout{display:flex; align-items:flex-start; gap:18px;}
-  .greet-main{flex:1 1 auto; min-width:0;}
-  @media (max-width:700px){ .greet-layout{flex-direction:column;} }
-  .greet-today-jo{
-    flex:0 0 360px; max-width:360px; align-self:stretch;
-    background:#FFF7E6; border:1px solid #F0D9A6; border-radius:12px;
-    padding:14px; display:flex; flex-direction:column; gap:10px;
-  }
-  @media (max-width:700px){ .greet-today-jo{ flex:1 1 auto; max-width:none; } }
-  .greet-today-jo-title{font-size:12px; font-weight:800; letter-spacing:.3px; text-transform:uppercase; color:#8A5A00;}
-  .greet-jo-empty{font-size:13px; color:var(--text-muted); font-style:italic;}
-  .greet-jo-item{background:#fff; border:1px solid var(--border); border-radius:8px; padding:10px; cursor:pointer;}
-  .greet-jo-item:active{background:var(--green-light);}
-  .greet-jo-item + .greet-jo-item{margin-top:8px;}
-  .greet-jo-item-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px;}
-  .greet-jo-no{font-weight:800; font-size:13px; color:var(--text);}
-  .greet-jo-cust{font-size:13px; color:var(--text); font-weight:600;}
-  .greet-jo-time{font-size:12px; color:var(--text-muted); margin-top:2px;}
+  .greet-jo-compact{ border-top:1px solid var(--border); padding-top:8px; }
+  .greet-jo-compact-title{ font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); margin-bottom:5px; }
+  .greet-jo-compact-empty{ font-size:12.5px; color:var(--text-muted); font-style:italic; }
+  .greet-jo-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; cursor:pointer; }
+  .greet-jo-row + .greet-jo-row{ border-top:1px dashed var(--border); }
+  .greet-jo-row-main{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .greet-jo-row-no{ font-weight:700; font-size:12.5px; color:var(--text); }
+  .greet-jo-row-cust{ font-size:11.5px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .greet-jo-row-time{ font-size:11px; color:var(--text-muted); flex-shrink:0; }
   .dtr-loc-tag{
     font-size:11px; color:var(--green-dark); background:none; border:none; padding:0; margin-top:2px;
     display:block; text-align:left; text-decoration:underline; cursor:pointer; font-family:inherit;
@@ -2147,3 +2176,47 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-legal-body h3{ font-size:13px; margin:16px 0 5px; }
 .cp-legal-body h3:first-child{ margin-top:0; }
 .cp-legal-body p{ font-size:12.5px; line-height:1.55; color:var(--text-muted); margin:0; }
+
+/* ---------- Technician-only: bottom nav replaces the sidebar ----------
+   Everything below overrides the shared body.role-admin/body.role-tech
+   sidebar rules further up this file, for role-tech ONLY — admin is
+   completely unaffected, still gets its sidebar exactly as before. Source
+   order wins here (equal selector specificity to the rules being
+   overridden), so this block has to stay below them — appended at the
+   end of the file for that reason. See #techNav in index.html and
+   techInitNav()/applyUserRestrictions() (auth.js) for the JS side. */
+body.role-tech .admin-sidebar,
+body.role-tech #menuBtn,
+body.role-tech .sidebar-backdrop{ display:none !important; }
+body.role-tech .main-wrap{ margin-left:0 !important; }
+body.role-tech .footer-bar{ left:0 !important; }
+/* The old shared Quick Actions grid is replaced by #techQuickActionsCard
+   (single card, 4 tiles) for this role — admin keeps .home-grid as-is. */
+body.role-tech .home-grid{ display:none; }
+/* Room for the fixed bottom nav so it never covers the last card — mirrors
+   .cp-page-content's own bottom padding for .cp-nav. Desktop turns .cp-nav
+   into a top bar instead (see .cp-nav's own min-width:1000px rule), so no
+   bottom padding is needed there. */
+body.role-tech .home-screen{ padding-bottom:78px; }
+@media (min-width:1000px){ body.role-tech .home-screen{ padding-bottom:32px; } }
+/* .footer-bar (Save Draft/Generate Report while filling a Service Report)
+   is ALSO fixed to the bottom, so it needs to sit above the new nav bar
+   instead of underneath/overlapping it — only while that bar is an actual
+   bottom bar (mobile); .cp-nav flips to a top bar at 1000px, so no shift
+   needed there. */
+body.role-tech .footer-bar{ bottom:calc(60px + env(safe-area-inset-bottom)) !important; }
+@media (min-width:1000px){ body.role-tech .footer-bar{ bottom:0 !important; } }
+/* Same bottom-nav clearance on every other technician screen. These use
+   an inline style="padding:16px" (higher specificity than any class), so
+   !important is the only way to add clearance without editing each one's
+   own inline style directly. */
+body.role-tech #dtrView, body.role-tech #leaveView, body.role-tech #cashAdvanceView,
+body.role-tech #dispatchView, body.role-tech #messagesView, body.role-tech #documentsView{
+  padding-bottom:78px !important;
+}
+@media (min-width:1000px){
+  body.role-tech #dtrView, body.role-tech #leaveView, body.role-tech #cashAdvanceView,
+  body.role-tech #dispatchView, body.role-tech #messagesView, body.role-tech #documentsView{
+    padding-bottom:16px !important;
+  }
+}

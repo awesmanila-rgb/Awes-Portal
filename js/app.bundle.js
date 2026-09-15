@@ -1476,6 +1476,12 @@
     document.body.classList.toggle('role-admin', isAdmin);
     document.body.classList.toggle('role-tech', isTech);
     document.body.classList.toggle('role-customer', isCustomer);
+    // Technician bottom nav (#techNav) replaces the sidebar for this role
+    // only — see the role-tech CSS overrides at the end of app.css and
+    // techSetNavActive()/the techNav*/techFh*/techMore* handlers in
+    // home.js. Toggled right here since this function already runs on
+    // every login/logout/role change.
+    if($('techNav')) $('techNav').style.display = isTech ? '' : 'none';
     if(!currentUser) document.body.classList.remove('dashboard-active');
     // Sidebar nav: each role only sees its own group of links (My Work vs.
     // Operations/Management vs. My Account) — see the #sidebarTechGroup /
@@ -12281,7 +12287,7 @@
     $('homeGreetingText').innerHTML = '<div class="empty-state">Loading…</div>';
 
     const now = new Date();
-    const dateStr = now.toLocaleDateString('en-PH', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+    const dateStr = now.toLocaleDateString('en-PH', {weekday:'short', month:'short', day:'numeric'});
     const timeStr = now.toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'});
     const [todayDtr, myTickets] = await Promise.all([
       dtrGetDay(currentUser.id, todayISO()).catch(()=>null),
@@ -12291,71 +12297,52 @@
     const alreadyTimedOut = !!(todayDtr && todayDtr.timeOut);
     const fmt = (iso)=> iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'}) : '—';
 
-    let html =
-      '<p class="greet-line">Good day, <b>'+escapeHtml(currentUser.name)+'</b>!</p>'+
-      '<p class="greet-date">Today is '+dateStr+', '+timeStr+'.</p>';
-
-    // Today's attendance log, right in the greeting — big and hard to miss,
-    // so Time In / Time Out isn't something a technician has to remember to
-    // go check the DTR page for.
-    html +=
-      '<div class="greet-attendance-box">'+
-        '<div class="greet-attendance-item">'+
-          '<span class="greet-attendance-label">Time In</span>'+
-          '<span class="greet-attendance-val'+(alreadyTimedIn?'':' greet-attendance-val-missing')+'">'+fmt(todayDtr && todayDtr.timeIn)+'</span>'+
-        '</div>'+
-        '<div class="greet-attendance-item">'+
-          '<span class="greet-attendance-label">Time Out</span>'+
-          '<span class="greet-attendance-val'+(alreadyTimedOut?'':' greet-attendance-val-missing')+'">'+fmt(todayDtr && todayDtr.timeOut)+'</span>'+
-        '</div>'+
+    // Attendance is PURE DISPLAY here — no tap target. Time In/Out are
+    // only ever recorded from the actual DTR screen (showDtrView).
+    const attendLine =
+      '<div class="greet-attend-line">'+
+        '<span>Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
+        '<span>Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
         (todayDtr && todayDtr.otTimeIn ?
-          '<div class="greet-attendance-item">'+
-            '<span class="greet-attendance-label">OT In</span>'+
-            '<span class="greet-attendance-val">'+fmt(todayDtr.otTimeIn)+'</span>'+
-          '</div>'+
-          '<div class="greet-attendance-item">'+
-            '<span class="greet-attendance-label">OT Out</span>'+
-            '<span class="greet-attendance-val'+(todayDtr.otTimeOut?'':' greet-attendance-val-missing')+'">'+fmt(todayDtr.otTimeOut)+'</span>'+
-          '</div>'
+          '<span>OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
+          '<span>OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
         : '')+
       '</div>';
+    const reminder = !alreadyTimedIn
+      ? '<div class="greet-reminder-compact">⏰ Don\'t forget to Time In.</div>'
+      : !alreadyTimedOut
+        ? '<div class="greet-reminder-compact">⏰ Don\'t forget to Time Out before you head home.</div>'
+        : '';
 
-    if(!alreadyTimedIn){
-      html += '<div class="greet-reminder">⏰ Don\'t forget to tap "Time-In" to officially register your attendance.</div>';
-    }else if(!alreadyTimedOut){
-      html += '<div class="greet-reminder">⏰ Don\'t forget to tap "Time-Out" before you head home.</div>';
-    }
-    html += '<p class="greet-thanks">Thank you!</p>';
-
-    // Today's Job Order(s) — sits to the right of the greeting so it's the
-    // first thing a technician's eye lands on, without having to open My
-    // Job Order and scan for today's date. Matched on scheduled date only
-    // (not status), so a same-day ticket still shows here even once it's
-    // been acknowledged or completed.
+    // Today's Job Order(s) — matched on scheduled date only (not status),
+    // so a same-day ticket still shows here even once it's been
+    // acknowledged or completed.
     const todaysJo = (myTickets||[]).filter(t=> t.date===todayISO())
       .sort((a,b)=> (a.expectedTime||'').localeCompare(b.expectedTime||''));
     const joBody = todaysJo.length===0
-      ? '<div class="greet-jo-empty">No job order scheduled for today.</div>'
+      ? '<div class="greet-jo-compact-empty">No job order scheduled for today.</div>'
       : todaysJo.map(t=>
-          '<div class="greet-jo-item" data-ticket-id="'+escapeHtml(t.id)+'">'+
-            '<div class="greet-jo-item-head">'+
-              '<span class="greet-jo-no">'+escapeHtml(t.jobOrderNo||t.id)+'</span>'+
-              dtStatusPill(t)+
+          '<div class="greet-jo-row" data-ticket-id="'+escapeHtml(t.id)+'">'+
+            '<div class="greet-jo-row-main">'+
+              '<span class="greet-jo-row-no">'+escapeHtml(t.jobOrderNo||t.id)+'</span>'+
+              '<span class="greet-jo-row-cust">'+escapeHtml(t.custName||'')+'</span>'+
             '</div>'+
-            '<div class="greet-jo-cust">'+escapeHtml(t.custName||'')+'</div>'+
-            (t.expectedTime ? '<div class="greet-jo-time">'+icon('clock')+' '+escapeHtml(t.expectedTime)+'</div>' : '')+
+            (t.expectedTime ? '<span class="greet-jo-row-time">'+escapeHtml(t.expectedTime)+'</span>' : '')+
           '</div>'
         ).join('');
-    const todayJoHtml =
-      '<div class="greet-today-jo">'+
-        '<div class="greet-today-jo-title">'+icon('clipboard')+' Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
-        joBody+
-      '</div>';
 
     $('homeGreetingText').innerHTML =
-      '<div class="greet-layout">'+
-        '<div class="greet-main">'+html+'</div>'+
-        todayJoHtml+
+      '<div class="greet-compact">'+
+        '<div class="greet-row1">'+
+          '<span class="greet-name">Good day, <b>'+escapeHtml(currentUser.name)+'</b>!</span>'+
+          '<span class="greet-datetime">'+dateStr+' · '+timeStr+'</span>'+
+        '</div>'+
+        attendLine+
+        reminder+
+        '<div class="greet-jo-compact">'+
+          '<div class="greet-jo-compact-title">Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
+          joBody+
+        '</div>'+
       '</div>';
   }
 
@@ -12406,26 +12393,6 @@
     $('ovMyLiqValue').textContent = String(liqCount);
     $('ovMyLiqSub').textContent = liqCount===0 ? 'Nothing to liquidate' : liqCount+' Cash Advance'+(liqCount===1?'':'s')+' to Liquidate';
 
-    // Finance — my own cash currently out and not yet accounted for
-    // (disbursed, but no approved liquidation on file yet). Same figure as
-    // admin's dashboard Finance tile, scoped down to just this technician.
-    const outstandingMine = (cashAdvances||[]).filter(r=> r.disbursed && (!r.liquidation || r.liquidation.status!=='approved'));
-    const outstandingMineTotal = outstandingMine.reduce((sum,r)=> sum + (r.amountGiven!=null ? r.amountGiven : (r.amount||0)), 0);
-    $('ovMyFinanceValue').textContent = caFmtPeso(outstandingMineTotal);
-    let myFinanceSub = outstandingMine.length===0
-      ? 'Nothing outstanding'
-      : outstandingMine.length+' Cash Advance'+(outstandingMine.length===1?'':'s')+' not yet liquidated';
-    // An approved liquidation can still leave a return/reimburse balance
-    // open — that's a separate, smaller state than "not yet liquidated"
-    // above, and used to have nowhere it stayed visible once the technician
-    // closed the liquidation screen.
-    const unsettledMine = (cashAdvances||[]).filter(r=> r.liquidation && r.liquidation.status==='approved' && r.liquidation.settlement && !r.liquidation.settlement.settled);
-    if(unsettledMine.length>0){
-      const unsettledMineAmount = unsettledMine.reduce((sum,r)=> sum + r.liquidation.settlement.amount, 0);
-      myFinanceSub += ' · '+caFmtPeso(unsettledMineAmount)+' to settle';
-    }
-    $('ovMyFinanceSub').textContent = myFinanceSub;
-
     // Next Job Order — the soonest-dated open ticket, so a technician sees
     // what's coming up without opening My Job Order and scanning the list.
     const nextJo = openTickets.filter(t=>t.date).slice()
@@ -12454,6 +12421,42 @@
     }
     const sidebarBadgeEl = $('sidebarMsgBadge');
     if(sidebarBadgeEl){ sidebarBadgeEl.style.display = unreadCount>0 ? '' : 'none'; sidebarBadgeEl.textContent = String(unreadCount); }
+    const techMoreBadgeEl = $('techMoreMsgBadge');
+    if(techMoreBadgeEl){ techMoreBadgeEl.style.display = unreadCount>0 ? '' : 'none'; techMoreBadgeEl.textContent = String(unreadCount); }
+    techInitOverviewCarousel();
+  }
+
+  // Swipeable Overview carousel (technician home) — the 5 .overview-stat
+  // slides themselves are static in index.html and already populated
+  // above by textContent; this only builds/wires the dot indicators.
+  // Idempotent — safe to call on every render (rebuilds the dots row each
+  // time rather than accumulating duplicates).
+  let techCarouselWired = false;
+  function techInitOverviewCarousel(){
+    const track = $('homeTechOverviewCarousel');
+    const dotsEl = $('homeTechOverviewDots');
+    if(!track || !dotsEl) return;
+    const slides = track.querySelectorAll('.overview-stat');
+    dotsEl.innerHTML = '';
+    slides.forEach((_, i)=>{
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'overview-dot'+(i===0?' active':'');
+      dot.setAttribute('aria-label', 'Go to stat '+(i+1));
+      dot.addEventListener('click', ()=> track.scrollTo({left: i*track.clientWidth, behavior:'smooth'}));
+      dotsEl.appendChild(dot);
+    });
+    if(techCarouselWired) return; // scroll listener only needs binding once — the track element itself never gets recreated
+    techCarouselWired = true;
+    let scrollRaf = null;
+    track.addEventListener('scroll', ()=>{
+      if(scrollRaf) return;
+      scrollRaf = requestAnimationFrame(()=>{
+        scrollRaf = null;
+        const active = track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : 0;
+        $$('.overview-dot', dotsEl).forEach((d,i)=> d.classList.toggle('active', i===active));
+      });
+    });
   }
 
   // Lightweight badge refresh — called right after a message thread is
@@ -12465,6 +12468,8 @@
     const unreadCount = await dtCountUnreadMessages().catch(()=>0);
     const sidebarBadgeEl = $('sidebarMsgBadge');
     if(sidebarBadgeEl){ sidebarBadgeEl.style.display = unreadCount>0 ? '' : 'none'; sidebarBadgeEl.textContent = String(unreadCount); }
+    const techMoreBadgeEl = $('techMoreMsgBadge');
+    if(techMoreBadgeEl){ techMoreBadgeEl.style.display = unreadCount>0 ? '' : 'none'; techMoreBadgeEl.textContent = String(unreadCount); }
     const notifEl = $('notifBadge');
     if(notifEl && currentUser.role!=='admin'){
       notifEl.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -12855,6 +12860,8 @@
     renderHomeTechOverview();
     renderHomeOverview();
     renderHomeAnnouncements();
+    renderTechQuickActions();
+    techSetNavActive('home');
     window.scrollTo({top:0});
   }
   // ---------- Service Report: Create New / Saved Draft / Completed / All tabs ----------
@@ -13064,12 +13071,79 @@
   // used when a technician is sent here from the Service Report picker
   // (see srGoAcknowledgeTicket).
   $('homeGreetingText').addEventListener('click', function(e){
-    const item = e.target.closest('.greet-jo-item');
+    const item = e.target.closest('.greet-jo-row');
     if(!item) return;
     const ticketId = item.getAttribute('data-ticket-id');
     if(!ticketId) return;
     showDispatchView().then(()=> dtHighlightTechCard(ticketId));
   });
+
+  // ---------- Technician Quick Actions (single card, 4 tiles — replaces
+  // the shared .home-grid for this role only; see body.role-tech .home-grid
+  // {display:none} in app.css). Shown/hidden alongside homeGreetingCard/
+  // homeTechOverviewCard — called from showHome() below. ----------
+  function renderTechQuickActions(){
+    const card = $('techQuickActionsCard');
+    if(!card) return;
+    card.style.display = (currentUser && currentUser.role==='tech') ? '' : 'none';
+  }
+  $('techQaServiceReport').addEventListener('click', showServiceReport);
+  $('techQaJobOrder').addEventListener('click', showDispatchView);
+  $('techQaFinanceHr').addEventListener('click', ()=> techOpenFinanceHrSheet());
+  $('techQaMaterials').addEventListener('click', ()=> flashComingSoonHeader('Material Request Form', 'Material Request Form — coming soon'));
+
+  // ---------- Finance & HR sheet — bundles what used to be five separate
+  // sidebar entries (Attendance/Cash Advance/Leave/Liquidation/
+  // Reimbursement) into one sheet, reusing the exact same target screens/
+  // tabs the old sidebar links opened. ----------
+  function techOpenFinanceHrSheet(){ $('techFinanceHrSheet').classList.add('open'); }
+  function techCloseFinanceHrSheet(){ $('techFinanceHrSheet').classList.remove('open'); }
+  $('closeTechFinanceHrSheet').addEventListener('click', techCloseFinanceHrSheet);
+  $('techFinanceHrSheet').addEventListener('click', (e)=>{ if(e.target.id==='techFinanceHrSheet') techCloseFinanceHrSheet(); });
+  $('techFhAttendance').addEventListener('click', ()=>{ techCloseFinanceHrSheet(); showDtrView(); });
+  $('techFhCashAdvance').addEventListener('click', ()=>{ techCloseFinanceHrSheet(); showCashAdvanceView(); });
+  $('techFhLeave').addEventListener('click', ()=>{ techCloseFinanceHrSheet(); showLeaveView(); });
+  $('techFhLiquidation').addEventListener('click', async ()=>{
+    techCloseFinanceHrSheet();
+    await showCashAdvanceView();
+    if(currentUser && currentUser.role!=='admin') caShowTab('liquidate');
+  });
+  $('techFhReimbursement').addEventListener('click', async ()=>{
+    techCloseFinanceHrSheet();
+    await showCashAdvanceView();
+    if(currentUser && currentUser.role!=='admin') caShowTab('reimburse');
+  });
+
+  // ---------- More sheet — the bottom nav's overflow tab for whatever
+  // doesn't get its own slot. ----------
+  function techOpenMoreSheet(){ $('techMoreSheet').classList.add('open'); }
+  function techCloseMoreSheet(){ $('techMoreSheet').classList.remove('open'); }
+  $('closeTechMoreSheet').addEventListener('click', techCloseMoreSheet);
+  $('techMoreSheet').addEventListener('click', (e)=>{ if(e.target.id==='techMoreSheet') techCloseMoreSheet(); });
+  $('techMoreMessages').addEventListener('click', ()=>{ techCloseMoreSheet(); showMessagesView(); });
+  $('techMoreDocuments').addEventListener('click', ()=>{ techCloseMoreSheet(); showDocumentsView(); });
+  $('techMoreSettings').addEventListener('click', ()=>{ techCloseMoreSheet(); showChangePasswordScreen(false); });
+  $('techMoreLogout').addEventListener('click', ()=>{ techCloseMoreSheet(); doLogout(); });
+
+  // ---------- Technician bottom nav (#techNav) — replaces the sidebar for
+  // this role only (admin keeps .admin-sidebar unchanged). Same .cp-nav/
+  // .cp-nav-btn classes as the customer portal's own nav, so it's already
+  // responsive (bottom bar on mobile, top bar on desktop) with no extra
+  // CSS needed here. Shown/hidden centrally in applyUserRestrictions()
+  // (auth.js) alongside the role-tech body class. ----------
+  function techSetNavActive(name){
+    const nav = $('techNav');
+    if(!nav) return;
+    $$('.cp-nav-btn', nav).forEach(btn=> btn.classList.remove('active'));
+    const map = { home:'techNavBtnHome', jobs:'techNavBtnJobs', report:'techNavBtnReport', finance:'techNavBtnFinance', more:'techNavBtnMore' };
+    const id = map[name];
+    if(id && $(id)) $(id).classList.add('active');
+  }
+  $('techNavBtnHome').addEventListener('click', ()=>{ techSetNavActive('home'); showHome(); });
+  $('techNavBtnJobs').addEventListener('click', ()=>{ techSetNavActive('jobs'); showDispatchView(); });
+  $('techNavBtnReport').addEventListener('click', ()=>{ techSetNavActive('report'); showServiceReport(); });
+  $('techNavBtnFinance').addEventListener('click', ()=>{ techSetNavActive('finance'); techOpenFinanceHrSheet(); });
+  $('techNavBtnMore').addEventListener('click', ()=>{ techSetNavActive('more'); techOpenMoreSheet(); });
 
 
 // ---------- Real-time technician location tracker (table: technician_locations) ----------
