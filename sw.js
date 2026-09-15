@@ -1,3 +1,10 @@
+// Bumped to v63 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — the "Back to Service Report" banner
+// on the Job Orders screen was showing raw <svg>...</svg> markup as
+// literal text instead of rendering the icon: dtRenderBackToSrBanner()
+// used .textContent instead of .innerHTML to set it, so the icon() helper's
+// HTML string never got parsed as markup. One-line fix in dispatch.js.
+//
 // Bumped to v62 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/js/app.bundle.js again — relayout of
 // the technician home screen:
@@ -265,7 +272,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v62';
+const CACHE_NAME = 'awes-sr-v63';
 
 // Split into two lists on purpose.
 //

@@ -8283,7 +8283,7 @@
     const ticket = (mine||[]).find(t=> t.id===srAckReturnTicketId);
     const jo = ticket ? ticket.jobOrderNo : 'That Job Order';
     const nowAck = ticket && currentUser && (ticket.acknowledgedBy||[]).includes(currentUser.id);
-    $('dtBackToSrText').textContent = nowAck
+    $('dtBackToSrText').innerHTML = nowAck
       ? (icon('checkCircle')+' '+jo+' is acknowledged — you can head back now.')
       : (icon('clipboard')+' Acknowledge '+jo+' below to unlock its Service Report.');
     banner.style.display = '';
