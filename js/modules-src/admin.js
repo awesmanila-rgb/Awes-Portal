@@ -508,7 +508,7 @@
           $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
           $('previewOkBtn').textContent = 'Close';
           $('previewOverlay').classList.add('open');
-          await renderPdfPreview(doc);
+          await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
         }catch(err){
           console.error('view report failed', err);
           toast('Could not open this report');
@@ -606,7 +606,7 @@
       // overlay's gallery (renderEquipmentPhotosSection below); showing a
       // real image per list row would mean a signed-URL round trip per
       // card just to browse the list, which isn't worth it here.
-      const photoBadge = photoCounts[e.id] ? ' &nbsp;📷 '+photoCounts[e.id] : '';
+      const photoBadge = photoCounts[e.id] ? ' &nbsp;'+icon('camera')+' '+photoCounts[e.id] : '';
       card.innerHTML =
         '<div class="user-card-head"'+(equipListTab==='edit' ? ' data-act="toggle" style="cursor:pointer;"' : '')+'><div>'+
           '<div class="u-name">'+escapeHtml(e.equipLocation || '(no location)')+'</div>'+
@@ -723,7 +723,7 @@
         if(!body) return;
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : '';
-        head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
+        head.querySelector('.cp-visit-chevron').innerHTML = icon('caretDown', open ? '' : 'style="transform:rotate(180deg);"');
       });
     });
     $$('.cp-visit-pdf-btn', list).forEach(btn=>{
@@ -747,8 +747,8 @@
           (url ? '<img src="'+url+'" style="width:100%; height:100%; object-fit:cover;">' : '<span style="font-size:11px; color:var(--text-muted);">…</span>')+
         '</div>'+
         '<div style="display:flex; gap:4px; margin-top:4px;">'+
-          '<button type="button" data-act="cover" title="Set as cover photo" style="flex:1; font-size:10px; padding:2px; border:1px solid var(--border); border-radius:5px; background:'+(photo.is_cover?'var(--accent,#2563eb)':'none')+'; color:'+(photo.is_cover?'#fff':'inherit')+'; cursor:pointer;">'+(photo.is_cover?'★ Cover':'☆ Set cover')+'</button>'+
-          '<button type="button" data-act="delete" title="Delete photo" style="font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:5px; background:none; cursor:pointer; color:#b42318;">✕</button>'+
+          '<button type="button" data-act="cover" title="Set as cover photo" style="flex:1; font-size:10px; padding:2px; border:1px solid var(--border); border-radius:5px; background:'+(photo.is_cover?'var(--accent,#2563eb)':'none')+'; color:'+(photo.is_cover?'#fff':'inherit')+'; cursor:pointer;">'+(photo.is_cover?(icon('star','fill="currentColor"')+' Cover'):(icon('star')+' Set cover'))+'</button>'+
+          '<button type="button" data-act="delete" title="Delete photo" style="font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:5px; background:none; cursor:pointer; color:#b42318;">'+icon('close')+'</button>'+
         '</div>'+
       '</div>'
     );

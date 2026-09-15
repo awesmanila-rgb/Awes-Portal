@@ -1,10 +1,94 @@
 (function(){
   "use strict";
 
+  // ---------- Icons ----------
+  // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
+  // dashboard, DTR, dispatch, cash advance, etc. — same reasoning and same
+  // stroke="currentColor" line-icon style already used for the customer
+  // portal's own CP_ICON set (customer-portal.js): emoji render as a
+  // different picture on every OS/font (an Android phone, an iPhone, and a
+  // desktop browser each draw something different for the same codepoint),
+  // can't take the surrounding text's color, and read as inconsistent next
+  // to a deliberately designed UI. icon(name) below returns a ready-to-use
+  // <svg> string sized at 1em so it drops into any existing emoji-sized
+  // container (.menu-ico, .card-head span, .home-tile-icon,
+  // .overview-stat-icon, etc.) without needing new CSS at each call site —
+  // see the .ic rule in app.css.
+  const ICON = {
+    home:'<path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',
+    clipboard:'<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/>',
+    receipt:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+    clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+    chat:'<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+    folder:'<path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    cash:'<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    calculator:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/>',
+    handshake:'<path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/>',
+    archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+    truck:'<rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/>',
+    tools:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/>',
+    building:'<rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/><path d="M8 6h2M14 6h2M8 10h2M14 10h2M8 14h2M14 14h2"/>',
+    toolbox:'<rect x="2" y="9" width="20" height="11" rx="2"/><path d="M8 9V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M2 14h20"/>',
+    person:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    people:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="3"/><path d="M15 14.2c2.8.5 5 2.6 5 5.8"/>',
+    megaphone:'<path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/>',
+    key:'<circle cx="8" cy="15" r="4"/><path d="M10.5 12.5 20 3"/><path d="M17 6l2 2"/><path d="M14 9l2 2"/>',
+    snowflake:'<path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/>',
+    file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+    logOut:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+    wave:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M14 11V5a1.5 1.5 0 0 1 3 0v8"/><path d="M17 13V8a1.5 1.5 0 0 1 3 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 15a1.4 1.4 0 0 1 2-2l2 1.8"/>',
+    search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+    barChart:'<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/>',
+    radio:'<circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/>',
+    bolt:'<path d="M13 2 3 14h7l-1 8 10-12h-7z"/>',
+    compass:'<circle cx="12" cy="12" r="10"/><path d="m16 8-2 6-6 2 2-6z"/>',
+    package:'<path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+    camera:'<path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/>',
+    car:'<path d="M5 11 6.5 6.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/>',
+    paperclip:'<path d="m21 11.5-8.5 8.5a4 4 0 0 1-5.7-5.7l9-9a2.5 2.5 0 0 1 3.6 3.6l-8.7 8.7a1 1 0 0 1-1.4-1.4l7.8-7.8"/>',
+    edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    checkCircle:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    download:'<path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>',
+    eye:'<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
+    lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    checkSquare:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8 12 3 3 5-6"/>',
+    check:'<path d="m5 12 5 5L20 7"/>',
+    alert:'<path d="M12 2 1 21h22z"/><path d="M12 9v5"/><path d="M12 17h.01"/>',
+    inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    pin:'<path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
+    flag:'<path d="M4 3v18"/><path d="M4 4h13l-3 5 3 5H4"/>',
+    cloud:'<path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.4-1.5A5 5 0 0 0 6.5 19z"/>',
+    menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+    close:'<path d="m18 6-12 12"/><path d="m6 6 12 12"/>',
+    star:'<path d="m12 2 3 7 7 .5-5.5 4.5 2 7-6.5-4-6.5 4 2-7L2 9.5 9 9z"/>',
+    lightbulb:'<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 2z"/>',
+    info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
+    caretDown:'<path d="m6 9 6 6 6-6"/>',
+    expand:'<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>',
+    externalLink:'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'
+  };
+  // Wraps an ICON path into a ready-to-use <svg>. `attrs` is an optional
+  // string of extra attributes (e.g. 'fill="currentColor" stroke="none"'
+  // for the solid status dots, or a style override) appended to the tag.
+  function icon(name, attrs){
+    const body = ICON[name] || '';
+    return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'+(attrs?(' '+attrs):'')+'>'+body+'</svg>';
+  }
+  // Small solid circle for status dots (🟢/🔴/🟠/⚫) — these were never
+  // line-art, just a colored disc, so this is fill="currentColor" instead
+  // of going through icon()'s stroke-based wrapper.
+  function dotIcon(colorVar){
+    return '<svg class="ic" viewBox="0 0 24 24" style="color:'+colorVar+';"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg>';
+  }
+
   // ---------- helpers ----------
   const domCache = Object.create(null);
   const $ = (id) => domCache[id] || (domCache[id] = document.getElementById(id));
   const $$ = (selector, root=document) => Array.from(root.querySelectorAll(selector));
+
 
   // Shared HTML escaping helper. Keep this in one place so modules do not each
   // maintain their own copy.
@@ -128,7 +212,7 @@
   }
   function setCloudStatusUI(connected){
     const btn = $('cloudBtn');
-    if(btn){ btn.textContent = connected ? '☁ Connected' : '☁ Not Connected'; btn.classList.toggle('cloud-connected', connected); }
+    if(btn){ btn.innerHTML = icon('cloud')+(connected ? ' Connected' : ' Not Connected'); btn.classList.toggle('cloud-connected', connected); }
   }
   async function doCloudInit(){
     const cfg = getCloudConfig();
@@ -1359,7 +1443,7 @@
       // name into it, so every role (including technicians and customers)
       // saw the literal word "Admin" here regardless of who was actually
       // logged in.
-      const greetTitleEl = $('dtGreetingTitle'); if(greetTitleEl) greetTitleEl.textContent = 'Good day, '+(currentUser.name||'there')+'! 👋';
+      const greetTitleEl = $('dtGreetingTitle'); if(greetTitleEl) greetTitleEl.innerHTML = 'Good day, '+escapeHtml(currentUser.name||'there')+'! '+icon('wave');
     }
     // "New" (header shortcut for a blank report) and "Create New" (Service
     // Report tab) both start a fresh, blank report. Technicians already
@@ -1401,14 +1485,14 @@
     $('adminBtn').textContent = 'Admin: ON';
     $('adminBtn').classList.add('admin-badge');
     const menuBtnEl = $('menuBtn');
-    if(menuBtnEl){ menuBtnEl.textContent = '☰ Menu • Admin ON'; menuBtnEl.classList.add('admin-badge'); }
+    if(menuBtnEl){ menuBtnEl.innerHTML = icon('menu')+' Menu • Admin ON'; menuBtnEl.classList.add('admin-badge'); }
   }
   function exitAdminModeUI(){
     adminMode = false;
     $('adminBtn').textContent = 'Admin';
     $('adminBtn').classList.remove('admin-badge');
     const menuBtnEl = $('menuBtn');
-    if(menuBtnEl){ menuBtnEl.textContent = '☰ Menu'; menuBtnEl.classList.remove('admin-badge'); }
+    if(menuBtnEl){ menuBtnEl.innerHTML = icon('menu')+' Menu'; menuBtnEl.classList.remove('admin-badge'); }
   }
 
   // Small inline icon set (Feather-style, stroke=currentColor) shared by the
@@ -1539,7 +1623,7 @@
     const cloudLink = document.createElement('button');
     cloudLink.type='button';
     cloudLink.className = 'login-cloud-link';
-    cloudLink.textContent = cloudReady ? '☁ Connected — Cloud Setup' : '☁ Not connected — tap to set up Shared Cloud';
+    cloudLink.innerHTML = icon('cloud')+(cloudReady ? ' Connected — Cloud Setup' : ' Not connected — tap to set up Shared Cloud');
     cloudLink.addEventListener('click', ()=>{
       const cfg = getCloudConfig();
       if(cfg){ $('cfgSupabaseUrl').value = cfg.url || ''; $('cfgSupabaseKey').value = cfg.anonKey || ''; }
@@ -1639,12 +1723,12 @@
     container.appendChild(heading);
     const techBtn = document.createElement('button');
     techBtn.type='button'; techBtn.className='login-user-btn';
-    techBtn.textContent = '👷 Technician';
+    techBtn.innerHTML = icon('people')+' Technician';
     techBtn.addEventListener('click', ()=> renderTechnicianLoginForm());
     container.appendChild(techBtn);
     const adminBtn = document.createElement('button');
     adminBtn.type='button'; adminBtn.className='login-user-btn';
-    adminBtn.textContent = '🔑 Admin';
+    adminBtn.innerHTML = icon('key')+' Admin';
     adminBtn.addEventListener('click', ()=> renderAdminLoginForm());
     container.appendChild(adminBtn);
   }
@@ -3783,7 +3867,7 @@
           $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
           $('previewOkBtn').textContent = 'Close';
           $('previewOverlay').classList.add('open');
-          await renderPdfPreview(doc);
+          await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
         }catch(err){
           console.error('view report failed', err);
           toast('Could not open this report');
@@ -3881,7 +3965,7 @@
       // overlay's gallery (renderEquipmentPhotosSection below); showing a
       // real image per list row would mean a signed-URL round trip per
       // card just to browse the list, which isn't worth it here.
-      const photoBadge = photoCounts[e.id] ? ' &nbsp;📷 '+photoCounts[e.id] : '';
+      const photoBadge = photoCounts[e.id] ? ' &nbsp;'+icon('camera')+' '+photoCounts[e.id] : '';
       card.innerHTML =
         '<div class="user-card-head"'+(equipListTab==='edit' ? ' data-act="toggle" style="cursor:pointer;"' : '')+'><div>'+
           '<div class="u-name">'+escapeHtml(e.equipLocation || '(no location)')+'</div>'+
@@ -3998,7 +4082,7 @@
         if(!body) return;
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : '';
-        head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
+        head.querySelector('.cp-visit-chevron').innerHTML = icon('caretDown', open ? '' : 'style="transform:rotate(180deg);"');
       });
     });
     $$('.cp-visit-pdf-btn', list).forEach(btn=>{
@@ -4022,8 +4106,8 @@
           (url ? '<img src="'+url+'" style="width:100%; height:100%; object-fit:cover;">' : '<span style="font-size:11px; color:var(--text-muted);">…</span>')+
         '</div>'+
         '<div style="display:flex; gap:4px; margin-top:4px;">'+
-          '<button type="button" data-act="cover" title="Set as cover photo" style="flex:1; font-size:10px; padding:2px; border:1px solid var(--border); border-radius:5px; background:'+(photo.is_cover?'var(--accent,#2563eb)':'none')+'; color:'+(photo.is_cover?'#fff':'inherit')+'; cursor:pointer;">'+(photo.is_cover?'★ Cover':'☆ Set cover')+'</button>'+
-          '<button type="button" data-act="delete" title="Delete photo" style="font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:5px; background:none; cursor:pointer; color:#b42318;">✕</button>'+
+          '<button type="button" data-act="cover" title="Set as cover photo" style="flex:1; font-size:10px; padding:2px; border:1px solid var(--border); border-radius:5px; background:'+(photo.is_cover?'var(--accent,#2563eb)':'none')+'; color:'+(photo.is_cover?'#fff':'inherit')+'; cursor:pointer;">'+(photo.is_cover?(icon('star','fill="currentColor"')+' Cover'):(icon('star')+' Set cover'))+'</button>'+
+          '<button type="button" data-act="delete" title="Delete photo" style="font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:5px; background:none; cursor:pointer; color:#b42318;">'+icon('close')+'</button>'+
         '</div>'+
       '</div>'
     );
@@ -5338,13 +5422,25 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
   let previewRenderToken = 0;
+  // Tracks whichever doc is currently sitting in the preview overlay, so
+  // the new Download button (added alongside Close/"Continue to
+  // Signatures") has something to hand to shareOrDownloadPdf() without
+  // every call site needing its own click handler — renderPdfPreview()
+  // is the one place all four preview entry points (pre-signing draft,
+  // admin/tech "View", customer portal "View Full Report (PDF)") already
+  // funnel through.
+  let previewCurrentDoc = null;
+  let previewCurrentFilename = 'Report.pdf';
   function closePreview(){
     $('previewOverlay').classList.remove('open');
     previewRenderToken++; // invalidate any in-flight render
     const frame = $('previewFrame');
     frame.innerHTML = '<div class="empty-state" style="display:none;">Rendering preview…</div>';
+    previewCurrentDoc = null;
   }
-  async function renderPdfPreview(doc){
+  async function renderPdfPreview(doc, filename){
+    previewCurrentDoc = doc;
+    previewCurrentFilename = filename || 'Report.pdf';
     const myToken = ++previewRenderToken;
     const frame = $('previewFrame');
     frame.innerHTML = '';
@@ -5383,16 +5479,33 @@
       $('previewOverlay').querySelector('h3').textContent = 'Report Preview';
       $('previewOkBtn').textContent = 'Looks Good — Continue to Signatures';
       $('previewOverlay').classList.add('open');
-      await renderPdfPreview(doc);
+      await renderPdfPreview(doc, (data.srNo||'service-report')+'.pdf');
     }catch(e){
       console.error(e);
       toast('Could not build preview');
     }finally{
-      $('previewBtn').disabled = false; $('previewBtn').textContent = '👁 Preview Report Before Signing';
+      $('previewBtn').disabled = false; $('previewBtn').innerHTML = icon('eye')+' Preview Report Before Signing';
     }
   });
   $('closePreview').addEventListener('click', closePreview);
   $('previewOkBtn').addEventListener('click', closePreview);
+  // Download does NOT close the overlay — someone checking a report over a
+  // weak field connection may want to save it and keep looking, or try
+  // again if the share sheet/save silently didn't go through.
+  $('previewDownloadBtn').addEventListener('click', async ()=>{
+    if(!previewCurrentDoc) return;
+    const btn = $('previewDownloadBtn');
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Downloading…';
+    try{
+      await shareOrDownloadPdf(previewCurrentDoc, previewCurrentFilename);
+    }catch(err){
+      console.error('preview download failed', err);
+      toast('Could not download this report');
+    }finally{
+      btn.disabled = false; btn.textContent = original;
+    }
+  });
 
   function showShareSuccess(detail){
     $('shareSuccessDetail').textContent = detail || '';
@@ -5613,7 +5726,7 @@
             $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
             $('previewOkBtn').textContent = 'Close';
             $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc);
+            await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
           }catch(err){
             console.error('view report failed', err);
             toast('Could not open this report');
@@ -6169,10 +6282,10 @@
         '<div class="hist-info"><b>'+escapeHtml(dtrFmtDateLabel(d.date))+'</b>'+
         '<span>In: '+escapeHtml(inTxt)+' &nbsp;·&nbsp; Out: '+escapeHtml(outTxt)+'</span>'+
         ((otInTxt || otOutTxt) ? '<span>OT In: '+escapeHtml(otInTxt||'—')+' &nbsp;·&nbsp; OT Out: '+escapeHtml(otOutTxt||'—')+'</span>' : '')+
-        (d.timeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="in">📍 In: '+escapeHtml(dtrLocLabel(d.timeInLoc))+'</button>' : '')+
-        (d.timeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="out">📍 Out: '+escapeHtml(dtrLocLabel(d.timeOutLoc))+'</button>' : '')+
-        (d.otTimeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otin">📍 OT In: '+escapeHtml(dtrLocLabel(d.otTimeInLoc))+'</button>' : '')+
-        (d.otTimeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otout">📍 OT Out: '+escapeHtml(dtrLocLabel(d.otTimeOutLoc))+'</button>' : '')+
+        (d.timeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="in">'+icon('pin')+' In: '+escapeHtml(dtrLocLabel(d.timeInLoc))+'</button>' : '')+
+        (d.timeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="out">'+icon('pin')+' Out: '+escapeHtml(dtrLocLabel(d.timeOutLoc))+'</button>' : '')+
+        (d.otTimeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otin">'+icon('pin')+' OT In: '+escapeHtml(dtrLocLabel(d.otTimeInLoc))+'</button>' : '')+
+        (d.otTimeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otout">'+icon('pin')+' OT Out: '+escapeHtml(dtrLocLabel(d.otTimeOutLoc))+'</button>' : '')+
         '</div>';
       list.appendChild(row);
       const inTag = row.querySelector('[data-kind="in"]');
@@ -6342,11 +6455,11 @@
         // running — that's a distinct status from "Completed for the day",
         // same split dtrIsOnClock() uses to keep the location tracker on.
         if(rec.otTimeIn && !rec.otTimeOut){
-          statusLabel = '🟠 Overtime'; otCount++;
+          statusLabel = dotIcon('var(--amber)')+' Overtime'; otCount++;
           otInTxt = dtrFmtTime(rec.otTimeIn);
           otHoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.otTimeIn))/60000)));
         }else{
-          statusLabel = '⚫ Completed'; completedCount++;
+          statusLabel = dotIcon('var(--text-muted)')+' Completed'; completedCount++;
           if(rec.otTimeIn){
             otInTxt = dtrFmtTime(rec.otTimeIn);
             otOutTxt = rec.otTimeOut ? dtrFmtTime(rec.otTimeOut) : '—';
@@ -6354,11 +6467,11 @@
           }
         }
       }else if(rec && rec.timeIn){
-        statusLabel = '🟢 Present'; presentCount++;
+        statusLabel = dotIcon('var(--green)')+' Present'; presentCount++;
         inTxt = dtrFmtTime(rec.timeIn);
         hoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.timeIn))/60000)));
       }else{
-        statusLabel = '🔴 Absent'; absentCount++;
+        statusLabel = dotIcon('var(--danger)')+' Absent'; absentCount++;
       }
       const row = document.createElement('tr');
       row.innerHTML =
@@ -6864,7 +6977,7 @@
           '</div>'+
           (alreadyAck
             ? dtStatusPill(r)
-            : '<button type="button" class="sr-ack-required-btn">🔒 Acknowledge Required</button>')+
+            : '<button type="button" class="sr-ack-required-btn">'+icon('lock')+' Acknowledge Required</button>')+
         '</div>'+
         (alreadyAck
           ? '<div class="dt-equip-pending" style="display:none; margin-top:8px;"></div>'
@@ -6911,7 +7024,7 @@
           batchLink.type = 'button';
           batchLink.className = 'sr-batch-toggle-link';
           batchLink.style.cssText = 'width:100%; text-align:center; background:none; border:none; color:var(--green-dark); font-size:12px; font-weight:600; padding:8px 0 2px; cursor:pointer;';
-          batchLink.textContent = '☑ Select multiple to batch sign →';
+          batchLink.innerHTML = icon('checkSquare')+' Select multiple to batch sign →';
           batchLink.addEventListener('click', (e)=>{
             e.stopPropagation();
             srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList);
@@ -7762,7 +7875,7 @@
     const willOpen = forceOpen!==undefined ? forceOpen : body.style.display==='none';
     body.style.display = willOpen ? '' : 'none';
     const caret = head.querySelector('.jo-caret');
-    if(caret) caret.textContent = willOpen ? '▴' : '▾';
+    if(caret) caret.innerHTML = icon('caretDown', willOpen ? 'style="transform:rotate(180deg);"' : '');
   }
   function dtHandleEquipRowClick(e){
     // Checked before the toggle header below: "Open Job Order" now lives
@@ -7869,7 +7982,7 @@
       const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
       return '<div class="jo-step '+state+'">'+
           '<span class="jo-step-line"></span>'+
-          '<span class="jo-step-dot">'+(i<stage ? '✓' : (i+1))+'</span>'+
+          '<span class="jo-step-dot">'+(i<stage ? icon('check') : (i+1))+'</span>'+
           '<span class="jo-step-label">'+label+'</span>'+
         '</div>';
     }).join('');
@@ -7880,7 +7993,7 @@
     else if(ack) nextText = 'You are on site. Tap Mark Completed once your visit here is done — that just closes out the fieldwork step, not that everything went perfectly; Close Job Order still lets you flag anything that wasn\'t finished.';
     else nextText = 'New assignment. Tap Acknowledge to accept this job order.';
     const expiredWarn = dtEffectiveStatus(r)==='expired'
-      ? '<div class="jo-stepper-warn">⚠ Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
+      ? '<div class="jo-stepper-warn">'+icon('alert')+' Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
       : '';
     return '<div class="jo-stepper">'+expiredWarn+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
@@ -8032,8 +8145,8 @@
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
       list.innerHTML = dtTechListTab==='closed'
-        ? '<div class="empty-state">📁 No closed job orders yet</div>'
-        : '<div class="empty-state">📭 No active job orders<br><span class="dt-jo-empty-sub">Job orders your admin assigns to you will show up here.</span></div>';
+        ? '<div class="empty-state">'+icon('folder')+' No closed job orders yet</div>'
+        : '<div class="empty-state">'+icon('inbox')+' No active job orders<br><span class="dt-jo-empty-sub">Job orders your admin assigns to you will show up here.</span></div>';
       return;
     }
     list.innerHTML = '';
@@ -8077,8 +8190,8 @@
     const jo = ticket ? ticket.jobOrderNo : 'That Job Order';
     const nowAck = ticket && currentUser && (ticket.acknowledgedBy||[]).includes(currentUser.id);
     $('dtBackToSrText').textContent = nowAck
-      ? ('✅ '+jo+' is acknowledged — you can head back now.')
-      : ('📋 Acknowledge '+jo+' below to unlock its Service Report.');
+      ? (icon('checkCircle')+' '+jo+' is acknowledged — you can head back now.')
+      : (icon('clipboard')+' Acknowledge '+jo+' below to unlock its Service Report.');
     banner.style.display = '';
   }
   if($('dtBackToSrBtn')){
@@ -8301,7 +8414,7 @@
           ? 'Acknowledge this job order'
           : (!doneSelf ? 'Mark Completed once your visit here is done' : 'Wait for the other assigned technician(s) to mark it completed');
         $('dtCloseSection').innerHTML =
-          '<div class="empty-state">🔒 '+nextStep+' — from My Job Order — before you can close this ticket.'+
+          '<div class="empty-state">'+icon('lock')+' '+nextStep+' — from My Job Order — before you can close this ticket.'+
           '<br><span class="dt-jo-empty-sub">Marking it completed doesn\'t mean everything went perfectly — you can still note anything that wasn\'t finished right here when you close it.</span></div>';
         $('dtCloseSubmitBtn').style.display = 'none';
       }else{
@@ -9348,7 +9461,7 @@
     const canConvert = r.status==='schedule_confirmed';
     return (
       '<div class="cp-row" style="align-items:flex-start;" data-req-id="'+r.id+'">'+
-        '<div class="cp-row-icon">🛠️</div>'+
+        '<div class="cp-row-icon">'+icon('tools')+'</div>'+
         '<div class="cp-row-body">'+
           '<div class="cp-row-title">'+escapeHtml(custName)+urgentTag+'</div>'+
           '<div class="cp-row-sub">'+escapeHtml(r.description||'')+'</div>'+
@@ -10093,7 +10206,7 @@
         return;
       }
       caLiqOthersAttachment = {data: dataUrl, mime, name: file.name};
-      $('liqOthersFileStatus').textContent = '📄 '+file.name;
+      $('liqOthersFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
     }catch(e){ toast('Could not attach that file'); }
   });
   $('liqOthersAddItemBtn').addEventListener('click', ()=>{
@@ -10186,7 +10299,7 @@
     const s = liq.settlement;
     const label = s.type==='return' ? 'Technician owes' : 'Reimburse technician';
     if(s.settled){
-      return '<div class="leave-comment"><b>Settlement</b>✅ '+label+' '+caFmtPeso(s.amount)+
+      return '<div class="leave-comment"><b>Settlement</b>'+icon('checkCircle')+' '+label+' '+caFmtPeso(s.amount)+
         ' — settled '+leaveFmtWhen(s.settledAt)+(s.settledBy ? ' by '+escapeHtml(s.settledBy) : '')+
         (s.method ? ' ('+escapeHtml(s.method)+')' : '')+'</div>';
     }
@@ -10222,10 +10335,10 @@
         '<div style="display:flex; flex:1; gap:8px; align-items:center; min-width:0;">'+
           '<span style="width:28px; color:var(--text-muted);">'+(idx+1)+'</span>'+
           '<span style="flex:1; font-size:12px; color:var(--text-muted);">'+caLiqItemDate(item)+'</span>'+
-          '<span style="flex:2;"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
+          '<span style="flex:2;"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
         '</div>'+
         '<div style="text-align:right; font-weight:700; white-space:nowrap; min-width:70px;">'+caFmtPeso(item.amount)+'</div>'+
-        (editable ? '<button type="button" class="btn btn-secondary" data-act="remove" data-item-id="'+item.id+'" style="flex:0 0 auto; width:auto; margin-left:8px; color:var(--danger); padding:4px 10px; font-size:11px;">✕</button>' : '')+
+        (editable ? '<button type="button" class="btn btn-secondary" data-act="remove" data-item-id="'+item.id+'" style="flex:0 0 auto; width:auto; margin-left:8px; color:var(--danger); padding:4px 10px; font-size:11px;">'+icon('close')+'</button>' : '')+
       '</div>';
     });
     return html;
@@ -10366,8 +10479,8 @@
       // trip-leg summary the editable form and admin review already show,
       // instead of leaving the technician no way to double-check it here.
       const particular = item.type==='transport'
-        ? '🚕 <a href="#" class="ca-liq-preview-link" data-view-item="'+escapeHtml(String(item.id))+'" style="color:var(--green-dark); font-weight:700; text-decoration:underline;">'+escapeHtml(caLiqItemParticular(item))+'</a>'
-        : '<b>📄 '+escapeHtml(caLiqItemParticular(item))+'</b>';
+        ? icon('car')+' <a href="#" class="ca-liq-preview-link" data-view-item="'+escapeHtml(String(item.id))+'" style="color:var(--green-dark); font-weight:700; text-decoration:underline;">'+escapeHtml(caLiqItemParticular(item))+'</a>'
+        : '<b>'+icon('file')+' '+escapeHtml(caLiqItemParticular(item))+'</b>';
       rows +=
         '<tr>'+
           '<td class="num">'+(idx+1)+'</td>'+
@@ -10522,7 +10635,7 @@
         '<div style="display:flex; flex:1; gap:8px; align-items:center;">'+
           '<span style="width:28px; color:var(--text-muted);">'+(idx+1)+'</span>'+
           '<span style="flex:1; font-size:12px; color:var(--text-muted);">'+caLiqItemDate(item)+'</span>'+
-          '<span style="flex:2;"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
+          '<span style="flex:2;"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
         '</div>'+
         '<span style="font-weight:700; white-space:nowrap;">'+caFmtPeso(item.amount)+'</span></div>';
     });
@@ -11020,7 +11133,7 @@
           let itemsHtml = '';
           (r.liquidation.items||[]).forEach(item=>{
             itemsHtml += '<div class="hist-item" style="cursor:pointer; padding:6px 8px;" data-view-item="'+escapeHtml(String(item.id))+'">'+
-              '<div class="hist-info"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b>'+
+              '<div class="hist-info"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b>'+
               '<span>'+caFmtPeso(item.amount)+'</span></div></div>';
           });
           liqBlock =
@@ -11066,7 +11179,7 @@
     let html = '<div class="field"><label>Items</label></div>';
     liq.items.forEach(item=>{
       html += '<div class="hist-item" style="cursor:pointer;" data-view-item="'+item.id+'">'+
-        '<div class="hist-info"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b>'+
+        '<div class="hist-info"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b>'+
         '<span>'+caFmtPeso(item.amount)+'</span></div></div>';
     });
     html += '<div style="display:flex; justify-content:space-between; font-weight:700; margin:8px 0;"><span>Total</span><span>'+caFmtPeso(liq.totalAmount)+' of '+caFmtPeso(r.amountGiven)+' given</span></div>';
@@ -11266,7 +11379,7 @@
         '<div class="card-body" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">'+
           '<div>'+
             '<div style="font-weight:600;">'+escapeHtml(it.description)+'</div>'+
-            '<div class="u-status">'+leaveFmtDate(it.dateIncurred)+' · 📎 '+escapeHtml(it.attachmentName||'receipt')+'</div>'+
+            '<div class="u-status">'+leaveFmtDate(it.dateIncurred)+' · '+icon('paperclip')+' '+escapeHtml(it.attachmentName||'receipt')+'</div>'+
           '</div>'+
           '<div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">'+
             '<b>'+caFmtPeso(it.amount)+'</b>'+
@@ -11309,7 +11422,7 @@
         return;
       }
       caReimbAttachment = {data: dataUrl, mime, name: file.name};
-      $('caReimbFileStatus').textContent = '📄 '+file.name;
+      $('caReimbFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
     }catch(e){ toast('Could not attach that file'); }
   });
   $('caReimbAddItemBtn').addEventListener('click', ()=>{
@@ -11792,12 +11905,12 @@
               dtStatusPill(t)+
             '</div>'+
             '<div class="greet-jo-cust">'+escapeHtml(t.custName||'')+'</div>'+
-            (t.expectedTime ? '<div class="greet-jo-time">🕒 '+escapeHtml(t.expectedTime)+'</div>' : '')+
+            (t.expectedTime ? '<div class="greet-jo-time">'+icon('clock')+' '+escapeHtml(t.expectedTime)+'</div>' : '')+
           '</div>'
         ).join('');
     const todayJoHtml =
       '<div class="greet-today-jo">'+
-        '<div class="greet-today-jo-title">📋 Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
+        '<div class="greet-today-jo-title">'+icon('clipboard')+' Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
         joBody+
       '</div>';
 
@@ -12066,7 +12179,7 @@
     const hour = new Date().getHours();
     const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
     const name = (currentUser && currentUser.name) ? currentUser.name : 'Admin';
-    el.textContent = 'Good '+part+', '+name+'! 👋';
+    el.innerHTML = 'Good '+escapeHtml(part)+', '+escapeHtml(name)+'! '+icon('wave');
   }
 
   // ---------- Recent Activity (admin dashboard, next to the live tracker) ----------
@@ -12615,7 +12728,7 @@
     );
     // One-time heads up — the browser's own permission prompt is the real
     // consent step; this just explains what it's for.
-    toast('📍 Location sharing is on while you\'re timed in');
+    toast('Location sharing is on while you\'re timed in');
   }
   function trackerStopBroadcasting(){
     if(trackerWatchId != null && navigator.geolocation){ navigator.geolocation.clearWatch(trackerWatchId); }
@@ -14762,7 +14875,7 @@
           '<div class="cp-visit-section"><b>Recommendations</b>'+cpFmtList(r.recommendations)+'</div>'+
           '<div class="cp-visit-section"><b>Services Done</b>'+cpFmtList(r.services_done)+'</div>'+
           '<div class="cp-visit-section"><b>Materials Used</b>'+cpFmtList(r.materials)+'</div>'+
-          '<button type="button" class="cp-visit-pdf-btn" data-sr-no="'+escapeHtml(r.sr_no||'')+'">🗎 View Full Report (PDF)</button>'+
+          '<button type="button" class="cp-visit-pdf-btn" data-sr-no="'+escapeHtml(r.sr_no||'')+'">'+icon('file')+' View Full Report (PDF)</button>'+
         '</div>'+
       '</div>'
     );
@@ -14895,7 +15008,7 @@
         const body = head.nextElementSibling;
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : '';
-        head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
+        head.querySelector('.cp-visit-chevron').innerHTML = icon('caretDown', open ? '' : 'style="transform:rotate(180deg);"');
       };
     });
 
@@ -15020,7 +15133,7 @@
       $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
       $('previewOkBtn').textContent = 'Close';
       $('previewOverlay').classList.add('open');
-      await renderPdfPreview(doc);
+      await renderPdfPreview(doc, (sr || d.srNo || 'service-report')+'.pdf');
     }catch(err){
       console.error('view customer report failed', err);
       toast('Could not open this report');

@@ -1,3 +1,20 @@
+// Bumped to v55 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/app.bundle.js again — three changes that
+// all need a fresh shell:
+//   1. Customer portal Profile screen now shows a "Profile Information"
+//      card (name, login email, contact person, contact number, property
+//      address) plus Terms and Conditions / Privacy Notice screens
+//      (customerLegalScreen) — new markup and new CSS.
+//   2. The shared PDF preview overlay gained a Download button next to
+//      Close (previewDownloadBtn), so every "View Full Report (PDF)" can
+//      save the report without closing the preview.
+//   3. Every remaining emoji across the whole system (sidebar nav, admin
+//      and technician dashboards, DTR, dispatch, cash advance,
+//      liquidation, leave, login) was replaced with inline SVG via the
+//      shared icon()/dotIcon() helpers in core.js and the new .ic class in
+//      app.css — emoji rendered differently on every OS/font and could not
+//      inherit their container's color.
+//
 // Bumped to v52 to force every installed device to drop its old cache and
 // re-fetch css/app.css/app.bundle.js again — reworked the customer Home
 // screen's Quick Actions section (My units / Quotes and invoices /
@@ -145,7 +162,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v54';
+const CACHE_NAME = 'awes-sr-v55';
 
 // Split into two lists on purpose.
 //

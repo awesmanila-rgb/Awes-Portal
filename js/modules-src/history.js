@@ -93,7 +93,7 @@
             $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
             $('previewOkBtn').textContent = 'Close';
             $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc);
+            await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
           }catch(err){
             console.error('view report failed', err);
             toast('Could not open this report');
@@ -649,10 +649,10 @@
         '<div class="hist-info"><b>'+escapeHtml(dtrFmtDateLabel(d.date))+'</b>'+
         '<span>In: '+escapeHtml(inTxt)+' &nbsp;·&nbsp; Out: '+escapeHtml(outTxt)+'</span>'+
         ((otInTxt || otOutTxt) ? '<span>OT In: '+escapeHtml(otInTxt||'—')+' &nbsp;·&nbsp; OT Out: '+escapeHtml(otOutTxt||'—')+'</span>' : '')+
-        (d.timeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="in">📍 In: '+escapeHtml(dtrLocLabel(d.timeInLoc))+'</button>' : '')+
-        (d.timeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="out">📍 Out: '+escapeHtml(dtrLocLabel(d.timeOutLoc))+'</button>' : '')+
-        (d.otTimeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otin">📍 OT In: '+escapeHtml(dtrLocLabel(d.otTimeInLoc))+'</button>' : '')+
-        (d.otTimeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otout">📍 OT Out: '+escapeHtml(dtrLocLabel(d.otTimeOutLoc))+'</button>' : '')+
+        (d.timeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="in">'+icon('pin')+' In: '+escapeHtml(dtrLocLabel(d.timeInLoc))+'</button>' : '')+
+        (d.timeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="out">'+icon('pin')+' Out: '+escapeHtml(dtrLocLabel(d.timeOutLoc))+'</button>' : '')+
+        (d.otTimeInLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otin">'+icon('pin')+' OT In: '+escapeHtml(dtrLocLabel(d.otTimeInLoc))+'</button>' : '')+
+        (d.otTimeOutLoc ? '<button type="button" class="dtr-loc-tag" data-kind="otout">'+icon('pin')+' OT Out: '+escapeHtml(dtrLocLabel(d.otTimeOutLoc))+'</button>' : '')+
         '</div>';
       list.appendChild(row);
       const inTag = row.querySelector('[data-kind="in"]');
@@ -822,11 +822,11 @@
         // running — that's a distinct status from "Completed for the day",
         // same split dtrIsOnClock() uses to keep the location tracker on.
         if(rec.otTimeIn && !rec.otTimeOut){
-          statusLabel = '🟠 Overtime'; otCount++;
+          statusLabel = dotIcon('var(--amber)')+' Overtime'; otCount++;
           otInTxt = dtrFmtTime(rec.otTimeIn);
           otHoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.otTimeIn))/60000)));
         }else{
-          statusLabel = '⚫ Completed'; completedCount++;
+          statusLabel = dotIcon('var(--text-muted)')+' Completed'; completedCount++;
           if(rec.otTimeIn){
             otInTxt = dtrFmtTime(rec.otTimeIn);
             otOutTxt = rec.otTimeOut ? dtrFmtTime(rec.otTimeOut) : '—';
@@ -834,11 +834,11 @@
           }
         }
       }else if(rec && rec.timeIn){
-        statusLabel = '🟢 Present'; presentCount++;
+        statusLabel = dotIcon('var(--green)')+' Present'; presentCount++;
         inTxt = dtrFmtTime(rec.timeIn);
         hoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.timeIn))/60000)));
       }else{
-        statusLabel = '🔴 Absent'; absentCount++;
+        statusLabel = dotIcon('var(--danger)')+' Absent'; absentCount++;
       }
       const row = document.createElement('tr');
       row.innerHTML =

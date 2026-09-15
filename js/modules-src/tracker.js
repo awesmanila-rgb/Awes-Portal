@@ -92,7 +92,7 @@
     );
     // One-time heads up — the browser's own permission prompt is the real
     // consent step; this just explains what it's for.
-    toast('📍 Location sharing is on while you\'re timed in');
+    toast('Location sharing is on while you\'re timed in');
   }
   function trackerStopBroadcasting(){
     if(trackerWatchId != null && navigator.geolocation){ navigator.geolocation.clearWatch(trackerWatchId); }

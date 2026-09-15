@@ -400,7 +400,7 @@
       // name into it, so every role (including technicians and customers)
       // saw the literal word "Admin" here regardless of who was actually
       // logged in.
-      const greetTitleEl = $('dtGreetingTitle'); if(greetTitleEl) greetTitleEl.textContent = 'Good day, '+(currentUser.name||'there')+'! 👋';
+      const greetTitleEl = $('dtGreetingTitle'); if(greetTitleEl) greetTitleEl.innerHTML = 'Good day, '+escapeHtml(currentUser.name||'there')+'! '+icon('wave');
     }
     // "New" (header shortcut for a blank report) and "Create New" (Service
     // Report tab) both start a fresh, blank report. Technicians already
@@ -442,14 +442,14 @@
     $('adminBtn').textContent = 'Admin: ON';
     $('adminBtn').classList.add('admin-badge');
     const menuBtnEl = $('menuBtn');
-    if(menuBtnEl){ menuBtnEl.textContent = '☰ Menu • Admin ON'; menuBtnEl.classList.add('admin-badge'); }
+    if(menuBtnEl){ menuBtnEl.innerHTML = icon('menu')+' Menu • Admin ON'; menuBtnEl.classList.add('admin-badge'); }
   }
   function exitAdminModeUI(){
     adminMode = false;
     $('adminBtn').textContent = 'Admin';
     $('adminBtn').classList.remove('admin-badge');
     const menuBtnEl = $('menuBtn');
-    if(menuBtnEl){ menuBtnEl.textContent = '☰ Menu'; menuBtnEl.classList.remove('admin-badge'); }
+    if(menuBtnEl){ menuBtnEl.innerHTML = icon('menu')+' Menu'; menuBtnEl.classList.remove('admin-badge'); }
   }
 
   // Small inline icon set (Feather-style, stroke=currentColor) shared by the
@@ -580,7 +580,7 @@
     const cloudLink = document.createElement('button');
     cloudLink.type='button';
     cloudLink.className = 'login-cloud-link';
-    cloudLink.textContent = cloudReady ? '☁ Connected — Cloud Setup' : '☁ Not connected — tap to set up Shared Cloud';
+    cloudLink.innerHTML = icon('cloud')+(cloudReady ? ' Connected — Cloud Setup' : ' Not connected — tap to set up Shared Cloud');
     cloudLink.addEventListener('click', ()=>{
       const cfg = getCloudConfig();
       if(cfg){ $('cfgSupabaseUrl').value = cfg.url || ''; $('cfgSupabaseKey').value = cfg.anonKey || ''; }
@@ -680,12 +680,12 @@
     container.appendChild(heading);
     const techBtn = document.createElement('button');
     techBtn.type='button'; techBtn.className='login-user-btn';
-    techBtn.textContent = '👷 Technician';
+    techBtn.innerHTML = icon('people')+' Technician';
     techBtn.addEventListener('click', ()=> renderTechnicianLoginForm());
     container.appendChild(techBtn);
     const adminBtn = document.createElement('button');
     adminBtn.type='button'; adminBtn.className='login-user-btn';
-    adminBtn.textContent = '🔑 Admin';
+    adminBtn.innerHTML = icon('key')+' Admin';
     adminBtn.addEventListener('click', ()=> renderAdminLoginForm());
     container.appendChild(adminBtn);
   }

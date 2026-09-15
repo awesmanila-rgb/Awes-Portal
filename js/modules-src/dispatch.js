@@ -176,7 +176,7 @@
           '</div>'+
           (alreadyAck
             ? dtStatusPill(r)
-            : '<button type="button" class="sr-ack-required-btn">🔒 Acknowledge Required</button>')+
+            : '<button type="button" class="sr-ack-required-btn">'+icon('lock')+' Acknowledge Required</button>')+
         '</div>'+
         (alreadyAck
           ? '<div class="dt-equip-pending" style="display:none; margin-top:8px;"></div>'
@@ -223,7 +223,7 @@
           batchLink.type = 'button';
           batchLink.className = 'sr-batch-toggle-link';
           batchLink.style.cssText = 'width:100%; text-align:center; background:none; border:none; color:var(--green-dark); font-size:12px; font-weight:600; padding:8px 0 2px; cursor:pointer;';
-          batchLink.textContent = '☑ Select multiple to batch sign →';
+          batchLink.innerHTML = icon('checkSquare')+' Select multiple to batch sign →';
           batchLink.addEventListener('click', (e)=>{
             e.stopPropagation();
             srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList);
@@ -1074,7 +1074,7 @@
     const willOpen = forceOpen!==undefined ? forceOpen : body.style.display==='none';
     body.style.display = willOpen ? '' : 'none';
     const caret = head.querySelector('.jo-caret');
-    if(caret) caret.textContent = willOpen ? '▴' : '▾';
+    if(caret) caret.innerHTML = icon('caretDown', willOpen ? 'style="transform:rotate(180deg);"' : '');
   }
   function dtHandleEquipRowClick(e){
     // Checked before the toggle header below: "Open Job Order" now lives
@@ -1181,7 +1181,7 @@
       const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
       return '<div class="jo-step '+state+'">'+
           '<span class="jo-step-line"></span>'+
-          '<span class="jo-step-dot">'+(i<stage ? '✓' : (i+1))+'</span>'+
+          '<span class="jo-step-dot">'+(i<stage ? icon('check') : (i+1))+'</span>'+
           '<span class="jo-step-label">'+label+'</span>'+
         '</div>';
     }).join('');
@@ -1192,7 +1192,7 @@
     else if(ack) nextText = 'You are on site. Tap Mark Completed once your visit here is done — that just closes out the fieldwork step, not that everything went perfectly; Close Job Order still lets you flag anything that wasn\'t finished.';
     else nextText = 'New assignment. Tap Acknowledge to accept this job order.';
     const expiredWarn = dtEffectiveStatus(r)==='expired'
-      ? '<div class="jo-stepper-warn">⚠ Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
+      ? '<div class="jo-stepper-warn">'+icon('alert')+' Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
       : '';
     return '<div class="jo-stepper">'+expiredWarn+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
@@ -1344,8 +1344,8 @@
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
       list.innerHTML = dtTechListTab==='closed'
-        ? '<div class="empty-state">📁 No closed job orders yet</div>'
-        : '<div class="empty-state">📭 No active job orders<br><span class="dt-jo-empty-sub">Job orders your admin assigns to you will show up here.</span></div>';
+        ? '<div class="empty-state">'+icon('folder')+' No closed job orders yet</div>'
+        : '<div class="empty-state">'+icon('inbox')+' No active job orders<br><span class="dt-jo-empty-sub">Job orders your admin assigns to you will show up here.</span></div>';
       return;
     }
     list.innerHTML = '';
@@ -1389,8 +1389,8 @@
     const jo = ticket ? ticket.jobOrderNo : 'That Job Order';
     const nowAck = ticket && currentUser && (ticket.acknowledgedBy||[]).includes(currentUser.id);
     $('dtBackToSrText').textContent = nowAck
-      ? ('✅ '+jo+' is acknowledged — you can head back now.')
-      : ('📋 Acknowledge '+jo+' below to unlock its Service Report.');
+      ? (icon('checkCircle')+' '+jo+' is acknowledged — you can head back now.')
+      : (icon('clipboard')+' Acknowledge '+jo+' below to unlock its Service Report.');
     banner.style.display = '';
   }
   if($('dtBackToSrBtn')){
@@ -1613,7 +1613,7 @@
           ? 'Acknowledge this job order'
           : (!doneSelf ? 'Mark Completed once your visit here is done' : 'Wait for the other assigned technician(s) to mark it completed');
         $('dtCloseSection').innerHTML =
-          '<div class="empty-state">🔒 '+nextStep+' — from My Job Order — before you can close this ticket.'+
+          '<div class="empty-state">'+icon('lock')+' '+nextStep+' — from My Job Order — before you can close this ticket.'+
           '<br><span class="dt-jo-empty-sub">Marking it completed doesn\'t mean everything went perfectly — you can still note anything that wasn\'t finished right here when you close it.</span></div>';
         $('dtCloseSubmitBtn').style.display = 'none';
       }else{

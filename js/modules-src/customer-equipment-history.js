@@ -55,7 +55,7 @@
           '<div class="cp-visit-section"><b>Recommendations</b>'+cpFmtList(r.recommendations)+'</div>'+
           '<div class="cp-visit-section"><b>Services Done</b>'+cpFmtList(r.services_done)+'</div>'+
           '<div class="cp-visit-section"><b>Materials Used</b>'+cpFmtList(r.materials)+'</div>'+
-          '<button type="button" class="cp-visit-pdf-btn" data-sr-no="'+escapeHtml(r.sr_no||'')+'">🗎 View Full Report (PDF)</button>'+
+          '<button type="button" class="cp-visit-pdf-btn" data-sr-no="'+escapeHtml(r.sr_no||'')+'">'+icon('file')+' View Full Report (PDF)</button>'+
         '</div>'+
       '</div>'
     );
@@ -188,7 +188,7 @@
         const body = head.nextElementSibling;
         const open = body.style.display !== 'none';
         body.style.display = open ? 'none' : '';
-        head.querySelector('.cp-visit-chevron').textContent = open ? '▾' : '▴';
+        head.querySelector('.cp-visit-chevron').innerHTML = icon('caretDown', open ? '' : 'style="transform:rotate(180deg);"');
       };
     });
 
@@ -313,7 +313,7 @@
       $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
       $('previewOkBtn').textContent = 'Close';
       $('previewOverlay').classList.add('open');
-      await renderPdfPreview(doc);
+      await renderPdfPreview(doc, (sr || d.srNo || 'service-report')+'.pdf');
     }catch(err){
       console.error('view customer report failed', err);
       toast('Could not open this report');

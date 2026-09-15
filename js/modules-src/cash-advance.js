@@ -561,7 +561,7 @@
         return;
       }
       caLiqOthersAttachment = {data: dataUrl, mime, name: file.name};
-      $('liqOthersFileStatus').textContent = '📄 '+file.name;
+      $('liqOthersFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
     }catch(e){ toast('Could not attach that file'); }
   });
   $('liqOthersAddItemBtn').addEventListener('click', ()=>{
@@ -654,7 +654,7 @@
     const s = liq.settlement;
     const label = s.type==='return' ? 'Technician owes' : 'Reimburse technician';
     if(s.settled){
-      return '<div class="leave-comment"><b>Settlement</b>✅ '+label+' '+caFmtPeso(s.amount)+
+      return '<div class="leave-comment"><b>Settlement</b>'+icon('checkCircle')+' '+label+' '+caFmtPeso(s.amount)+
         ' — settled '+leaveFmtWhen(s.settledAt)+(s.settledBy ? ' by '+escapeHtml(s.settledBy) : '')+
         (s.method ? ' ('+escapeHtml(s.method)+')' : '')+'</div>';
     }
@@ -690,10 +690,10 @@
         '<div style="display:flex; flex:1; gap:8px; align-items:center; min-width:0;">'+
           '<span style="width:28px; color:var(--text-muted);">'+(idx+1)+'</span>'+
           '<span style="flex:1; font-size:12px; color:var(--text-muted);">'+caLiqItemDate(item)+'</span>'+
-          '<span style="flex:2;"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
+          '<span style="flex:2;"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
         '</div>'+
         '<div style="text-align:right; font-weight:700; white-space:nowrap; min-width:70px;">'+caFmtPeso(item.amount)+'</div>'+
-        (editable ? '<button type="button" class="btn btn-secondary" data-act="remove" data-item-id="'+item.id+'" style="flex:0 0 auto; width:auto; margin-left:8px; color:var(--danger); padding:4px 10px; font-size:11px;">✕</button>' : '')+
+        (editable ? '<button type="button" class="btn btn-secondary" data-act="remove" data-item-id="'+item.id+'" style="flex:0 0 auto; width:auto; margin-left:8px; color:var(--danger); padding:4px 10px; font-size:11px;">'+icon('close')+'</button>' : '')+
       '</div>';
     });
     return html;
@@ -834,8 +834,8 @@
       // trip-leg summary the editable form and admin review already show,
       // instead of leaving the technician no way to double-check it here.
       const particular = item.type==='transport'
-        ? '🚕 <a href="#" class="ca-liq-preview-link" data-view-item="'+escapeHtml(String(item.id))+'" style="color:var(--green-dark); font-weight:700; text-decoration:underline;">'+escapeHtml(caLiqItemParticular(item))+'</a>'
-        : '<b>📄 '+escapeHtml(caLiqItemParticular(item))+'</b>';
+        ? icon('car')+' <a href="#" class="ca-liq-preview-link" data-view-item="'+escapeHtml(String(item.id))+'" style="color:var(--green-dark); font-weight:700; text-decoration:underline;">'+escapeHtml(caLiqItemParticular(item))+'</a>'
+        : '<b>'+icon('file')+' '+escapeHtml(caLiqItemParticular(item))+'</b>';
       rows +=
         '<tr>'+
           '<td class="num">'+(idx+1)+'</td>'+
@@ -990,7 +990,7 @@
         '<div style="display:flex; flex:1; gap:8px; align-items:center;">'+
           '<span style="width:28px; color:var(--text-muted);">'+(idx+1)+'</span>'+
           '<span style="flex:1; font-size:12px; color:var(--text-muted);">'+caLiqItemDate(item)+'</span>'+
-          '<span style="flex:2;"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
+          '<span style="flex:2;"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b></span>'+
         '</div>'+
         '<span style="font-weight:700; white-space:nowrap;">'+caFmtPeso(item.amount)+'</span></div>';
     });
@@ -1488,7 +1488,7 @@
           let itemsHtml = '';
           (r.liquidation.items||[]).forEach(item=>{
             itemsHtml += '<div class="hist-item" style="cursor:pointer; padding:6px 8px;" data-view-item="'+escapeHtml(String(item.id))+'">'+
-              '<div class="hist-info"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b>'+
+              '<div class="hist-info"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b>'+
               '<span>'+caFmtPeso(item.amount)+'</span></div></div>';
           });
           liqBlock =
@@ -1534,7 +1534,7 @@
     let html = '<div class="field"><label>Items</label></div>';
     liq.items.forEach(item=>{
       html += '<div class="hist-item" style="cursor:pointer;" data-view-item="'+item.id+'">'+
-        '<div class="hist-info"><b>'+(item.type==='transport'?'🚕 ':'📄 ')+escapeHtml(caLiqItemParticular(item))+'</b>'+
+        '<div class="hist-info"><b>'+(item.type==='transport'?(icon('car')+' '):(icon('file')+' '))+escapeHtml(caLiqItemParticular(item))+'</b>'+
         '<span>'+caFmtPeso(item.amount)+'</span></div></div>';
     });
     html += '<div style="display:flex; justify-content:space-between; font-weight:700; margin:8px 0;"><span>Total</span><span>'+caFmtPeso(liq.totalAmount)+' of '+caFmtPeso(r.amountGiven)+' given</span></div>';
@@ -1734,7 +1734,7 @@
         '<div class="card-body" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">'+
           '<div>'+
             '<div style="font-weight:600;">'+escapeHtml(it.description)+'</div>'+
-            '<div class="u-status">'+leaveFmtDate(it.dateIncurred)+' · 📎 '+escapeHtml(it.attachmentName||'receipt')+'</div>'+
+            '<div class="u-status">'+leaveFmtDate(it.dateIncurred)+' · '+icon('paperclip')+' '+escapeHtml(it.attachmentName||'receipt')+'</div>'+
           '</div>'+
           '<div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">'+
             '<b>'+caFmtPeso(it.amount)+'</b>'+
@@ -1777,7 +1777,7 @@
         return;
       }
       caReimbAttachment = {data: dataUrl, mime, name: file.name};
-      $('caReimbFileStatus').textContent = '📄 '+file.name;
+      $('caReimbFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
     }catch(e){ toast('Could not attach that file'); }
   });
   $('caReimbAddItemBtn').addEventListener('click', ()=>{

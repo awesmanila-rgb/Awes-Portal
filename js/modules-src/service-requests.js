@@ -686,7 +686,7 @@
     const canConvert = r.status==='schedule_confirmed';
     return (
       '<div class="cp-row" style="align-items:flex-start;" data-req-id="'+r.id+'">'+
-        '<div class="cp-row-icon">🛠️</div>'+
+        '<div class="cp-row-icon">'+icon('tools')+'</div>'+
         '<div class="cp-row-body">'+
           '<div class="cp-row-title">'+escapeHtml(custName)+urgentTag+'</div>'+
           '<div class="cp-row-sub">'+escapeHtml(r.description||'')+'</div>'+

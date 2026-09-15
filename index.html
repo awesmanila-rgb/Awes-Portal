@@ -194,7 +194,7 @@ window.awesCss = {
     </div>
   </div>
   <nav class="sidebar-nav">
-    <button type="button" class="sidebar-link active" id="sbNavDashboard"><span class="menu-ico">🏠</span>Dashboard</button>
+    <button type="button" class="sidebar-link active" id="sbNavDashboard"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span>Dashboard</button>
 
     <!-- Technician-only nav — hidden for admin via setVis('sidebarTechGroup', isTech)
          in auth.js's applyUserRestrictions(). Each item routes to the same
@@ -202,77 +202,77 @@ window.awesCss = {
          this is just a persistent way to reach them without going Home first. -->
     <div id="sidebarTechGroup" style="display:none;">
       <div class="sidebar-section-label">My Work</div>
-      <button type="button" class="sidebar-link" id="techNavDispatch"><span class="menu-ico">📋</span>Job Orders</button>
-      <button type="button" class="sidebar-link" id="techNavServiceReport"><span class="menu-ico">🧾</span>Service Reports</button>
-      <button type="button" class="sidebar-link" id="techNavDtr"><span class="menu-ico">🕒</span>Attendance</button>
-      <button type="button" class="sidebar-link" id="techNavLeave"><span class="menu-ico">🗓️</span>Leaves</button>
-      <button type="button" class="sidebar-link" id="techNavMessages"><span class="menu-ico">💬</span>Messages<span class="sidebar-badge" id="sidebarMsgBadge" style="display:none;">0</span></button>
-      <button type="button" class="sidebar-link" id="techNavDocuments"><span class="menu-ico">📁</span>Documents</button>
-      <button type="button" class="sidebar-link" id="techNavSettings"><span class="menu-ico">⚙️</span>Settings</button>
+      <button type="button" class="sidebar-link" id="techNavDispatch"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg></span>Job Orders</button>
+      <button type="button" class="sidebar-link" id="techNavServiceReport"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>Service Reports</button>
+      <button type="button" class="sidebar-link" id="techNavDtr"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>Attendance</button>
+      <button type="button" class="sidebar-link" id="techNavLeave"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span>Leaves</button>
+      <button type="button" class="sidebar-link" id="techNavMessages"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span>Messages<span class="sidebar-badge" id="sidebarMsgBadge" style="display:none;">0</span></button>
+      <button type="button" class="sidebar-link" id="techNavDocuments"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></span>Documents</button>
+      <button type="button" class="sidebar-link" id="techNavSettings"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</button>
       <!-- Finance placed last (rather than between other groups, as on the
            admin side) so it stays unambiguously its own labeled section —
            this sidebar only ever had one section label ("My Work") before,
            so inserting Finance in the middle would leave the items after it
            looking like part of Finance too with no label of their own. -->
       <div class="sidebar-section-label">Finance</div>
-      <button type="button" class="sidebar-link" id="techNavCashAdvance"><span class="menu-ico">💵</span>Cash Advance</button>
-      <button type="button" class="sidebar-link" id="techNavLiquidation"><span class="menu-ico">🧮</span>Liquidation</button>
-      <button type="button" class="sidebar-link" id="techNavReimbursement"><span class="menu-ico">🤝</span>Reimbursement</button>
+      <button type="button" class="sidebar-link" id="techNavCashAdvance"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>Cash Advance</button>
+      <button type="button" class="sidebar-link" id="techNavLiquidation"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></span>Liquidation</button>
+      <button type="button" class="sidebar-link" id="techNavReimbursement"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span>Reimbursement</button>
     </div>
 
     <!-- Admin-only nav — hidden for technicians via setVis('sidebarAdminGroup', isAdmin). -->
     <div id="sidebarAdminGroup">
       <div class="sidebar-section-label">Operations</div>
-      <button type="button" class="sidebar-link" id="sbNavTechnicians"><span class="menu-ico">🕒</span>Technicians</button>
-      <button type="button" class="sidebar-link" id="menuManageReports"><span class="menu-ico">🗂</span>Service Reports</button>
-      <button type="button" class="sidebar-link" id="sbNavDispatch"><span class="menu-ico">🚚</span>Dispatch</button>
+      <button type="button" class="sidebar-link" id="sbNavTechnicians"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>Technicians</button>
+      <button type="button" class="sidebar-link" id="menuManageReports"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></span>Service Reports</button>
+      <button type="button" class="sidebar-link" id="sbNavDispatch"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg></span>Dispatch</button>
       <!-- Admin-only — customer-filed service requests. Technicians never
            see this item (it lives inside #sidebarAdminGroup, hidden for
            them) and RLS blocks the underlying table for their role too.
            Badge count is kept live by service-requests.js (srAdminInit). -->
       <button type="button" class="sidebar-link" id="sbNavServiceRequests">
-        <span class="menu-ico">🛠️</span>Service Requests
+        <span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg></span>Service Requests
         <span class="sidebar-badge" id="sbServiceRequestsBadge" style="display:none;">0</span>
       </button>
-      <button type="button" class="sidebar-link" id="menuManageCustomers"><span class="menu-ico">🏢</span>Customers</button>
-      <button type="button" class="sidebar-link" id="menuManageEquipment"><span class="menu-ico">🧰</span>Equipment</button>
+      <button type="button" class="sidebar-link" id="menuManageCustomers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/><path d="M8 6h2M14 6h2M8 10h2M14 10h2M8 14h2M14 14h2"/></svg></span>Customers</button>
+      <button type="button" class="sidebar-link" id="menuManageEquipment"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="20" height="11" rx="2"/><path d="M8 9V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M2 14h20"/></svg></span>Equipment</button>
       <div class="sidebar-section-label">Finance</div>
-      <button type="button" class="sidebar-link" id="sbNavCashAdvance"><span class="menu-ico">💵</span>Cash Advance</button>
-      <button type="button" class="sidebar-link" id="sbNavLiquidation"><span class="menu-ico">🧮</span>Liquidation</button>
-      <button type="button" class="sidebar-link" id="sbNavReimbursement"><span class="menu-ico">🤝</span>Reimbursement</button>
+      <button type="button" class="sidebar-link" id="sbNavCashAdvance"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>Cash Advance</button>
+      <button type="button" class="sidebar-link" id="sbNavLiquidation"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></span>Liquidation</button>
+      <button type="button" class="sidebar-link" id="sbNavReimbursement"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span>Reimbursement</button>
       <div class="sidebar-section-label">Management</div>
-      <button type="button" class="sidebar-link" id="menuManageUsers"><span class="menu-ico">👤</span>Users &amp; Roles</button>
-      <button type="button" class="sidebar-link" id="menuManageAnnouncements"><span class="menu-ico">📣</span>Announcements</button>
-      <button type="button" class="sidebar-link" id="settingsBtn"><span class="menu-ico">⚙️</span>Settings</button>
-      <button type="button" class="sidebar-link" id="menuManageDropdowns"><span class="menu-ico">📋</span>Dropdown Lists</button>
-      <button type="button" class="sidebar-link" id="menuChangePin"><span class="menu-ico">🔑</span>Change Password</button>
+      <button type="button" class="sidebar-link" id="menuManageUsers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>Users &amp; Roles</button>
+      <button type="button" class="sidebar-link" id="menuManageAnnouncements"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/></svg></span>Announcements</button>
+      <button type="button" class="sidebar-link" id="settingsBtn"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</button>
+      <button type="button" class="sidebar-link" id="menuManageDropdowns"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg></span>Dropdown Lists</button>
+      <button type="button" class="sidebar-link" id="menuChangePin"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.5 12.5 20 3"/><path d="M17 6l2 2"/><path d="M14 9l2 2"/></svg></span>Change Password</button>
     </div>
 
     <!-- Customer-only nav — hidden for admin/tech via setVis('sidebarCustomerGroup', isCustomer). -->
     <div id="sidebarCustomerGroup" style="display:none;">
       <div class="sidebar-section-label">My Account</div>
-      <button type="button" class="sidebar-link active" id="custNavHome"><span class="menu-ico">🏠</span>Home</button>
+      <button type="button" class="sidebar-link active" id="custNavHome"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span>Home</button>
       <button type="button" class="sidebar-link" id="custNavEquipment">
-        <span class="menu-ico">❄️</span>Equipment
+        <span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/></svg></span>Equipment
         <span class="sidebar-badge" id="custEquipBadge" style="display:none;">0</span>
       </button>
-      <button type="button" class="sidebar-link" id="custNavReports"><span class="menu-ico">📄</span>Service Reports</button>
+      <button type="button" class="sidebar-link" id="custNavReports"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>Service Reports</button>
       <button type="button" class="sidebar-link" id="custNavRequests">
-        <span class="menu-ico">🛠️</span>Service Requests
+        <span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg></span>Service Requests
         <span class="sidebar-badge" id="custRequestsBadge" style="display:none;">0</span>
       </button>
-      <button type="button" class="sidebar-link" id="custNavAccount"><span class="menu-ico">👤</span>Account</button>
+      <button type="button" class="sidebar-link" id="custNavAccount"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>Account</button>
     </div>
   </nav>
   <div class="sidebar-footer">
-    <button class="icon-btn sidebar-cloud-btn" id="cloudBtn" title="Cloud connection status" aria-live="polite">☁ Not Connected</button>
+    <button class="icon-btn sidebar-cloud-btn" id="cloudBtn" title="Cloud connection status" aria-live="polite"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.4-1.5A5 5 0 0 0 6.5 19z"/></svg> Not Connected</button>
     <div class="sidebar-account">
       <div class="sidebar-avatar" id="sidebarAvatar">AD</div>
       <div class="sidebar-account-text">
         <div class="sidebar-account-name" id="sidebarAccountName">Admin User</div>
         <div class="sidebar-account-role" id="sidebarAccountRole">Super Administrator</div>
       </div>
-      <button type="button" class="sidebar-logout" id="menuLogout" title="Logout">🚪</button>
+      <button type="button" class="sidebar-logout" id="menuLogout" title="Logout"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></button>
     </div>
   </div>
 </aside>
@@ -284,12 +284,12 @@ window.awesCss = {
      since those screens still rely on it for the page title + Home button. -->
 <div class="dashboard-topbar" id="dashboardTopbar">
   <div class="dt-greeting">
-    <div class="dt-greeting-title" id="dtGreetingTitle">Good day, Admin! 👋</div>
+    <div class="dt-greeting-title" id="dtGreetingTitle">Good day, Admin! <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M14 11V5a1.5 1.5 0 0 1 3 0v8"/><path d="M17 13V8a1.5 1.5 0 0 1 3 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 15a1.4 1.4 0 0 1 2-2l2 1.8"/></svg></div>
     <div class="dt-greeting-sub">Here's what's happening with your field operations today.</div>
   </div>
   <div class="dt-actions">
-    <div class="dt-search"><span>🔍</span><input type="text" placeholder="Search anything..." disabled title="Search — coming soon"></div>
-    <button type="button" class="dt-icon-btn" id="dtNotifBtn" title="Pending items needing your attention">🔔<span class="dt-badge" id="notifBadge" style="display:none;">0</span></button>
+    <div class="dt-search"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span><input type="text" placeholder="Search anything..." disabled title="Search — coming soon"></div>
+    <button type="button" class="dt-icon-btn" id="dtNotifBtn" title="Pending items needing your attention"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="dt-badge" id="notifBadge" style="display:none;">0</span></button>
   </div>
 </div>
 
@@ -302,17 +302,17 @@ window.awesCss = {
     </div>
   </div>
   <div class="top-actions">
-    <button class="icon-btn" id="homeBtn" style="display:none;">🏠 Home</button>
+    <button class="icon-btn" id="homeBtn" style="display:none;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg> Home</button>
     <button class="icon-btn" id="newBtn">New</button>
     <!-- Shown directly (not tucked in a menu) for technician accounts -->
-    <button class="icon-btn" id="userLogoutBtn" style="display:none;">🚪 Logout</button>
+    <button class="icon-btn" id="userLogoutBtn" style="display:none;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg> Logout</button>
     <!-- Legacy control kept off-screen: existing app logic is wired to this id. -->
     <button class="icon-btn" id="adminBtn" style="display:none;" aria-hidden="true" tabindex="-1">Admin</button>
     <!-- Admin-only mobile hamburger: toggles the sidebar drawer below 1000px
          (see body.role-admin #menuBtn / .admin-sidebar rules in app.css).
          Hidden entirely for technician accounts and on wide screens, where
          the sidebar is already permanently visible. -->
-    <button class="icon-btn" id="menuBtn" style="display:none;">☰ Menu</button>
+    <button class="icon-btn" id="menuBtn" style="display:none;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg> Menu</button>
   </div>
 </header>
 
@@ -331,7 +331,7 @@ window.awesCss = {
 <!-- Home screen (feature tiles) -->
 <div id="homeScreen" class="home-screen" style="display:none;">
   <div class="card" id="homeGreetingCard" style="display:none; margin-bottom:16px;">
-    <div class="card-head"><span>👋 Welcome Back</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M14 11V5a1.5 1.5 0 0 1 3 0v8"/><path d="M17 13V8a1.5 1.5 0 0 1 3 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 15a1.4 1.4 0 0 1 2-2l2 1.8"/></svg> Welcome Back</span></div>
     <div class="card-body">
       <div id="homeGreetingText"></div>
     </div>
@@ -339,31 +339,31 @@ window.awesCss = {
   <!-- Technician-only snapshot, same visual style as admin's Overview below
        but scoped to just this technician's own numbers. -->
   <div class="card" id="homeTechOverviewCard" style="display:none; margin-bottom:16px;">
-    <div class="card-head"><span>📊 Overview</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg> Overview</span></div>
     <div class="card-body">
       <div class="overview-grid">
         <div class="overview-stat ov-blue">
-          <div class="overview-stat-head"><span class="overview-stat-title">Job Order</span><span class="overview-stat-icon ov-icon-chip">🚚</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Job Order</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg></span></div>
           <div class="overview-stat-value" id="ovMyJoValue">—</div>
           <div class="overview-stat-sub" id="ovMyJoSub">—</div>
         </div>
         <div class="overview-stat ov-gray">
-          <div class="overview-stat-head"><span class="overview-stat-title">Pending Service Reports</span><span class="overview-stat-icon ov-icon-chip">🧾</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Pending Service Reports</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span></div>
           <div class="overview-stat-value" id="ovMyReportsValue">—</div>
           <div class="overview-stat-sub" id="ovMyReportsSub">—</div>
         </div>
         <div class="overview-stat ov-amber">
-          <div class="overview-stat-head"><span class="overview-stat-title">Pending Requisitions</span><span class="overview-stat-icon ov-icon-chip">💵</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Pending Requisitions</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div>
           <div class="overview-stat-value" id="ovMyReqValue">—</div>
           <div class="overview-stat-sub" id="ovMyReqSub">—</div>
         </div>
         <div class="overview-stat ov-purple">
-          <div class="overview-stat-head"><span class="overview-stat-title">Pending Liquidation</span><span class="overview-stat-icon ov-icon-chip">🧮</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Pending Liquidation</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></span></div>
           <div class="overview-stat-value" id="ovMyLiqValue">—</div>
           <div class="overview-stat-sub" id="ovMyLiqSub">—</div>
         </div>
         <div class="overview-stat ov-teal">
-          <div class="overview-stat-head"><span class="overview-stat-title">Next Job Order</span><span class="overview-stat-icon ov-icon-chip">📅</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Next Job Order</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span></div>
           <div class="overview-stat-value" id="ovMyNextJoValue">—</div>
           <div class="overview-stat-sub" id="ovMyNextJoSub">—</div>
         </div>
@@ -374,7 +374,7 @@ window.awesCss = {
        sidebar's Administration group (Manage Announcements). -->
   <div class="card" id="homeAnnouncementsCard" style="display:none; margin-bottom:16px;">
     <div class="card-head">
-      <span>📣 Announcements</span>
+      <span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/></svg> Announcements</span>
       <button type="button" id="homeAnnViewAllBtn" style="color:#fff; background:none; border:none; font-size:12px; font-weight:700; cursor:pointer;">View All ›</button>
     </div>
     <div class="card-body">
@@ -382,32 +382,32 @@ window.awesCss = {
     </div>
   </div>
   <div class="card" id="homeOverviewCard" style="display:none; margin-bottom:16px;">
-    <div class="card-head"><span>📊 Overview</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg> Overview</span></div>
     <div class="card-body">
       <div class="overview-grid">
         <div class="overview-stat ov-green">
-          <div class="overview-stat-head"><span class="overview-stat-title">Active Technicians</span><span class="overview-stat-icon ov-icon-chip">👥</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Active Technicians</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="3"/><path d="M15 14.2c2.8.5 5 2.6 5 5.8"/></svg></span></div>
           <div class="overview-stat-value" id="ovTechValue">—</div>
           <div class="overview-progress"><div class="overview-progress-bar" id="ovTechBar" style="width:0%"></div></div>
           <div class="overview-stat-sub" id="ovTechSub">—</div>
         </div>
         <div class="overview-stat ov-amber">
-          <div class="overview-stat-head"><span class="overview-stat-title">Pending Requisitions</span><span class="overview-stat-icon ov-icon-chip">💵</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Pending Requisitions</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div>
           <div class="overview-stat-value" id="ovReqValue">—</div>
           <div class="overview-stat-sub" id="ovReqSub">—</div>
         </div>
         <div class="overview-stat ov-blue">
-          <div class="overview-stat-head"><span class="overview-stat-title">Dispatch Status</span><span class="overview-stat-icon ov-icon-chip">🚚</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Dispatch Status</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg></span></div>
           <div class="overview-stat-value" id="ovDispatchValue">—</div>
           <div class="overview-stat-sub" id="ovDispatchSub">—</div>
         </div>
         <div class="overview-stat ov-gray">
-          <div class="overview-stat-head"><span class="overview-stat-title">Unreviewed Reports</span><span class="overview-stat-icon ov-icon-chip">📝</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Unreviewed Reports</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span></div>
           <div class="overview-stat-value" id="ovReportsValue">—</div>
           <div class="overview-stat-sub" id="ovReportsSub">—</div>
         </div>
         <div class="overview-stat ov-teal">
-          <div class="overview-stat-head"><span class="overview-stat-title">To Settle</span><span class="overview-stat-icon ov-icon-chip">🤝</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">To Settle</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span></div>
           <div class="overview-stat-value" id="ovSettleValue">—</div>
           <div class="overview-stat-sub" id="ovSettleSub">—</div>
         </div>
@@ -415,7 +415,7 @@ window.awesCss = {
              srAdminInit()/srRefreshAdminCounts(). Clicking jumps straight
              to the requests queue, same as the badge in the sidebar. -->
         <div class="overview-stat ov-purple" id="ovServiceReqCard" style="cursor:pointer;">
-          <div class="overview-stat-head"><span class="overview-stat-title">Service Requests</span><span class="overview-stat-icon ov-icon-chip">🛠️</span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Service Requests</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg></span></div>
           <div class="overview-stat-value" id="ovServiceReqValue">—</div>
           <div class="overview-stat-sub" id="ovServiceReqSub">—</div>
         </div>
@@ -428,7 +428,7 @@ window.awesCss = {
        fetched by renderHomeOverview so no extra query is made). -->
   <div class="card" id="homeScheduleCalendarCard" style="display:none; margin-bottom:16px;">
     <div class="card-head">
-      <span>📅 Schedule Calendar</span>
+      <span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg> Schedule Calendar</span>
       <button type="button" id="homeCalViewAllBtn" style="color:#fff; background:none; border:none; font-size:12px; font-weight:700; cursor:pointer;">Full Calendar ›</button>
     </div>
     <div class="card-body">
@@ -458,7 +458,7 @@ window.awesCss = {
        hidden for technician accounts, same as homeOverviewCard above. -->
   <div class="dash-two-col" id="dashTwoCol">
     <div class="card" id="homeTrackerCard" style="display:none; margin-bottom:16px;">
-      <div class="card-head"><span>🛰️ Technician Live Tracker</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg> Technician Live Tracker</span></div>
       <div class="card-body">
         <div class="tracker-topline">
           <span>Live location of technicians currently signed in and sharing their position. Tap a name on the right to see their path for today.</span>
@@ -468,54 +468,54 @@ window.awesCss = {
       </div>
     </div>
     <div class="card" id="homeTechListCard" style="display:none; margin-bottom:16px;">
-      <div class="card-head"><span>👷 Technicians</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17" cy="9" r="3"/><path d="M15 14.2c2.8.5 5 2.6 5 5.8"/></svg> Technicians</span></div>
       <div class="card-body">
         <div class="tracker-list" id="trackerList"></div>
       </div>
     </div>
   </div>
   <div class="card" id="homeActivityCard" style="display:none; margin-bottom:16px;">
-    <div class="card-head"><span>⚡ Recent Activity</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg> Recent Activity</span></div>
     <div class="card-body">
       <div id="recentActivityList"><div class="empty-state">No recent activity yet.</div></div>
     </div>
   </div>
   <div class="card" id="homeIntroCard" style="margin-bottom:16px;">
-    <div class="card-head"><span>🧭 What would you like to do?</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16 8-2 6-6 2 2-6z"/></svg> What would you like to do?</span></div>
     <div class="card-body">
   <div class="home-grid">
     <button type="button" class="home-tile qa-purple" id="tile_serviceReport">
-      <span class="home-tile-icon">🧾</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>
       <span class="tile-text"><span class="home-tile-label">Service Report</span><span class="tile-desc">Create or manage service reports</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile qa-gray" id="tile_dtr">
-      <span class="home-tile-icon">🕒</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
       <span class="tile-text"><span class="home-tile-label">Online DTR</span><span class="tile-desc">Manage daily time records</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile qa-green" id="tile_cashAdvance">
-      <span class="home-tile-icon">💵</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>
       <span class="tile-text"><span class="home-tile-label">Cash Advance Form</span><span class="tile-desc">Process cash advance requests</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile qa-violet" id="tile_leave">
-      <span class="home-tile-icon">🗓️</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span>
       <span class="tile-text"><span class="home-tile-label">Leave Form</span><span class="tile-desc">Manage leave applications</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile qa-orange" id="tile_dispatch">
-      <span class="home-tile-icon">🚚</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg></span>
       <span class="tile-text"><span class="home-tile-label" id="tile_dispatch_label">Service Dispatch Ticket</span><span class="tile-desc">Create new dispatch or view tickets</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile qa-brown" id="tile_materialRequest">
-      <span class="home-tile-icon">📦</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
       <span class="tile-text"><span class="home-tile-label">Material Request Form <span class="home-tile-badge">Coming Soon</span></span><span class="tile-desc">Request materials and equipment</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile" id="tile_changePassword" style="display:none;">
-      <span class="home-tile-icon">🔑</span>
+      <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M10.5 12.5 20 3"/><path d="M17 6l2 2"/><path d="M14 9l2 2"/></svg></span>
       <span class="tile-text"><span class="home-tile-label">Change My Password</span></span>
       <span class="tile-chevron">›</span>
     </button>
@@ -994,17 +994,17 @@ window.awesCss = {
 <main id="dtrView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
 
   <div class="card" id="dtrTechCard">
-    <div class="card-head"><span>🕒 Daily Time Record</span><span id="dtrTechName" style="font-weight:600; opacity:.85;"></span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Daily Time Record</span><span id="dtrTechName" style="font-weight:600; opacity:.85;"></span></div>
     <div class="card-body">
       <div id="dtrDeviceBanner" class="dtr-banner dtr-banner-warn" style="display:none;"></div>
       <div class="dtr-clock-row">
-        <button type="button" class="btn btn-primary" id="dtrTimeInBtn">🟢 Time In</button>
-        <button type="button" class="btn btn-secondary" id="dtrTimeOutBtn">🔴 Time Out</button>
+        <button type="button" class="btn btn-primary" id="dtrTimeInBtn"><svg class="ic" viewBox="0 0 24 24" style="color:var(--green);"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg> Time In</button>
+        <button type="button" class="btn btn-secondary" id="dtrTimeOutBtn"><svg class="ic" viewBox="0 0 24 24" style="color:var(--danger);"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg> Time Out</button>
       </div>
       <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); margin:4px 0 8px;">Overtime</div>
       <div class="dtr-clock-row">
-        <button type="button" class="btn btn-primary" id="dtrOtTimeInBtn">🟠 OT Time In</button>
-        <button type="button" class="btn btn-secondary" id="dtrOtTimeOutBtn">🟠 OT Time Out</button>
+        <button type="button" class="btn btn-primary" id="dtrOtTimeInBtn"><svg class="ic" viewBox="0 0 24 24" style="color:var(--amber);"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg> OT Time In</button>
+        <button type="button" class="btn btn-secondary" id="dtrOtTimeOutBtn"><svg class="ic" viewBox="0 0 24 24" style="color:var(--amber);"><circle cx="12" cy="12" r="8" fill="currentColor"/></svg> OT Time Out</button>
       </div>
       <div class="dtr-today-box">
         <div class="dtr-stat">
@@ -1041,7 +1041,7 @@ window.awesCss = {
        flow. Tapping "View DTR" swaps this out for the read-only detail +
        history view below, scoped to that one technician. -->
   <div class="card" id="dtrAdminTableCard" style="display:none;">
-    <div class="card-head"><span>🕒 Technician Attendance</span><span id="dtrAttendanceDate" style="font-weight:600; opacity:.85;"></span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Technician Attendance</span><span id="dtrAttendanceDate" style="font-weight:600; opacity:.85;"></span></div>
     <div class="card-body">
       <div class="att-summary" id="dtrAttendanceSummary"></div>
       <div class="attendance-table-wrap">
@@ -1056,7 +1056,7 @@ window.awesCss = {
   </div>
 
   <div class="card" id="dtrAdminViewingCard" style="display:none;">
-    <div class="card-head"><span>🕒 Daily Time Record</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Daily Time Record</span></div>
     <div class="card-body">
       <div class="dtr-banner dtr-banner-info">
         Viewing <b id="dtrAdminViewingName">—</b>'s DTR (read-only). <button type="button" id="dtrSwitchUserBtn" style="background:none; border:none; color:var(--green-dark); font-weight:700; text-decoration:underline; cursor:pointer; padding:0; font-size:13px;">← Back to attendance list</button>
@@ -1079,7 +1079,7 @@ window.awesCss = {
      as the other admin/technician full-page views (dtrView, leaveView, etc). -->
 <main id="equipmentManagerView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card" id="equipmentManagerCard">
-    <div class="card-head"><span>🧰 Manage Equipment List</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="20" height="11" rx="2"/><path d="M8 9V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M2 14h20"/></svg> Manage Equipment List</span></div>
     <div class="card-body">
       <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
         Every unit on file, across all customers — showing each equipment's description and the
@@ -1109,7 +1109,7 @@ window.awesCss = {
       <div id="equipAddSection" style="display:none;">
         <div class="field">
           <label>Scan Equipment Label (optional)</label>
-          <button type="button" class="btn btn-secondary" id="eqScanBtn" style="width:100%;">📷 Scan Nameplate</button>
+          <button type="button" class="btn btn-secondary" id="eqScanBtn" style="width:100%;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/></svg> Scan Nameplate</button>
           <input type="file" accept="image/*" capture="environment" id="eqScanInput" style="display:none;">
           <div id="eqScanStatus" style="font-size:12px; color:var(--text-muted); margin-top:6px; display:none;"></div>
           <div id="eqScanRawWrap" style="display:none; margin-top:6px;">
@@ -1151,7 +1151,7 @@ window.awesCss = {
     <div class="loc-modal-address" id="dtrLocationAddress">—</div>
     <div class="loc-modal-coords" id="dtrLocationCoords">—</div>
     <div class="loc-map-frame"><iframe id="dtrLocationIframe" src="" loading="lazy" referrerpolicy="no-referrer-when-downgrade" title="Map"></iframe></div>
-    <a href="#" target="_blank" rel="noopener" class="loc-external-link" id="dtrLocationExternalLink">Open in Google Maps ↗</a>
+    <a href="#" target="_blank" rel="noopener" class="loc-external-link" id="dtrLocationExternalLink">Open in Google Maps <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg></a>
   </div>
 </div>
 
@@ -1191,8 +1191,8 @@ window.awesCss = {
       <button class="sheet-close" id="closeLiqAddItemModal">&times;</button>
     </div>
     <div class="seg-tabs">
-      <button type="button" class="seg-tab" id="liqAddItemTabTransport">🚕 Transportation</button>
-      <button type="button" class="seg-tab" id="liqAddItemTabOthers">📄 Others</button>
+      <button type="button" class="seg-tab" id="liqAddItemTabTransport"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11 6.5 6.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg> Transportation</button>
+      <button type="button" class="seg-tab" id="liqAddItemTabOthers"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg> Others</button>
     </div>
   </div>
 </div>
@@ -1227,7 +1227,7 @@ window.awesCss = {
       <label>Attach File <span class="req">*</span></label>
       <div style="display:flex; gap:8px; align-items:center;">
         <input type="file" accept="image/*,application/pdf" capture="environment" id="liqOthersFile" style="display:none;">
-        <button type="button" class="btn btn-secondary" id="liqOthersAttachBtn" style="flex:1;">📎 Attach Photo of Receipt</button>
+        <button type="button" class="btn btn-secondary" id="liqOthersAttachBtn" style="flex:1;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.5 8.5a4 4 0 0 1-5.7-5.7l9-9a2.5 2.5 0 0 1 3.6 3.6l-8.7 8.7a1 1 0 0 1-1.4-1.4l7.8-7.8"/></svg> Attach Photo of Receipt</button>
       </div>
       <div class="leave-note" id="liqOthersFileStatus" style="margin-top:6px;"></div>
     </div>
@@ -1240,7 +1240,7 @@ window.awesCss = {
 <div class="overlay" id="liqTransportModal">
   <div class="sheet">
     <div class="sheet-head">
-      <h3>🚕 Transportation Expenses</h3>
+      <h3><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11 6.5 6.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg> Transportation Expenses</h3>
       <button class="sheet-close" id="closeLiqTransportModal">&times;</button>
     </div>
     <div class="leave-note" style="margin-bottom:10px;">For fares without a single receipt — list every leg, then add the whole table as one liquidation item.</div>
@@ -1357,7 +1357,7 @@ window.awesCss = {
     </div>
 
     <div class="card" id="leaveFormCard">
-      <div class="card-head"><span>🗓️ File a Leave Request</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg> File a Leave Request</span></div>
       <div class="card-body">
         <div class="field">
           <label>Leave Type <span class="req">*</span></label>
@@ -1411,7 +1411,7 @@ window.awesCss = {
   <!-- Admin: review every technician's requests -->
   <div id="leaveAdminArea" style="display:none;">
     <div class="card">
-      <div class="card-head"><span>🗓️ Leave Requests</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg> Leave Requests</span></div>
       <div class="card-body">
         <div class="leave-filter-row" id="leaveAdminFilterRow">
           <button type="button" data-filter="pending" class="active">Pending</button>
@@ -1434,7 +1434,7 @@ window.awesCss = {
   <div id="caTechArea">
     <div class="card" id="caInstructionsCard" style="margin-bottom:14px;">
       <div class="card-head collapsible-head" id="caInstructionsHead">
-        <span>ℹ️ How this works</span><span class="card-caret">▾</span>
+        <span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg> How this works</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
       </div>
       <div class="card-body" id="caInstructionsBody" style="display:none;">
         <div class="leave-note" style="margin:0;">
@@ -1466,7 +1466,7 @@ window.awesCss = {
     </div>
 
     <div class="card" id="caFormCard">
-      <div class="card-head"><span>💵 Request a Cash Advance</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Request a Cash Advance</span></div>
       <div class="card-body">
         <div class="field">
           <label>Amount Requested (₱) <span class="req">*</span></label>
@@ -1509,7 +1509,7 @@ window.awesCss = {
          with a required attachment per item, plus a dedicated transportation
          sub-form for fares that rarely come with a single receipt. -->
     <div class="card" id="caLiquidateCard" style="display:none;">
-      <div class="card-head"><span>🧾 Liquidate Cash Advance</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg> Liquidate Cash Advance</span></div>
       <div class="card-body" id="caLiquidateBody">
         <div id="caLiquidateEmpty" class="empty-state" style="display:none;">Nothing to liquidate right now — you're all clear!</div>
 
@@ -1521,7 +1521,7 @@ window.awesCss = {
                when there's nothing left to edit. -->
           <div id="caLiqReadonlyView" style="display:none;">
             <div id="caLiqReadonlyItems"></div>
-            <button type="button" class="btn btn-secondary" id="caLiqDownloadPdfBtn" style="width:100%; margin-top:12px; display:none;">⬇️ Download PDF Copy</button>
+            <button type="button" class="btn btn-secondary" id="caLiqDownloadPdfBtn" style="width:100%; margin-top:12px; display:none;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg> Download PDF Copy</button>
           </div>
 
           <!-- Editable form: shown when nothing has been submitted yet, or
@@ -1540,7 +1540,7 @@ window.awesCss = {
 
             <!-- Once at least one item exists: the Liquidation Form itself. -->
             <div id="caLiqFormBuilt" style="display:none;">
-              <div class="card-head" style="padding:0 0 10px 0;"><span>🧾 Liquidation Form</span></div>
+              <div class="card-head" style="padding:0 0 10px 0;"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg> Liquidation Form</span></div>
               <div id="caLiqFormTable"></div>
               <button type="button" class="btn btn-secondary" id="caLiqAddItemBtn" style="width:100%; margin-top:10px;">+ Add Item</button>
 
@@ -1578,7 +1578,7 @@ window.awesCss = {
          payment fields (see guard_cash_decision() in the DB) for free, and the
          same offline-outbox handling — nothing new needed on either front. -->
     <div class="card" id="caReimburseCard" style="display:none;">
-      <div class="card-head"><span>🧾 Reimburse an Expense</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg> Reimburse an Expense</span></div>
       <div class="card-body">
         <div class="leave-note" style="margin-bottom:12px;">
           For money you already spent out of your own pocket — not tied to any cash advance. Add each expense below, then submit the whole batch for admin approval.
@@ -1596,7 +1596,7 @@ window.awesCss = {
         <div class="field"><label>What was it for <span class="req">*</span></label><textarea id="caReimbDescription" rows="2" placeholder="e.g. Grab fare to Ortigas site, PVC elbow fitting bought at hardware store"></textarea></div>
         <div class="field">
           <label>Receipt <span class="req">*</span></label>
-          <button type="button" class="btn btn-secondary" id="caReimbAttachBtn" style="width:100%;">📎 Attach Receipt Photo / File</button>
+          <button type="button" class="btn btn-secondary" id="caReimbAttachBtn" style="width:100%;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.5 8.5a4 4 0 0 1-5.7-5.7l9-9a2.5 2.5 0 0 1 3.6 3.6l-8.7 8.7a1 1 0 0 1-1.4-1.4l7.8-7.8"/></svg> Attach Receipt Photo / File</button>
           <input type="file" id="caReimbFile" accept="image/*,.pdf" style="display:none;">
           <div id="caReimbFileStatus" style="font-size:12.5px; color:var(--text-muted); margin-top:6px;"></div>
         </div>
@@ -1620,11 +1620,11 @@ window.awesCss = {
   <!-- Admin: review every technician's requests -->
   <div id="caAdminArea" style="display:none;">
     <div class="seg-tabs">
-      <button type="button" class="seg-tab active" id="caAdminSecRequests">💵 Cash Advance</button>
-      <button type="button" class="seg-tab" id="caAdminSecReimb">🧾 Reimbursement <span id="caReimbPendingBadge" class="status-pill status-rejected" style="display:none; margin-left:4px;">0</span></button>
+      <button type="button" class="seg-tab active" id="caAdminSecRequests"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Cash Advance</button>
+      <button type="button" class="seg-tab" id="caAdminSecReimb"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg> Reimbursement <span id="caReimbPendingBadge" class="status-pill status-rejected" style="display:none; margin-left:4px;">0</span></button>
     </div>
     <div class="card" id="caAdminReqSection">
-      <div class="card-head"><span>💵 Cash Advance Requests</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Cash Advance Requests</span></div>
       <div class="card-body">
         <input type="text" id="caAdminSearch" placeholder="Search by technician name…" style="width:100%; margin-bottom:10px;">
         <div class="leave-filter-row" id="caAdminFilterRow">
@@ -1648,7 +1648,7 @@ window.awesCss = {
          fields are repurposed here as "paid"/"date paid"/"amount paid" —
          same server-side protection, no schema change needed). -->
     <div class="card" id="caAdminReimbSection" style="display:none;">
-      <div class="card-head"><span>🧾 Reimbursement Requests</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg> Reimbursement Requests</span></div>
       <div class="card-body">
         <input type="text" id="caReimbAdminSearch" placeholder="Search by technician name…" style="width:100%; margin-bottom:10px;">
         <div class="leave-filter-row" id="caReimbAdminFilterRow">
@@ -1670,7 +1670,7 @@ window.awesCss = {
        plus the itemized liquidation breakdown for records that have one. -->
   <div id="caTechHistoryArea" style="display:none;">
     <div class="card">
-      <div class="card-head"><span>🗂️ <span id="caTechHistoryName">Cash Advance History</span></span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg> <span id="caTechHistoryName">Cash Advance History</span></span></div>
       <div class="card-body">
         <button class="btn btn-secondary" id="caTechHistBackBtn" type="button" style="margin-bottom:12px;">← Back to All Requests</button>
         <div id="caTechHistoryList"><div class="empty-state">Loading…</div></div>
@@ -1692,7 +1692,7 @@ window.awesCss = {
     </div>
 
     <div class="card" id="dtNewCard">
-      <div class="card-head"><span>🚚 Service Dispatch Ticket</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg> Service Dispatch Ticket</span></div>
       <div class="card-body">
         <div class="grid2">
           <div class="field"><label>Job Order No.</label><input type="text" id="dtJobOrderNo" value="—" disabled></div>
@@ -1806,7 +1806,7 @@ window.awesCss = {
          scrolling the All Tickets list. Same rendering engine (dtCalRender
          in dispatch.js) also drives the compact widget on the dashboard. -->
     <div class="card" id="dtCalendarCard" style="display:none;">
-      <div class="card-head"><span>📅 Schedule Calendar</span></div>
+      <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg> Schedule Calendar</span></div>
       <div class="card-body">
         <div class="cal-toolbar">
           <div class="cal-nav">
@@ -1841,7 +1841,7 @@ window.awesCss = {
            above the list itself (stacked layout — see .dt-jo-layout in
            app.css) so a technician reads it before scanning tickets. -->
       <div class="card dt-jo-help-card">
-        <div class="card-head"><span>ℹ️ How Job Orders Work</span></div>
+        <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg> How Job Orders Work</span></div>
         <div class="card-body">
           <p class="dt-jo-help-intro">Every job order goes through the same four stages. Tap a job order below to expand it — a step tracker shows exactly where it stands and what to do next.</p>
           <div class="dt-jo-help-item">
@@ -1861,15 +1861,15 @@ window.awesCss = {
             <div class="dt-jo-help-desc">Fully finalized. No further action needed on these.</div>
           </div>
           <div class="dt-jo-help-item">
-            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#B02A37;"></span>⚠ Expired</div>
+            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#B02A37;"></span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 1 21h22z"/><path d="M12 9v5"/><path d="M12 17h.01"/></svg> Expired</div>
             <div class="dt-jo-help-desc">A warning, not a stage — it just means the scheduled date passed before the job was completed. You can still Acknowledge, Complete, or Close it; check with your dispatcher/admin if unsure.</div>
           </div>
-          <p class="dt-jo-help-tip">💡 Tip: tap a job order's title bar to expand it and see its step tracker, or use "Expand all" to open everything at once.</p>
+          <p class="dt-jo-help-tip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 2z"/></svg> Tip: tap a job order's title bar to expand it and see its step tracker, or use "Expand all" to open everything at once.</p>
         </div>
       </div>
 
       <div class="card dt-jo-list-card">
-        <div class="card-head"><span>🚚 My Job Order</span></div>
+        <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg> My Job Order</span></div>
         <div class="card-body">
           <!-- Shown only when the technician was sent here from the Service
                Report "From Job Order" picker to acknowledge a specific ticket
@@ -1880,7 +1880,7 @@ window.awesCss = {
             <span id="dtBackToSrText"></span>
             <div class="dt-back-to-sr-actions">
               <button type="button" id="dtBackToSrBtn">← Back to Service Report</button>
-              <button type="button" id="dtBackToSrDismissBtn" aria-label="Dismiss">✕</button>
+              <button type="button" id="dtBackToSrDismissBtn" aria-label="Dismiss"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 6-12 12"/><path d="m6 6 12 12"/></svg></button>
             </div>
           </div>
           <!-- Two tabs only: "Active" (everything not yet closed — open,
@@ -1894,7 +1894,7 @@ window.awesCss = {
             <button type="button" class="seg-tab" id="dtTechTabClosed">Closed Job Orders</button>
           </div>
           <div class="dt-jo-list-toolbar">
-            <button type="button" class="dt-jo-toggle-all-btn" id="dtTechExpandAllBtn" data-mode="expand">⤢ Expand all</button>
+            <button type="button" class="dt-jo-toggle-all-btn" id="dtTechExpandAllBtn" data-mode="expand"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg> Expand all</button>
           </div>
           <div id="dtTechList"><div class="empty-state">Loading…</div></div>
         </div>
@@ -1907,7 +1907,7 @@ window.awesCss = {
 <!-- Messages hub — every Job Order thread in one place. -->
 <main id="messagesView" style="display:none; max-width:700px; margin:0 auto; padding:16px;">
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-head"><span>💬 Job Order Messages</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg> Job Order Messages</span></div>
     <div class="card-body">
       <div id="messagesHubList"><div class="empty-state">Loading…</div></div>
     </div>
@@ -1918,7 +1918,7 @@ window.awesCss = {
      loadHistory() (see history.js), same as admin's Manage Service Report. -->
 <main id="documentsView" style="display:none; max-width:700px; margin:0 auto; padding:16px;">
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-head"><span>📁 My Documents</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg> My Documents</span></div>
     <div class="card-body">
       <div id="documentsList"><div class="empty-state">Loading…</div></div>
     </div>
@@ -1933,7 +1933,7 @@ window.awesCss = {
 <main id="serviceRequestsView" style="display:none; max-width:800px; margin:0 auto; padding:16px;">
   <div class="card" style="margin-bottom:16px;">
     <div class="card-head">
-      <span>🚩 Flag an Issue</span>
+      <span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v18"/><path d="M4 4h13l-3 5 3 5H4"/></svg> Flag an Issue</span>
       <button type="button" id="srFlagToggleBtn" style="color:#fff; background:none; border:none; font-size:12px; font-weight:700; cursor:pointer;">+ New</button>
     </div>
     <div class="card-body" id="srFlagFormBody" style="display:none;">
@@ -1956,7 +1956,7 @@ window.awesCss = {
     </div>
   </div>
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-head"><span>🛠️ Service Requests</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg> Service Requests</span></div>
     <div class="card-body">
       <div id="srQueueList"><div class="empty-state">Loading…</div></div>
     </div>
@@ -1976,7 +1976,7 @@ window.awesCss = {
 
   <div class="card" id="srInstructionsCard" style="margin-bottom:14px;">
     <div class="card-head collapsible-head" id="srInstructionsHead">
-      <span>ℹ️ How to file a Service Report</span><span class="card-caret">▾</span>
+      <span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg> How to file a Service Report</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
     </div>
     <div class="card-body" id="srInstructionsBody" style="display:none;">
       <div class="leave-note" style="margin:0;">
@@ -1994,7 +1994,7 @@ window.awesCss = {
   <div id="srStepperContainer" style="margin-bottom:14px;"></div>
 
   <div class="card" id="srBatchBanner" style="display:none; margin-bottom:14px; border-color:var(--green-dark);">
-    <div class="card-head"><span>🖊️ Batch Signing Mode</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Batch Signing Mode</span></div>
     <div class="card-body">
       <p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">
         Equipment details below are pulled automatically per unit — Section 2 is skipped in this mode.
@@ -2006,7 +2006,7 @@ window.awesCss = {
 
   <!-- Pick up an assigned Job Order to auto-fill the fields below (technicians only) -->
   <div class="card" id="srJobOrderCard" style="display:none;">
-    <div class="card-head collapsible-head open" id="srJobOrderHead"><span>📋 Select From Job Order</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head open" id="srJobOrderHead"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg> Select From Job Order</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body">
       <div id="srJobOrderList"><div class="empty-state">Loading…</div></div>
     </div>
@@ -2015,7 +2015,7 @@ window.awesCss = {
 
   <!-- 1. Customer Information -->
   <div class="card" id="sec1Card" style="display:none;">
-    <div class="card-head collapsible-head open" id="sec1Head"><span><span class="num">1</span>Customer's Information</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head open" id="sec1Head"><span><span class="num">1</span>Customer's Information</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec1Body">
       <div class="grid2">
         <div class="field" id="f_custName">
@@ -2055,7 +2055,7 @@ window.awesCss = {
 
   <!-- 2. Equipment Description -->
   <div class="card" id="sec2Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">2</span>Equipment Description</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">2</span>Equipment Description</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec2Body" style="display:none;">
       <div id="equipTabBar" style="display:flex; gap:8px; margin-bottom:14px;">
         <button type="button" id="equipTabExisting" class="equip-tab">Select Existing</button>
@@ -2087,7 +2087,7 @@ window.awesCss = {
 
   <!-- 3. Report Summary -->
   <div class="card" id="sec3Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">3</span>Report Summary</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">3</span>Report Summary</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec3Body" style="display:none;">
       <div class="field">
         <label>Trouble Call / Request / Reason for Service</label>
@@ -2108,7 +2108,7 @@ window.awesCss = {
 
   <!-- 4. Components / Parts Needed to Replace -->
   <div class="card" id="sec4Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">4</span>Components / Parts Needed to Replace</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">4</span>Components / Parts Needed to Replace</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec4Body" style="display:none;">
       <div id="materialsTableWrap" style="display:none;">
       <table class="materials" id="materialsTable">
@@ -2130,7 +2130,7 @@ window.awesCss = {
 
   <!-- 5. Services Done -->
   <div class="card" id="sec5Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">5</span>Services Done</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">5</span>Services Done</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec5Body" style="display:none;">
       <div class="field">
         <label>Describe the service(s) performed</label>
@@ -2142,7 +2142,7 @@ window.awesCss = {
 
   <!-- 6. Operating Data -->
   <div class="card" id="sec6Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">6</span>Operating Data</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">6</span>Operating Data</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec6Body" style="display:none;">
       <div class="opdata-table-wrap">
       <table class="opdata-table">
@@ -2183,7 +2183,7 @@ window.awesCss = {
 
   <!-- 7. Installation Data (conditional) -->
   <div class="card" id="sec7Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">7</span>Installation Data</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">7</span>Installation Data</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec7Body" style="display:none;">
       <div class="toggle-row">
         <div>
@@ -2214,7 +2214,7 @@ window.awesCss = {
 
   <!-- 8. Acknowledgment -->
   <div class="card" id="sec8Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">8</span>Acknowledgment</span><span class="card-caret">▾</span></div>
+    <div class="card-head collapsible-head"><span><span class="num">8</span>Acknowledgment</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec8Body" style="display:none;">
       <p style="font-size:13px; color:var(--text-muted); margin-top:0; line-height:1.5;">
         I hereby acknowledge the services / works done on my equipment and agree to the terms &amp; conditions stated herein.
@@ -2228,7 +2228,7 @@ window.awesCss = {
         <textarea id="remarks"></textarea>
       </div>
 
-      <button type="button" class="btn btn-secondary" id="previewBtn" style="width:100%; margin-bottom:16px;">👁 Preview Report Before Signing</button>
+      <button type="button" class="btn btn-secondary" id="previewBtn" style="width:100%; margin-bottom:16px;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg> Preview Report Before Signing</button>
 
       <div class="grid2">
         <div class="field">
@@ -2289,10 +2289,10 @@ window.awesCss = {
 <!-- Report Shared — Success -->
 <div class="overlay" id="shareSuccessOverlay" style="z-index:70;">
   <div class="sheet" style="text-align:center; padding:32px 20px;">
-    <div style="font-size:52px; margin-bottom:10px;">✅</div>
+    <div style="font-size:52px; margin-bottom:10px;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg></div>
     <h3 style="margin:0 0 8px;">Service Report Shared Successfully</h3>
     <p id="shareSuccessDetail" style="font-size:13px; color:var(--text-muted); margin:0 0 24px;"></p>
-    <button class="btn btn-primary" id="shareSuccessHomeBtn" type="button" style="width:100%;">🏠 Home</button>
+    <button class="btn btn-primary" id="shareSuccessHomeBtn" type="button" style="width:100%;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg> Home</button>
   </div>
 </div>
 
@@ -2305,8 +2305,9 @@ window.awesCss = {
     <div id="previewFrame" style="flex:1; width:100%; overflow-y:auto; border:1px solid var(--border); border-radius:8px; background:#eee; padding:10px; text-align:center;">
       <div class="empty-state" style="display:none;">Rendering preview…</div>
     </div>
-    <div style="padding-top:12px;">
-      <button class="btn btn-primary" id="previewOkBtn" style="width:100%;" type="button">Looks Good — Continue to Signatures</button>
+    <div style="padding-top:12px; display:flex; gap:8px;">
+      <button class="btn btn-secondary" id="previewDownloadBtn" type="button"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg> Download</button>
+      <button class="btn btn-primary" id="previewOkBtn" style="flex:1;" type="button">Looks Good — Continue to Signatures</button>
     </div>
   </div>
 </div>
@@ -2406,7 +2407,7 @@ window.awesCss = {
     </div>
     <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
       <img id="techProfilePhoto" alt="" style="width:72px; height:72px; border-radius:50%; object-fit:cover; display:none; flex-shrink:0;">
-      <div id="techProfilePhotoPlaceholder" style="width:72px; height:72px; border-radius:50%; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:26px; flex-shrink:0;">👤</div>
+      <div id="techProfilePhotoPlaceholder" style="width:72px; height:72px; border-radius:50%; background:var(--border); display:flex; align-items:center; justify-content:center; font-size:26px; flex-shrink:0;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></div>
       <div style="flex:1; min-width:0;">
         <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">Profile photo</div>
         <input type="file" id="techProfilePhotoInput" accept="image/*" style="font-size:12px; max-width:100%;">
@@ -2454,7 +2455,7 @@ window.awesCss = {
      page, same pattern as the Equipment page. -->
 <main id="customersManagerView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card" id="customersManagerCard">
-    <div class="card-head"><span>🏢 Manage Customers</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/><path d="M8 6h2M14 6h2M8 10h2M14 10h2M8 14h2M14 14h2"/></svg> Manage Customers</span></div>
     <div class="card-body">
       <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
         This is the client list technicians pick from on Service Reports — selecting a name
@@ -2495,7 +2496,7 @@ window.awesCss = {
      service-report history. -->
 <main id="customerHistoryView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card" id="custHistEquipListCard">
-    <div class="card-head"><span>🗂️ Customer History</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg> Customer History</span></div>
     <div class="card-body">
       <button class="btn btn-secondary" id="custHistBackToListBtn" type="button" style="margin-bottom:12px;">← Back to Customers</button>
       <div id="custHistDetails" style="margin-bottom:14px;"></div>
@@ -2505,7 +2506,7 @@ window.awesCss = {
     </div>
   </div>
   <div class="card" id="custHistServiceCard" style="display:none;">
-    <div class="card-head"><span>🧾 Service History</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg> Service History</span></div>
     <div class="card-body">
       <button class="btn btn-secondary" id="custHistBackToEquipBtn" type="button" style="margin-bottom:12px;">← Back to Equipment</button>
       <div id="custHistEquipSummary" style="margin-bottom:14px;"></div>
@@ -2662,7 +2663,7 @@ window.awesCss = {
      tabs and a search bar, same pattern as the other full-page views. -->
 <main id="serviceReportsManagerView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card">
-    <div class="card-head"><span>🗂 Saved Reports</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg> Saved Reports</span></div>
     <div class="card-body">
       <div class="leave-filter-row" id="srMgrFilterRow">
         <button type="button" data-filter="all" class="active">All</button>

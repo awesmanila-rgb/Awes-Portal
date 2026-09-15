@@ -303,13 +303,25 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
   let previewRenderToken = 0;
+  // Tracks whichever doc is currently sitting in the preview overlay, so
+  // the new Download button (added alongside Close/"Continue to
+  // Signatures") has something to hand to shareOrDownloadPdf() without
+  // every call site needing its own click handler — renderPdfPreview()
+  // is the one place all four preview entry points (pre-signing draft,
+  // admin/tech "View", customer portal "View Full Report (PDF)") already
+  // funnel through.
+  let previewCurrentDoc = null;
+  let previewCurrentFilename = 'Report.pdf';
   function closePreview(){
     $('previewOverlay').classList.remove('open');
     previewRenderToken++; // invalidate any in-flight render
     const frame = $('previewFrame');
     frame.innerHTML = '<div class="empty-state" style="display:none;">Rendering preview…</div>';
+    previewCurrentDoc = null;
   }
-  async function renderPdfPreview(doc){
+  async function renderPdfPreview(doc, filename){
+    previewCurrentDoc = doc;
+    previewCurrentFilename = filename || 'Report.pdf';
     const myToken = ++previewRenderToken;
     const frame = $('previewFrame');
     frame.innerHTML = '';
@@ -348,16 +360,33 @@
       $('previewOverlay').querySelector('h3').textContent = 'Report Preview';
       $('previewOkBtn').textContent = 'Looks Good — Continue to Signatures';
       $('previewOverlay').classList.add('open');
-      await renderPdfPreview(doc);
+      await renderPdfPreview(doc, (data.srNo||'service-report')+'.pdf');
     }catch(e){
       console.error(e);
       toast('Could not build preview');
     }finally{
-      $('previewBtn').disabled = false; $('previewBtn').textContent = '👁 Preview Report Before Signing';
+      $('previewBtn').disabled = false; $('previewBtn').innerHTML = icon('eye')+' Preview Report Before Signing';
     }
   });
   $('closePreview').addEventListener('click', closePreview);
   $('previewOkBtn').addEventListener('click', closePreview);
+  // Download does NOT close the overlay — someone checking a report over a
+  // weak field connection may want to save it and keep looking, or try
+  // again if the share sheet/save silently didn't go through.
+  $('previewDownloadBtn').addEventListener('click', async ()=>{
+    if(!previewCurrentDoc) return;
+    const btn = $('previewDownloadBtn');
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Downloading…';
+    try{
+      await shareOrDownloadPdf(previewCurrentDoc, previewCurrentFilename);
+    }catch(err){
+      console.error('preview download failed', err);
+      toast('Could not download this report');
+    }finally{
+      btn.disabled = false; btn.textContent = original;
+    }
+  });
 
   function showShareSuccess(detail){
     $('shareSuccessDetail').textContent = detail || '';

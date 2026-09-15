@@ -232,12 +232,12 @@
               dtStatusPill(t)+
             '</div>'+
             '<div class="greet-jo-cust">'+escapeHtml(t.custName||'')+'</div>'+
-            (t.expectedTime ? '<div class="greet-jo-time">🕒 '+escapeHtml(t.expectedTime)+'</div>' : '')+
+            (t.expectedTime ? '<div class="greet-jo-time">'+icon('clock')+' '+escapeHtml(t.expectedTime)+'</div>' : '')+
           '</div>'
         ).join('');
     const todayJoHtml =
       '<div class="greet-today-jo">'+
-        '<div class="greet-today-jo-title">📋 Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
+        '<div class="greet-today-jo-title">'+icon('clipboard')+' Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
         joBody+
       '</div>';
 
@@ -506,7 +506,7 @@
     const hour = new Date().getHours();
     const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
     const name = (currentUser && currentUser.name) ? currentUser.name : 'Admin';
-    el.textContent = 'Good '+part+', '+name+'! 👋';
+    el.innerHTML = 'Good '+escapeHtml(part)+', '+escapeHtml(name)+'! '+icon('wave');
   }
 
   // ---------- Recent Activity (admin dashboard, next to the live tracker) ----------

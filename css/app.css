@@ -24,6 +24,21 @@
     --portal-green-dark:#245C10;
   }
   *{box-sizing:border-box;}
+  /* Shared inline-SVG icon class — every icon produced by icon()/dotIcon()
+     in core.js carries it. Sized at 1em so each icon inherits whatever
+     font-size its container already set for the emoji it replaced
+     (.menu-ico, .home-tile-icon, .overview-stat-icon, .card-head, plain
+     button text, etc.), which means no per-call-site sizing was needed
+     when the system was switched off emoji. vertical-align keeps it
+     centered against adjacent text instead of sitting on the baseline. */
+  .ic{
+    width:1em; height:1em; flex-shrink:0;
+    display:inline-block; vertical-align:-0.135em;
+  }
+  /* In flex rows (.card-head, .sidebar-link, .overview-stat-head) an inline
+     icon still wants a little breathing room from its label, the same way
+     the emoji's own glyph padding used to provide it. */
+  .card-head .ic, .home-tile-icon .ic, .overview-stat-icon .ic{ vertical-align:-0.15em; }
   /* App-wide typeface: "Google Sans" first (used automatically wherever the
      device/OS already has it installed, e.g. Android/ChromeOS), falling back
      to Roboto — Google Sans' own metrics/shape are based on Roboto, so this
