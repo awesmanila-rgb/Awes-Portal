@@ -1,3 +1,25 @@
+// Bumped to v61 to force every installed device to drop its old cache and
+// re-fetch css/app.css/js/app.bundle.js again — the "Active service"
+// hero card (dispatched/en route/in progress) now shows the scheduled
+// date/time the visit was actually dispatched for, under the description
+// line — previously only visible by opening the request detail. See
+// cpHeroActive in customer-portal.js / .cp-hero-schedule in app.css.
+//
+// Bumped to v60 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — fixes equipment tile cover photos
+// flickering on the Home and Units screens. Two compounding causes: (1)
+// every re-render (notably the customer portal's 30s realtime poll)
+// repainted the tiles with an EMPTY photo map first, so an already-loaded
+// photo would revert to the icon fallback and pop back in every single
+// poll; (2) each photo fetch signed a brand-new URL (fresh token) even
+// for the identical file, so even a silent background refetch alone
+// would still flash the <img>, since a changed src forces a reload.
+// Fixed by caching the signed URL itself for 10 minutes, per equipment id
+// (cpCachedCoverPhotoMap/cpFetchCoverPhotoMap in equipment-photos.js) —
+// repeat renders now paint straight from that cache (no network, no icon
+// flash), and skip the repaint entirely when a refetch didn't actually
+// change anything.
+//
 // Bumped to v59 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/js/app.bundle.js again — replaced the
 // standalone "Service Fee" billing card (shown below Units) with a
@@ -220,7 +242,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v59';
+const CACHE_NAME = 'awes-sr-v61';
 
 // Split into two lists on purpose.
 //

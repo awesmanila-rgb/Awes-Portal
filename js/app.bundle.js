@@ -824,6 +824,41 @@
 
   const EQUIP_PHOTO_BUCKET = 'equipment-photos';
 
+  // Signed cover-photo URLs are cached here, per equipment id, for close
+  // to their real lifetime (signed URLs are issued for 1hr below; cached
+  // for 10min app-side — comfortably longer than the 30s realtime poll
+  // interval that was causing the flicker, while still picking up an
+  // admin-changed cover photo reasonably soon, not up to an hour later).
+  // This isn't just a performance optimization — it's the fix for a real
+  // flicker bug: cpUnitCardHtml's callers (paintUnitStack/paint in
+  // customer-portal.js) used to always paint with an EMPTY photo map
+  // first and re-fetch fresh every time, including on every ~30s realtime
+  // poll — so an already-loaded photo would revert to the icon fallback
+  // and pop back in on every single poll. Worse, each fetch signed a
+  // BRAND NEW url (different token) even for the identical file, so even
+  // a silent background refetch alone would still flash the <img>, since
+  // a changed src forces the browser to reload it. Caching the url itself
+  // fixes both: repeat renders paint straight from cpCachedCoverPhotoMap
+  // (synchronous, no network, no icon flash), and the url string stays
+  // byte-identical across that whole window, so an unchanged photo really
+  // does stay unchanged on screen.
+  const EQUIP_COVER_URL_TTL_MS = 10 * 60 * 1000;
+  let equipCoverUrlCache = {}; // equipmentId -> { url: string|null, at: number }
+
+  // Synchronous — whatever's already cached and still fresh, no network.
+  // Used for the FIRST paint on every re-render so an already-loaded
+  // photo never has to fall back to the icon while a refetch is pending.
+  function cpCachedCoverPhotoMap(equipmentIds){
+    const map = {};
+    const now = Date.now();
+    (equipmentIds||[]).forEach(id=>{
+      const hit = equipCoverUrlCache[id];
+      if(hit && (now - hit.at) < EQUIP_COVER_URL_TTL_MS && hit.url) map[id] = hit.url;
+    });
+    return map;
+  }
+
+
   // ---------- Client-side compression ----------
   // Runs before every upload so storage cost stays bounded no matter what
   // a phone camera produces (a raw shot can be 5-10MB). Downscales to
@@ -1027,17 +1062,35 @@
   // has no photos yet).
   async function cpFetchCoverPhotoMap(equipmentIds){
     const ids = (equipmentIds||[]).filter(Boolean);
-    if(ids.length===0 || !(await ensureCloud())) return {};
+    if(ids.length===0) return {};
+    const now = Date.now();
+    const result = {};
+    const stale = [];
+    ids.forEach(id=>{
+      const hit = equipCoverUrlCache[id];
+      if(hit && (now - hit.at) < EQUIP_COVER_URL_TTL_MS){ if(hit.url) result[id] = hit.url; }
+      else stale.push(id);
+    });
+    if(stale.length===0 || !(await ensureCloud())) return result;
     try{
       const { data, error } = await db.from('equipment_photos')
-        .select('equipment_id, storage_path').eq('is_cover', true).in('equipment_id', ids);
+        .select('equipment_id, storage_path').eq('is_cover', true).in('equipment_id', stale);
       if(error) throw error;
       const rows = data || [];
       const urls = await equipPhotoSignedUrls(rows.map(r=>r.storage_path));
-      const map = {};
-      rows.forEach(r=>{ const u = urls[r.storage_path]; if(u) map[r.equipment_id] = u; });
-      return map;
-    }catch(e){ console.error('load cover photos failed', describeCloudError(e)); return {}; }
+      rows.forEach(r=>{
+        const u = urls[r.storage_path];
+        if(u){ equipCoverUrlCache[r.equipment_id] = { url:u, at: now }; result[r.equipment_id] = u; }
+      });
+      // Anything in `stale` that came back with no cover photo at all
+      // still gets cached (as null) for the same TTL, so a unit with no
+      // cover doesn't get re-queried on every single poll either.
+      stale.forEach(id=>{
+        const alreadySetThisPass = equipCoverUrlCache[id] && equipCoverUrlCache[id].at===now;
+        if(!alreadySetThisPass) equipCoverUrlCache[id] = { url: null, at: now };
+      });
+      return result;
+    }catch(e){ console.error('load cover photos failed', describeCloudError(e)); return result; }
   }
 
 
@@ -13873,6 +13926,14 @@
     const techLine = techNames && techNames.length
       ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
       : 'A technician is on the way';
+    // Scheduled date/time this visit was actually dispatched for — the
+    // confirmed proposed schedule normally, falling back to the original
+    // requested date on the off chance a request reached 'dispatched'
+    // without one ever being proposed.
+    const schedDate = req.proposedScheduleDate || req.requestedDate;
+    const scheduleLine = schedDate
+      ? fmtDate(schedDate) + (req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '')
+      : '';
     return (
       '<div data-req-id="'+req.id+'">'+
         '<div class="cp-hero-head">'+
@@ -13880,6 +13941,7 @@
             '<p class="cp-hero-eyebrow amber">Active service · '+escapeHtml(label)+'</p>'+
             '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
+            (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
         '</div>'+
         (techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
@@ -14038,9 +14100,15 @@
         card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
       });
     }
-    paintUnitStack({});
+    paintUnitStack(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(shown.map(eq=>eq.id)) : {});
     if(shown.length && typeof cpFetchCoverPhotoMap === 'function'){
-      cpFetchCoverPhotoMap(shown.map(eq=>eq.id)).then(paintUnitStack);
+      const beforeMap = typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(shown.map(eq=>eq.id)) : {};
+      cpFetchCoverPhotoMap(shown.map(eq=>eq.id)).then(photoMap=>{
+        // Skip the repaint (and the fresh <img> nodes it would create)
+        // when the fetch resolved to exactly what was already on screen
+        // — e.g. every routine 30s poll once photos are cached.
+        if(JSON.stringify(photoMap)!==JSON.stringify(beforeMap)) paintUnitStack(photoMap);
+      });
     }
 
     // Quick actions — four real destinations only; nothing here is
@@ -14625,9 +14693,13 @@
       });
       cpUnitsApplyFilter();
     }
-    paint({});
+    const equipIds = cpEquipment.map(eq=>eq.id);
+    paint(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(equipIds) : {});
     if(cpEquipment.length && typeof cpFetchCoverPhotoMap === 'function'){
-      cpFetchCoverPhotoMap(cpEquipment.map(eq=>eq.id)).then(paint);
+      const beforeMap = typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(equipIds) : {};
+      cpFetchCoverPhotoMap(equipIds).then(photoMap=>{
+        if(JSON.stringify(photoMap)!==JSON.stringify(beforeMap)) paint(photoMap);
+      });
     }
   }
   // Matches each card's full visible text — name/label, brand, equipment

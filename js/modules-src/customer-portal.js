@@ -349,6 +349,14 @@
     const techLine = techNames && techNames.length
       ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
       : 'A technician is on the way';
+    // Scheduled date/time this visit was actually dispatched for — the
+    // confirmed proposed schedule normally, falling back to the original
+    // requested date on the off chance a request reached 'dispatched'
+    // without one ever being proposed.
+    const schedDate = req.proposedScheduleDate || req.requestedDate;
+    const scheduleLine = schedDate
+      ? fmtDate(schedDate) + (req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '')
+      : '';
     return (
       '<div data-req-id="'+req.id+'">'+
         '<div class="cp-hero-head">'+
@@ -356,6 +364,7 @@
             '<p class="cp-hero-eyebrow amber">Active service · '+escapeHtml(label)+'</p>'+
             '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
+            (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
         '</div>'+
         (techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
@@ -514,9 +523,15 @@
         card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
       });
     }
-    paintUnitStack({});
+    paintUnitStack(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(shown.map(eq=>eq.id)) : {});
     if(shown.length && typeof cpFetchCoverPhotoMap === 'function'){
-      cpFetchCoverPhotoMap(shown.map(eq=>eq.id)).then(paintUnitStack);
+      const beforeMap = typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(shown.map(eq=>eq.id)) : {};
+      cpFetchCoverPhotoMap(shown.map(eq=>eq.id)).then(photoMap=>{
+        // Skip the repaint (and the fresh <img> nodes it would create)
+        // when the fetch resolved to exactly what was already on screen
+        // — e.g. every routine 30s poll once photos are cached.
+        if(JSON.stringify(photoMap)!==JSON.stringify(beforeMap)) paintUnitStack(photoMap);
+      });
     }
 
     // Quick actions — four real destinations only; nothing here is
@@ -1101,9 +1116,13 @@
       });
       cpUnitsApplyFilter();
     }
-    paint({});
+    const equipIds = cpEquipment.map(eq=>eq.id);
+    paint(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(equipIds) : {});
     if(cpEquipment.length && typeof cpFetchCoverPhotoMap === 'function'){
-      cpFetchCoverPhotoMap(cpEquipment.map(eq=>eq.id)).then(paint);
+      const beforeMap = typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(equipIds) : {};
+      cpFetchCoverPhotoMap(equipIds).then(photoMap=>{
+        if(JSON.stringify(photoMap)!==JSON.stringify(beforeMap)) paint(photoMap);
+      });
     }
   }
   // Matches each card's full visible text — name/label, brand, equipment

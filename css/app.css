@@ -1830,6 +1830,8 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-hero-eyebrow.teal{ background:var(--teal-light); color:var(--teal); border:1px solid #bcdadf; }
 .cp-hero-name{ font-size:17px; font-weight:700; margin:8px 0 3px; letter-spacing:-.015em; }
 .cp-hero-sub{ font-size:13px; color:var(--text-muted); margin:0; }
+.cp-hero-schedule{ display:flex; align-items:center; gap:5px; margin-top:3px; }
+.cp-hero-schedule svg{ width:13px; height:13px; color:var(--amber); flex-shrink:0; }
 .cp-hero-eta{ text-align:right; flex:0 0 auto; }
 .cp-hero-eta .n{ font-size:21px; font-weight:700; color:var(--green-dark); letter-spacing:-.04em; line-height:1.1; display:block; }
 .cp-hero-eta .l{ font-size:10px; color:var(--text-muted); }
