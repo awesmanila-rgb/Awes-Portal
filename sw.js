@@ -1,3 +1,12 @@
+// Bumped to v58 to force every installed device to drop its old cache and
+// re-fetch css/app.css again — the account picker screen (multi-account
+// login) was packing 4 cards per row at a 260px minimum width with the
+// account name truncated to one line + ellipsis, so several similarly-
+// named accounts (differing only near the end of the name) all rendered
+// as the same truncated text. Widened the grid to fit ~2 cards per row
+// on desktop and let the name wrap onto multiple lines instead of
+// truncating, so the differentiating part of the name stays visible.
+//
 // Bumped to v57 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js/index.html again — adds a way to cancel an
 // ONGOING dispatch (previously: no cancel path at all past 'dispatched'):
@@ -201,7 +210,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v57';
+const CACHE_NAME = 'awes-sr-v58';
 
 // Split into two lists on purpose.
 //

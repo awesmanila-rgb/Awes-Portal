@@ -1728,10 +1728,10 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   margin:0 24px 24px;
 }
 @media (min-width:1000px){
-  .cp-account-picker{ grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); margin:0 auto 24px; max-width:1200px; }
+  .cp-account-picker{ grid-template-columns:repeat(auto-fill, minmax(420px,1fr)); margin:0 auto 24px; max-width:1200px; }
 }
 .cp-account-card{
-  display:flex; align-items:center; gap:14px; width:100%; text-align:left;
+  display:flex; align-items:flex-start; gap:14px; width:100%; text-align:left;
   background:var(--surface); border:1px solid var(--border); border-radius:16px;
   padding:18px 20px; box-shadow:var(--shadow-card, 0 8px 24px rgba(20,65,48,.08));
   cursor:pointer; font-family:inherit;
@@ -1741,8 +1741,11 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
   flex-shrink:0; width:44px; height:44px; border-radius:12px; background:var(--green-light);
   color:var(--green-dark); font-weight:800; font-size:17px; display:flex; align-items:center; justify-content:center;
 }
-.cp-account-card-name{ flex:1; min-width:0; font-size:16px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cp-account-card-chevron{ flex-shrink:0; color:var(--text-muted); font-size:20px; }
+.cp-account-card-name{
+  flex:1; min-width:0; font-size:15px; font-weight:700; color:var(--text); line-height:1.35;
+  white-space:normal; overflow-wrap:break-word; padding-top:2px;
+}
+.cp-account-card-chevron{ flex-shrink:0; color:var(--text-muted); font-size:20px; margin-top:2px; }
 
 /* "To add another account, please contact Admin." — sits directly below
    the .cp-account-picker grid (see showCustomerAccountPicker() /
