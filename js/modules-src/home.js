@@ -759,7 +759,12 @@
     $('srHistoryPanel').style.display = isHistoryTab ? '' : 'none';
     // The footer (Save Draft / Generate Report) and the SR-No./status meta
     // bar only make sense while actively filling out a report.
-    $('footerBar').style.display = which==='new' ? 'flex' : 'none';
+    // Leaving the Create New tab always hides the footer; entering it hands
+    // the decision to srUpdateFooterBar, which only shows it once the last
+    // section has been reached (see its comment in ui.js).
+    if(which!=='new') $('footerBar').style.display = 'none';
+    else if(typeof srUpdateFooterBar === 'function') srUpdateFooterBar();
+    else $('footerBar').style.display = 'flex';
     $('metaBar').style.display = which==='new' ? '' : 'none';
     if(which==='new'){
       // "Create New" is a hard reset, not just a tab switch — same convention

@@ -1,3 +1,43 @@
+// Bumped to v79 — the Service Report now opens at Section 3 (Report
+// Summary) rather than 4. The Job Order prefills that section's trouble
+// call, but Findings and Recommendations start empty, so treating it as
+// "already filled" let a technician reach the signatures without ever
+// being asked for the substance of the report. Sections 1 and 2 are still
+// skipped when the Job Order filled them.
+//
+// Bumped to v78 — two refinements to the progressive Service Report:
+//
+//   1. ONE SECTION AT A TIME. Revealed sections used to stay on screen, so
+//      by the end the page was all eight again — rebuilding the exact wall
+//      of fields progressive disclosure exists to avoid. Only the current
+//      section's card now renders. Earlier sections stay reachable through
+//      a new chip navigator (#srSectionNav) rather than by scrolling past
+//      hidden cards.
+//   2. SKIP WHAT THE JOB ORDER ALREADY FILLED. srApplyJobOrder populates
+//      customer details (sec 1), the equipment fields (sec 2) and the
+//      trouble call (sec 3), so the form now opens at the first section
+//      that actually needs input — normally 4, Components/Parts — instead
+//      of making the technician page through three screens of read-only
+//      data they didn't type. srSectionPrefilled/srFirstUnfilledSection in
+//      ui.js decide this from the actual field values, so if a Job Order
+//      is missing something (no email on file, no trouble call) it still
+//      lands on that section rather than skipping past a gap.
+//
+// The footer now keys off the CURRENT section rather than the furthest
+// reached, so it shows only while Acknowledgment is the section on screen.
+//
+// Bumped to v77 — the Service Report footer ("Save Draft & Create New" /
+// "Generate & Share Report") was pinned to the screen for the whole
+// "Create New" tab. That was right when every section rendered at once,
+// but after v71 made the sections progressive it meant offering to
+// generate and share a report while the technician was still on Section 1.
+// It now appears only once the last section (8, Acknowledgment — where the
+// signatures are) has actually been reached, and stays put after that so
+// they can scroll back up to edit and return. srUpdateFooterBar() in ui.js
+// owns the decision; resetForm, srRevealSections, srSetAllSectionsRevealed
+// and the tab switch in home.js all defer to it. Opening a saved draft
+// still shows it immediately, since that reveals every section at once.
+//
 // Bumped to v76 — pre-deploy review pass. Two real bugs found by checking
 // every dynamically-created element that is read through $():
 //
@@ -536,7 +576,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v76';
+const CACHE_NAME = 'awes-sr-v79';
 
 // Split into two lists on purpose.
 //

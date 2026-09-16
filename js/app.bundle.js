@@ -3047,8 +3047,12 @@
     // rest appear as each is finished (see srGoToSection and the Continue
     // buttons in ui.js). This used to reveal sections 2-8 all at once,
     // which is what made the form a wall of fields on a phone.
+    // Jump straight to the first section that actually needs input. A Job
+    // Order prefills customer details, equipment and the trouble call, so
+    // walking the technician through those is three screens of read-only
+    // review before any real work starts.
     if(typeof srGoToSection === 'function'){
-      srGoToSection(typeof srNextSection === 'function' ? srNextSection(1) : 2);
+      srGoToSection(typeof srFirstUnfilledSection === 'function' ? srFirstUnfilledSection() : 2);
       return;
     }
     ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
@@ -5077,6 +5081,10 @@
   };
   const SR_LAST_SECTION = 8;
   let srMaxSection = 1;
+  // The ONE section currently on screen (srRevealSections hides the rest).
+  // srMaxSection is still the furthest reached — it's what the chip
+  // navigator and the progress bar are built from.
+  let srCurrentSection = 1;
   function resetForm(){
     // Scoped to the Service Report view only. This used to select every text,
     // number, textarea and checkbox on the page, so starting a new report also
@@ -5125,6 +5133,8 @@
     clearInvalid();
     applyTechNameDefault();
     srMaxSection = 1;
+    srCurrentSection = 1;
+    srUpdateFooterBar();
     srRenderStepper();
   }
   resetForm();
@@ -5158,22 +5168,95 @@
     }
     return null;
   }
+  // The footer (Save Draft / Generate & Share Report) belongs to the END of
+  // the form. It used to show for the entire "Create New" tab, which was
+  // right when every section was visible at once — but with progressive
+  // sections it meant offering "Generate & Share Report" while the
+  // technician was still on Customer's Information. It now appears only
+  // once the last section (Acknowledgment, where the signatures are) has
+  // been reached, and stays visible after that so they can still scroll up
+  // to edit and come back.
+  function srUpdateFooterBar(){
+    const bar = $('footerBar');
+    if(!bar) return;
+    const newPanel = $('srNewPanel');
+    const onNewTab = newPanel && newPanel.style.display !== 'none';
+    bar.style.display = (onNewTab && srCurrentSection >= SR_LAST_SECTION) ? 'flex' : 'none';
+  }
+  // A section counts as already handled when the Job Order prefill has
+  // filled everything it asks for (srApplyJobOrder populates customer
+  // details, the equipment fields, and the trouble call). There's nothing
+  // to do on those, so the form opens past them instead of making the
+  // technician page through screens of data they didn't type and can't
+  // usefully change.
+  function srSectionPrefilled(n){
+    if(n===1){
+      return !!$('custName').value.trim() && !!$('svcDate').value && !!$('custEmail').value.trim();
+    }
+    if(n===2){
+      return srSectionIsSkipped(2)
+        || !!($('equipType').value.trim() || $('modelCU').value.trim() || $('modelFCU').value.trim());
+    }
+    // Section 3 is deliberately NEVER treated as prefilled. The Job Order
+    // supplies its trouble call, but Findings and Recommendations — the
+    // substance of the report — start empty, and skipping past it would
+    // take a technician to the signatures without ever asking for them.
+    return false; // 3-8 always need real input
+  }
+  // First section that actually needs attention.
+  function srFirstUnfilledSection(){
+    for(let n=1; n<=SR_LAST_SECTION; n++){
+      if(srSectionIsSkipped(n)) continue;
+      if(!srSectionPrefilled(n)) return n;
+    }
+    return SR_LAST_SECTION;
+  }
+
+  // Only the CURRENT section is on screen. Showing every unlocked section
+  // at once rebuilt the same wall of fields progressive disclosure exists
+  // to avoid — by the last section the page was all eight again. Earlier
+  // sections stay reachable through the chip navigator (srRenderSectionNav)
+  // rather than by scrolling past them.
   function srRevealSections(){
-    for(let n=2; n<=SR_LAST_SECTION; n++){
+    for(let n=1; n<=SR_LAST_SECTION; n++){
       const card = $('sec'+n+'Card');
       if(!card) continue;
-      card.style.display = (n<=srMaxSection && !srSectionIsSkipped(n)) ? '' : 'none';
+      if(n===1 && currentUser && currentUser.role!=='admin' && !srCurrentTicketId){
+        card.style.display = 'none'; // no Job Order picked yet
+        continue;
+      }
+      card.style.display = (n===srCurrentSection && !srSectionIsSkipped(n)) ? '' : 'none';
     }
+    srRenderSectionNav();
+    srUpdateFooterBar();
     srRenderStepper();
   }
+
+  // Chips for every section reached so far, so going back to fix something
+  // is one tap instead of a scroll through hidden cards.
+  function srRenderSectionNav(){
+    const host = $('srSectionNav');
+    if(!host) return;
+    if(srMaxSection<=1 && srCurrentSection<=1){ host.innerHTML = ''; host.style.display='none'; return; }
+    host.style.display = '';
+    let html = '';
+    for(let n=1; n<=SR_LAST_SECTION; n++){
+      if(srSectionIsSkipped(n)) continue;
+      if(n>srMaxSection) continue;
+      const cls = n===srCurrentSection ? 'sr-nav-chip active' : 'sr-nav-chip';
+      html += '<button type="button" class="'+cls+'" data-sr-nav="'+n+'">'+n+'</button>';
+    }
+    host.innerHTML = '<span class="sr-nav-label">Section</span>'+html;
+  }
   function srGoToSection(n){
-    if(n>SR_LAST_SECTION) return;
+    if(n>SR_LAST_SECTION) n = SR_LAST_SECTION;
+    if(n<1) n = 1;
+    srCurrentSection = n;
     srMaxSection = Math.max(srMaxSection, n);
     srRevealSections();
     const head = $('sec'+n+'Head');
-    const card = $('sec'+n+'Card');
     if(head) toggleCollapsibleSection(head, true);
-    if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+    window.scrollTo({top:0, behavior:'smooth'});
   }
   // Appended once at startup — putting these in the markup would mean
   // eight near-identical blocks kept in sync by hand.
@@ -5188,6 +5271,13 @@
         'Continue to '+escapeHtml(SR_SECTION_TITLES[next]||'next section')+' \u2192</button>';
       body.appendChild(wrap);
     }
+    // Chip navigator — delegated, since the chips are re-rendered on every
+    // section change.
+    document.addEventListener('click', (e)=>{
+      const chip = e.target.closest('[data-sr-nav]');
+      if(!chip) return;
+      srGoToSection(parseInt(chip.getAttribute('data-sr-nav'), 10));
+    });
     document.addEventListener('click', (e)=>{
       const btn = e.target.closest('.sr-continue-btn');
       if(!btn) return;
@@ -5212,6 +5302,8 @@
 
   function srSetAllSectionsRevealed(){
     srMaxSection = SR_LAST_SECTION;
+    srCurrentSection = SR_LAST_SECTION;
+    srUpdateFooterBar();
     srRenderStepper();
   }
 
@@ -13510,7 +13602,12 @@
     $('srHistoryPanel').style.display = isHistoryTab ? '' : 'none';
     // The footer (Save Draft / Generate Report) and the SR-No./status meta
     // bar only make sense while actively filling out a report.
-    $('footerBar').style.display = which==='new' ? 'flex' : 'none';
+    // Leaving the Create New tab always hides the footer; entering it hands
+    // the decision to srUpdateFooterBar, which only shows it once the last
+    // section has been reached (see its comment in ui.js).
+    if(which!=='new') $('footerBar').style.display = 'none';
+    else if(typeof srUpdateFooterBar === 'function') srUpdateFooterBar();
+    else $('footerBar').style.display = 'flex';
     $('metaBar').style.display = which==='new' ? '' : 'none';
     if(which==='new'){
       // "Create New" is a hard reset, not just a tab switch — same convention

@@ -340,8 +340,12 @@
     // rest appear as each is finished (see srGoToSection and the Continue
     // buttons in ui.js). This used to reveal sections 2-8 all at once,
     // which is what made the form a wall of fields on a phone.
+    // Jump straight to the first section that actually needs input. A Job
+    // Order prefills customer details, equipment and the trouble call, so
+    // walking the technician through those is three screens of read-only
+    // review before any real work starts.
     if(typeof srGoToSection === 'function'){
-      srGoToSection(typeof srNextSection === 'function' ? srNextSection(1) : 2);
+      srGoToSection(typeof srFirstUnfilledSection === 'function' ? srFirstUnfilledSection() : 2);
       return;
     }
     ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
