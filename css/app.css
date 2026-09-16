@@ -2288,3 +2288,21 @@ body.role-tech .overview-dots{ margin-top:8px; }
    rule has to target the html element itself. */
 html.role-tech-root{ overscroll-behavior-x:none; overscroll-behavior-y:auto; }
 html.role-tech-root body{ overscroll-behavior-x:none; overscroll-behavior-y:auto; }
+
+/* ---------- Service Report: progressive sections ----------
+   Each section body ends with a Continue button that reveals the next one
+   (see srInstallContinueButtons in ui.js), and the step tracker carries a
+   persistent "Section X of 8" bar so progress stays visible the whole way
+   through rather than only at the four coarse stages. */
+.sr-continue-wrap{ margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
+.sr-continue-btn{ width:100%; }
+.sr-section-progress{ margin:10px 0 2px; }
+.sr-section-progress-bar{
+  height:5px; border-radius:3px; background:var(--border); overflow:hidden;
+}
+.sr-section-progress-bar span{
+  display:block; height:100%; background:var(--green); border-radius:3px; transition:width .25s ease;
+}
+.sr-section-progress-text{
+  margin-top:5px; font-size:11.5px; font-weight:700; color:var(--text-muted);
+}

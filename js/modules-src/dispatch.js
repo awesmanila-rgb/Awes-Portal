@@ -394,6 +394,9 @@
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = null;
     srBatchEquipItems = equipItems;
+    // Section 2 is skipped in batch mode, so section 1's Continue button
+    // needs to name section 3 instead — see srRefreshContinueLabels.
+    if(typeof srRefreshContinueLabels === 'function') srRefreshContinueLabels();
     $('srBatchBanner').style.display = '';
     $('srBatchList').innerHTML = equipItems.map(it=>
       '<div class="leave-note" style="margin-bottom:4px;">• '+escapeHtml(dtEquipSummaryLine(it))+'</div>'

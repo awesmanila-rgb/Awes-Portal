@@ -132,6 +132,10 @@
     setEquipTab('addnew');
     $('custDetailsWrap').style.display = '';
     $('sec1Card').style.display = '';
+    // A saved draft is reviewed/finished as a whole, not walked through
+    // section by section — reveal everything and mark the progressive
+    // state as fully unlocked so the tracker agrees with what's shown.
+    if(typeof srSetAllSectionsRevealed === 'function') srSetAllSectionsRevealed();
     ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
       const el = $(id); if(el) el.style.display = '';
     });

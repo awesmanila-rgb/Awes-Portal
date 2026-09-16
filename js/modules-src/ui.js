@@ -62,9 +62,105 @@
     $('metaSrNo').textContent='—';
     clearInvalid();
     applyTechNameDefault();
+    srMaxSection = 1;
     srRenderStepper();
   }
   resetForm();
+  srInstallContinueButtons();
+  // ---------- progressive sections ----------
+  // The report has 8 sections. They used to all appear at once the moment a
+  // customer was set, which is a wall of fields on a phone in the field.
+  // Now each one reveals as the previous is finished, via a Continue button
+  // appended to every section body. Sections already revealed STAY
+  // revealed, so going back to change something never means re-walking the
+  // form. The step tracker above stays visible throughout either way.
+  const SR_SECTION_TITLES = {
+    1:"Customer's Information", 2:'Equipment Description', 3:'Report Summary',
+    4:'Components / Parts Needed to Replace', 5:'Services Done', 6:'Operating Data',
+    7:'Installation Data', 8:'Acknowledgment'
+  };
+  const SR_LAST_SECTION = 8;
+  let srMaxSection = 1;
+  // Section 2 is filled automatically per unit in batch mode (see
+  // srBatchBanner), so it's skipped rather than shown empty.
+  function srSectionIsSkipped(n){
+    return n===2 && srBatchEquipItems && srBatchEquipItems.length > 1;
+  }
+  function srNextSection(n){
+    let next = n+1;
+    while(next<=SR_LAST_SECTION && srSectionIsSkipped(next)) next++;
+    return next;
+  }
+  // Only sections with genuinely required fields block progress. Everything
+  // else continues freely — gating optional sections would turn progressive
+  // disclosure into an obstacle rather than a simplification.
+  function srSectionBlocker(n){
+    if(n===1){
+      if(!$('custName').value.trim()) return 'Enter the customer name to continue';
+      if(!$('svcDate').value) return 'Set the service date to continue';
+      const email = $('custEmail').value.trim();
+      if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'A valid customer email is required — the report is sent there';
+      return null;
+    }
+    return null;
+  }
+  function srRevealSections(){
+    for(let n=2; n<=SR_LAST_SECTION; n++){
+      const card = $('sec'+n+'Card');
+      if(!card) continue;
+      card.style.display = (n<=srMaxSection && !srSectionIsSkipped(n)) ? '' : 'none';
+    }
+    srRenderStepper();
+  }
+  function srGoToSection(n){
+    if(n>SR_LAST_SECTION) return;
+    srMaxSection = Math.max(srMaxSection, n);
+    srRevealSections();
+    const head = $('sec'+n+'Head');
+    const card = $('sec'+n+'Card');
+    if(head) toggleCollapsibleSection(head, true);
+    if(card) card.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  // Appended once at startup — putting these in the markup would mean
+  // eight near-identical blocks kept in sync by hand.
+  function srInstallContinueButtons(){
+    for(let n=1; n<SR_LAST_SECTION; n++){
+      const body = $('sec'+n+'Body');
+      if(!body || body.querySelector('.sr-continue-btn')) continue;
+      const wrap = document.createElement('div');
+      wrap.className = 'sr-continue-wrap';
+      const next = srNextSection(n);
+      wrap.innerHTML = '<button type="button" class="btn btn-primary sr-continue-btn" data-sr-section="'+n+'">'+
+        'Continue to '+escapeHtml(SR_SECTION_TITLES[next]||'next section')+' \u2192</button>';
+      body.appendChild(wrap);
+    }
+    document.addEventListener('click', (e)=>{
+      const btn = e.target.closest('.sr-continue-btn');
+      if(!btn) return;
+      const n = parseInt(btn.getAttribute('data-sr-section'), 10);
+      const blocker = srSectionBlocker(n);
+      if(blocker){ toast(blocker); return; }
+      const head = $('sec'+n+'Head');
+      if(head) toggleCollapsibleSection(head, false); // collapse the one just finished
+      srGoToSection(srNextSection(n));
+    });
+  }
+  // Continue labels shift when batch mode skips section 2, so refresh them
+  // whenever that mode changes.
+  function srRefreshContinueLabels(){
+    for(let n=1; n<SR_LAST_SECTION; n++){
+      const btn = document.querySelector('.sr-continue-btn[data-sr-section="'+n+'"]');
+      if(!btn) continue;
+      const next = srNextSection(n);
+      btn.textContent = 'Continue to '+(SR_SECTION_TITLES[next]||'next section')+' \u2192';
+    }
+  }
+
+  function srSetAllSectionsRevealed(){
+    srMaxSection = SR_LAST_SECTION;
+    srRenderStepper();
+  }
+
   // ---------- progressive step tracker ----------
   // Same jo-stepper visual language as the Job Order / Cash Advance
   // trackers. Re-rendered at every state change below rather than on every
@@ -103,8 +199,26 @@
     else if(step2Done) nextText = 'Sign in Section 8 to continue (both customer and technician).';
     else if(step1Done) nextText = "Fill in Customer's Information and the sections below.";
     else nextText = 'Select a Job Order above to get started.';
+    // Section progress sits alongside the four coarse stages: the stages
+    // say what phase you're in, this says how far through the actual form
+    // you are. Visible the whole time the form is being filled, which is
+    // what keeps the tracker meaningful now that sections appear one at a
+    // time rather than all at once.
+    let sectionLine = '';
+    if(step1Done && !step4Done){
+      const total = srSectionIsSkipped(2) ? SR_LAST_SECTION-1 : SR_LAST_SECTION;
+      const shown = Math.min(srMaxSection, SR_LAST_SECTION);
+      const pos = srSectionIsSkipped(2) && shown>2 ? shown-1 : shown;
+      const pct = Math.round((pos/total)*100);
+      sectionLine = '<div class="sr-section-progress">'+
+          '<div class="sr-section-progress-bar"><span style="width:'+pct+'%"></span></div>'+
+          '<div class="sr-section-progress-text">Section '+pos+' of '+total+
+            ' \u00b7 '+escapeHtml(SR_SECTION_TITLES[shown]||'')+'</div>'+
+        '</div>';
+    }
     container.innerHTML = '<div class="jo-stepper">'+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
+      sectionLine+
       '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
     '</div>';
   }

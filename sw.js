@@ -1,3 +1,27 @@
+// Bumped to v71 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — the Service
+// Report form is now progressive. Sections 2-8 used to all appear at once
+// the moment a customer was set, which is a wall of fields on a phone in
+// the field. Each section body now ends with a Continue button that
+// reveals the next one (srInstallContinueButtons/srGoToSection in ui.js),
+// grouped by the report's own existing sections rather than any new
+// split. Notes:
+//   - Only Section 1 gates progress (name/date/valid email — the same
+//     fields validate() already required). Every other section continues
+//     freely: gating optional sections would make disclosure an obstacle
+//     instead of a simplification.
+//   - Revealed sections STAY revealed, so going back to change something
+//     never means re-walking the form.
+//   - The step tracker stays visible throughout and gained a persistent
+//     "Section X of 8" progress bar, so progress is legible between the
+//     four coarse stages.
+//   - Batch mode still skips Section 2 (filled per unit automatically);
+//     srNextSection/srRefreshContinueLabels keep the Continue targets and
+//     labels correct when it does.
+//   - Opening a SAVED DRAFT reveals everything at once
+//     (srSetAllSectionsRevealed) — that's reviewing a filled form, not
+//     walking a new one.
+//
 // Bumped to v70 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js again — cash-advance receipt images moved OUT
 // of the cash_advances JSONB row and into a private Storage bucket
@@ -406,7 +430,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v70';
+const CACHE_NAME = 'awes-sr-v71';
 
 // Split into two lists on purpose.
 //

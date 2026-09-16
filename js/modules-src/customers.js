@@ -336,6 +336,14 @@
   // FOUR fields (address/contact/person/email) at once, not just one.
   function revealSectionsAfterCustomer(){
     $('custDetailsWrap').style.display = '';
+    // Progressive: setting a customer unlocks the NEXT section only — the
+    // rest appear as each is finished (see srGoToSection and the Continue
+    // buttons in ui.js). This used to reveal sections 2-8 all at once,
+    // which is what made the form a wall of fields on a phone.
+    if(typeof srGoToSection === 'function'){
+      srGoToSection(typeof srNextSection === 'function' ? srNextSection(1) : 2);
+      return;
+    }
     ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
       const el = $(id); if(el) el.style.display = '';
     });
