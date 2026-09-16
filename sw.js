@@ -1,3 +1,26 @@
+// Bumped to v80 — Service Report rebuilt as a step-by-step wizard.
+//
+// Entry: Report -> "How to file a Service Report" gate with I Understand
+// (ONCE PER SESSION, not every tap) -> Create New / Saved Draft tiles ->
+// job order list -> Single Report / Multiple Reports tiles -> unit.
+//
+// The form is now one screen per step with Back and Next on each:
+//   1 Equipment Details   2 Report Summary   3 Components / Parts Needed
+//   4 Works Done to this unit   5 Operation Parameters
+//   6 Installation Parameters (behind a toggle; skipped when off)
+//   7 Time & Remarks   8 Technician Signature   9 Customer Acknowledgment
+// Section 8 was split into steps 7-9 (Time & Remarks / technician sig /
+// customer sig + Preview) keeping every element id identical, so the
+// signature pads, preview and PDF code needed no changes. Customer's
+// Information is no longer a step at all — it comes from the Job Order and
+// the technician cannot edit it. Time In/Out are relabelled Time Started /
+// Time Finished.
+//
+// The Findings, Recommendations and Works Done suggestion dropdowns needed
+// no new work: findings/recs/servicesDone were already in FIELD_META and
+// already admin-editable through Manage Dropdown Lists. "Services Done"
+// is relabelled "Works Done" there to match the new step name.
+//
 // Bumped to v79 — the Service Report now opens at Section 3 (Report
 // Summary) rather than 4. The Job Order prefills that section's trouble
 // call, but Findings and Recommendations start empty, so treating it as
@@ -576,7 +599,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v79';
+const CACHE_NAME = 'awes-sr-v80';
 
 // Split into two lists on purpose.
 //

@@ -239,7 +239,7 @@
     m_desc:{label:'Components — Item Description', group:'Components'},
     m_qty:{label:'Components — Qty', group:'Components'},
     m_unit:{label:'Components — Unit', group:'Components'},
-    servicesDone:{label:'Services Done', group:'Services Done'},
+    servicesDone:{label:'Works Done', group:'Works Done'},
     scopeOfWork:{label:'Scope of Work', group:'Dispatch'},
     custPrintedName:{label:'Customer Printed Name', group:'Acknowledgment'},
     techName:{label:'Technician Name', group:'Acknowledgment'}

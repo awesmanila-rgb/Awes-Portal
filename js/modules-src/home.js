@@ -780,7 +780,11 @@
         // and clear, but it looks like nothing happened until they scroll up.
         window.scrollTo({top:0, behavior:'smooth'});
       }
-      srRenderJobOrderPicker();
+      // The wizard's entry flow owns this now: instruction gate (once per
+      // session) -> Create New / Saved Draft -> job order -> Single /
+      // Multiple -> unit. srTileCreateNew is what calls the picker.
+      if(typeof srStartReportFlow === 'function') srStartReportFlow();
+      else srRenderJobOrderPicker();
     }
     if(isHistoryTab){
       $('srHistoryPanelTitle').textContent =

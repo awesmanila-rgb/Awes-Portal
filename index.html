@@ -2187,6 +2187,50 @@ window.awesCss = {
     </div>
   </div>
 
+  <!-- ===== Wizard entry screens. Shown one at a time by srShowEntry()
+       in ui.js; the form itself stays hidden until a unit is chosen. ===== -->
+  <div id="srEntryGate" class="card" style="display:none;">
+    <div class="card-head"><span>How to file a Service Report</span></div>
+    <div class="card-body" id="srEntryGateBody"></div>
+  </div>
+
+  <div id="srEntryChoice" class="card" style="display:none;">
+    <div class="card-head"><span>Service Report</span></div>
+    <div class="card-body">
+      <div class="sr-tile-grid">
+        <button type="button" class="sr-tile" id="srTileCreateNew">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="sr-tile-title">Create New</span>
+          <span class="sr-tile-sub">Start a report from a job order</span>
+        </button>
+        <button type="button" class="sr-tile" id="srTileSavedDraft">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+          <span class="sr-tile-title">Saved Draft</span>
+          <span class="sr-tile-sub">Continue where you left off</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="srEntryMode" class="card" style="display:none;">
+    <div class="card-head"><span id="srEntryModeTitle">Report Type</span></div>
+    <div class="card-body">
+      <div class="sr-tile-grid">
+        <button type="button" class="sr-tile" id="srTileSingle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
+          <span class="sr-tile-title">Single Report</span>
+          <span class="sr-tile-sub">One equipment unit</span>
+        </button>
+        <button type="button" class="sr-tile" id="srTileMultiple">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="14" height="16" rx="2"/><path d="M3 7v12a2 2 0 0 0 2 2h12"/></svg>
+          <span class="sr-tile-title">Multiple Reports</span>
+          <span class="sr-tile-sub">Use this for all equipment with the same Works Done</span>
+        </button>
+      </div>
+      <button type="button" class="btn btn-secondary" id="srEntryModeBack" style="width:100%; margin-top:14px;">← Back</button>
+    </div>
+  </div>
+
   <div id="srStepperContainer" style="margin-bottom:14px;"></div>
 
   <!-- Section chips — jump back to any section already reached. Only the
@@ -2256,7 +2300,7 @@ window.awesCss = {
 
   <!-- 2. Equipment Description -->
   <div class="card" id="sec2Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">2</span>Equipment Description</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">1</span>Equipment Details</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec2Body" style="display:none;">
       <div id="equipTabBar" style="display:flex; gap:8px; margin-bottom:14px;">
         <button type="button" id="equipTabExisting" class="equip-tab">Select Existing</button>
@@ -2288,7 +2332,7 @@ window.awesCss = {
 
   <!-- 3. Report Summary -->
   <div class="card" id="sec3Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">3</span>Report Summary</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">2</span>Report Summary</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec3Body" style="display:none;">
       <div class="field">
         <label>Trouble Call / Request / Reason for Service</label>
@@ -2309,7 +2353,7 @@ window.awesCss = {
 
   <!-- 4. Components / Parts Needed to Replace -->
   <div class="card" id="sec4Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">4</span>Components / Parts Needed to Replace</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">3</span>Components / Parts Needed</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec4Body" style="display:none;">
       <div id="materialsTableWrap" style="display:none;">
       <table class="materials" id="materialsTable">
@@ -2331,7 +2375,7 @@ window.awesCss = {
 
   <!-- 5. Services Done -->
   <div class="card" id="sec5Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">5</span>Services Done</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">4</span>Works Done to this unit</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec5Body" style="display:none;">
       <div class="field">
         <label>Describe the service(s) performed</label>
@@ -2343,7 +2387,7 @@ window.awesCss = {
 
   <!-- 6. Operating Data -->
   <div class="card" id="sec6Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">6</span>Operating Data</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">5</span>Operation Parameters</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec6Body" style="display:none;">
       <div class="opdata-table-wrap">
       <table class="opdata-table">
@@ -2384,8 +2428,16 @@ window.awesCss = {
 
   <!-- 7. Installation Data (conditional) -->
   <div class="card" id="sec7Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">7</span>Installation Data</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">6</span>Installation Parameters</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec7Body" style="display:none;">
+      <!-- Installation Parameters only apply when the unit was installed on
+           this visit. Off by default; srSectionIsSkipped(7) skips the whole
+           step unless this is switched on. -->
+      <label class="sr-install-toggle">
+        <input type="checkbox" id="installToggle">
+        <span>This unit was newly installed on this visit</span>
+      </label>
+      <div id="installFieldsWrap" style="display:none;">
       <div class="toggle-row">
         <div>
           <div class="ttl">This visit includes a new installation</div>
@@ -2410,62 +2462,71 @@ window.awesCss = {
         <div class="field"><label>P-Trap</label><input type="text" id="ptrap"></div>
         <div class="field"><label>Accu Bracket Type</label><input type="text" id="bracketType" placeholder="e.g. L-Type Bracket"></div>
       </div>
+      </div>
     </div>
   </div>
 
   <!-- 8. Acknowledgment -->
   <div class="card" id="sec8Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">8</span>Acknowledgment</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head"><span><span class="num">7</span>Time &amp; Remarks</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec8Body" style="display:none;">
-      <p style="font-size:13px; color:var(--text-muted); margin-top:0; line-height:1.5;">
-        I hereby acknowledge the services / works done on my equipment and agree to the terms &amp; conditions stated herein.
-      </p>
       <div class="grid2">
-        <div class="field"><label>Time In</label><input type="time" id="timeIn"></div>
-        <div class="field"><label>Time Out</label><input type="time" id="timeOut"></div>
+        <div class="field"><label>Time Started</label><input type="time" id="timeIn"></div>
+        <div class="field"><label>Time Finished</label><input type="time" id="timeOut"></div>
       </div>
       <div class="field">
         <label>Remarks</label>
-        <textarea id="remarks"></textarea>
+        <textarea id="remarks" placeholder="Anything else worth noting about this visit"></textarea>
       </div>
+    </div>
+  </div>
 
-      <button type="button" class="btn btn-secondary" id="previewBtn" style="width:100%; margin-bottom:16px;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg> Preview Report Before Signing</button>
-
-      <div class="grid2">
-        <div class="field">
-          <label>Customer Signature</label>
-          <div class="sig-box">
-            <div class="sig-canvas-wrap">
-              <canvas class="sigpad" id="sigCustomer"></canvas>
-              <div class="sig-placeholder" id="sigCustomerPh">Sign with finger or stylus</div>
-            </div>
-            <div class="sig-tools">
-              <button type="button" class="sig-confirm-btn" data-confirm="sigCustomer">Confirm Signature</button>
-              <button type="button" data-clear="sigCustomer">Clear</button>
-            </div>
+  <div class="card" id="sec9Card" style="display:none;">
+    <div class="card-head collapsible-head"><span><span class="num">8</span>Technician Signature</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-body" id="sec9Body" style="display:none;">
+      <div class="field">
+        <label>Technician Signature</label>
+        <div class="sig-box">
+          <div class="sig-canvas-wrap">
+            <canvas class="sigpad" id="sigTech"></canvas>
+            <div class="sig-placeholder" id="sigTechPh">Sign with finger or stylus</div>
           </div>
-          <div style="margin-top:8px;">
-            <input type="text" id="custPrintedName" placeholder="Printed name">
+          <div class="sig-tools">
+            <button type="button" class="sig-confirm-btn" data-confirm="sigTech">Confirm Signature</button>
+            <button type="button" data-clear="sigTech">Clear</button>
           </div>
         </div>
-        <div class="field">
-          <label>Technician Signature</label>
-          <div class="sig-box">
-            <div class="sig-canvas-wrap">
-              <canvas class="sigpad" id="sigTech"></canvas>
-              <div class="sig-placeholder" id="sigTechPh">Sign with finger or stylus</div>
-            </div>
-            <div class="sig-tools">
-              <button type="button" class="sig-confirm-btn" data-confirm="sigTech">Confirm Signature</button>
-              <button type="button" data-clear="sigTech">Clear</button>
-            </div>
-          </div>
-          <div style="margin-top:8px;">
-            <input type="text" id="techName" placeholder="Technician name">
-            <div class="leave-note" style="margin-top:4px;">Auto-filled from your logged-in account — edit if a different technician performed the work.</div>
-          </div>
+        <div style="margin-top:8px;">
+          <input type="text" id="techName" placeholder="Technician name">
+          <div class="leave-note" style="margin-top:4px;">Auto-filled from your logged-in account — edit if a different technician performed the work.</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="card" id="sec10Card" style="display:none;">
+    <div class="card-head collapsible-head"><span><span class="num">9</span>Customer Acknowledgment</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-body" id="sec10Body" style="display:none;">
+      <p style="font-size:13px; color:var(--text-muted); margin-top:0; line-height:1.5;">
+        I hereby acknowledge the services / works done on my equipment and agree to the terms &amp; conditions stated herein.
+      </p>
+      <div class="field">
+        <label>Customer Signature</label>
+        <div class="sig-box">
+          <div class="sig-canvas-wrap">
+            <canvas class="sigpad" id="sigCustomer"></canvas>
+            <div class="sig-placeholder" id="sigCustomerPh">Sign with finger or stylus</div>
+          </div>
+          <div class="sig-tools">
+            <button type="button" class="sig-confirm-btn" data-confirm="sigCustomer">Confirm Signature</button>
+            <button type="button" data-clear="sigCustomer">Clear</button>
+          </div>
+        </div>
+        <div style="margin-top:8px;">
+          <input type="text" id="custPrintedName" placeholder="Printed name">
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary" id="previewBtn" style="width:100%; margin-top:14px;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg> Preview Report</button>
     </div>
   </div>
 

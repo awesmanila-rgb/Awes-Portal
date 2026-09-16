@@ -216,25 +216,34 @@
           });
           pendingWrap.appendChild(btn);
         });
-        // Batch signing entry point — only worth offering with 2+ items
-        // still pending on this ticket (see srApplyJobOrderBatch below).
-        if(pending.length >= 2){
-          const batchLink = document.createElement('button');
-          batchLink.type = 'button';
-          batchLink.className = 'sr-batch-toggle-link';
-          batchLink.style.cssText = 'width:100%; text-align:center; background:none; border:none; color:var(--green-dark); font-size:12px; font-weight:600; padding:8px 0 2px; cursor:pointer;';
-          batchLink.innerHTML = icon('checkSquare')+' Select multiple to batch sign →';
-          batchLink.addEventListener('click', (e)=>{
-            e.stopPropagation();
-            srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList);
-          });
-          pendingWrap.appendChild(batchLink);
-        }
+      }
+      // Single vs Multiple is now its own screen (srEntryMode), shown
+      // between picking a job order and picking units — see
+      // srStartReportFlow in ui.js. The inline "batch sign" link it
+      // replaces is gone; with only one unit pending there's nothing to
+      // choose, so that case goes straight to the unit list.
+      function openUnitStep(){
+        const modeScreen = $('srEntryMode');
+        if(pending.length < 2 || !modeScreen){ renderSinglePickList(); pendingWrap.style.display=''; return; }
+        $('srEntryModeTitle').textContent = 'Report Type — '+(r.jobOrderNo||'');
+        if(typeof srShowEntry === 'function') srShowEntry('srEntryMode');
+        $('srTileSingle').onclick = ()=>{
+          if(typeof srShowEntry === 'function') srShowEntry(null);
+          if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
+          setTimeout(()=>{ renderSinglePickList(); pendingWrap.style.display=''; }, 0);
+        };
+        $('srTileMultiple').onclick = ()=>{
+          if(typeof srShowEntry === 'function') srShowEntry(null);
+          if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
+          setTimeout(()=>{ srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList); pendingWrap.style.display=''; }, 0);
+        };
       }
       head.addEventListener('click', ()=>{
         const isOpen = pendingWrap.style.display !== 'none';
-        pendingWrap.style.display = isOpen ? 'none' : '';
-        if(!isOpen && pendingWrap.childElementCount===0) renderSinglePickList();
+        if(isOpen){ pendingWrap.style.display = 'none'; return; }
+        // Opening a job order now goes through the Single/Multiple step
+        // rather than straight to the unit list.
+        openUnitStep();
       });
       list.appendChild(row);
     });

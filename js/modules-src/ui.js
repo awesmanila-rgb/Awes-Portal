@@ -22,12 +22,20 @@
   // that call site leaves it in the temporal dead zone — which threw
   // "Cannot access 'srMaxSection' before initialization" and took the
   // whole bundle (and therefore the whole page) down with it.
+  // The wizard's steps. Section 1 (Customer's Information) is deliberately
+  // NOT a step — it comes from the Job Order and the technician cannot edit
+  // it, so it is filled silently and never shown. Sections 8-10 are the
+  // split of what used to be one "Acknowledgment" card, so Time & Remarks,
+  // the technician's signature and the customer's signature each get their
+  // own screen.
   const SR_SECTION_TITLES = {
-    1:"Customer's Information", 2:'Equipment Description', 3:'Report Summary',
-    4:'Components / Parts Needed to Replace', 5:'Services Done', 6:'Operating Data',
-    7:'Installation Data', 8:'Acknowledgment'
+    1:"Customer's Information", 2:'Equipment Details', 3:'Report Summary',
+    4:'Components / Parts Needed', 5:'Works Done to this unit', 6:'Operation Parameters',
+    7:'Installation Parameters', 8:'Time & Remarks', 9:'Technician Signature',
+    10:'Customer Acknowledgment'
   };
-  const SR_LAST_SECTION = 8;
+  const SR_FIRST_SECTION = 2;   // the wizard always starts at Equipment Details
+  const SR_LAST_SECTION = 10;
   let srMaxSection = 1;
   // The ONE section currently on screen (srRevealSections hides the rest).
   // srMaxSection is still the furthest reached — it's what the chip
@@ -96,12 +104,21 @@
   // Section 2 is filled automatically per unit in batch mode (see
   // srBatchBanner), so it's skipped rather than shown empty.
   function srSectionIsSkipped(n){
-    return n===2 && srBatchEquipItems && srBatchEquipItems.length > 1;
+    if(n===1) return true; // customer info: inherited from the Job Order, never shown
+    // Installation Parameters is behind a toggle — off means the unit wasn't
+    // newly installed on this visit, so the step is skipped entirely.
+    if(n===7){ const t = $('installToggle'); return !(t && t.checked); }
+    return false;
   }
   function srNextSection(n){
     let next = n+1;
     while(next<=SR_LAST_SECTION && srSectionIsSkipped(next)) next++;
     return next;
+  }
+  function srPrevSection(n){
+    let prev = n-1;
+    while(prev>=SR_FIRST_SECTION && srSectionIsSkipped(prev)) prev--;
+    return prev < SR_FIRST_SECTION ? SR_FIRST_SECTION : prev;
   }
   // Only sections with genuinely required fields block progress. Everything
   // else continues freely — gating optional sections would turn progressive
@@ -209,16 +226,27 @@
   // Appended once at startup — putting these in the markup would mean
   // eight near-identical blocks kept in sync by hand.
   function srInstallContinueButtons(){
-    for(let n=1; n<SR_LAST_SECTION; n++){
+    for(let n=SR_FIRST_SECTION; n<=SR_LAST_SECTION; n++){
       const body = $('sec'+n+'Body');
-      if(!body || body.querySelector('.sr-continue-btn')) continue;
+      if(!body || body.querySelector('.sr-step-nav')) continue;
       const wrap = document.createElement('div');
-      wrap.className = 'sr-continue-wrap';
-      const next = srNextSection(n);
-      wrap.innerHTML = '<button type="button" class="btn btn-primary sr-continue-btn" data-sr-section="'+n+'">'+
-        'Continue to '+escapeHtml(SR_SECTION_TITLES[next]||'next section')+' \u2192</button>';
+      wrap.className = 'sr-continue-wrap sr-step-nav';
+      // Back on every step except the first; Next on every step except the
+      // last (where the footer's Generate/Save buttons take over).
+      const backBtn = n>SR_FIRST_SECTION
+        ? '<button type="button" class="btn btn-secondary sr-back-btn" data-sr-back="'+n+'">\u2190 Back</button>'
+        : '';
+      const nextBtn = n<SR_LAST_SECTION
+        ? '<button type="button" class="btn btn-primary sr-continue-btn" data-sr-section="'+n+'">Next \u2192</button>'
+        : '';
+      wrap.innerHTML = backBtn + nextBtn;
       body.appendChild(wrap);
     }
+    document.addEventListener('click', (e)=>{
+      const back = e.target.closest('.sr-back-btn');
+      if(!back) return;
+      srGoToSection(srPrevSection(parseInt(back.getAttribute('data-sr-back'), 10)));
+    });
     // Chip navigator — delegated, since the chips are re-rendered on every
     // section change.
     document.addEventListener('click', (e)=>{
@@ -239,14 +267,10 @@
   }
   // Continue labels shift when batch mode skips section 2, so refresh them
   // whenever that mode changes.
-  function srRefreshContinueLabels(){
-    for(let n=1; n<SR_LAST_SECTION; n++){
-      const btn = document.querySelector('.sr-continue-btn[data-sr-section="'+n+'"]');
-      if(!btn) continue;
-      const next = srNextSection(n);
-      btn.textContent = 'Continue to '+(SR_SECTION_TITLES[next]||'next section')+' \u2192';
-    }
-  }
+  // Kept as a no-op: the step buttons now read plainly "Back" / "Next", so
+  // there are no per-section labels to keep in sync. Still called from
+  // dispatch.js when batch mode toggles.
+  function srRefreshContinueLabels(){ srRenderSectionNav(); }
 
   function srSetAllSectionsRevealed(){
     srMaxSection = SR_LAST_SECTION;
@@ -254,6 +278,68 @@
     srUpdateFooterBar();
     srRenderStepper();
   }
+
+  // Installation toggle reveals its own fields and re-evaluates whether
+  // step 7 exists at all (srSectionIsSkipped reads this checkbox).
+  (function(){
+    const t = $('installToggle');
+    if(!t) return;
+    t.addEventListener('change', ()=>{
+      const wrap = $('installFieldsWrap');
+      if(wrap) wrap.style.display = t.checked ? '' : 'none';
+      srRenderSectionNav();
+    });
+  })();
+  // =====================================================================
+  // Wizard entry flow: instruction gate -> Create New / Saved Draft ->
+  // job order -> Single / Multiple -> unit -> the step form.
+  // Each screen is a card; srShowEntry() shows exactly one of them (or
+  // none, once the form itself is running).
+  // =====================================================================
+  // Session-scoped on purpose: shown once per sign-in, not on every tap.
+  // Someone filing six reports in a day should read it once.
+  let srGateSeenThisSession = false;
+  const SR_ENTRY_SCREENS = ['srEntryGate','srEntryChoice','srEntryMode'];
+  function srShowEntry(which){
+    SR_ENTRY_SCREENS.forEach(id=>{ const el = $(id); if(el) el.style.display = (id===which) ? '' : 'none'; });
+    const showingEntry = !!which;
+    // While an entry screen is up, the form, its stepper, chips and footer
+    // all stay out of the way.
+    ['srStepperContainer','srSectionNav'].forEach(id=>{ const el=$(id); if(el) el.style.display = showingEntry ? 'none' : ''; });
+    for(let n=1; n<=SR_LAST_SECTION; n++){ const c=$('sec'+n+'Card'); if(c && showingEntry) c.style.display='none'; }
+    if(showingEntry && $('footerBar')) $('footerBar').style.display = 'none';
+    // The old always-on instructions card is redundant now that the gate
+    // shows the same content up front.
+    if($('srInstructionsCard')) $('srInstructionsCard').style.display = 'none';
+    if(!showingEntry) srRevealSections();
+  }
+  // Entry point from the Report tab / bottom nav.
+  function srStartReportFlow(){
+    if(!srGateSeenThisSession){
+      const body = $('srEntryGateBody');
+      const howto = $('srInstructionsBody');
+      if(body){
+        body.innerHTML = (howto ? howto.innerHTML : '<p>Fill each step and tap Next. You will sign at the end.</p>')
+          + '<button type="button" class="btn btn-primary" id="srGateOkBtn" style="width:100%; margin-top:14px;">I Understand</button>';
+        const ok = body.querySelector('#srGateOkBtn');
+        if(ok) ok.onclick = ()=>{ srGateSeenThisSession = true; srShowEntry('srEntryChoice'); };
+      }
+      srShowEntry('srEntryGate');
+      return;
+    }
+    srShowEntry('srEntryChoice');
+  }
+  if($('srTileCreateNew')) $('srTileCreateNew').addEventListener('click', ()=>{
+    srShowEntry(null);
+    // The Job Order picker already exists and is titled "Select from Job
+    // Order" — reuse it rather than building a second list.
+    if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
+  });
+  if($('srTileSavedDraft')) $('srTileSavedDraft').addEventListener('click', ()=>{
+    srShowEntry(null);
+    if(typeof showServiceReportTab === 'function') showServiceReportTab('drafts');
+  });
+  if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=> srShowEntry('srEntryChoice'));
 
   srInstallContinueButtons();
 
