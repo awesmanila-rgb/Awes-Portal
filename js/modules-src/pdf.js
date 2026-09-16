@@ -413,6 +413,16 @@
       const srNo = await nextSrNo();
       const data = Object.assign({}, baseData, { srNo, completed:true });
       EQUIP_FIELD_KEYS.forEach(k=> data[k] = item[k] || '');
+      // Operating readings are the ONE thing that isn't shared across a
+      // batch — copying one unit's voltages and pressures onto the others
+      // would be inventing measurements. Each unit's own values come from
+      // the tab strip on the Operation Parameters step (srOpParamsFor in
+      // ui.js); any field that unit has no value for is blanked rather
+      // than inheriting the previous unit's number.
+      if(typeof srOpParamsFor === 'function' && typeof SR_OP_FIELDS !== 'undefined'){
+        const own = srOpParamsFor(item.id || '');
+        SR_OP_FIELDS.forEach(f=> data[f] = own[f] || '');
+      }
       if(item.scope && item.scope.length) data.troubleCall = item.scope.join('; ');
       // Same reuse-by-real-id as the single-report path (srApplyJobOrder) —
       // each item's own equipmentId (stamped on at ticket-creation time),

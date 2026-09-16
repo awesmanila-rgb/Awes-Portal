@@ -5242,7 +5242,15 @@
         card.style.display = 'none'; // no Job Order picked yet
         continue;
       }
-      card.style.display = (n===srCurrentSection && !srSectionIsSkipped(n)) ? '' : 'none';
+      const isCurrent = (n===srCurrentSection && !srSectionIsSkipped(n));
+      card.style.display = isCurrent ? '' : 'none';
+      // Showing the CARD isn't enough — these are collapsible, and the
+      // body starts display:none, so without this the technician had to
+      // tap the header open on every single step.
+      if(isCurrent){
+        const head = card.querySelector('.collapsible-head');
+        if(head) toggleCollapsibleSection(head, true);
+      }
     }
     srRenderSectionNav();
     srUpdateFooterBar();
@@ -5251,9 +5259,14 @@
 
   // Chips for every section reached so far, so going back to fix something
   // is one tap instead of a scroll through hidden cards.
+  // Chips removed: the single progress line above is the only indicator
+  // now, and it deliberately shows just the current step. Kept as a no-op
+  // so the existing call sites don't need unpicking.
   function srRenderSectionNav(){
     const host = $('srSectionNav');
     if(!host) return;
+    host.innerHTML = ''; host.style.display = 'none';
+    if(true) return;
     if(srMaxSection<=1 && srCurrentSection<=1){ host.innerHTML = ''; host.style.display='none'; return; }
     host.style.display = '';
     let html = '';
@@ -5358,6 +5371,9 @@
     // While an entry screen is up, the form, its stepper, chips and footer
     // all stay out of the way.
     ['srStepperContainer','srSectionNav'].forEach(id=>{ const el=$(id); if(el) el.style.display = showingEntry ? 'none' : ''; });
+    // The Job Order picker is a step of its own — it must not sit under the
+    // Create New / Saved Draft tiles.
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = showingEntry ? 'none' : '';
     for(let n=1; n<=SR_LAST_SECTION; n++){ const c=$('sec'+n+'Card'); if(c && showingEntry) c.style.display='none'; }
     if(showingEntry && $('footerBar')) $('footerBar').style.display = 'none';
     // The old always-on instructions card is redundant now that the gate
@@ -5383,13 +5399,17 @@
   }
   if($('srTileCreateNew')) $('srTileCreateNew').addEventListener('click', ()=>{
     srShowEntry(null);
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
     // The Job Order picker already exists and is titled "Select from Job
     // Order" — reuse it rather than building a second list.
     if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
   });
   if($('srTileSavedDraft')) $('srTileSavedDraft').addEventListener('click', ()=>{
     srShowEntry(null);
-    if(typeof showServiceReportTab === 'function') showServiceReportTab('drafts');
+    // 'draft' — not 'drafts'; the wrong name silently matched no tab and
+    // left the user on a blank screen.
+    if(typeof showServiceReportTab === 'function') showServiceReportTab('draft');
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
   });
   if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=> srShowEntry('srEntryChoice'));
 
@@ -5400,61 +5420,33 @@
   // trackers. Re-rendered at every state change below rather than on every
   // keystroke — resetForm, applying a Job Order (single or batch), signing,
   // and submitting all call this directly.
+  // One progress line, driven by the WIZARD SECTIONS themselves.
+  //
+  // This used to render a separate four-stage tracker (Job Order Selected /
+  // Details Filled / Signed / Submitted) plus a section line plus a row of
+  // numbered chips — three different progress indicators stacked on top of
+  // each other, all saying overlapping things, and the chips advertised
+  // every section already visited when only the current one matters.
   function srRenderStepper(){
     const container = $('srStepperContainer');
     if(!container) return;
-    const isAdmin = currentUser && currentUser.role==='admin';
-    const step1Done = isAdmin || !!srCurrentTicketId;
-    const step2Done = step1Done && !!$('custName').value.trim() && !!$('svcDate').value;
-    const custSigned = !!(sigCustomerPad && !sigCustomerPad.isEmpty());
-    const techSigned = !!(sigTechPad && !sigTechPad.isEmpty());
-    const step3Done = step2Done && custSigned && techSigned;
-    const step4Done = step3Done && $('statusPill').textContent==='Completed';
-    let stage = 0;
-    if(step1Done) stage = 1;
-    if(step2Done) stage = 2;
-    if(step3Done) stage = 3;
-    if(step4Done) stage = 4;
-    const isBatch = srBatchEquipItems && srBatchEquipItems.length > 1;
-    const labels = isBatch
-      ? ['Job Order Selected','Details Filled','Signed Once','All Reports Submitted']
-      : ['Job Order Selected','Details Filled','Signed','Submitted'];
-    const stepsHtml = labels.map((label,i)=>{
-      const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
-      return '<div class="jo-step '+state+'">'+
-          '<span class="jo-step-line"></span>'+
-          '<span class="jo-step-dot">'+(i<stage ? '\u2713' : (i+1))+'</span>'+
-          '<span class="jo-step-label">'+label+'</span>'+
-        '</div>';
-    }).join('');
-    let nextText;
-    if(step4Done) nextText = isBatch ? 'All reports for this batch were generated.' : 'Report submitted.';
-    else if(step3Done) nextText = 'Tap "Generate & Share Report" below to submit'+(isBatch ? ' every report in this batch.' : '.');
-    else if(step2Done) nextText = 'Sign in Section 8 to continue (both customer and technician).';
-    else if(step1Done) nextText = "Fill in Customer's Information and the sections below.";
-    else nextText = 'Select a Job Order above to get started.';
-    // Section progress sits alongside the four coarse stages: the stages
-    // say what phase you're in, this says how far through the actual form
-    // you are. Visible the whole time the form is being filled, which is
-    // what keeps the tracker meaningful now that sections appear one at a
-    // time rather than all at once.
-    let sectionLine = '';
-    if(step1Done && !step4Done){
-      const total = srSectionIsSkipped(2) ? SR_LAST_SECTION-1 : SR_LAST_SECTION;
-      const shown = Math.min(srMaxSection, SR_LAST_SECTION);
-      const pos = srSectionIsSkipped(2) && shown>2 ? shown-1 : shown;
-      const pct = Math.round((pos/total)*100);
-      sectionLine = '<div class="sr-section-progress">'+
-          '<div class="sr-section-progress-bar"><span style="width:'+pct+'%"></span></div>'+
-          '<div class="sr-section-progress-text">Section '+pos+' of '+total+
-            ' \u00b7 '+escapeHtml(SR_SECTION_TITLES[shown]||'')+'</div>'+
-        '</div>';
+    // Steps that actually exist for this report (Installation Parameters
+    // drops out when its toggle is off, so "of N" stays truthful).
+    const steps = [];
+    for(let n=SR_FIRST_SECTION; n<=SR_LAST_SECTION; n++){
+      if(!srSectionIsSkipped(n)) steps.push(n);
     }
-    container.innerHTML = '<div class="jo-stepper">'+
-      '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
-      sectionLine+
-      '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
-    '</div>';
+    const total = steps.length;
+    const pos = Math.max(1, steps.indexOf(srCurrentSection) + 1);
+    const pct = total ? Math.round((pos/total)*100) : 0;
+    container.innerHTML =
+      '<div class="sr-progress">'+
+        '<div class="sr-progress-head">'+
+          '<span class="sr-progress-step">Step '+pos+' of '+total+'</span>'+
+          '<span class="sr-progress-name">'+escapeHtml(SR_SECTION_TITLES[srCurrentSection]||'')+'</span>'+
+        '</div>'+
+        '<div class="sr-progress-bar"><span style="width:'+pct+'%"></span></div>'+
+      '</div>';
   }
   ['custName','svcDate'].forEach(id=>{ const el = $(id); if(el){ el.addEventListener('input', srRenderStepper); el.addEventListener('change', srRenderStepper); } });
   srRenderStepper();
@@ -5604,6 +5596,81 @@
       : ('Draft saved on this device — it will upload automatically when you are online'));
     resetForm();
   });
+
+  // =====================================================================
+  // Multiple Reports — per-unit Operation Parameters
+  //
+  // Everything else in the wizard is shared across the selected units, but
+  // readings are not: copying one unit's voltages and pressures onto every
+  // other unit would be fabricating measurements. So this one step keeps a
+  // separate set of values per unit.
+  //
+  // Presented as a tab strip rather than a Next-per-unit loop: five units
+  // as five near-identical screens gives no sense of progress and makes it
+  // easy to tab past one unnoticed. Tabs show a tick once a unit has
+  // readings, so what's still missing is visible at a glance.
+  // =====================================================================
+  const SR_OP_FIELDS = [
+    'a_temp','a_airflow','a_press_suction','a_press_discharge','a_volt_l12','a_volt_l23','a_volt_l31','a_amp_l1','a_amp_l2','a_amp_l3',
+    'b_temp','b_airflow','b_press_suction','b_press_discharge','b_volt_l12','b_volt_l23','b_volt_l31','b_amp_l1','b_amp_l2','b_amp_l3'
+  ];
+  let srOpParamsByUnit = {};   // unitId -> {field: value}
+  let srOpActiveUnitId = null;
+
+  function srOpReadFields(){
+    const out = {};
+    SR_OP_FIELDS.forEach(f=>{ const el = $(f); if(el) out[f] = el.value; });
+    return out;
+  }
+  function srOpWriteFields(vals){
+    SR_OP_FIELDS.forEach(f=>{ const el = $(f); if(el) el.value = (vals && vals[f]) || ''; });
+  }
+  function srOpHasValues(vals){
+    return !!vals && SR_OP_FIELDS.some(f=> (vals[f]||'').trim());
+  }
+  // Store whatever is on screen against the unit currently selected.
+  function srOpStashActive(){
+    if(srOpActiveUnitId) srOpParamsByUnit[srOpActiveUnitId] = srOpReadFields();
+  }
+  function srOpSelectUnit(unitId){
+    srOpStashActive();
+    srOpActiveUnitId = unitId;
+    srOpWriteFields(srOpParamsByUnit[unitId]);
+    srRenderOpUnitTabs();
+  }
+  function srRenderOpUnitTabs(){
+    const host = $('srOpUnitTabs');
+    if(!host) return;
+    const items = srBatchEquipItems || [];
+    if(items.length < 2){ host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    host.innerHTML = '<p class="sr-unit-hint">Readings are recorded separately for each unit. Tap a unit to enter its values.</p>' +
+      '<div style="display:flex; gap:8px; overflow-x:auto;">' +
+      items.map((it,idx)=>{
+        const id = it.id || String(idx);
+        const done = srOpHasValues(id===srOpActiveUnitId ? srOpReadFields() : srOpParamsByUnit[id]);
+        const cls = 'sr-unit-tab'+(id===srOpActiveUnitId ? ' active' : '');
+        return '<button type="button" class="'+cls+'" data-sr-unit="'+escapeHtml(id)+'">'+
+          escapeHtml(dtEquipSummaryLine ? dtEquipSummaryLine(it) : ('Unit '+(idx+1)))+
+          (done ? '<span class="tick">\u2713</span>' : '')+'</button>';
+      }).join('') + '</div>';
+  }
+  document.addEventListener('click', (e)=>{
+    const tab = e.target.closest('[data-sr-unit]');
+    if(!tab) return;
+    srOpSelectUnit(tab.getAttribute('data-sr-unit'));
+  });
+  // Called when the batch selection is made, to start clean.
+  function srOpResetForBatch(items){
+    srOpParamsByUnit = {};
+    srOpActiveUnitId = (items && items.length) ? (items[0].id || '0') : null;
+    srRenderOpUnitTabs();
+  }
+  // Readings for one unit, for submitBatchReports.
+  function srOpParamsFor(unitId){
+    if(unitId===srOpActiveUnitId) srOpStashActive();
+    return srOpParamsByUnit[unitId] || {};
+  }
 
 
 // ---------- build PDF ----------
@@ -6021,6 +6088,16 @@
       const srNo = await nextSrNo();
       const data = Object.assign({}, baseData, { srNo, completed:true });
       EQUIP_FIELD_KEYS.forEach(k=> data[k] = item[k] || '');
+      // Operating readings are the ONE thing that isn't shared across a
+      // batch — copying one unit's voltages and pressures onto the others
+      // would be inventing measurements. Each unit's own values come from
+      // the tab strip on the Operation Parameters step (srOpParamsFor in
+      // ui.js); any field that unit has no value for is blanked rather
+      // than inheriting the previous unit's number.
+      if(typeof srOpParamsFor === 'function' && typeof SR_OP_FIELDS !== 'undefined'){
+        const own = srOpParamsFor(item.id || '');
+        SR_OP_FIELDS.forEach(f=> data[f] = own[f] || '');
+      }
       if(item.scope && item.scope.length) data.troubleCall = item.scope.join('; ');
       // Same reuse-by-real-id as the single-report path (srApplyJobOrder) —
       // each item's own equipmentId (stamped on at ticket-creation time),
@@ -7510,6 +7587,27 @@
           });
           pendingWrap.appendChild(btn);
         });
+        // Add New Equipment — for a unit found on site that isn't on the
+        // ticket. Opens the report on this job order with the equipment
+        // fields blank and the "+ Add New" tab active; saving the report
+        // then registers it permanently against the customer via
+        // cloudAddCustomerEquipment (customers.js), so it appears in their
+        // equipment list from then on.
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'sr-batch-toggle-link';
+        addBtn.style.cssText = 'width:100%; text-align:center; background:none; border:1px dashed var(--border); border-radius:8px; color:var(--green-dark); font-size:12.5px; font-weight:700; padding:10px 0; margin-top:6px; cursor:pointer;';
+        addBtn.innerHTML = icon('plus')+' Add New Equipment';
+        addBtn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          // srApplyJobOrder already skips the equipment fill when no unit
+          // is passed, leaving those fields blank for the technician.
+          srApplyJobOrder(r, null);
+          if(typeof setEquipTab === 'function') setEquipTab('addnew');
+          if(typeof setEquipPickedId === 'function') setEquipPickedId(null);
+          toast('Enter the equipment details — it will be saved to this customer');
+        });
+        pendingWrap.appendChild(addBtn);
       }
       // Single vs Multiple is now its own screen (srEntryMode), shown
       // between picking a job order and picking units — see
@@ -7697,6 +7795,8 @@
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = null;
     srBatchEquipItems = equipItems;
+    // Fresh per-unit readings for this batch (see srOpResetForBatch in ui.js).
+    if(typeof srOpResetForBatch === 'function') srOpResetForBatch(equipItems);
     // Section 2 is skipped in batch mode, so section 1's Continue button
     // needs to name section 3 instead — see srRefreshContinueLabels.
     if(typeof srRefreshContinueLabels === 'function') srRefreshContinueLabels();

@@ -2389,6 +2389,10 @@ window.awesCss = {
   <div class="card" id="sec6Card" style="display:none;">
     <div class="card-head collapsible-head"><span><span class="num">5</span>Operation Parameters</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec6Body" style="display:none;">
+      <!-- Multiple Reports: readings differ per unit, so this step gets a
+           unit tab strip. Everything else in the wizard is shared; only
+           these fields are per-unit. Hidden for a single report. -->
+      <div id="srOpUnitTabs" class="sr-unit-tabs" style="display:none;"></div>
       <div class="opdata-table-wrap">
       <table class="opdata-table">
         <thead>

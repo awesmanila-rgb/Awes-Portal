@@ -216,6 +216,27 @@
           });
           pendingWrap.appendChild(btn);
         });
+        // Add New Equipment — for a unit found on site that isn't on the
+        // ticket. Opens the report on this job order with the equipment
+        // fields blank and the "+ Add New" tab active; saving the report
+        // then registers it permanently against the customer via
+        // cloudAddCustomerEquipment (customers.js), so it appears in their
+        // equipment list from then on.
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'sr-batch-toggle-link';
+        addBtn.style.cssText = 'width:100%; text-align:center; background:none; border:1px dashed var(--border); border-radius:8px; color:var(--green-dark); font-size:12.5px; font-weight:700; padding:10px 0; margin-top:6px; cursor:pointer;';
+        addBtn.innerHTML = icon('plus')+' Add New Equipment';
+        addBtn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          // srApplyJobOrder already skips the equipment fill when no unit
+          // is passed, leaving those fields blank for the technician.
+          srApplyJobOrder(r, null);
+          if(typeof setEquipTab === 'function') setEquipTab('addnew');
+          if(typeof setEquipPickedId === 'function') setEquipPickedId(null);
+          toast('Enter the equipment details — it will be saved to this customer');
+        });
+        pendingWrap.appendChild(addBtn);
       }
       // Single vs Multiple is now its own screen (srEntryMode), shown
       // between picking a job order and picking units — see
@@ -403,6 +424,8 @@
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = null;
     srBatchEquipItems = equipItems;
+    // Fresh per-unit readings for this batch (see srOpResetForBatch in ui.js).
+    if(typeof srOpResetForBatch === 'function') srOpResetForBatch(equipItems);
     // Section 2 is skipped in batch mode, so section 1's Continue button
     // needs to name section 3 instead — see srRefreshContinueLabels.
     if(typeof srRefreshContinueLabels === 'function') srRefreshContinueLabels();

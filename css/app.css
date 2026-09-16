@@ -2341,3 +2341,25 @@ html.role-tech-root body{ overscroll-behavior-x:none; overscroll-behavior-y:auto
 .sr-tile svg{ width:28px; height:28px; color:var(--green-dark); }
 .sr-tile-title{ font-size:14.5px; font-weight:700; color:var(--text); }
 .sr-tile-sub{ font-size:12px; color:var(--text-muted); line-height:1.4; }
+
+/* Operation Parameters per-unit tabs (Multiple Reports) */
+.sr-unit-tabs{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:14px; }
+.sr-unit-tab{
+  flex:0 0 auto; padding:8px 12px; border-radius:9px; cursor:pointer; font-family:inherit;
+  border:1px solid var(--border); background:var(--surface);
+  font-size:12.5px; font-weight:700; color:var(--text-muted); white-space:nowrap;
+}
+.sr-unit-tab.active{ background:var(--green-dark); border-color:var(--green-dark); color:#fff; }
+.sr-unit-tab .tick{ color:var(--green); margin-left:5px; font-weight:800; }
+.sr-unit-tab.active .tick{ color:#9EE8C3; }
+.sr-unit-hint{ font-size:12px; color:var(--text-muted); margin:0 0 12px; }
+
+/* Service Report — single progress line (replaces the old four-stage
+   tracker + section line + chip row, which were three overlapping
+   indicators stacked together). */
+.sr-progress{ margin-bottom:14px; }
+.sr-progress-head{ display:flex; align-items:baseline; gap:8px; margin-bottom:6px; }
+.sr-progress-step{ font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted); }
+.sr-progress-name{ font-size:14px; font-weight:700; color:var(--green-dark); }
+.sr-progress-bar{ height:6px; border-radius:3px; background:var(--border); overflow:hidden; }
+.sr-progress-bar span{ display:block; height:100%; background:var(--green); border-radius:3px; transition:width .25s ease; }

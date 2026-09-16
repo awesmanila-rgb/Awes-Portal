@@ -1,3 +1,40 @@
+// Bumped to v82 — four wizard fixes from testing:
+//
+// 1. EVERY STEP OPENED COLLAPSED. srRevealSections showed the step's CARD
+//    but these are collapsible cards whose body starts display:none, so
+//    the technician had to tap the header open on every single step.
+//    Now force-expands the current step's body.
+// 2. THREE STACKED PROGRESS INDICATORS -> ONE. The four-stage tracker
+//    (Job Order Selected / Details Filled / Signed / Submitted), the
+//    "Section X of Y" line and the numbered chip row all rendered at once,
+//    saying overlapping things. Replaced by a single section-driven
+//    progress line ("Step 3 of 9 · Report Summary" + bar). The chip row is
+//    gone: only the CURRENT section is shown, as asked. "of N" counts only
+//    the steps that actually exist, so it stays truthful when Installation
+//    Parameters is toggled off.
+// 3. "SELECT FROM JOB ORDER" WAS VISIBLE UNDER THE ENTRY TILES. It is its
+//    own step and is now hidden until Create New is tapped.
+// 4. SAVED DRAFT WENT NOWHERE: the tile called showServiceReportTab with
+//    'drafts'; the real tab name is 'draft', so it silently matched
+//    nothing and left a blank screen.
+//
+// Bumped to v81 — completes the wizard's two remaining gaps.
+//
+// 1. MULTIPLE REPORTS now records Operation Parameters PER UNIT. Batch
+//    previously copied one set of readings onto every unit, which is
+//    fabricating measurements. Done as a unit TAB STRIP inside that one
+//    step (srRenderOpUnitTabs/srOpParamsFor in ui.js) rather than a
+//    Next-per-unit loop: five units as five near-identical screens gives
+//    no sense of progress and makes it easy to tab past one unnoticed.
+//    Tabs tick once a unit has readings. submitBatchReports applies each
+//    unit's own values and blanks anything unfilled, so no unit ever
+//    inherits another's numbers. Everything else stays shared.
+// 2. ADD NEW EQUIPMENT on the unit picker: opens the report against the
+//    same job order with equipment fields blank and the "+ Add New" tab
+//    active. Saving registers it permanently to the customer through
+//    cloudAddCustomerEquipment, so it is in their equipment list from then
+//    on — not a one-off typed into a single report.
+//
 // Bumped to v80 — Service Report rebuilt as a step-by-step wizard.
 //
 // Entry: Report -> "How to file a Service Report" gate with I Understand
@@ -599,7 +636,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v80';
+const CACHE_NAME = 'awes-sr-v82';
 
 // Split into two lists on purpose.
 //
