@@ -595,15 +595,55 @@
     // ':' is used as the separator, so keep ids from splitting the key.
     return OUTBOX_PREFIX + kind + ':' + String(id).replace(/:/g, '_');
   }
-  async function outboxQueue(kind, id, payload){
+  // queueError: the error that caused this write to fall back to the queue,
+  // when there WAS one. Queuing happens for two very different reasons —
+  // genuinely offline (no error; the write was never attempted), or the
+  // server rejected the write (RLS, a missing table, a stale schema cache,
+  // bad data). Those used to look identical here, and the reason was only
+  // captured later, on a replay attempt — so a strong-signal rejection
+  // still displayed as "waiting for a connection", and discarding the item
+  // before any retry threw the reason away with it. Recording it up front
+  // means the banner tells the truth immediately.
+  async function outboxQueue(kind, id, payload, queueError){
     try{
-      await window.storage.set(outboxKey(kind, id), JSON.stringify({
-        kind, id, payload, queuedAt: new Date().toISOString()
-      }), false);
+      const rec = { kind, id, payload, queuedAt: new Date().toISOString() };
+      if(queueError){
+        rec.lastError = typeof queueError === 'string' ? queueError : describeCloudError(queueError);
+        rec.lastTriedAt = rec.queuedAt;
+        syncLogRecord(kind, id, rec.lastError);
+      }
+      await window.storage.set(outboxKey(kind, id), JSON.stringify(rec), false);
       updateOutboxBadge();
       return true;
     }catch(e){ console.error('could not queue pending write', kind, id, describeCloudError(e)); return false; }
   }
+  // ---- Persistent sync-failure log ----
+  // Separate from the queue itself ON PURPOSE. Discarding a stuck item
+  // deletes its recorded error along with it, which makes a failure
+  // impossible to diagnose afterwards — exactly what happens when someone
+  // in the field clears a banner to get on with their day. These entries
+  // outlive the items they describe. Rolling cap so a device that's been
+  // failing for days can't grow this without bound.
+  const SYNC_LOG_KEY = 'sync-failure-log';
+  const SYNC_LOG_MAX = 20;
+  async function syncLogRecord(kind, id, errMsg){
+    try{
+      let log = [];
+      try{
+        const raw = await window.storage.get(SYNC_LOG_KEY, false);
+        if(raw) log = JSON.parse(raw.value) || [];
+      }catch(e){}
+      log.unshift({ kind, id: String(id), error: String(errMsg||''), at: new Date().toISOString() });
+      await window.storage.set(SYNC_LOG_KEY, JSON.stringify(log.slice(0, SYNC_LOG_MAX)), false);
+    }catch(e){ /* logging must never break the thing it's logging about */ }
+  }
+  async function syncLogList(){
+    try{
+      const raw = await window.storage.get(SYNC_LOG_KEY, false);
+      return raw ? (JSON.parse(raw.value) || []) : [];
+    }catch(e){ return []; }
+  }
+
   async function outboxList(){
     try{
       const res = await window.storage.list(OUTBOX_PREFIX, false);
@@ -672,7 +712,7 @@
         if(!handler){ left++; continue; }
         let ok = false, errMsg = null;
         try{ await withTimeout(handler(item.id, item.payload), OUTBOX_ITEM_TIMEOUT_MS); ok = true; }
-        catch(e){ errMsg = describeCloudError(e); console.error('outbox replay failed', item.kind, item.id, errMsg); }
+        catch(e){ errMsg = describeCloudError(e); console.error('outbox replay failed', item.kind, item.id, errMsg); syncLogRecord(item.kind, item.id, errMsg); }
         if(ok){
           sent++;
           try{ await window.storage.delete(item.storageKey); }catch(e){}
@@ -710,11 +750,20 @@
     el.style.display = n ? 'flex' : 'none';
     const label = $('pendingSyncText');
     if(label){
-      const failing = items.some(it=> it.lastError);
-      label.textContent = failing
-        ? n+' item'+(n===1?'':'s')+' failed to sync — tap View for the reason'
-        : n+' item'+(n===1?'':'s')+' saved on this device only — waiting for a connection';
-      el.style.background = failing ? '#8A2020' : '#8A5A00';
+      const failed = items.filter(it=> it.lastError).length;
+      // Three distinct states, because "unsent" has two very different
+      // causes and conflating them is actively misleading: an item the
+      // server REJECTED will never go through on its own no matter how
+      // good the signal gets, and telling someone to wait for a connection
+      // they already have just hides a real error.
+      if(failed && failed === n){
+        label.textContent = n+' item'+(n===1?'':'s')+' rejected by the server — tap View for the reason';
+      }else if(failed){
+        label.textContent = failed+' of '+n+' items rejected by the server — tap View for the reason';
+      }else{
+        label.textContent = n+' item'+(n===1?'':'s')+' saved on this device only — waiting for a connection';
+      }
+      el.style.background = failed ? '#8A2020' : '#8A5A00';
     }
   }
   window.addEventListener('online', ()=>{ outboxFlush(); });
@@ -758,8 +807,9 @@
     const listEl = $('pendingSyncList');
     if(!listEl) return;
     const items = await outboxList();
+    const logHtml = await renderSyncLogHtml();
     if(!items.length){
-      listEl.innerHTML = '<div class="empty-state">Nothing pending — everything on this device has synced.</div>';
+      listEl.innerHTML = '<div class="empty-state">Nothing pending — everything on this device has synced.</div>' + logHtml;
       $('pendingSyncClearAllBtn').style.display = 'none';
       return;
     }
@@ -768,15 +818,32 @@
       const label = OUTBOX_KIND_LABELS[item.kind] || item.kind;
       const when = item.queuedAt ? new Date(item.queuedAt).toLocaleString() : '';
       const errorLine = item.lastError
-        ? '<div style="font-size:12px; color:var(--danger); margin-top:2px;">Last try failed: '+escapeHtml(item.lastError)+'</div>'
-        : '';
+        ? '<div style="font-size:12px; color:var(--danger); margin-top:2px;">Rejected: '+escapeHtml(item.lastError)+'</div>'
+        : '<div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Not sent yet — waiting for a connection</div>';
       return '<div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">'
         + '<div><div style="font-weight:700; font-size:13.5px;">'+escapeHtml(label)+'</div>'
         + '<div style="font-size:12px; color:var(--text-muted);">'+escapeHtml(String(item.id))+(when?' · '+escapeHtml(when):'')+'</div>'
         + errorLine + '</div>'
         + '<button type="button" class="btn pendingSyncDeleteBtn" data-key="'+escapeHtml(item.storageKey)+'" style="flex:0 0 auto; padding:6px 10px; font-size:12.5px; background:#fdeceb; color:var(--danger);">Discard</button>'
         + '</div>';
-    }).join('');
+    }).join('') + logHtml;
+  }
+  // Recent failures — shown whether or not anything is still queued, since
+  // the whole point is that it outlives the items themselves.
+  async function renderSyncLogHtml(){
+    const log = await syncLogList();
+    if(!log.length) return '';
+    return '<div style="margin-top:18px; padding-top:12px; border-top:2px solid var(--border);">'
+      + '<div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted); margin-bottom:8px;">Recent sync failures (last '+log.length+')</div>'
+      + log.map(e=>
+          '<div style="padding:7px 0; border-bottom:1px solid var(--border);">'
+          + '<div style="font-size:12.5px; font-weight:700;">'+escapeHtml(OUTBOX_KIND_LABELS[e.kind]||e.kind)+'</div>'
+          + '<div style="font-size:11.5px; color:var(--text-muted);">'+escapeHtml(e.at ? new Date(e.at).toLocaleString() : '')+'</div>'
+          + '<div style="font-size:11.5px; color:var(--danger); word-break:break-word;">'+escapeHtml(e.error)+'</div>'
+          + '</div>'
+        ).join('')
+      + '<button type="button" class="btn btn-secondary" id="syncLogClearBtn" style="width:100%; margin-top:10px; font-size:12.5px; padding:8px;">Clear this log</button>'
+      + '</div>';
   }
   const pendingSyncViewBtn = $('pendingSyncViewBtn');
   if(pendingSyncViewBtn) pendingSyncViewBtn.addEventListener('click', async ()=>{
@@ -791,6 +858,11 @@
   });
   const pendingSyncListEl = $('pendingSyncList');
   if(pendingSyncListEl) pendingSyncListEl.addEventListener('click', async (e)=>{
+    if(e.target.closest('#syncLogClearBtn')){
+      try{ await window.storage.delete(SYNC_LOG_KEY); }catch(err){}
+      await renderPendingSyncList();
+      return;
+    }
     const btn = e.target.closest('.pendingSyncDeleteBtn');
     if(!btn) return;
     if(!confirm('Discard this item? It will NOT be uploaded and cannot be recovered.')) return;
@@ -13238,16 +13310,17 @@
       recorded_at: new Date(now).toISOString()
     };
 
+    let pushError = null;
     if(await ensureCloud()){
       try{ await trackerWritePoint(point); return; }
-      catch(e){ console.error('tracker push failed, queuing instead', describeCloudError(e)); }
+      catch(e){ pushError = e; console.error('tracker push failed, queuing instead', describeCloudError(e)); }
     }
     // No signal (or the write above failed): queue it instead of dropping it.
     // `recorded_at` is the phone's own clock at capture time and travels
     // with the point, so once this reaches the server the admin's trail
     // shows where the technician actually was, not just when the phone
     // next caught a signal.
-    await outboxQueue('geo', currentUser.id+'|'+point.recorded_at, point);
+    await outboxQueue('geo', currentUser.id+'|'+point.recorded_at, point, pushError);
     updateOutboxBadge();
   }
 

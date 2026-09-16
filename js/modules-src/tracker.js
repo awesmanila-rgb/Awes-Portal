@@ -50,16 +50,17 @@
       recorded_at: new Date(now).toISOString()
     };
 
+    let pushError = null;
     if(await ensureCloud()){
       try{ await trackerWritePoint(point); return; }
-      catch(e){ console.error('tracker push failed, queuing instead', describeCloudError(e)); }
+      catch(e){ pushError = e; console.error('tracker push failed, queuing instead', describeCloudError(e)); }
     }
     // No signal (or the write above failed): queue it instead of dropping it.
     // `recorded_at` is the phone's own clock at capture time and travels
     // with the point, so once this reaches the server the admin's trail
     // shows where the technician actually was, not just when the phone
     // next caught a signal.
-    await outboxQueue('geo', currentUser.id+'|'+point.recorded_at, point);
+    await outboxQueue('geo', currentUser.id+'|'+point.recorded_at, point, pushError);
     updateOutboxBadge();
   }
 

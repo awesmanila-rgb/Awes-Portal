@@ -1,3 +1,22 @@
+// Bumped to v68 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — sync diagnosability. The outbox is NOT
+// only an offline queue: ensureCloud() only checks that the Supabase
+// client was constructed, never that the network works, so a write the
+// SERVER rejects (RLS, missing table, stale schema cache, bad data) also
+// lands in the queue. Those two cases were indistinguishable, and the
+// banner called both "waiting for a connection" — so a server rejection
+// on a strong signal displayed as a connection problem that no amount of
+// signal would ever clear. Fixed three ways:
+//   1. outboxQueue() now takes the causing error and records it at queue
+//      time, instead of the reason only appearing after a later replay.
+//   2. The banner distinguishes rejected-by-server from waiting-for-
+//      connection (and reports a mix as "N of M"), and the item list says
+//      which each item is.
+//   3. New persistent sync-failure log (last 20), shown in the same
+//      overlay and kept SEPARATELY from the queue, so it survives
+//      discarding an item — previously, discarding a stuck item deleted
+//      the only record of why it failed, making it undiagnosable.
+//
 // Bumped to v67 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/js/app.bundle.js again — added prev/next
 // arrow buttons either side of the technician Overview carousel's dots.
@@ -341,7 +360,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v67';
+const CACHE_NAME = 'awes-sr-v68';
 
 // Split into two lists on purpose.
 //
