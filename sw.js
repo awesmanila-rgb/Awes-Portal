@@ -1,3 +1,35 @@
+// Bumped to v64 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — technician
+// portal refinements:
+//   1. Page frame now matches the customer portal exactly (max-width:1200px,
+//      centered, .cp-page-content's own 16/24 -> 16/44 -> 28/24 padding
+//      steps) instead of a full-bleed padding:16px — applied to the home
+//      screen and every other technician screen.
+//   2. "What would you like to do?" card (#homeIntroCard) hidden for this
+//      role — #techQuickActionsCard fully replaces it. Admin keeps it.
+//   3. Greeting card rebalanced: larger/consistent type scale, the
+//      attendance strip lost its green fill (plain bordered row now) and
+//      became a link into the DTR screen with a clock icon. The Time In/
+//      Out VALUES themselves remain display-only.
+//   4. Added a contextual orientation note that changes with state — tells
+//      the technician to acknowledge a job order to unlock its Service
+//      Report, or where to go when nothing is scheduled.
+//   5. Dropped the duplicated dashboard-topbar greeting for this role
+//      (the Welcome Back card already says it) along with its admin-
+//      oriented "field operations today" strapline.
+//   6. Overview carousel tiles shortened (padding 18->12px, value 28->21px,
+//      smaller icon chip/labels) — one visible slide was eating far too
+//      much vertical space.
+//   7. Header Home/Logout buttons hidden — Logout now lives under
+//      More > Logout in the bottom nav.
+//   8. New More > Profile sheet (#techMyProfileSheet) showing the
+//      technician's own details, reusing the customer portal's
+//      .cp-info-card/.cp-info-row components. NOTE: its ids are prefixed
+//      techMyProfile* on purpose — an admin-facing #techProfileOverlay
+//      already owns techProfileName/techProfilePhoto/etc., and
+//      getElementById returns the FIRST match, so an unprefixed id here
+//      silently wrote into that admin overlay instead.
+//
 // Bumped to v63 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js again — the "Back to Service Report" banner
 // on the Job Orders screen was showing raw <svg>...</svg> markup as
@@ -272,7 +304,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v63';
+const CACHE_NAME = 'awes-sr-v64';
 
 // Split into two lists on purpose.
 //

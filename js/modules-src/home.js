@@ -180,17 +180,20 @@
     const alreadyTimedOut = !!(todayDtr && todayDtr.timeOut);
     const fmt = (iso)=> iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'}) : '—';
 
-    // Attendance is PURE DISPLAY here — no tap target. Time In/Out are
-    // only ever recorded from the actual DTR screen (showDtrView).
+    // Attendance VALUES are display-only, but the strip itself links to the
+    // DTR screen (where Time In/Out is actually recorded) — the clock icon
+    // marks it as tappable. See the .greet-attend-line handler below.
     const attendLine =
-      '<div class="greet-attend-line">'+
+      '<button type="button" class="greet-attend-line" id="greetAttendLink">'+
+        '<svg class="greet-attend-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'+
         '<span>Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
         '<span>Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
         (todayDtr && todayDtr.otTimeIn ?
           '<span>OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
           '<span>OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
         : '')+
-      '</div>';
+        '<span class="greet-attend-go">Open DTR ›</span>'+
+      '</button>';
     const reminder = !alreadyTimedIn
       ? '<div class="greet-reminder-compact">⏰ Don\'t forget to Time In.</div>'
       : !alreadyTimedOut
@@ -214,6 +217,13 @@
           '</div>'
         ).join('');
 
+    // Orientation note — tells the technician what to actually do next
+    // rather than leaving them to guess, and changes with their state so
+    // it stays useful instead of becoming wallpaper they stop reading.
+    const note = todaysJo.length===0
+      ? '<p class="greet-note">Nothing scheduled today. Use <b>Job Orders</b> below to see upcoming work, or <b>Finance</b> for DTR, cash advance and leave.</p>'
+      : '<p class="greet-note">Tap a job order above to open it and <b>Acknowledge</b> it — that unlocks its Service Report. When the work is done, file the report, then <b>Close Job Order</b>.</p>';
+
     $('homeGreetingText').innerHTML =
       '<div class="greet-compact">'+
         '<div class="greet-row1">'+
@@ -226,6 +236,7 @@
           '<div class="greet-jo-compact-title">Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
           joBody+
         '</div>'+
+        note+
       '</div>';
   }
 
@@ -954,6 +965,9 @@
   // used when a technician is sent here from the Service Report picker
   // (see srGoAcknowledgeTicket).
   $('homeGreetingText').addEventListener('click', function(e){
+    // Attendance strip → the DTR screen, where Time In/Out is actually
+    // recorded (the values shown in the strip are display-only).
+    if(e.target.closest('.greet-attend-line')){ showDtrView(); return; }
     const item = e.target.closest('.greet-jo-row');
     if(!item) return;
     const ticketId = item.getAttribute('data-ticket-id');
@@ -1003,10 +1017,61 @@
   function techCloseMoreSheet(){ $('techMoreSheet').classList.remove('open'); }
   $('closeTechMoreSheet').addEventListener('click', techCloseMoreSheet);
   $('techMoreSheet').addEventListener('click', (e)=>{ if(e.target.id==='techMoreSheet') techCloseMoreSheet(); });
-  $('techMoreMessages').addEventListener('click', ()=>{ techCloseMoreSheet(); showMessagesView(); });
-  $('techMoreDocuments').addEventListener('click', ()=>{ techCloseMoreSheet(); showDocumentsView(); });
+  $('techMoreMessages').addEventListener('click', ()=>{ techCloseMoreSheet(); showMessagesView(); });  $('techMoreDocuments').addEventListener('click', ()=>{ techCloseMoreSheet(); showDocumentsView(); });
   $('techMoreSettings').addEventListener('click', ()=>{ techCloseMoreSheet(); showChangePasswordScreen(false); });
   $('techMoreLogout').addEventListener('click', ()=>{ techCloseMoreSheet(); doLogout(); });
+
+  // ---------- Technician profile (More > Profile) ----------
+  // Renders from currentUser plus a fresh profiles-row read and the auth
+  // session's email — only fields that actually exist are shown (the
+  // profiles table has no position/contact columns), so nothing renders
+  // as a permanently-blank row. Today's figures reuse the same calls the
+  // home screen already makes.
+  function techCloseProfileSheet(){ $('techMyProfileSheet').classList.remove('open'); }
+  async function techOpenProfileSheet(){
+    $('techMyProfileSheet').classList.add('open');
+    await techRenderProfile();
+  }
+  async function techRenderProfile(){
+    if(!currentUser) return;
+    const setTxt = (id, val)=>{ const el = $(id); if(el) el.textContent = val || '—'; };
+    setTxt('techMyProfileAvatar', (currentUser.name||'?').trim().charAt(0).toUpperCase() || '?');
+    setTxt('techMyProfileName', currentUser.name);
+    setTxt('techMyProfileRole', currentUser.role==='tech' ? 'Technician' : currentUser.role);
+    setTxt('techMyProfileFullName', currentUser.name);
+    setTxt('techMyProfileUsername', currentUser.username);
+    // Reset the async fields so a previous open's values never linger
+    // while this render is still in flight.
+    setTxt('techMyProfileEmail', '—');
+    setTxt('techMyProfileStatus', '—');
+    setTxt('techMyProfileTimeIn', '—');
+    setTxt('techMyProfileTimeOut', '—');
+    setTxt('techMyProfileOpenJo', '—');
+    const fmtT = (iso)=> iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'}) : '—';
+    const [prof, todayDtr, myTickets] = await Promise.all([
+      (typeof cloudGetUser==='function' ? cloudGetUser(currentUser.id).catch(()=>null) : Promise.resolve(null)),
+      dtrGetDay(currentUser.id, todayISO()).catch(()=>null),
+      dtListForWorker(currentUser.id).catch(()=>[])
+    ]);
+    if(prof){
+      setTxt('techMyProfileUsername', prof.username || currentUser.username);
+      setTxt('techMyProfileStatus', prof.active===false ? 'Inactive' : 'Active');
+    }
+    try{
+      if(db){
+        const { data } = await db.auth.getUser();
+        if(data && data.user && data.user.email) setTxt('techMyProfileEmail', data.user.email);
+      }
+    }catch(e){}
+    setTxt('techMyProfileTimeIn', fmtT(todayDtr && todayDtr.timeIn));
+    setTxt('techMyProfileTimeOut', fmtT(todayDtr && todayDtr.timeOut));
+    const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled'].includes(dtEffectiveStatus(t))).length;
+    setTxt('techMyProfileOpenJo', String(openCount));
+  }
+  $('techMoreProfile').addEventListener('click', ()=>{ techCloseMoreSheet(); techOpenProfileSheet(); });
+  $('closeTechMyProfileSheet').addEventListener('click', techCloseProfileSheet);
+  $('techMyProfileSheet').addEventListener('click', (e)=>{ if(e.target.id==='techMyProfileSheet') techCloseProfileSheet(); });
+  $('techMyProfileChangePwBtn').addEventListener('click', ()=>{ techCloseProfileSheet(); showChangePasswordScreen(false); });
 
   // ---------- Technician bottom nav (#techNav) — replaces the sidebar for
   // this role only (admin keeps .admin-sidebar unchanged). Same .cp-nav/

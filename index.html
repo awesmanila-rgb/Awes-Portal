@@ -938,6 +938,10 @@ window.awesCss = {
       <button class="sheet-close" id="closeTechMoreSheet">&times;</button>
     </div>
     <div class="tech-sheet-list">
+      <button type="button" class="tech-sheet-item" id="techMoreProfile">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+        Profile
+      </button>
       <button type="button" class="tech-sheet-item" id="techMoreMessages">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
         Messages<span class="sidebar-badge" id="techMoreMsgBadge" style="display:none;">0</span>
@@ -955,6 +959,40 @@ window.awesCss = {
         Logout
       </button>
     </div>
+  </div>
+</div>
+
+<!-- Technician profile — opened from the More sheet. Reuses the customer
+     portal's .cp-info-card/.cp-info-row components so both portals present
+     account details identically. Populated by techRenderProfile() in
+     home.js from currentUser (no extra fetch). -->
+<div class="overlay" id="techMyProfileSheet">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3>My Profile</h3>
+      <button class="sheet-close" id="closeTechMyProfileSheet">&times;</button>
+    </div>
+    <div class="tech-profile-head">
+      <div class="tech-profile-avatar" id="techMyProfileAvatar">?</div>
+      <div class="tech-profile-ident">
+        <div class="tech-profile-name" id="techMyProfileName">—</div>
+        <div class="tech-profile-role" id="techMyProfileRole">Technician</div>
+      </div>
+    </div>
+    <div class="cp-info-card">
+      <div class="cp-info-card-title">Account Details</div>
+      <div class="cp-info-row"><p class="l">Full Name</p><p class="v" id="techMyProfileFullName">—</p></div>
+      <div class="cp-info-row"><p class="l">Username</p><p class="v" id="techMyProfileUsername">—</p></div>
+      <div class="cp-info-row"><p class="l">Email</p><p class="v" id="techMyProfileEmail">—</p></div>
+      <div class="cp-info-row"><p class="l">Account Status</p><p class="v" id="techMyProfileStatus">—</p></div>
+    </div>
+    <div class="cp-info-card">
+      <div class="cp-info-card-title">Today</div>
+      <div class="cp-info-row"><p class="l">Time In</p><p class="v" id="techMyProfileTimeIn">—</p></div>
+      <div class="cp-info-row"><p class="l">Time Out</p><p class="v" id="techMyProfileTimeOut">—</p></div>
+      <div class="cp-info-row"><p class="l">Open Job Orders</p><p class="v" id="techMyProfileOpenJo">—</p></div>
+    </div>
+    <button type="button" class="btn btn-secondary" id="techMyProfileChangePwBtn" style="width:100%;">Change My Password</button>
   </div>
 </div>
 
