@@ -1,3 +1,25 @@
+// Bumped to v87 — the "Select From Job Order" card stayed pinned above
+// every step of the wizard. Two causes, both fixed:
+//   - srShowEntry re-SHOWED it on every srShowEntry(null) call, not just
+//     for the Create New tile. It now only ever hides it there; showing it
+//     is Create New's job alone.
+//   - Nothing hid it once a unit was actually picked. Now hidden in all
+//     three paths that put a unit in play — srApplyJobOrder,
+//     srApplyJobOrderBatch and srResumeDraft — right where the equipment
+//     tab bar is hidden, so choosing a unit moves straight to the first
+//     step with nothing left above it.
+//
+// Bumped to v86 — the equipment Existing / "+ Add New" tab bar was still
+// showing after picking a unit. v84's fix was in the wrong place: it
+// checked srCurrentTicketId from inside srRevealSections, but that runs
+// via revealSectionsAfterCustomer(), which srApplyJobOrder calls BEFORE it
+// assigns srCurrentTicketId — so the check read null every time and left
+// the bar up. Now hidden inside srApplyJobOrder and srApplyJobOrderBatch,
+// immediately after that id is set, and restored to flex by resetForm for
+// ad-hoc reports with no job order. Also dropped the leftover
+// scrollIntoView to section 1 there: section 1 is no longer a step, and
+// srGoToSection already scrolls to the top.
+//
 // Bumped to v85 — the Saved Draft tile still went nowhere. v82 fixed the
 // ARGUMENT ('drafts' -> 'draft') but not the FUNCTION NAME: it called
 // showServiceReportTab, which does not exist anywhere in the codebase —
@@ -669,7 +691,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v85';
+const CACHE_NAME = 'awes-sr-v87';
 
 // Split into two lists on purpose.
 //

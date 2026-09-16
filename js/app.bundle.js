@@ -5137,6 +5137,10 @@
     currentSrNo = null;
     currentTechnicianId = null;
     srCurrentTicketId = null;
+    // Back to an ad-hoc report with no job order, where choosing between an
+    // existing unit and a new one genuinely applies again. 'flex', not '',
+    // because the bar's layout comes from an inline display:flex.
+    if($('equipTabBar')) $('equipTabBar').style.display = 'flex';
     srCurrentEquipId = null;
     srBatchEquipItems = null;
     if($('srBatchBanner')) $('srBatchBanner').style.display = 'none';
@@ -5254,21 +5258,12 @@
         const head = card.querySelector('.collapsible-head');
         if(head) toggleCollapsibleSection(head, true);
       }
-      // The Existing / "+ Add New" tab bar is redundant inside the wizard:
-      // the unit was already chosen two screens earlier, so this step is
-      // purely "review and edit these details". Leaving the bar visible
-      // was actively misleading — picking an existing unit lands on the
-      // tab labelled "+ Add New" (it is really just the editable-fields
-      // panel; the record's real id is stamped behind the scenes, so
-      // saving updates that unit and does NOT create a duplicate), which
-      // reads like the app ignored the selection. Kept for an ad-hoc
-      // report with no job order behind it, where choosing still applies.
-      if(n===2){
-        const tabBar = $('equipTabBar');
-        // 'flex', not '': the bar's layout comes from an inline
-        // display:flex, so clearing the property would leave it block.
-        if(tabBar) tabBar.style.display = srCurrentTicketId ? 'none' : 'flex';
-      }
+      // NOTE: the equipment tab bar is NOT toggled here. This runs from
+      // revealSectionsAfterCustomer(), which srApplyJobOrder calls BEFORE
+      // it assigns srCurrentTicketId — so any check of that id here reads
+      // null and gets it wrong. It's hidden in srApplyJobOrder /
+      // srApplyJobOrderBatch instead (after the id is set) and restored
+      // by resetForm for ad-hoc reports.
     }
     srRenderSectionNav();
     srUpdateFooterBar();
@@ -5392,9 +5387,11 @@
     // While an entry screen is up, the form, its stepper, chips and footer
     // all stay out of the way.
     ['srStepperContainer','srSectionNav'].forEach(id=>{ const el=$(id); if(el) el.style.display = showingEntry ? 'none' : ''; });
-    // The Job Order picker is a step of its own — it must not sit under the
-    // Create New / Saved Draft tiles.
-    if($('srJobOrderCard')) $('srJobOrderCard').style.display = showingEntry ? 'none' : '';
+    // The Job Order picker is a step of its own. Only ever HIDDEN here —
+    // showing it is the Create New tile's job. Re-showing it on every
+    // srShowEntry(null) is what left it stuck above every step of the
+    // wizard after a unit was already chosen.
+    if(showingEntry && $('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
     for(let n=1; n<=SR_LAST_SECTION; n++){ const c=$('sec'+n+'Card'); if(c && showingEntry) c.style.display='none'; }
     if(showingEntry && $('footerBar')) $('footerBar').style.display = 'none';
     // The old always-on instructions card is redundant now that the gate
@@ -7779,8 +7776,19 @@
     }
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = equipItem ? equipItem.id : null;
-    toast('Job Order '+ticket.jobOrderNo+' applied — check the fields below');
-    $('sec1Head').scrollIntoView({behavior:'smooth', block:'start'});
+    // Hidden HERE, not in the wizard's own reveal pass: srCurrentTicketId
+    // is only assigned on the line above, AFTER
+    // revealSectionsAfterCustomer() ran further up — so that check read a
+    // null ticket id and left the bar on screen. The unit was chosen two
+    // screens earlier, so this step is purely "review and edit these
+    // details"; the Existing / "+ Add New" tabs have nothing left to
+    // decide and only made a selected unit look like a new one.
+    if($('equipTabBar')) $('equipTabBar').style.display = 'none';
+    // The unit is chosen — the Job Order picker has done its job and must
+    // not sit above every step of the form from here on.
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
+    // The old scroll-to-section-1 is wrong for the wizard: section 1 isn't
+    // even a step now, and srGoToSection already scrolls to the top.
     srRenderStepper();
   }
 
@@ -7814,6 +7822,8 @@
     if($('sec2Card')) $('sec2Card').style.display = 'none';
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = null;
+    if($('equipTabBar')) $('equipTabBar').style.display = 'none';
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
     srBatchEquipItems = equipItems;
     // Fresh per-unit readings for this batch (see srOpResetForBatch in ui.js).
     if(typeof srOpResetForBatch === 'function') srOpResetForBatch(equipItems);
@@ -7854,6 +7864,11 @@
     await openReport(data);
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = equipItem.id;
+    // Same as the two paths above: once a unit is in play, the Job Order
+    // picker and the equipment tab bar are done and must not sit above the
+    // wizard's steps.
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
+    if($('equipTabBar')) $('equipTabBar').style.display = 'none';
     toast('Continuing draft '+srNo);
   }
 

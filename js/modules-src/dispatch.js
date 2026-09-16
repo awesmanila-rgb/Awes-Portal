@@ -388,8 +388,19 @@
     }
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = equipItem ? equipItem.id : null;
-    toast('Job Order '+ticket.jobOrderNo+' applied — check the fields below');
-    $('sec1Head').scrollIntoView({behavior:'smooth', block:'start'});
+    // Hidden HERE, not in the wizard's own reveal pass: srCurrentTicketId
+    // is only assigned on the line above, AFTER
+    // revealSectionsAfterCustomer() ran further up — so that check read a
+    // null ticket id and left the bar on screen. The unit was chosen two
+    // screens earlier, so this step is purely "review and edit these
+    // details"; the Existing / "+ Add New" tabs have nothing left to
+    // decide and only made a selected unit look like a new one.
+    if($('equipTabBar')) $('equipTabBar').style.display = 'none';
+    // The unit is chosen — the Job Order picker has done its job and must
+    // not sit above every step of the form from here on.
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
+    // The old scroll-to-section-1 is wrong for the wizard: section 1 isn't
+    // even a step now, and srGoToSection already scrolls to the top.
     srRenderStepper();
   }
 
@@ -423,6 +434,8 @@
     if($('sec2Card')) $('sec2Card').style.display = 'none';
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = null;
+    if($('equipTabBar')) $('equipTabBar').style.display = 'none';
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
     srBatchEquipItems = equipItems;
     // Fresh per-unit readings for this batch (see srOpResetForBatch in ui.js).
     if(typeof srOpResetForBatch === 'function') srOpResetForBatch(equipItems);
@@ -463,6 +476,11 @@
     await openReport(data);
     srCurrentTicketId = ticket.id;
     srCurrentEquipId = equipItem.id;
+    // Same as the two paths above: once a unit is in play, the Job Order
+    // picker and the equipment tab bar are done and must not sit above the
+    // wizard's steps.
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
+    if($('equipTabBar')) $('equipTabBar').style.display = 'none';
     toast('Continuing draft '+srNo);
   }
 
