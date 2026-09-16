@@ -980,6 +980,26 @@
     // ordinary ticket with no source request just leaves this as a no-op.
     if(dtSourceServiceRequestId && typeof srLinkTicket === 'function'){
       srLinkTicket(dtSourceServiceRequestId, id).catch(()=>{});
+    }else if(custId && typeof srCreateForAdminDispatch === 'function'){
+      // No originating request — admin scheduled this directly. The
+      // customer's home screen reads service_requests only, so without a
+      // row here the job is invisible to them: no active-service card, no
+      // progress tracker, no technician name, nothing to message about.
+      // Create one, already 'dispatched' and linked, so every existing
+      // customer-facing behaviour works for this ticket too. Best-effort:
+      // the ticket itself has already saved and must not fail on this.
+      // Equipment is only carried over when the ticket covers exactly one
+      // unit — the request row holds a single equipment_id, so guessing on
+      // a multi-unit ticket would misattribute it.
+      const singleEquipId = (equipmentList.length===1 && equipmentList[0].equipmentId)
+        ? equipmentList[0].equipmentId : null;
+      srCreateForAdminDispatch({
+        customerId: custId,
+        equipmentId: singleEquipId,
+        ticketId: id,
+        description: $('dtRemarks').value.trim() || ('Scheduled service visit — '+jobOrderNo),
+        requestedDate: $('dtDate').value || null
+      }).catch(()=>{});
     }
     // Mirrors the srLinkTicket call above, for the "Continue Tomorrow" case:
     // best-effort, never blocks the ticket that DID just save successfully.

@@ -1,3 +1,21 @@
+// Bumped to v72 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — a dispatch ticket admin creates
+// DIRECTLY (preventive maintenance, a phone-in job) never appeared on the
+// customer's portal. The customer home screen (renderCustomerHero) is
+// driven entirely by service_requests rows, and only tickets CONVERTED
+// from an existing customer request ever got one (srLinkTicket). A
+// standalone ticket had no row behind it, so the customer saw no
+// active-service card, no progress tracker, no technician name, and had
+// nothing to message about — even though the job was real and scheduled.
+// dtCreateTicket now calls srCreateForAdminDispatch() when there's no
+// originating request, inserting a matching row already at 'dispatched'
+// and linked to the ticket, so the entire existing customer-facing
+// pipeline (hero, tracker, en-route/complete sync, cancellation) works
+// for these tickets unchanged. Equipment is carried over only when the
+// ticket covers exactly one unit, since the request row holds a single
+// equipment_id. Needs 20260916_02_admin_dispatch_origin.sql, which widens
+// the origin CHECK to allow 'admin_dispatch'.
+//
 // Bumped to v71 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/js/app.bundle.js again — the Service
 // Report form is now progressive. Sections 2-8 used to all appear at once
@@ -430,7 +448,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v71';
+const CACHE_NAME = 'awes-sr-v72';
 
 // Split into two lists on purpose.
 //

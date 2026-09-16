@@ -8043,6 +8043,26 @@
     // ordinary ticket with no source request just leaves this as a no-op.
     if(dtSourceServiceRequestId && typeof srLinkTicket === 'function'){
       srLinkTicket(dtSourceServiceRequestId, id).catch(()=>{});
+    }else if(custId && typeof srCreateForAdminDispatch === 'function'){
+      // No originating request — admin scheduled this directly. The
+      // customer's home screen reads service_requests only, so without a
+      // row here the job is invisible to them: no active-service card, no
+      // progress tracker, no technician name, nothing to message about.
+      // Create one, already 'dispatched' and linked, so every existing
+      // customer-facing behaviour works for this ticket too. Best-effort:
+      // the ticket itself has already saved and must not fail on this.
+      // Equipment is only carried over when the ticket covers exactly one
+      // unit — the request row holds a single equipment_id, so guessing on
+      // a multi-unit ticket would misattribute it.
+      const singleEquipId = (equipmentList.length===1 && equipmentList[0].equipmentId)
+        ? equipmentList[0].equipmentId : null;
+      srCreateForAdminDispatch({
+        customerId: custId,
+        equipmentId: singleEquipId,
+        ticketId: id,
+        description: $('dtRemarks').value.trim() || ('Scheduled service visit — '+jobOrderNo),
+        requestedDate: $('dtDate').value || null
+      }).catch(()=>{});
     }
     // Mirrors the srLinkTicket call above, for the "Continue Tomorrow" case:
     // best-effort, never blocks the ticket that DID just save successfully.
@@ -9419,6 +9439,36 @@
       if(error) throw error;
       return srRowToRequest(data);
     }catch(e){ console.error('flag issue failed', describeCloudError(e)); return null; }
+  }
+
+  // Called by dispatch.js when admin saves a dispatch ticket that did NOT
+  // come from an existing customer request (preventive maintenance, a
+  // phone-in job — anything admin schedules directly). The customer's home
+  // screen is driven entirely by service_requests rows, so without this a
+  // perfectly real, scheduled job was invisible to them: no active-service
+  // card, no progress tracker, no technician name, nothing to message
+  // about. Creating the row here means the whole existing customer-facing
+  // pipeline (hero, tracker, en-route/complete sync, cancellation) works
+  // for these tickets with no other changes. Starts at 'dispatched'
+  // because by definition the work is already scheduled and assigned —
+  // there's no fee or scheduling to negotiate after the fact.
+  async function srCreateForAdminDispatch({ customerId, equipmentId, ticketId, description, requestedDate }){
+    if(!customerId || !(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.from('service_requests').insert({
+        customer_id: customerId,
+        equipment_id: equipmentId || null,
+        description: description || 'Scheduled service visit',
+        urgency: 'normal',
+        origin: 'admin_dispatch',
+        status: 'dispatched',
+        requested_date: requestedDate || null,
+        proposed_schedule_date: requestedDate || null,
+        linked_dispatch_ticket_id: ticketId
+      }).select().single();
+      if(error) throw error;
+      return srRowToRequest(data);
+    }catch(e){ console.error('create admin-dispatch service request failed', describeCloudError(e)); return null; }
   }
 
   // Customer-side history — explicit customer_id filter (RLS would already
