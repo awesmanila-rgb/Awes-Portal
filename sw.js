@@ -1,3 +1,29 @@
+// Bumped to v74 to force every installed device to drop its old cache and
+// re-fetch everything — real Web Push notifications for all three roles.
+// Until now every "notify" was in-app only: a Realtime badge/toast that
+// only fired while the app was open and focused, which misses exactly the
+// moments that matter. Now the device shows a real OS notification (sound,
+// lock screen, notification tray) with the app closed.
+//
+// Pieces: push_subscriptions table (20260916_03), the send-push Edge
+// Function (supabase/functions/send-push), the push/notificationclick
+// handlers at the bottom of this file, and js/modules-src/push.js.
+//
+// Events wired: new service request -> admins; fee proposed and schedule
+// proposed -> that customer; schedule confirmed and cancellation requested
+// -> admins; job order created -> each assigned technician + the customer;
+// en route and arrived -> the customer; job order closed -> admins, and
+// the customer when it completed with no remaining work.
+//
+// Notes: sound is NOT forced — leaving `silent` false lets Android play the
+// user's own notification sound and honour Do Not Disturb. Permission is
+// asked from an in-app toggle (admin cloud sheet / technician profile /
+// customer profile), never on load, because a dialog shown before someone
+// understands what it's for gets dismissed, and dismissal is sticky.
+// Signing out drops only THIS device's subscription. Every send is
+// best-effort and never awaited: a failed notification must not stop the
+// action that triggered it.
+//
 // Bumped to v73 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js again — fixes the runaway pending-sync queue
 // of Location Points failing with 42501 (row-level security violation on
@@ -472,7 +498,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v73';
+const CACHE_NAME = 'awes-sr-v74';
 
 // Split into two lists on purpose.
 //
@@ -607,6 +633,78 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => cached);
       return cached || fetchPromise;
+    })
+  );
+});
+
+// ---------------------------------------------------------------------
+// Web Push
+//
+// This is what makes a notification appear on the device's own screen —
+// lock screen and notification tray, with the device's default sound —
+// even when the app is closed. The in-app badges and toasts elsewhere in
+// this codebase only ever worked while the app was open and focused.
+//
+// Sound is NOT set here on purpose: as long as `silent` is false (the
+// default), Android plays the user's chosen notification sound and honours
+// their Do Not Disturb and per-channel settings. Forcing a custom sound
+// would override preferences people set deliberately.
+// ---------------------------------------------------------------------
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+
+  const title = data.title || 'AWES';
+  const options = {
+    body: data.body || '',
+    icon: 'icon-192.png',
+    badge: 'icon-192.png',
+    // Vibration is a request, not a command — the OS ignores it under Do
+    // Not Disturb or if the user has vibration off, which is correct.
+    vibrate: [180, 80, 180],
+    // Same tag replaces an earlier notification instead of stacking a
+    // second one, so a technician doesn't come back to fifteen copies of
+    // the same job-order update.
+    tag: data.tag || 'awes',
+    renotify: true,
+    // Stays on screen until acted on. Field work means the phone is
+    // often in a pocket when this arrives.
+    requireInteraction: false,
+    data: { url: data.url || '/' }
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+
+  // Focus an already-open tab rather than opening a duplicate — and
+  // navigate it to whatever the notification was about.
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          if ('navigate' in client && target && target !== '/') {
+            return client.navigate(target).then((c) => c && c.focus());
+          }
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+    })
+  );
+});
+
+// A push service can rotate a subscription on its own. When that happens
+// the old endpoint stops working, so the app must re-subscribe — the page
+// does that on next load (pushInit in push.js); this just makes sure the
+// stale one isn't left looking valid.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    self.clients.matchAll({ includeUncontrolled: true }).then((clients) => {
+      clients.forEach((c) => c.postMessage({ type: 'push-subscription-changed' }));
     })
   );
 });

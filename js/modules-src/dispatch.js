@@ -978,6 +978,18 @@
     // 'in_progress' once a technician acknowledges, and dtComplete's
     // completion hook takes it to 'completed' later). Best-effort — an
     // ordinary ticket with no source request just leaves this as a no-op.
+    // Real OS notifications (see push.js). Best-effort and never awaited —
+    // the ticket has already saved and must not fail on a notification.
+    if(typeof notifyUser === 'function'){
+      (workers||[]).forEach(w=>{
+        notifyUser(w.id, 'New job order assigned',
+          jobOrderNo+' \u2014 '+(custName||'')+' on '+($('dtDate').value||''), 'jo-new');
+      });
+    }
+    if(custId && typeof notifyCustomer === 'function'){
+      notifyCustomer(custId, 'A technician has been scheduled',
+        'Your service is scheduled for '+($('dtDate').value||'')+'.', 'jo-dispatched');
+    }
     if(dtSourceServiceRequestId && typeof srLinkTicket === 'function'){
       srLinkTicket(dtSourceServiceRequestId, id).catch(()=>{});
     }else if(custId && typeof srCreateForAdminDispatch === 'function'){
@@ -1552,6 +1564,11 @@
       });
     });
     const ok = typeof srMarkEnRouteByTicket === 'function' ? await srMarkEnRouteByTicket(id) : true;
+    const _enrTicket = dtLastTicketsById[id];
+    if(_enrTicket && _enrTicket.custId && typeof notifyCustomer === 'function'){
+      notifyCustomer(_enrTicket.custId, 'Your technician is on the way',
+        (currentUser && currentUser.name ? currentUser.name : 'A technician')+' is heading to your site now.', 'jo-enroute');
+    }
     if(btn){ btn.disabled = false; btn.textContent = 'On My Way'; }
     toast(ok ? "Customer notified you're on the way" : 'Could not notify the customer — check your connection');
     dtRenderTechList();
@@ -1582,6 +1599,16 @@
     // service-requests.js and the homepage progress tracker it feeds.
     if(ok && becameAcknowledged && typeof srMarkInProgressByTicket === 'function'){
       srMarkInProgressByTicket(id).catch(()=>{});
+    }
+    if(ok && becameAcknowledged){
+      const _ackTicket = dtLastTicketsById[id];
+      if(_ackTicket && _ackTicket.custId && typeof notifyCustomer === 'function'){
+        notifyCustomer(_ackTicket.custId, 'Your technician has arrived',
+          'Work has started on your service.', 'jo-started');
+      }
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins('Job order started', (_ackTicket ? _ackTicket.jobOrderNo : id)+' was acknowledged on site.', 'jo-ack');
+      }
     }
     dtRenderTechList();
   }
@@ -1915,6 +1942,14 @@
       const stillHasWork = equipmentList.some(it=> it.notDone);
       if(!stillHasWork && typeof srMarkCompletedByTicket === 'function'){
         srMarkCompletedByTicket(ticketId).catch(()=>{});
+      }
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins(stillHasWork ? 'Job order closed with remaining work' : 'Job order completed',
+          (rec.jobOrderNo||ticketId)+' \u2014 '+(rec.custName||''), 'jo-closed');
+      }
+      if(!stillHasWork && rec.custId && typeof notifyCustomer === 'function'){
+        notifyCustomer(rec.custId, 'Your service is complete',
+          'The work has been finished and closed out. Thank you!', 'jo-done');
       }
       return true;
     }catch(e){

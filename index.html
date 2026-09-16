@@ -854,6 +854,13 @@ window.awesCss = {
       <div class="cp-info-row"><p class="l">Property / Site Address</p><p class="v" id="cpInfoAddress">—</p></div>
     </div>
 
+    <div class="cp-info-card">
+      <p class="cp-info-card-title">Notifications</p>
+      <div class="cp-info-row"><p class="l">This device</p><p class="v" id="pushStatusCust">—</p></div>
+      <button type="button" class="btn btn-primary" id="pushEnableCustBtn" style="width:100%; margin-top:8px;">Turn on notifications</button>
+      <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 0;">Get updates about your service even when the app is closed.</p>
+    </div>
+
     <div class="cp-profile-row" id="cpProfileRowRequests">
       <div><p class="t">My service requests</p><p class="s">Status, quotes, and messages</p></div>
       <span>›</span>
@@ -994,6 +1001,12 @@ window.awesCss = {
       <div class="cp-info-row"><p class="l">Time In</p><p class="v" id="techMyProfileTimeIn">—</p></div>
       <div class="cp-info-row"><p class="l">Time Out</p><p class="v" id="techMyProfileTimeOut">—</p></div>
       <div class="cp-info-row"><p class="l">Open Job Orders</p><p class="v" id="techMyProfileOpenJo">—</p></div>
+    </div>
+    <div class="cp-info-card">
+      <div class="cp-info-card-title">Notifications</div>
+      <div class="cp-info-row"><p class="l">This device</p><p class="v" id="pushStatusTech">—</p></div>
+      <button type="button" class="btn btn-primary" id="pushEnableTechBtn" style="width:100%; margin-top:8px;">Turn on notifications</button>
+      <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 0;">Get alerted about new job orders even when the app is closed.</p>
     </div>
     <button type="button" class="btn btn-secondary" id="techMyProfileChangePwBtn" style="width:100%;">Change My Password</button>
     <button type="button" class="btn btn-secondary" id="techMyProfileLogoutBtn" style="width:100%; margin-top:8px; color:var(--danger);">Logout</button>
@@ -2752,6 +2765,13 @@ window.awesCss = {
     <div class="sheet-head">
       <h3>Shared Cloud Setup</h3>
       <button class="sheet-close" id="closeCloud">&times;</button>
+    </div>
+    <!-- Admin's own device notifications. Lives here because this sheet is
+         already the admin's device-level settings surface. -->
+    <div class="field" style="border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
+      <label style="margin-bottom:6px;">Notifications on this device: <span id="pushStatusAdmin">—</span></label>
+      <button type="button" class="btn btn-primary" id="pushEnableAdminBtn" style="width:100%;">Turn on notifications</button>
+      <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 0;">Get alerted to new service requests and job order updates even when the app is closed.</p>
     </div>
     <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
       Connect your Supabase project so every technician's phone shares the same reports, dropdown lists,

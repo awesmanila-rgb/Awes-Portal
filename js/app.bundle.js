@@ -1588,6 +1588,10 @@
     // home.js. Toggled right here since this function already runs on
     // every login/logout/role change.
     if($('techNav')) $('techNav').style.display = isTech ? '' : 'none';
+    // Re-subscribe this device silently when permission was already
+    // granted (endpoints rotate; a row may have been pruned as dead).
+    // Never prompts here — see pushRequestPermission's comment.
+    if(typeof pushInit === 'function') pushInit();
     if(!currentUser) document.body.classList.remove('dashboard-active');
     // Sidebar nav: each role only sees its own group of links (My Work vs.
     // Operations/Management vs. My Account) — see the #sidebarTechGroup /
@@ -2239,6 +2243,12 @@
     trackerAdminTeardown();
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
+    // Drop only THIS device's push subscription — other devices the same
+    // person signs in on keep receiving. Awaited so the row is gone before
+    // the auth session ends (deleting it needs that session).
+    if(typeof pushUnsubscribeThisDevice === 'function'){
+      try{ await pushUnsubscribeThisDevice(); }catch(e){}
+    }
     // This used to only clear the app's OWN 'current-user' flag and never told
     // Supabase Auth to end the session. The real session cookie/token was left
     // fully valid, so the login screen showing right after tapping Logout was
@@ -8070,6 +8080,18 @@
     // 'in_progress' once a technician acknowledges, and dtComplete's
     // completion hook takes it to 'completed' later). Best-effort — an
     // ordinary ticket with no source request just leaves this as a no-op.
+    // Real OS notifications (see push.js). Best-effort and never awaited —
+    // the ticket has already saved and must not fail on a notification.
+    if(typeof notifyUser === 'function'){
+      (workers||[]).forEach(w=>{
+        notifyUser(w.id, 'New job order assigned',
+          jobOrderNo+' \u2014 '+(custName||'')+' on '+($('dtDate').value||''), 'jo-new');
+      });
+    }
+    if(custId && typeof notifyCustomer === 'function'){
+      notifyCustomer(custId, 'A technician has been scheduled',
+        'Your service is scheduled for '+($('dtDate').value||'')+'.', 'jo-dispatched');
+    }
     if(dtSourceServiceRequestId && typeof srLinkTicket === 'function'){
       srLinkTicket(dtSourceServiceRequestId, id).catch(()=>{});
     }else if(custId && typeof srCreateForAdminDispatch === 'function'){
@@ -8644,6 +8666,11 @@
       });
     });
     const ok = typeof srMarkEnRouteByTicket === 'function' ? await srMarkEnRouteByTicket(id) : true;
+    const _enrTicket = dtLastTicketsById[id];
+    if(_enrTicket && _enrTicket.custId && typeof notifyCustomer === 'function'){
+      notifyCustomer(_enrTicket.custId, 'Your technician is on the way',
+        (currentUser && currentUser.name ? currentUser.name : 'A technician')+' is heading to your site now.', 'jo-enroute');
+    }
     if(btn){ btn.disabled = false; btn.textContent = 'On My Way'; }
     toast(ok ? "Customer notified you're on the way" : 'Could not notify the customer — check your connection');
     dtRenderTechList();
@@ -8674,6 +8701,16 @@
     // service-requests.js and the homepage progress tracker it feeds.
     if(ok && becameAcknowledged && typeof srMarkInProgressByTicket === 'function'){
       srMarkInProgressByTicket(id).catch(()=>{});
+    }
+    if(ok && becameAcknowledged){
+      const _ackTicket = dtLastTicketsById[id];
+      if(_ackTicket && _ackTicket.custId && typeof notifyCustomer === 'function'){
+        notifyCustomer(_ackTicket.custId, 'Your technician has arrived',
+          'Work has started on your service.', 'jo-started');
+      }
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins('Job order started', (_ackTicket ? _ackTicket.jobOrderNo : id)+' was acknowledged on site.', 'jo-ack');
+      }
     }
     dtRenderTechList();
   }
@@ -9007,6 +9044,14 @@
       const stillHasWork = equipmentList.some(it=> it.notDone);
       if(!stillHasWork && typeof srMarkCompletedByTicket === 'function'){
         srMarkCompletedByTicket(ticketId).catch(()=>{});
+      }
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins(stillHasWork ? 'Job order closed with remaining work' : 'Job order completed',
+          (rec.jobOrderNo||ticketId)+' \u2014 '+(rec.custName||''), 'jo-closed');
+      }
+      if(!stillHasWork && rec.custId && typeof notifyCustomer === 'function'){
+        notifyCustomer(rec.custId, 'Your service is complete',
+          'The work has been finished and closed out. Thank you!', 'jo-done');
       }
       return true;
     }catch(e){
@@ -9444,6 +9489,9 @@
         contact_number: contactNumber || null
       }).select().single();
       if(error) throw error;
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins('New service request', (description||'A customer submitted a service request'), 'sr-new');
+      }
       return srRowToRequest(data);
     }catch(e){ console.error('create service request failed', describeCloudError(e)); return null; }
   }
@@ -9603,11 +9651,16 @@
   // ---------- Fee workflow (admin proposes, customer responds) ----------
   async function srProposeFee(id, amount){
     if(!(await ensureCloud())) return false;
+    const _feeReq = srOverlayRequest && String(srOverlayRequest.id)===String(id) ? srOverlayRequest : null;
     try{
       const { error } = await db.from('service_requests')
         .update({ fee_amount: amount, fee_status: 'proposed', status: 'fee_proposed' })
         .eq('id', id);
       if(error) throw error;
+      if(_feeReq && typeof notifyCustomer === 'function'){
+        notifyCustomer(_feeReq.customerId, 'Service fee ready for review',
+          'A fee of \u20b1'+Number(amount||0).toLocaleString()+' has been proposed for your service request.', 'sr-fee');
+      }
       return true;
     }catch(e){ console.error('propose fee failed', describeCloudError(e)); return false; }
   }
@@ -9635,12 +9688,17 @@
 
   // ---------- Schedule workflow (admin proposes, customer confirms) ----------
   async function srProposeSchedule(id, date, time){
+    const _schedReq = srOverlayRequest && String(srOverlayRequest.id)===String(id) ? srOverlayRequest : null;
     if(!(await ensureCloud())) return false;
     try{
       const { error } = await db.from('service_requests')
         .update({ proposed_schedule_date: date, proposed_schedule_time: time||null, status: 'schedule_proposed' })
         .eq('id', id);
       if(error) throw error;
+      if(_schedReq && typeof notifyCustomer === 'function'){
+        notifyCustomer(_schedReq.customerId, 'Proposed schedule for your service',
+          'Suggested date: '+(typeof fmtDate==='function' ? fmtDate(date) : date)+(time?(' at '+time):'')+'. Please confirm.', 'sr-sched');
+      }
       return true;
     }catch(e){ console.error('propose schedule failed', describeCloudError(e)); return false; }
   }
@@ -9651,6 +9709,9 @@
     try{
       const { data, error } = await db.rpc('customer_confirm_service_request_schedule', { p_request_id: id });
       if(error) throw error;
+      if(data && typeof notifyAdmins === 'function'){
+        notifyAdmins('Schedule confirmed', 'A customer confirmed their proposed service schedule.', 'sr-sched-ok');
+      }
       return !!data;
     }catch(e){ console.error('confirm schedule failed', describeCloudError(e)); return false; }
   }
@@ -9703,6 +9764,9 @@
     try{
       const { data, error } = await db.rpc('customer_request_cancel_dispatched_service', { p_request_id: id, p_reason: reason.trim() });
       if(error) throw error;
+      if(data && typeof notifyAdmins === 'function'){
+        notifyAdmins('Cancellation requested', 'A customer asked to cancel a dispatched service: '+reason.trim(), 'sr-cancel-req');
+      }
       return !!data;
     }catch(e){ console.error('request cancel failed', describeCloudError(e)); return false; }
   }
@@ -12482,6 +12546,190 @@
   }
 
 
+  // =====================================================================
+  // Web Push — real OS notifications (sound, lock screen, app closed)
+  //
+  // Everything the app called a "notification" before this was in-app
+  // only: a Realtime subscription updating a badge or firing a toast while
+  // the app happened to be open and focused. That misses exactly the cases
+  // that matter — a job order dispatched while the technician's phone is
+  // in their pocket, a fee proposed while the customer is doing something
+  // else.
+  //
+  // Requires:
+  //   - 20260916_03_push_subscriptions.sql (the subscriptions table)
+  //   - the send-push Edge Function deployed, with VAPID secrets set
+  //   - PUSH_PUBLIC_KEY below matching the deployed VAPID_PUBLIC_KEY
+  //
+  // Nothing here is load-bearing: if push isn't set up, isn't supported,
+  // or the user declines, every function degrades to a silent no-op and
+  // the app behaves exactly as it did before.
+  // =====================================================================
+
+  // Must match VAPID_PUBLIC_KEY in the Edge Function's secrets. The public
+  // half is meant to ship to clients — it only lets a browser create a
+  // subscription addressed to this server. The PRIVATE key never leaves
+  // Supabase.
+  const PUSH_PUBLIC_KEY = 'BK4deTS5XrY4poCng9Brtx6XSjqOIhlyfeyDROLHZ_iR02NZe9rGVvSBTIX0ZRLimwiQvKtGAk_YO-FQ5VZ7UGQ';
+
+  function pushSupported(){
+    return typeof window !== 'undefined'
+      && 'serviceWorker' in navigator
+      && 'PushManager' in window
+      && 'Notification' in window;
+  }
+
+  function urlBase64ToUint8Array(base64String){
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const out = new Uint8Array(raw.length);
+    for(let i=0; i<raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  // Subscribes this device and stores the endpoint. Safe to call repeatedly
+  // — the browser returns the SAME subscription for a device+origin, and
+  // the row upserts on endpoint, so re-running never creates duplicates.
+  async function pushSubscribe(){
+    if(!pushSupported() || !currentUser) return false;
+    if(Notification.permission !== 'granted') return false;
+    if(!(await ensureCloud())) return false;
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if(!sub){
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true, // required by Chrome; every push must show something
+          applicationServerKey: urlBase64ToUint8Array(PUSH_PUBLIC_KEY)
+        });
+      }
+      const json = sub.toJSON();
+      if(!json || !json.keys) return false;
+      const { error } = await db.from('push_subscriptions').upsert({
+        user_id: currentUser.id,
+        customer_id: currentUser.role==='customer' ? (currentUser.customerId || null) : null,
+        role: currentUser.role==='admin' ? 'admin' : (currentUser.role==='customer' ? 'customer' : 'tech'),
+        endpoint: json.endpoint,
+        p256dh: json.keys.p256dh,
+        auth: json.keys.auth,
+        user_agent: navigator.userAgent.slice(0, 300),
+        last_seen_at: new Date().toISOString()
+      }, { onConflict: 'endpoint' });
+      if(error) throw error;
+      return true;
+    }catch(e){ console.error('push subscribe failed', describeCloudError(e)); return false; }
+  }
+
+  // Asks for permission, then subscribes. Called from the in-app prompt
+  // rather than on load: a permission dialog that appears before someone
+  // understands what it's for is usually dismissed, and a dismissal is
+  // sticky — the browser won't ask again.
+  async function pushRequestPermission(){
+    if(!pushSupported()){ toast('This device does not support notifications'); return false; }
+    if(Notification.permission === 'denied'){
+      toast('Notifications are blocked — turn them back on in your browser settings for this site');
+      return false;
+    }
+    let perm = Notification.permission;
+    if(perm !== 'granted') perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ toast('Notifications stay off — you can turn them on later'); return false; }
+    const ok = await pushSubscribe();
+    toast(ok ? 'Notifications are on for this device' : 'Could not turn on notifications — try again');
+    return ok;
+  }
+
+  // Signing out removes only THIS device's row: other devices the same
+  // person uses keep working.
+  async function pushUnsubscribeThisDevice(){
+    if(!pushSupported()) return;
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(!sub) return;
+      const endpoint = sub.endpoint;
+      try{ await sub.unsubscribe(); }catch(e){}
+      if(await ensureCloud()){
+        await db.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      }
+    }catch(e){ /* signing out must never fail because of this */ }
+  }
+
+  // Re-subscribes a returning user silently when permission is already
+  // granted (endpoints rotate, and a row may have been pruned as dead).
+  async function pushInit(){
+    if(!pushSupported() || !currentUser) return;
+    if(Notification.permission === 'granted') pushSubscribe();
+    navigator.serviceWorker.addEventListener('message', (e)=>{
+      if(e.data && e.data.type==='push-subscription-changed') pushSubscribe();
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Sending
+  //
+  // Every call is best-effort and deliberately NOT awaited by its caller:
+  // a notification failing must never stop the action that triggered it
+  // from completing. The audience is resolved server-side (see the Edge
+  // Function) — callers name an audience, never a recipient list.
+  // ---------------------------------------------------------------------
+  async function notifyPush({ audience, customerId, userId, title, message, url, tag }){
+    if(!(await ensureCloud())) return;
+    try{
+      await db.functions.invoke('send-push', {
+        body: { audience, customerId, userId, title, message, url, tag }
+      });
+    }catch(e){ console.warn('notifyPush failed (non-fatal)', e && e.message); }
+  }
+  function notifyAdmins(title, message, tag){
+    notifyPush({ audience:'admins', title, message, tag }).catch(()=>{});
+  }
+  function notifyCustomer(customerId, title, message, tag){
+    if(!customerId) return;
+    notifyPush({ audience:'customer', customerId, title, message, tag }).catch(()=>{});
+  }
+  function notifyUser(userId, title, message, tag){
+    if(!userId) return;
+    notifyPush({ audience:'user', userId, title, message, tag }).catch(()=>{});
+  }
+  function notifyTechnicians(title, message, tag){
+    notifyPush({ audience:'technicians', title, message, tag }).catch(()=>{});
+  }
+
+  // ---------------------------------------------------------------------
+  // The three in-app toggles (admin cloud sheet, technician profile,
+  // customer profile). One shared handler — the only difference between
+  // them is which pair of element ids they render into.
+  // ---------------------------------------------------------------------
+  const PUSH_TOGGLES = [
+    { status:'pushStatusAdmin', btn:'pushEnableAdminBtn' },
+    { status:'pushStatusTech',  btn:'pushEnableTechBtn' },
+    { status:'pushStatusCust',  btn:'pushEnableCustBtn' }
+  ];
+  function pushRefreshToggles(){
+    let label, showBtn = true;
+    if(!pushSupported()){ label = 'Not supported on this device'; showBtn = false; }
+    else if(Notification.permission === 'granted'){ label = 'On'; showBtn = false; }
+    else if(Notification.permission === 'denied'){ label = 'Blocked in browser settings'; showBtn = false; }
+    else label = 'Off';
+    PUSH_TOGGLES.forEach(t=>{
+      const s = $(t.status), b = $(t.btn);
+      if(s) s.textContent = label;
+      if(b) b.style.display = showBtn ? '' : 'none';
+    });
+  }
+  PUSH_TOGGLES.forEach(t=>{
+    const b = $(t.btn);
+    if(b) b.addEventListener('click', async ()=>{
+      b.disabled = true;
+      await pushRequestPermission();
+      b.disabled = false;
+      pushRefreshToggles();
+    });
+  });
+  pushRefreshToggles();
+
+
 // ---------- Header title (changes per feature page) ----------
   function setHeaderTitle(title, sub){
     $('brandName').textContent = title;
@@ -13520,6 +13768,7 @@
       setTxt('techMyProfileUsername', prof.username || currentUser.username);
       setTxt('techMyProfileStatus', prof.active===false ? 'Inactive' : 'Active');
     }
+    if(typeof pushRefreshToggles === 'function') pushRefreshToggles();
     setTxt('techMyProfileTimeIn', fmtT(todayDtr && todayDtr.timeIn));
     setTxt('techMyProfileTimeOut', fmtT(todayDtr && todayDtr.timeOut));
     const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t))).length;

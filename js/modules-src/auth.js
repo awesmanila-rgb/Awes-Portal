@@ -391,6 +391,10 @@
     // home.js. Toggled right here since this function already runs on
     // every login/logout/role change.
     if($('techNav')) $('techNav').style.display = isTech ? '' : 'none';
+    // Re-subscribe this device silently when permission was already
+    // granted (endpoints rotate; a row may have been pruned as dead).
+    // Never prompts here — see pushRequestPermission's comment.
+    if(typeof pushInit === 'function') pushInit();
     if(!currentUser) document.body.classList.remove('dashboard-active');
     // Sidebar nav: each role only sees its own group of links (My Work vs.
     // Operations/Management vs. My Account) — see the #sidebarTechGroup /
@@ -1042,6 +1046,12 @@
     trackerAdminTeardown();
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
+    // Drop only THIS device's push subscription — other devices the same
+    // person signs in on keep receiving. Awaited so the row is gone before
+    // the auth session ends (deleting it needs that session).
+    if(typeof pushUnsubscribeThisDevice === 'function'){
+      try{ await pushUnsubscribeThisDevice(); }catch(e){}
+    }
     // This used to only clear the app's OWN 'current-user' flag and never told
     // Supabase Auth to end the session. The real session cookie/token was left
     // fully valid, so the login screen showing right after tapping Logout was

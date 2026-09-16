@@ -1036,6 +1036,7 @@
       setTxt('techMyProfileUsername', prof.username || currentUser.username);
       setTxt('techMyProfileStatus', prof.active===false ? 'Inactive' : 'Active');
     }
+    if(typeof pushRefreshToggles === 'function') pushRefreshToggles();
     setTxt('techMyProfileTimeIn', fmtT(todayDtr && todayDtr.timeIn));
     setTxt('techMyProfileTimeOut', fmtT(todayDtr && todayDtr.timeOut));
     const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t))).length;

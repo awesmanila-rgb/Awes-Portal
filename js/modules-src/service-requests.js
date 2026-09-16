@@ -137,6 +137,9 @@
         contact_number: contactNumber || null
       }).select().single();
       if(error) throw error;
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins('New service request', (description||'A customer submitted a service request'), 'sr-new');
+      }
       return srRowToRequest(data);
     }catch(e){ console.error('create service request failed', describeCloudError(e)); return null; }
   }
@@ -296,11 +299,16 @@
   // ---------- Fee workflow (admin proposes, customer responds) ----------
   async function srProposeFee(id, amount){
     if(!(await ensureCloud())) return false;
+    const _feeReq = srOverlayRequest && String(srOverlayRequest.id)===String(id) ? srOverlayRequest : null;
     try{
       const { error } = await db.from('service_requests')
         .update({ fee_amount: amount, fee_status: 'proposed', status: 'fee_proposed' })
         .eq('id', id);
       if(error) throw error;
+      if(_feeReq && typeof notifyCustomer === 'function'){
+        notifyCustomer(_feeReq.customerId, 'Service fee ready for review',
+          'A fee of \u20b1'+Number(amount||0).toLocaleString()+' has been proposed for your service request.', 'sr-fee');
+      }
       return true;
     }catch(e){ console.error('propose fee failed', describeCloudError(e)); return false; }
   }
@@ -328,12 +336,17 @@
 
   // ---------- Schedule workflow (admin proposes, customer confirms) ----------
   async function srProposeSchedule(id, date, time){
+    const _schedReq = srOverlayRequest && String(srOverlayRequest.id)===String(id) ? srOverlayRequest : null;
     if(!(await ensureCloud())) return false;
     try{
       const { error } = await db.from('service_requests')
         .update({ proposed_schedule_date: date, proposed_schedule_time: time||null, status: 'schedule_proposed' })
         .eq('id', id);
       if(error) throw error;
+      if(_schedReq && typeof notifyCustomer === 'function'){
+        notifyCustomer(_schedReq.customerId, 'Proposed schedule for your service',
+          'Suggested date: '+(typeof fmtDate==='function' ? fmtDate(date) : date)+(time?(' at '+time):'')+'. Please confirm.', 'sr-sched');
+      }
       return true;
     }catch(e){ console.error('propose schedule failed', describeCloudError(e)); return false; }
   }
@@ -344,6 +357,9 @@
     try{
       const { data, error } = await db.rpc('customer_confirm_service_request_schedule', { p_request_id: id });
       if(error) throw error;
+      if(data && typeof notifyAdmins === 'function'){
+        notifyAdmins('Schedule confirmed', 'A customer confirmed their proposed service schedule.', 'sr-sched-ok');
+      }
       return !!data;
     }catch(e){ console.error('confirm schedule failed', describeCloudError(e)); return false; }
   }
@@ -396,6 +412,9 @@
     try{
       const { data, error } = await db.rpc('customer_request_cancel_dispatched_service', { p_request_id: id, p_reason: reason.trim() });
       if(error) throw error;
+      if(data && typeof notifyAdmins === 'function'){
+        notifyAdmins('Cancellation requested', 'A customer asked to cancel a dispatched service: '+reason.trim(), 'sr-cancel-req');
+      }
       return !!data;
     }catch(e){ console.error('request cancel failed', describeCloudError(e)); return false; }
   }
