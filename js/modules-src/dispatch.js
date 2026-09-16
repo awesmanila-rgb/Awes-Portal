@@ -1979,7 +1979,12 @@
       ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed? The customer\'s service request will stay in progress — you can open the next visit for the remaining unit(s) with Continue Tomorrow once this closes.')
       : 'Close this Job Order? This marks it — and the customer\'s service request — as fully done.';
     if(!confirm(confirmMsg)) return;
-    const remarksEl = $('dtCloseRemarks');
+    // Scoped lookup, NOT $(): dtCloseSection's innerHTML is rebuilt every
+    // time a ticket overlay opens, and $() caches a node by id forever —
+    // so from the second ticket onward it returns a detached element and
+    // the remarks typed here would be silently dropped. (Same trap the
+    // srFeeAcceptBtn comment in service-requests.js calls out.)
+    const remarksEl = document.getElementById('dtCloseRemarks');
     const remarks = remarksEl ? remarksEl.value.trim() : '';
     $('dtCloseSubmitBtn').disabled = true;
     const ok = await dtCloseTicket(dtOverlayTicket.id, equipmentList, remarks);

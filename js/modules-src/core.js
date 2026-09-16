@@ -85,6 +85,12 @@
   // ---------- helpers ----------
   const domCache = Object.create(null);
   const $ = (id) => domCache[id] || (domCache[id] = document.getElementById(id));
+  // Non-caching lookup, for elements that are DESTROYED AND RECREATED by an
+  // innerHTML rebuild. $() memoizes a node by id forever, so once its
+  // container is re-rendered $() keeps handing back the old detached node —
+  // reads return stale values and listeners attach to nothing. Use $live()
+  // for anything inside markup the app regenerates.
+  const $live = (id) => document.getElementById(id);
   const $$ = (selector, root=document) => Array.from(root.querySelectorAll(selector));
 
 

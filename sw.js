@@ -1,3 +1,41 @@
+// Bumped to v76 — pre-deploy review pass. Two real bugs found by checking
+// every dynamically-created element that is read through $():
+//
+// $() memoizes a node by id FOREVER (domCache in core.js). That is fine for
+// static markup, but any element destroyed and recreated by an innerHTML
+// rebuild keeps returning the ORIGINAL, now-detached node — reads give
+// stale values and listeners attach to nothing.
+//   - dtCloseRemarks (dispatch.js): dtCloseSection is rebuilt on every
+//     ticket overlay open, so from the SECOND job order onward the close
+//     remarks a user typed were read off a detached node and silently
+//     dropped.
+//   - The three customer calculators (customer-portal.js): cpCalcBody is
+//     rebuilt each time a calculator opens, so switching between them and
+//     back left every input and result element stale.
+// Added $live() in core.js (uncached lookup) and switched those 20 reads
+// to it. srFeeAcceptBtn was already handled correctly via querySelector.
+//
+// Also verified this pass: bundle executes cleanly under jsdom for all
+// three roles (tech/admin/customer), no duplicate HTML ids, no $() refs to
+// elements that never exist, sw.js parses, the VAPID public key in push.js
+// matches PUSH_SETUP.md, and every column srCreateForAdminDispatch writes
+// is backed by a migration.
+//
+// Bumped to v75 — CRITICAL FIX for a blank, unresponsive page introduced
+// in v71 (the progressive Service Report). ui.js calls resetForm() at load,
+// and resetForm() assigns srMaxSection — but that `let` was declared
+// further down the file, AFTER its own call site. In a module joined into
+// one strict-mode IIFE that leaves it in the temporal dead zone, so load
+// threw "Cannot access 'srMaxSection' before initialization", the whole
+// bundle aborted, and every screen stayed hidden: static markup like the
+// nav bar rendered, nothing else did. srInstallContinueButtons() had the
+// same problem via SR_SECTION_TITLES. Both declarations now sit at the top
+// of the module, above any load-time call.
+//
+// Worth remembering: `node --check` does NOT catch this. It is valid
+// syntax and only fails when executed, so the bundle has to actually be
+// run against a DOM to see it.
+//
 // Bumped to v74 to force every installed device to drop its old cache and
 // re-fetch everything — real Web Push notifications for all three roles.
 // Until now every "notify" was in-app only: a Realtime badge/toast that
@@ -498,7 +536,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v74';
+const CACHE_NAME = 'awes-sr-v76';
 
 // Split into two lists on purpose.
 //

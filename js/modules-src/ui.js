@@ -15,6 +15,20 @@
   // srApplyJobOrderBatch() (dispatch.js) and the submit loop in pdf.js.
   // Each entry is one equipment item off the ticket's equipmentList.
   let srBatchEquipItems = null;
+
+  // Progressive-section state. Declared HERE, at the top of the module,
+  // rather than beside the functions that use it further down: resetForm()
+  // is called at load and assigns srMaxSection, so a `let` declared after
+  // that call site leaves it in the temporal dead zone — which threw
+  // "Cannot access 'srMaxSection' before initialization" and took the
+  // whole bundle (and therefore the whole page) down with it.
+  const SR_SECTION_TITLES = {
+    1:"Customer's Information", 2:'Equipment Description', 3:'Report Summary',
+    4:'Components / Parts Needed to Replace', 5:'Services Done', 6:'Operating Data',
+    7:'Installation Data', 8:'Acknowledgment'
+  };
+  const SR_LAST_SECTION = 8;
+  let srMaxSection = 1;
   function resetForm(){
     // Scoped to the Service Report view only. This used to select every text,
     // number, textarea and checkbox on the page, so starting a new report also
@@ -66,7 +80,6 @@
     srRenderStepper();
   }
   resetForm();
-  srInstallContinueButtons();
   // ---------- progressive sections ----------
   // The report has 8 sections. They used to all appear at once the moment a
   // customer was set, which is a wall of fields on a phone in the field.
@@ -74,13 +87,6 @@
   // appended to every section body. Sections already revealed STAY
   // revealed, so going back to change something never means re-walking the
   // form. The step tracker above stays visible throughout either way.
-  const SR_SECTION_TITLES = {
-    1:"Customer's Information", 2:'Equipment Description', 3:'Report Summary',
-    4:'Components / Parts Needed to Replace', 5:'Services Done', 6:'Operating Data',
-    7:'Installation Data', 8:'Acknowledgment'
-  };
-  const SR_LAST_SECTION = 8;
-  let srMaxSection = 1;
   // Section 2 is filled automatically per unit in batch mode (see
   // srBatchBanner), so it's skipped rather than shown empty.
   function srSectionIsSkipped(n){
@@ -160,6 +166,8 @@
     srMaxSection = SR_LAST_SECTION;
     srRenderStepper();
   }
+
+  srInstallContinueButtons();
 
   // ---------- progressive step tracker ----------
   // Same jo-stepper visual language as the Job Order / Cash Advance

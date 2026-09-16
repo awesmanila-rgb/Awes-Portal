@@ -1424,8 +1424,8 @@
       '<div class="cp-calc-result"><p class="n" id="ceResult">—</p><p class="l">Estimated cost per month</p></div>'+
       '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Estimate based on typical input wattage per HP for each unit type, assuming it runs continuously at that load for the hours entered. Actual draw varies by brand, EER/CSPF rating, set temperature, insulation, and how often the compressor cycles or idles once the room is cool — so real bills are often lower than this, especially for inverter units in a well-sized room.</p>';
     const calc = ()=>{
-      const hp = parseFloat($('ceHp').value)||0, hours = parseFloat($('ceHours').value)||0, rate = parseFloat($('ceRate').value)||0;
-      const type = $('ceType').value;
+      const hp = parseFloat($live('ceHp').value)||0, hours = parseFloat($live('ceHours').value)||0, rate = parseFloat($live('ceRate').value)||0;
+      const type = $live('ceType').value;
       // Typical full-load electrical input for a non-inverter unit runs
       // roughly 750-900W per HP (not the ~746W mechanical-only figure);
       // 800W/HP is the midpoint. Inverter units modulate and average
@@ -1434,10 +1434,10 @@
       const wattsPerHp = 800;
       const watts = hp * wattsPerHp * (type === 'inverter' ? 0.6 : 1);
       const monthly = (watts/1000) * hours * 30 * rate;
-      $('ceResult').textContent = '₱'+monthly.toLocaleString(undefined,{maximumFractionDigits:0});
+      $live('ceResult').textContent = '₱'+monthly.toLocaleString(undefined,{maximumFractionDigits:0});
     };
     ['ceHp','ceHours','ceRate'].forEach(id=> $(id).addEventListener('input', calc));
-    $('ceType').addEventListener('change', calc);
+    $live('ceType').addEventListener('change', calc);
     calc();
     cpShowCalcScreen();
   }
@@ -1456,7 +1456,7 @@
       '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l" id="ccResultLabel">Suggested capacity</p></div>'+
       '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Based on roughly 600 BTU/hr per sqm, rounded to the nearest standard HP size. Higher ceilings, west/afternoon sun exposure, more occupants, or heat-generating equipment in the room push the real requirement higher — a technician can confirm the right size on-site.</p>';
     const calc = ()=>{
-      const area = parseFloat($('ccArea').value)||0;
+      const area = parseFloat($live('ccArea').value)||0;
       const btu = area * 600;
       // Table only covers sizes a single split-type indoor unit actually
       // ships as. The old version had no upper bound, so anything past
@@ -1469,21 +1469,21 @@
       const TIERS = [[6500,0.75],[9500,1.0],[13500,1.5],[18500,2.0],[22500,2.5],[27000,3.0]];
       const tier = area>0 ? TIERS.find(t=> btu<=t[0]) : null;
       if(area<=0){
-        $('ccResult').textContent = '—';
-        $('ccResultLabel').textContent = 'Suggested capacity';
+        $live('ccResult').textContent = '—';
+        $live('ccResultLabel').textContent = 'Suggested capacity';
       } else if(tier){
-        $('ccResult').textContent = tier[1]+' HP';
-        $('ccResultLabel').textContent = 'Suggested capacity (~'+Math.round(btu).toLocaleString()+' BTU/hr)';
+        $live('ccResult').textContent = tier[1]+' HP';
+        $live('ccResultLabel').textContent = 'Suggested capacity (~'+Math.round(btu).toLocaleString()+' BTU/hr)';
       } else {
         // Beyond one unit's range: give the total load and a ballpark
         // unit count using a common per-zone size (2.0 HP ≈ 18,000
         // BTU/hr) rather than one oversized HP number.
         const zones = Math.ceil(btu/18000);
-        $('ccResult').textContent = '~'+Math.round(btu).toLocaleString()+' BTU/hr total';
-        $('ccResultLabel').textContent = 'Too large for one unit — plan for roughly '+zones+' × 2.0 HP units (or fewer, larger/ducted units) across zones';
+        $live('ccResult').textContent = '~'+Math.round(btu).toLocaleString()+' BTU/hr total';
+        $live('ccResultLabel').textContent = 'Too large for one unit — plan for roughly '+zones+' × 2.0 HP units (or fewer, larger/ducted units) across zones';
       }
     };
-    $('ccArea').addEventListener('input', calc);
+    $live('ccArea').addEventListener('input', calc);
     calc();
     cpShowCalcScreen();
   }
@@ -1497,12 +1497,12 @@
       '<div class="cp-calc-result"><p class="n" id="csResult">—</p><p class="l">Estimated yearly savings vs. skipping PM</p></div>'+
       '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Assumes one avoided major repair per unit per year without regular PM — a common, conservative rule of thumb, not a guarantee.</p>';
     const calc = ()=>{
-      const units = parseFloat($('csUnits').value)||0, visits = parseFloat($('csVisits').value)||0;
-      const pmCost = parseFloat($('csPmCost').value)||0, repairCost = parseFloat($('csRepairCost').value)||0;
+      const units = parseFloat($live('csUnits').value)||0, visits = parseFloat($live('csVisits').value)||0;
+      const pmCost = parseFloat($live('csPmCost').value)||0, repairCost = parseFloat($live('csRepairCost').value)||0;
       const pmTotal = units * visits * pmCost;
       const avoidedRepairs = units * repairCost;
       const savings = avoidedRepairs - pmTotal;
-      $('csResult').textContent = '₱'+Math.max(0,savings).toLocaleString(undefined,{maximumFractionDigits:0});
+      $live('csResult').textContent = '₱'+Math.max(0,savings).toLocaleString(undefined,{maximumFractionDigits:0});
     };
     ['csUnits','csVisits','csPmCost','csRepairCost'].forEach(id=> $(id).addEventListener('input', calc));
     calc();

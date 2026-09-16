@@ -918,7 +918,7 @@
         if(item) openLiquidationAttachment(item);
       });
     });
-    $('liqFormPreviewSubmitBtn').addEventListener('click', ()=>{
+    $live('liqFormPreviewSubmitBtn').addEventListener('click', ()=>{
       $('liqFormPreviewOverlay').classList.remove('open');
       caSubmitLiquidation();
     });
