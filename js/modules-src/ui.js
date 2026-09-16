@@ -66,9 +66,12 @@
     // default whenever the form is reset from anywhere else.
     const sec1 = $('sec1Card');
     if(sec1) sec1.style.display = (currentUser && currentUser.role==='admin') ? '' : 'none';
-    ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
-      const el = $(id); if(el) el.style.display = 'none';
-    });
+    // Every step card, including sec9/sec10 added when Acknowledgment was
+    // split — the old fixed list stopped at sec8 and left the two new
+    // signature steps visible after a reset.
+    for(let n=2; n<=10; n++){
+      const el = $('sec'+n+'Card'); if(el) el.style.display = 'none';
+    }
     $('materialsTableWrap').style.display = 'none';
     collapseAllSections();
     toggleCollapsibleSection($('sec1Head'), true); // keep section 1 (Customer's Info) open — it's the entry point
@@ -199,6 +202,21 @@
         const head = card.querySelector('.collapsible-head');
         if(head) toggleCollapsibleSection(head, true);
       }
+      // The Existing / "+ Add New" tab bar is redundant inside the wizard:
+      // the unit was already chosen two screens earlier, so this step is
+      // purely "review and edit these details". Leaving the bar visible
+      // was actively misleading — picking an existing unit lands on the
+      // tab labelled "+ Add New" (it is really just the editable-fields
+      // panel; the record's real id is stamped behind the scenes, so
+      // saving updates that unit and does NOT create a duplicate), which
+      // reads like the app ignored the selection. Kept for an ad-hoc
+      // report with no job order behind it, where choosing still applies.
+      if(n===2){
+        const tabBar = $('equipTabBar');
+        // 'flex', not '': the bar's layout comes from an inline
+        // display:flex, so clearing the property would leave it block.
+        if(tabBar) tabBar.style.display = srCurrentTicketId ? 'none' : 'flex';
+      }
     }
     srRenderSectionNav();
     srUpdateFooterBar();
@@ -285,11 +303,14 @@
   // dispatch.js when batch mode toggles.
   function srRefreshContinueLabels(){ srRenderSectionNav(); }
 
+  // Resuming a saved draft: every step is reachable, but the technician is
+  // put back at the FIRST step and walks forward from there, one screen at
+  // a time — same as a new report. (Dropping them straight at the last
+  // step would skip whatever the draft is still missing.)
   function srSetAllSectionsRevealed(){
     srMaxSection = SR_LAST_SECTION;
-    srCurrentSection = SR_LAST_SECTION;
-    srUpdateFooterBar();
-    srRenderStepper();
+    srCurrentSection = SR_FIRST_SECTION;
+    srRevealSections();
   }
 
   // Installation toggle reveals its own fields and re-evaluates whether
@@ -354,9 +375,10 @@
   });
   if($('srTileSavedDraft')) $('srTileSavedDraft').addEventListener('click', ()=>{
     srShowEntry(null);
-    // 'draft' — not 'drafts'; the wrong name silently matched no tab and
-    // left the user on a blank screen.
-    if(typeof showServiceReportTab === 'function') showServiceReportTab('draft');
+    // srShowTab — NOT showServiceReportTab, which doesn't exist. The
+    // typeof guard meant the wrong name failed silently rather than
+    // throwing, so the tile just did nothing at all.
+    if(typeof srShowTab === 'function') srShowTab('draft');
     if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
   });
   if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=> srShowEntry('srEntryChoice'));

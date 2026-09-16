@@ -348,9 +348,9 @@
       srGoToSection(typeof srFirstUnfilledSection === 'function' ? srFirstUnfilledSection() : 2);
       return;
     }
-    ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
-      const el = $(id); if(el) el.style.display = '';
-    });
+    // Fallback only (wizard helpers unavailable): show just the first
+    // step, never every card at once.
+    const first = $('sec2Card'); if(first) first.style.display = '';
   }
   // Shared by the customer-picker combo (below) and the "From Job Order"
   // autofill — anywhere a customer record needs to populate section 1.

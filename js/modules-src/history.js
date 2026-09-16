@@ -132,14 +132,12 @@
     setEquipTab('addnew');
     $('custDetailsWrap').style.display = '';
     $('sec1Card').style.display = '';
-    // A saved draft is reviewed/finished as a whole, not walked through
-    // section by section — reveal everything and mark the progressive
-    // state as fully unlocked so the tracker agrees with what's shown.
+    // A saved draft resumes INSIDE the wizard, one step at a time — same
+    // as a new report. This used to dump every section card on screen at
+    // once, which is exactly the wall of fields the wizard removes.
+    // srGoToSection lands on the first step and srRevealSections hides the
+    // rest; the step is expanded for us, so no expandAllSections() here.
     if(typeof srSetAllSectionsRevealed === 'function') srSetAllSectionsRevealed();
-    ['sec2Card','sec3Card','sec4Card','sec5Card','sec6Card','sec7Card','sec8Card'].forEach(id=>{
-      const el = $(id); if(el) el.style.display = '';
-    });
-    expandAllSections();
     $('equipType').value = d.equipType || (Array.isArray(d.equipCodes) ? d.equipCodes.join(', ') : '') || '';
     $('modelCU').value=d.modelCU||''; $('serialCU').value=d.serialCU||'';
     $('modelFCU').value=d.modelFCU||''; $('serialFCU').value=d.serialFCU||'';

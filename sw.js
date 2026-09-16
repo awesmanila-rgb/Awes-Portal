@@ -1,3 +1,36 @@
+// Bumped to v85 — the Saved Draft tile still went nowhere. v82 fixed the
+// ARGUMENT ('drafts' -> 'draft') but not the FUNCTION NAME: it called
+// showServiceReportTab, which does not exist anywhere in the codebase —
+// the real one is srShowTab. Because the call sat behind a
+// `typeof ... === 'function'` guard it failed silently instead of
+// throwing, which is exactly why it looked like a dead button twice.
+// Swept the whole codebase for the same pattern; this was the only one.
+//
+// Bumped to v84 — selecting an existing unit appeared to jump to
+// "+ Add New". It wasn't creating a duplicate: that tab is really just the
+// editable-fields panel, and picking a unit fills those fields and stamps
+// the record's real id (setEquipPickedId) so saving UPDATES that unit. But
+// a tab labelled "+ Add New" showing an existing unit's details reads like
+// the app threw the selection away. Inside the wizard the bar is redundant
+// anyway — the unit was chosen two screens earlier — so it's hidden
+// whenever there's a job order behind the report, leaving Step 1 as a
+// plain "review and edit these details". Still shown for an ad-hoc report
+// with no job order, where choosing existing-vs-new genuinely applies.
+//
+// Bumped to v83 — ONE section on screen at a time, everywhere. Three
+// places still revealed every section card at once, so despite the wizard
+// the old wall of fields came back:
+//   - history.js, resuming a SAVED DRAFT (the visible case) — it revealed
+//     sec2..sec8 together and expandAllSections()'d them. A draft now
+//     resumes inside the wizard at the first step and walks forward, same
+//     as a new report; landing at the last step instead would skip
+//     whatever the draft is still missing.
+//   - customers.js fallback path (wizard helpers unavailable) — now shows
+//     only the first step.
+//   - ui.js resetForm — its hard-coded list stopped at sec8, so the two
+//     signature steps added when Acknowledgment was split (sec9/sec10)
+//     stayed on screen after a reset. Now loops every step card.
+//
 // Bumped to v82 — four wizard fixes from testing:
 //
 // 1. EVERY STEP OPENED COLLAPSED. srRevealSections showed the step's CARD
@@ -636,7 +669,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v82';
+const CACHE_NAME = 'awes-sr-v85';
 
 // Split into two lists on purpose.
 //
