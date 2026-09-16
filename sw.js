@@ -1,3 +1,40 @@
+// Bumped to v67 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — added prev/next
+// arrow buttons either side of the technician Overview carousel's dots.
+// The scroll-snap swipe covers touch, but a desktop mouse had no way to
+// move between slides except dragging the (hidden) scrollbar. Arrows
+// scroll by exactly one slide and disable at the first/last one; a shared
+// syncControls() keeps the active dot AND the arrows' disabled state
+// correct off the scroll position itself, so all three inputs (swipe,
+// dot, arrow) stay in sync. See techInitOverviewCarousel() in home.js.
+//
+// Bumped to v66 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — technician
+// portal:
+//   1. Pull-to-refresh re-enabled. html/body carry overscroll-behavior:
+//      none app-wide to kill the "screen moves a little" bounce, which
+//      also killed the browser's pull-down-to-refresh gesture. Now
+//      re-enabled on the Y axis only, for role-tech only (X stays
+//      contained, so the sideways-drift fix that rule exists for is
+//      untouched; admin/customer unchanged). Needs a class on <html>
+//      itself, not body — applyUserRestrictions() in auth.js mirrors
+//      role-tech onto documentElement as role-tech-root for this.
+//   2. Email removed from More > Profile — that detail is maintained by
+//      admin under the technician's profile, not surfaced here. The
+//      db.auth.getUser() call that fetched it is gone too.
+//   3. Logout now lives ONLY in More > Profile. Removed from the More
+//      sheet itself; the header #userLogoutBtn and the sidebar's
+//      #menuLogout were already hidden/unreachable for this role.
+//
+// Bumped to v65 to force every installed device to drop its old cache and
+// re-fetch css/app.css/js/app.bundle.js again — removed the Time In/Out
+// reminder banner and the "Today's Job Order" section from the technician
+// greeting card. The orientation note is now static (it no longer branches
+// on whether today has a job order), the greeting's dtListForWorker() call
+// is gone (it was fetching every one of the technician's tickets on each
+// home render purely to build that removed section), and the dead
+// greet-jo-*/greet-reminder-compact CSS and click handler went with them.
+//
 // Bumped to v64 to force every installed device to drop its old cache and
 // re-fetch index.html/css/app.css/js/app.bundle.js again — technician
 // portal refinements:
@@ -304,7 +341,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v64';
+const CACHE_NAME = 'awes-sr-v67';
 
 // Split into two lists on purpose.
 //

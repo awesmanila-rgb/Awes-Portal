@@ -1476,6 +1476,11 @@
     document.body.classList.toggle('role-admin', isAdmin);
     document.body.classList.toggle('role-tech', isTech);
     document.body.classList.toggle('role-customer', isCustomer);
+    // Mirrored onto <html> because the overscroll-behavior rule that
+    // disables pull-to-refresh sits on the html element itself, which a
+    // body.role-tech selector can't reach. See the role-tech-root rules
+    // in app.css.
+    document.documentElement.classList.toggle('role-tech-root', isTech);
     // Technician bottom nav (#techNav) replaces the sidebar for this role
     // only — see the role-tech CSS overrides at the end of app.css and
     // techSetNavActive()/the techNav*/techFh*/techMore* handlers in
@@ -12289,10 +12294,7 @@
     const now = new Date();
     const dateStr = now.toLocaleDateString('en-PH', {weekday:'short', month:'short', day:'numeric'});
     const timeStr = now.toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'});
-    const [todayDtr, myTickets] = await Promise.all([
-      dtrGetDay(currentUser.id, todayISO()).catch(()=>null),
-      dtListForWorker(currentUser.id).catch(()=>[])
-    ]);
+    const todayDtr = await dtrGetDay(currentUser.id, todayISO()).catch(()=>null);
     const alreadyTimedIn = !!(todayDtr && todayDtr.timeIn);
     const alreadyTimedOut = !!(todayDtr && todayDtr.timeOut);
     const fmt = (iso)=> iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'}) : '—';
@@ -12311,35 +12313,9 @@
         : '')+
         '<span class="greet-attend-go">Open DTR ›</span>'+
       '</button>';
-    const reminder = !alreadyTimedIn
-      ? '<div class="greet-reminder-compact">⏰ Don\'t forget to Time In.</div>'
-      : !alreadyTimedOut
-        ? '<div class="greet-reminder-compact">⏰ Don\'t forget to Time Out before you head home.</div>'
-        : '';
-
-    // Today's Job Order(s) — matched on scheduled date only (not status),
-    // so a same-day ticket still shows here even once it's been
-    // acknowledged or completed.
-    const todaysJo = (myTickets||[]).filter(t=> t.date===todayISO())
-      .sort((a,b)=> (a.expectedTime||'').localeCompare(b.expectedTime||''));
-    const joBody = todaysJo.length===0
-      ? '<div class="greet-jo-compact-empty">No job order scheduled for today.</div>'
-      : todaysJo.map(t=>
-          '<div class="greet-jo-row" data-ticket-id="'+escapeHtml(t.id)+'">'+
-            '<div class="greet-jo-row-main">'+
-              '<span class="greet-jo-row-no">'+escapeHtml(t.jobOrderNo||t.id)+'</span>'+
-              '<span class="greet-jo-row-cust">'+escapeHtml(t.custName||'')+'</span>'+
-            '</div>'+
-            (t.expectedTime ? '<span class="greet-jo-row-time">'+escapeHtml(t.expectedTime)+'</span>' : '')+
-          '</div>'
-        ).join('');
-
     // Orientation note — tells the technician what to actually do next
-    // rather than leaving them to guess, and changes with their state so
-    // it stays useful instead of becoming wallpaper they stop reading.
-    const note = todaysJo.length===0
-      ? '<p class="greet-note">Nothing scheduled today. Use <b>Job Orders</b> below to see upcoming work, or <b>Finance</b> for DTR, cash advance and leave.</p>'
-      : '<p class="greet-note">Tap a job order above to open it and <b>Acknowledge</b> it — that unlocks its Service Report. When the work is done, file the report, then <b>Close Job Order</b>.</p>';
+    // rather than leaving them to guess.
+    const note = '<p class="greet-note">Use <b>Job Orders</b> below to see your assigned work — open one and <b>Acknowledge</b> it to unlock its Service Report. When the work is done, file the report, then <b>Close Job Order</b>.</p>';
 
     $('homeGreetingText').innerHTML =
       '<div class="greet-compact">'+
@@ -12348,11 +12324,6 @@
           '<span class="greet-datetime">'+dateStr+' · '+timeStr+'</span>'+
         '</div>'+
         attendLine+
-        reminder+
-        '<div class="greet-jo-compact">'+
-          '<div class="greet-jo-compact-title">Today\'s Job Order'+(todaysJo.length>1?'s':'')+'</div>'+
-          joBody+
-        '</div>'+
         note+
       '</div>';
   }
@@ -12448,6 +12419,8 @@
     const dotsEl = $('homeTechOverviewDots');
     if(!track || !dotsEl) return;
     const slides = track.querySelectorAll('.overview-stat');
+    const prevBtn = $('homeTechOverviewPrev');
+    const nextBtn = $('homeTechOverviewNext');
     dotsEl.innerHTML = '';
     slides.forEach((_, i)=>{
       const dot = document.createElement('button');
@@ -12457,16 +12430,30 @@
       dot.addEventListener('click', ()=> track.scrollTo({left: i*track.clientWidth, behavior:'smooth'}));
       dotsEl.appendChild(dot);
     });
-    if(techCarouselWired) return; // scroll listener only needs binding once — the track element itself never gets recreated
+    // Current slide index, derived from scroll position rather than
+    // tracked separately — so it stays correct no matter which of the
+    // three inputs (swipe, dot, arrow) actually moved the track.
+    const currentIndex = ()=> track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : 0;
+    function syncControls(){
+      const active = currentIndex();
+      $$('.overview-dot', dotsEl).forEach((d,i)=> d.classList.toggle('active', i===active));
+      if(prevBtn) prevBtn.disabled = active <= 0;
+      if(nextBtn) nextBtn.disabled = active >= slides.length-1;
+    }
+    syncControls();
+    if(techCarouselWired) return; // listeners only need binding once — these elements are never recreated
     techCarouselWired = true;
+    if(prevBtn) prevBtn.addEventListener('click', ()=>{
+      track.scrollTo({left: Math.max(0, currentIndex()-1)*track.clientWidth, behavior:'smooth'});
+    });
+    if(nextBtn) nextBtn.addEventListener('click', ()=>{
+      const last = track.querySelectorAll('.overview-stat').length - 1;
+      track.scrollTo({left: Math.min(last, currentIndex()+1)*track.clientWidth, behavior:'smooth'});
+    });
     let scrollRaf = null;
     track.addEventListener('scroll', ()=>{
       if(scrollRaf) return;
-      scrollRaf = requestAnimationFrame(()=>{
-        scrollRaf = null;
-        const active = track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : 0;
-        $$('.overview-dot', dotsEl).forEach((d,i)=> d.classList.toggle('active', i===active));
-      });
+      scrollRaf = requestAnimationFrame(()=>{ scrollRaf = null; syncControls(); });
     });
   }
 
@@ -13084,12 +13071,7 @@
   $('homeGreetingText').addEventListener('click', function(e){
     // Attendance strip → the DTR screen, where Time In/Out is actually
     // recorded (the values shown in the strip are display-only).
-    if(e.target.closest('.greet-attend-line')){ showDtrView(); return; }
-    const item = e.target.closest('.greet-jo-row');
-    if(!item) return;
-    const ticketId = item.getAttribute('data-ticket-id');
-    if(!ticketId) return;
-    showDispatchView().then(()=> dtHighlightTechCard(ticketId));
+    if(e.target.closest('.greet-attend-line')) showDtrView();
   });
 
   // ---------- Technician Quick Actions (single card, 4 tiles — replaces
@@ -13136,7 +13118,6 @@
   $('techMoreSheet').addEventListener('click', (e)=>{ if(e.target.id==='techMoreSheet') techCloseMoreSheet(); });
   $('techMoreMessages').addEventListener('click', ()=>{ techCloseMoreSheet(); showMessagesView(); });  $('techMoreDocuments').addEventListener('click', ()=>{ techCloseMoreSheet(); showDocumentsView(); });
   $('techMoreSettings').addEventListener('click', ()=>{ techCloseMoreSheet(); showChangePasswordScreen(false); });
-  $('techMoreLogout').addEventListener('click', ()=>{ techCloseMoreSheet(); doLogout(); });
 
   // ---------- Technician profile (More > Profile) ----------
   // Renders from currentUser plus a fresh profiles-row read and the auth
@@ -13159,7 +13140,6 @@
     setTxt('techMyProfileUsername', currentUser.username);
     // Reset the async fields so a previous open's values never linger
     // while this render is still in flight.
-    setTxt('techMyProfileEmail', '—');
     setTxt('techMyProfileStatus', '—');
     setTxt('techMyProfileTimeIn', '—');
     setTxt('techMyProfileTimeOut', '—');
@@ -13174,12 +13154,6 @@
       setTxt('techMyProfileUsername', prof.username || currentUser.username);
       setTxt('techMyProfileStatus', prof.active===false ? 'Inactive' : 'Active');
     }
-    try{
-      if(db){
-        const { data } = await db.auth.getUser();
-        if(data && data.user && data.user.email) setTxt('techMyProfileEmail', data.user.email);
-      }
-    }catch(e){}
     setTxt('techMyProfileTimeIn', fmtT(todayDtr && todayDtr.timeIn));
     setTxt('techMyProfileTimeOut', fmtT(todayDtr && todayDtr.timeOut));
     const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled'].includes(dtEffectiveStatus(t))).length;
@@ -13189,6 +13163,7 @@
   $('closeTechMyProfileSheet').addEventListener('click', techCloseProfileSheet);
   $('techMyProfileSheet').addEventListener('click', (e)=>{ if(e.target.id==='techMyProfileSheet') techCloseProfileSheet(); });
   $('techMyProfileChangePwBtn').addEventListener('click', ()=>{ techCloseProfileSheet(); showChangePasswordScreen(false); });
+  $('techMyProfileLogoutBtn').addEventListener('click', ()=>{ techCloseProfileSheet(); doLogout(); });
 
   // ---------- Technician bottom nav (#techNav) — replaces the sidebar for
   // this role only (admin keeps .admin-sidebar unchanged). Same .cp-nav/

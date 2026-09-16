@@ -338,6 +338,19 @@
   .overview-carousel::-webkit-scrollbar{ display:none; }
   .overview-carousel .overview-stat{ flex:0 0 100%; scroll-snap-align:start; margin:0 2px; }
   .overview-dots{ display:flex; justify-content:center; gap:6px; margin-top:10px; }
+  /* Prev/next controls — the swipe gesture covers touch devices, but a
+     desktop mouse has no equivalent, so these give it an explicit way to
+     step through the slides. Dots sit centered between them. */
+  .overview-controls{ display:flex; align-items:center; justify-content:center; gap:10px; margin-top:8px; }
+  .overview-controls .overview-dots{ margin-top:0; }
+  .overview-arrow{
+    width:28px; height:28px; border-radius:50%; flex-shrink:0; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:none; border:1px solid var(--border); color:var(--text-muted); cursor:pointer;
+  }
+  .overview-arrow svg{ width:15px; height:15px; }
+  .overview-arrow:hover:not(:disabled){ border-color:var(--green); color:var(--green-dark); }
+  .overview-arrow:disabled{ opacity:.35; cursor:default; }
   .overview-dot{ width:6px; height:6px; border-radius:50%; background:var(--border); border:none; padding:0; cursor:pointer; transition:width .15s, border-radius .15s; }
   .overview-dot.active{ background:var(--green-dark); width:16px; border-radius:3px; }
   .overview-stat{
@@ -665,23 +678,10 @@
   .greet-attend-line b{ color:var(--green-dark); font-weight:700; font-size:14px; margin-left:3px; }
   .greet-attend-line b.greet-missing{ color:var(--amber); }
   .greet-attend-go{ margin-left:auto; font-size:12px; font-weight:700; color:var(--teal); }
-  .greet-reminder-compact{
-    font-size:12.5px; font-weight:600; color:#8A6716; background:#FBF0DC;
-    border:1px solid #F0DBA8; border-radius:9px; padding:8px 11px;
-  }
   /* Orientation note — plain text, no fill, so it reads as guidance rather
-     than another alert competing with the reminder above. */
+     than another alert competing for attention. */
   .greet-note{ font-size:12px; color:var(--text-muted); line-height:1.5; margin:0; }
   .greet-note b{ color:var(--text); font-weight:700; }
-  .greet-jo-compact{ border-top:1px solid var(--border); padding-top:10px; }
-  .greet-jo-compact-title{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted); margin-bottom:7px; }
-  .greet-jo-compact-empty{ font-size:13px; color:var(--text-muted); font-style:italic; }
-  .greet-jo-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; cursor:pointer; }
-  .greet-jo-row + .greet-jo-row{ border-top:1px dashed var(--border); }
-  .greet-jo-row-main{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-  .greet-jo-row-no{ font-weight:700; font-size:13.5px; color:var(--text); }
-  .greet-jo-row-cust{ font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .greet-jo-row-time{ font-size:12px; color:var(--text-muted); flex-shrink:0; }
   .dtr-loc-tag{
     font-size:11px; color:var(--green-dark); background:none; border:none; padding:0; margin-top:2px;
     display:block; text-align:left; text-decoration:underline; cursor:pointer; font-family:inherit;
@@ -2272,3 +2272,15 @@ body.role-tech .overview-dots{ margin-top:8px; }
 .tech-profile-ident{ min-width:0; }
 .tech-profile-name{ font-size:16px; font-weight:700; color:var(--text); }
 .tech-profile-role{ font-size:12.5px; color:var(--text-muted); margin-top:2px; }
+
+/* ---------- Technician-only: re-enable pull-to-refresh ----------
+   html/body carry overscroll-behavior:none app-wide (see its comment near
+   the top of this file) to kill the "screen moves a little" bounce. That
+   also kills the browser's pull-down-to-refresh gesture, which technicians
+   in the field do want. Re-enabled here on the Y axis ONLY, for this role
+   only — X stays contained, so the sideways-drift fix that rule was
+   originally written for is untouched, as is admin/customer. The class is
+   mirrored onto <html> by applyUserRestrictions() in auth.js because this
+   rule has to target the html element itself. */
+html.role-tech-root{ overscroll-behavior-x:none; overscroll-behavior-y:auto; }
+html.role-tech-root body{ overscroll-behavior-x:none; overscroll-behavior-y:auto; }

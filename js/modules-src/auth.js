@@ -380,6 +380,11 @@
     document.body.classList.toggle('role-admin', isAdmin);
     document.body.classList.toggle('role-tech', isTech);
     document.body.classList.toggle('role-customer', isCustomer);
+    // Mirrored onto <html> because the overscroll-behavior rule that
+    // disables pull-to-refresh sits on the html element itself, which a
+    // body.role-tech selector can't reach. See the role-tech-root rules
+    // in app.css.
+    document.documentElement.classList.toggle('role-tech-root', isTech);
     // Technician bottom nav (#techNav) replaces the sidebar for this role
     // only — see the role-tech CSS overrides at the end of app.css and
     // techSetNavActive()/the techNav*/techFh*/techMore* handlers in
