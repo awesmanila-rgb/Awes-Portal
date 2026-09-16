@@ -34,6 +34,21 @@
     // watcher left running past a role change should never write as someone
     // it no longer is.
     if(!currentUser || currentUser.role !== 'tech') return;
+    // technician_location_history's RLS check is `technician_id =
+    // auth.uid()`, so the point must be stamped with the LIVE session's
+    // uid — not currentUser.id, which is restored from localStorage and
+    // can outlive the session. When there's no session (expired refresh
+    // token, signed out elsewhere), the row can never pass that check, so
+    // queuing it would just retry forever: every point failing 42501,
+    // filling the pending-sync queue and burying genuinely recoverable
+    // failures like an unsent service report. Stop broadcasting instead,
+    // and let the next successful sign-in start it again.
+    const authUid = typeof cloudAuthUid === 'function' ? await cloudAuthUid() : currentUser.id;
+    if(!authUid){
+      console.warn('tracker: no active auth session — stopping location broadcast until next sign-in');
+      trackerStopBroadcasting();
+      return;
+    }
     const now = Date.now();
     const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     const moved = trackerHaversineMeters(trackerLastSentPos, here);
@@ -42,7 +57,7 @@
     trackerLastSentPos = here;
 
     const point = {
-      technician_id: currentUser.id,
+      technician_id: authUid,
       lat: here.lat, lng: here.lng,
       accuracy: pos.coords.accuracy != null ? pos.coords.accuracy : null,
       heading: (pos.coords.heading == null || isNaN(pos.coords.heading)) ? null : pos.coords.heading,

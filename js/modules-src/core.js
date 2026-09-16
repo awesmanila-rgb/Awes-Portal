@@ -271,6 +271,21 @@
     try{ return JSON.stringify(e); }catch(_){ return String(e); }
   }
 
+  // The signed-in user id according to the LIVE Supabase session, or null.
+  // Deliberately distinct from currentUser.id: currentUser is restored from
+  // localStorage on app start and can easily outlive the auth session
+  // (expired refresh token, cleared storage, signed out in another tab).
+  // Any write governed by an `auth.uid()` RLS check must be validated
+  // against this, not against currentUser — otherwise the row is rejected
+  // with 42501 and, for a queued write, retried forever.
+  async function cloudAuthUid(){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data } = await db.auth.getSession();
+      return (data && data.session && data.session.user) ? data.session.user.id : null;
+    }catch(e){ return null; }
+  }
+
   // ---- Generic settings key-value store (table: app_settings) ----
   // Used for things like field-lists dropdowns and EmailJS config.
   // NOTE: admin password is no longer stored here — see loginAdmin/changeAdminPassword,
@@ -713,6 +728,20 @@
         catch(e){ errMsg = describeCloudError(e); console.error('outbox replay failed', item.kind, item.id, errMsg); syncLogRecord(item.kind, item.id, errMsg); }
         if(ok){
           sent++;
+          try{ await window.storage.delete(item.storageKey); }catch(e){}
+        }else if(item.kind==='geo' && /42501|row-level security/i.test(errMsg||'')){
+          // An RLS rejection is deterministic: this exact row will be
+          // refused on every future retry too, so keeping it queued just
+          // grows the queue forever and buries genuinely recoverable
+          // failures behind hundreds of location points. Location data is
+          // also self-superseding — the next successful point replaces
+          // what this one would have said. The reason is already in the
+          // persistent sync log, so the problem stays visible.
+          //
+          // ONLY 'geo'. A report, DTR entry, leave request or cash advance
+          // is the user's actual work and is never auto-discarded, however
+          // it failed.
+          console.warn('outbox: discarding permanently-rejected location point', item.id, errMsg);
           try{ await window.storage.delete(item.storageKey); }catch(e){}
         }else{
           left++;

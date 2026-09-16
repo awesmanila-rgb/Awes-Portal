@@ -273,6 +273,21 @@
     try{ return JSON.stringify(e); }catch(_){ return String(e); }
   }
 
+  // The signed-in user id according to the LIVE Supabase session, or null.
+  // Deliberately distinct from currentUser.id: currentUser is restored from
+  // localStorage on app start and can easily outlive the auth session
+  // (expired refresh token, cleared storage, signed out in another tab).
+  // Any write governed by an `auth.uid()` RLS check must be validated
+  // against this, not against currentUser — otherwise the row is rejected
+  // with 42501 and, for a queued write, retried forever.
+  async function cloudAuthUid(){
+    if(!(await ensureCloud())) return null;
+    try{
+      const { data } = await db.auth.getSession();
+      return (data && data.session && data.session.user) ? data.session.user.id : null;
+    }catch(e){ return null; }
+  }
+
   // ---- Generic settings key-value store (table: app_settings) ----
   // Used for things like field-lists dropdowns and EmailJS config.
   // NOTE: admin password is no longer stored here — see loginAdmin/changeAdminPassword,
@@ -715,6 +730,20 @@
         catch(e){ errMsg = describeCloudError(e); console.error('outbox replay failed', item.kind, item.id, errMsg); syncLogRecord(item.kind, item.id, errMsg); }
         if(ok){
           sent++;
+          try{ await window.storage.delete(item.storageKey); }catch(e){}
+        }else if(item.kind==='geo' && /42501|row-level security/i.test(errMsg||'')){
+          // An RLS rejection is deterministic: this exact row will be
+          // refused on every future retry too, so keeping it queued just
+          // grows the queue forever and buries genuinely recoverable
+          // failures behind hundreds of location points. Location data is
+          // also self-superseding — the next successful point replaces
+          // what this one would have said. The reason is already in the
+          // persistent sync log, so the problem stays visible.
+          //
+          // ONLY 'geo'. A report, DTR entry, leave request or cash advance
+          // is the user's actual work and is never auto-discarded, however
+          // it failed.
+          console.warn('outbox: discarding permanently-rejected location point', item.id, errMsg);
           try{ await window.storage.delete(item.storageKey); }catch(e){}
         }else{
           left++;
@@ -13559,6 +13588,21 @@
     // watcher left running past a role change should never write as someone
     // it no longer is.
     if(!currentUser || currentUser.role !== 'tech') return;
+    // technician_location_history's RLS check is `technician_id =
+    // auth.uid()`, so the point must be stamped with the LIVE session's
+    // uid — not currentUser.id, which is restored from localStorage and
+    // can outlive the session. When there's no session (expired refresh
+    // token, signed out elsewhere), the row can never pass that check, so
+    // queuing it would just retry forever: every point failing 42501,
+    // filling the pending-sync queue and burying genuinely recoverable
+    // failures like an unsent service report. Stop broadcasting instead,
+    // and let the next successful sign-in start it again.
+    const authUid = typeof cloudAuthUid === 'function' ? await cloudAuthUid() : currentUser.id;
+    if(!authUid){
+      console.warn('tracker: no active auth session — stopping location broadcast until next sign-in');
+      trackerStopBroadcasting();
+      return;
+    }
     const now = Date.now();
     const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     const moved = trackerHaversineMeters(trackerLastSentPos, here);
@@ -13567,7 +13611,7 @@
     trackerLastSentPos = here;
 
     const point = {
-      technician_id: currentUser.id,
+      technician_id: authUid,
       lat: here.lat, lng: here.lng,
       accuracy: pos.coords.accuracy != null ? pos.coords.accuracy : null,
       heading: (pos.coords.heading == null || isNaN(pos.coords.heading)) ? null : pos.coords.heading,

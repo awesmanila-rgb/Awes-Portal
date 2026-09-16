@@ -1,3 +1,27 @@
+// Bumped to v73 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — fixes the runaway pending-sync queue
+// of Location Points failing with 42501 (row-level security violation on
+// technician_location_history).
+//
+// That table's INSERT policy is `technician_id = auth.uid()`. The point was
+// stamped with currentUser.id, which is restored from localStorage on app
+// start and can outlive the auth session it came from — and the outbox is
+// device-wide, not per-user, so a point queued by one account could also
+// be replayed under another. Either way auth.uid() no longer matches the
+// stamped id, the row is refused, and since an RLS rejection is
+// deterministic it was then retried forever.
+//
+//   - New cloudAuthUid() (core.js) reads the LIVE session's user id.
+//   - trackerPushLocation stamps points with that instead of
+//     currentUser.id, and when there is no session it stops broadcasting
+//     rather than queuing rows that can never pass the check.
+//   - outboxFlush auto-discards a 'geo' item rejected with 42501: the
+//     same row will be refused on every retry, and location data is
+//     self-superseding. The reason is still written to the persistent sync
+//     log, so the problem stays visible. ONLY 'geo' — a report, DTR entry,
+//     leave request or cash advance is the user's actual work and is never
+//     auto-discarded, however it failed.
+//
 // Bumped to v72 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js again — a dispatch ticket admin creates
 // DIRECTLY (preventive maintenance, a phone-in job) never appeared on the
@@ -448,7 +472,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v72';
+const CACHE_NAME = 'awes-sr-v73';
 
 // Split into two lists on purpose.
 //
