@@ -669,15 +669,19 @@
      whole strip is a link into the DTR screen; the clock icon marks it as
      tappable. The VALUES themselves stay display-only. */
   .greet-attend-line{
-    display:flex; align-items:center; flex-wrap:wrap; gap:16px; width:100%; text-align:left;
+    display:flex; align-items:center; flex-wrap:wrap; gap:8px 18px; width:100%; text-align:left;
     background:none; border:1px solid var(--border); border-radius:10px; padding:11px 13px;
     font-size:13px; color:var(--text-muted); cursor:pointer; font-family:inherit;
   }
   .greet-attend-line:active{ background:var(--green-light); }
   .greet-attend-clock{ width:17px; height:17px; color:var(--green-dark); flex-shrink:0; }
-  .greet-attend-line b{ color:var(--green-dark); font-weight:700; font-size:14px; margin-left:3px; }
+  /* Each label+value is its own aligned unit — relying on whitespace
+     between the text nodes left the values sitting unevenly against their
+     labels, especially once one side read "—" and the other a full time. */
+  .greet-attend-item{ display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap; }
+  .greet-attend-line b{ color:var(--green-dark); font-weight:700; font-size:14px; font-variant-numeric:tabular-nums; }
   .greet-attend-line b.greet-missing{ color:var(--amber); }
-  .greet-attend-go{ margin-left:auto; font-size:12px; font-weight:700; color:var(--teal); }
+  .greet-attend-go{ margin-left:auto; font-size:12px; font-weight:700; color:var(--teal); white-space:nowrap; }
   /* Orientation note — plain text, no fill, so it reads as guidance rather
      than another alert competing for attention. */
   .greet-note{ font-size:12px; color:var(--text-muted); line-height:1.5; margin:0; }

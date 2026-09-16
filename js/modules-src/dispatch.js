@@ -151,7 +151,7 @@
     // report — see dtCloseTicket). Once closed, the Job Order is finalized,
     // so it shouldn't keep showing up here as something still needing a
     // report to be filed against it.
-    const openOnes = mine.filter(r=> dtEffectiveStatus(r)!=='closed' && (r.equipmentList||[]).some(it=> !it.reportSrNo));
+    const openOnes = mine.filter(r=> !dtIsTerminal(r) && (r.equipmentList||[]).some(it=> !it.reportSrNo));
     if(openOnes.length===0){
       list.innerHTML = '<div class="empty-state">No Job Order tickets with equipment still needing a report.</div>';
       return;
@@ -1013,6 +1013,17 @@
   // status. If the date field is edited or the ticket already reached
   // completed/closed, this stops applying on its own — no cleanup needed.
   function dtIsPastDue(r){ return !!r.date && r.date < todayISO(); }
+  // Expiry is TERMINAL, exactly like closed/cancelled: a job order whose
+  // scheduled date passed without being acknowledged means the visit never
+  // happened, and there's no attendance record for that day to back it up.
+  // Letting it be acknowledged or reported on afterwards would be recording
+  // a site visit that didn't occur, so every action is blocked and admin
+  // raises a fresh job order instead. dtIsTerminal is the single check the
+  // list filters, action buttons and report picker all share.
+  function dtIsTerminal(r){
+    return ['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(r));
+  }
+  function dtIsExpired(r){ return dtEffectiveStatus(r)==='expired'; }
   function dtEffectiveStatus(r){
     if(r.status==='completed' || r.status==='closed' || r.status==='cancelled') return r.status;
     if(dtIsPastDue(r)) return 'expired';
@@ -1202,16 +1213,22 @@
       return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);"><b>Cancelled</b>'+
         (r.cancelReason ? (' — '+escapeHtml(r.cancelReason)) : '')+'</div></div>';
     }
+    if(dtIsExpired(r)){
+      return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);">'+
+        '<b>Expired — closed automatically</b><br>The scheduled date passed without this being acknowledged, so it can no longer be acknowledged or reported on. Ask your admin to issue a new job order.</div></div>';
+    }
     const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
+    const enRoute = (r.enRouteBy||[]).includes(currentUser.id);
     const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
     const completed = r.status==='completed';
     const closed = r.status==='closed';
     const waitingOnOthers = doneBySelf && !completed;
     let stage = 0;
-    if(closed) stage = 3;
-    else if(completed) stage = 2;
-    else if(ack) stage = 1;
-    const steps = ['Open','Acknowledged','Completed','Closed'];
+    if(closed) stage = 4;
+    else if(completed) stage = 3;
+    else if(ack) stage = 2;
+    else if(enRoute) stage = 1;
+    const steps = ['Open','En Route','Acknowledged','Completed','Closed'];
     const stepsHtml = steps.map((label,i)=>{
       const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
       return '<div class="jo-step '+state+'">'+
@@ -1225,11 +1242,9 @@
     else if(completed) nextText = 'File the Service Report for this ticket, then open it below and run Close Job Order.';
     else if(waitingOnOthers) nextText = 'Recorded — waiting for the other assigned technician(s) to mark it completed.';
     else if(ack) nextText = 'You are on site. Tap Mark Completed once your visit here is done — that just closes out the fieldwork step, not that everything went perfectly; Close Job Order still lets you flag anything that wasn\'t finished.';
-    else nextText = 'New assignment. Tap Acknowledge to accept this job order.';
-    const expiredWarn = dtEffectiveStatus(r)==='expired'
-      ? '<div class="jo-stepper-warn">'+icon('alert')+' Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
-      : '';
-    return '<div class="jo-stepper">'+expiredWarn+
+    else if(enRoute) nextText = 'The customer has been told you\'re on the way. Tap Acknowledge when you arrive on site — that also unlocks this ticket\'s Service Report.';
+    else nextText = 'New assignment. Tap Acknowledge to accept this job order, or On My Way to let the customer know you\'re heading over.';
+    return '<div class="jo-stepper">'+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
       '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
     '</div>';
@@ -1372,9 +1387,9 @@
     // is what's useful once a ticket is done — dtSortTechTickets's own
     // ascending date tie-break is aimed at the Active tab's upcoming work.
     const items = dtTechListTab==='closed'
-      ? sorted.filter(r=> r.status==='closed' || r.status==='cancelled').sort((a,b)=>
+      ? sorted.filter(r=> dtIsTerminal(r) && dtEffectiveStatus(r)!=='completed').sort((a,b)=>
           (b.closedAt||b.cancelledAt||b.date||'').localeCompare(a.closedAt||a.cancelledAt||a.date||''))
-      : sorted.filter(r=> r.status!=='closed' && r.status!=='cancelled');
+      : sorted.filter(r=> !dtIsTerminal(r) || dtEffectiveStatus(r)==='completed');
     dtLastTicketsById = {};
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
@@ -1394,12 +1409,15 @@
       // and one person's Complete closed it for everyone.
       const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
       const alreadyDone = r.status==='completed' || (r.completedBy||[]).includes(currentUser.id);
+      // An expired/cancelled/closed ticket takes no actions at all — see
+      // dtIsTerminal. Offering buttons here would only produce a refusal.
+      const locked = dtIsTerminal(r) && r.status!=='completed';
       card.innerHTML = dtCardHtml(r, false, dtStepperHtml(r)) +
         '<div class="user-card-actions">'+
-          (!alreadyAck && !alreadyDone ? '<button data-act="enroute" class="secondary">On My Way</button>' : '')+
-          (!alreadyAck && !alreadyDone ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
-          (alreadyAck && !alreadyDone ? '<button data-act="complete" class="primary">Mark Completed</button>' : '')+
-          (alreadyDone && r.status!=='completed' ? '<span class="u-status">Waiting for the other assigned technician(s)</span>' : '')+
+          (!locked && !alreadyAck && !alreadyDone ? '<button data-act="enroute" class="secondary">On My Way</button>' : '')+
+          (!locked && !alreadyAck && !alreadyDone ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
+          (!locked && alreadyAck && !alreadyDone ? '<button data-act="complete" class="primary">Mark Completed</button>' : '')+
+          (!locked && alreadyDone && r.status!=='completed' ? '<span class="u-status">Waiting for the other assigned technician(s)</span>' : '')+
         '</div>';
       const enRouteBtn = card.querySelector('[data-act="enroute"]');
       if(enRouteBtn) enRouteBtn.addEventListener('click', ()=> dtMarkEnRoute(r.id, enRouteBtn));
@@ -1493,24 +1511,36 @@
       return false;
     }
   }
-  // "On My Way" — a lightweight, optional signal a technician can send
-  // before acknowledging, purely so the customer's home screen shows a
-  // real "en route" state instead of jumping straight from "assigned" to
-  // "in progress". Deliberately does NOT touch the ticket itself (no
-  // acknowledgedBy change, no status change) — only the linked
-  // service_request, via srMarkEnRouteByTicket's RPC. Safe to tap more
-  // than once; the RPC just no-ops if the request has already moved past
-  // 'dispatched'.
+  // "On My Way" — an optional signal a technician sends before
+  // acknowledging. Records enRouteBy on the ticket (so the technician's OWN
+  // step tracker advances to En Route — it previously only ever touched the
+  // linked service_request, so tapping this changed nothing on their
+  // screen), AND syncs the customer's request via srMarkEnRouteByTicket.
+  // Does NOT acknowledge or change ticket status. Safe to tap twice.
   async function dtMarkEnRoute(id, btn){
-    if(typeof srMarkEnRouteByTicket !== 'function') return;
     if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
-    const ok = await srMarkEnRouteByTicket(id);
+    await dtApplyWorkerChange(id, (rec)=>{
+      const set = new Set(rec.enRouteBy||[]);
+      if(set.has(currentUser.id)) return null; // already sent — nothing to write
+      set.add(currentUser.id);
+      return Object.assign({}, rec, {
+        enRouteBy: Array.from(set),
+        enRouteAt: rec.enRouteAt || new Date().toISOString()
+      });
+    });
+    const ok = typeof srMarkEnRouteByTicket === 'function' ? await srMarkEnRouteByTicket(id) : true;
     if(btn){ btn.disabled = false; btn.textContent = 'On My Way'; }
-    toast(ok ? "Customer notified you're on the way" : 'Could not send — check your connection');
+    toast(ok ? "Customer notified you're on the way" : 'Could not notify the customer — check your connection');
+    dtRenderTechList();
   }
   async function dtAcknowledge(id){
     let becameAcknowledged = false;
     const ok = await dtApplyWorkerChange(id, (rec, assigned)=>{
+      // Guarded here rather than only by hiding the button: a list that was
+      // rendered before midnight can still be on screen after the ticket
+      // expired, and tapping it then would record a visit that never
+      // happened.
+      if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return null; }
       const ackBy = new Set(rec.acknowledgedBy||[]);
       if(ackBy.has(currentUser.id)){ toast('You already acknowledged this'); return null; }
       ackBy.add(currentUser.id);

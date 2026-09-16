@@ -1,3 +1,49 @@
+// Bumped to v70 to force every installed device to drop its old cache and
+// re-fetch js/app.bundle.js again — cash-advance receipt images moved OUT
+// of the cash_advances JSONB row and into a private Storage bucket
+// ('liquidation-receipts'; see 20260916_01_liquidation_receipts_storage.sql,
+// which must be run before deploying this). Previously every receipt was a
+// base64 data URL embedded in the record, which made rows megabytes each
+// and forced hard size caps plus an attachment-stripping pass on every
+// list query. Now: uploaded on selection, resized to <=150KB first by the
+// shared compressImageForUpload(), row keeps only attachmentPath, viewing
+// resolves a short-lived signed URL. Applies to BOTH liquidation receipts
+// and reimbursement receipts. Image-only now — the resize path is
+// canvas-based, so a PDF couldn't be shrunk and would upload at full size.
+// Records submitted before this keep their inline base64 and still display:
+// the viewer reads whichever form an item has, and the old byte guards
+// remain only for drafts started the old way.
+//
+// Bumped to v69 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — technician
+// account fixes:
+//   - Phantom Job Order count: the open-ticket filter excluded only
+//     completed/closed, not cancelled or EXPIRED. dtEffectiveStatus()
+//     returns 'expired' for any past-dated unacknowledged ticket, so one
+//     stale ticket counted as open forever. Fixed in both the home
+//     Overview and the Profile sheet.
+//   - "On My Way" now records enRouteBy on the TICKET as well as syncing
+//     the customer's request, so the technician's own step tracker
+//     actually advances. Tracker is now Open -> En Route -> Acknowledged
+//     -> Completed -> Closed (was missing En Route entirely, so tapping
+//     the button changed nothing on the technician's screen).
+//   - Expiry is now TERMINAL, like closed/cancelled (new dtIsTerminal/
+//     dtIsExpired). An expired job order can't be acknowledged or have a
+//     report filed against it — there's no attendance record for that day,
+//     so acting on it would record a visit that never happened. It moves
+//     to the Closed tab, shows no action buttons, is blocked inside
+//     dtAcknowledge itself (not just by hiding the button, since a list
+//     rendered before midnight can still be on screen), and is excluded
+//     from the report job-order picker. "How Job Orders Work" rewritten to
+//     match, including the new En Route stage.
+//   - Admin dispatch list gained a Cancelled filter tab (cancelled
+//     tickets were previously only findable under All).
+//   - Greeting attendance row alignment: each label+value is its own
+//     baseline-aligned unit with tabular numerals, instead of relying on
+//     whitespace between text nodes.
+//   - Dollar-sign icon replaced with a banknote everywhere (11 in
+//     index.html plus the shared icon('cash') helper) — pesos, not dollars.
+//
 // Bumped to v68 to force every installed device to drop its old cache and
 // re-fetch js/app.bundle.js again — sync diagnosability. The outbox is NOT
 // only an offline queue: ensureCloud() only checks that the Supabase
@@ -360,7 +406,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v68';
+const CACHE_NAME = 'awes-sr-v70';
 
 // Split into two lists on purpose.
 //

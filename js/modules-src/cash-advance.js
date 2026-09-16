@@ -18,17 +18,55 @@
       : genUUIDv4Fallback();
   }
 
-  // Receipt images live inside the JSONB row as base64 data URLs. That keeps the
-  // app dependency-free but means a row can be megabytes, so cap it: an
-  // oversized row is rejected outright by Postgres/PostgREST and the old code
-  // just showed "could not submit" with no explanation.
-  const CA_ATTACHMENT_MAX_BYTES = 1_500_000; // ~1.5 MB per receipt, post-compression
-  const CA_RECORD_MAX_BYTES = 6_000_000;     // ~6 MB for the whole liquidation
+  // Receipt images live in the private 'liquidation-receipts' Storage
+  // bucket (see 20260916_01_liquidation_receipts_storage.sql), NOT inside
+  // the cash_advances JSONB row. The row keeps only attachmentPath.
+  // Every upload is resized to <=150KB first by compressImageForUpload
+  // (shared with equipment photos), so the old per-receipt and
+  // whole-record byte caps are gone along with the base64 payloads that
+  // made them necessary.
+  //
+  // Records submitted before this change still carry inline base64 in
+  // attachmentData. Nothing migrates them — the viewer below simply reads
+  // whichever of the two a given item has, so existing liquidations keep
+  // displaying instead of breaking.
+  const LIQ_RECEIPT_BUCKET = 'liquidation-receipts';
   function caAttachmentSize(dataUrl){
     if(!dataUrl) return 0;
     const comma = dataUrl.indexOf(',');
     const b64 = comma>=0 ? dataUrl.slice(comma+1) : dataUrl;
     return Math.floor(b64.length * 3 / 4);
+  }
+  // Uploads one receipt and returns its storage path, or null on failure.
+  async function caUploadReceipt(recordId, file){
+    if(!file || !currentUser || !(await ensureCloud())) return null;
+    let blob;
+    try{ blob = await compressImageForUpload(file); }
+    catch(e){ console.error('compress receipt failed', e); return null; }
+    if(!blob) return null;
+    const safeName = (file.name||'receipt.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+    // First segment must be the uploader's uid — the storage INSERT policy
+    // checks exactly that.
+    const path = currentUser.id+'/'+(recordId||'draft')+'/'+Date.now()+'-'+safeName;
+    try{
+      const { error } = await db.storage.from(LIQ_RECEIPT_BUCKET).upload(path, blob, {
+        contentType: 'image/jpeg', upsert: false
+      });
+      if(error) throw error;
+      return path;
+    }catch(e){ console.error('upload receipt failed', describeCloudError(e)); return null; }
+  }
+  async function caReceiptSignedUrl(path){
+    if(!path || !(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.storage.from(LIQ_RECEIPT_BUCKET).createSignedUrl(path, 3600);
+      if(error) throw error;
+      return data ? data.signedUrl : null;
+    }catch(e){ console.error('sign receipt url failed', describeCloudError(e)); return null; }
+  }
+  async function caRemoveReceipt(path){
+    if(!path || !(await ensureCloud())) return;
+    try{ await db.storage.from(LIQ_RECEIPT_BUCKET).remove([path]); }catch(e){}
   }
 
   async function caSaveRequest(id, data){
@@ -436,7 +474,7 @@
 
   // ================= Liquidation (technician side) =================
   let caLiqActiveRecord = null;   // the cash-advance record currently being liquidated
-  let caLiqItems = [];            // in-progress itemized list {id, type, description, amount, attachmentName, attachmentData, attachmentMime, transportRows}
+  let caLiqItems = [];            // in-progress itemized list {id, type, description, amount, attachmentName, attachmentPath, attachmentMime, transportRows}
   let caTransportRows = [];       // in-progress transportation sub-form rows
 
   function caLiqItemId(){ return 'li_'+Date.now()+'_'+Math.floor(Math.random()*10000); }
@@ -537,32 +575,33 @@
   $('closeLiqOthersModal').addEventListener('click', caLiqCloseOthersModal);
   $('liqOthersModal').addEventListener('click', (e)=>{ if(e.target.id==='liqOthersModal') caLiqCloseOthersModal(); });
 
-  let caLiqOthersAttachment = null; // {data, mime, name} for the item currently being built
+  let caLiqOthersAttachment = null; // {path, mime, name} for the item currently being built
   $('liqOthersAttachBtn').addEventListener('click', ()=> $('liqOthersFile').click());
   $('liqOthersFile').addEventListener('change', async ()=>{
     const file = $('liqOthersFile').files[0];
     if(!file) return;
+    // Image-only: the <=150KB resize path is canvas-based, so a PDF or doc
+    // can't be shrunk and would go up at full size — exactly the bloat this
+    // whole change is meant to end. Receipts are photographed in the field
+    // anyway.
+    if(!file.type.startsWith('image/')){
+      toast('Attach a photo of the receipt — other file types aren\'t supported');
+      return;
+    }
     try{
-      let dataUrl, mime;
-      if(file.type.startsWith('image/')){
-        dataUrl = await compressImageToDataURL(file, 1000, 0.6);
-        mime = 'image/jpeg';
-      }else{
-        dataUrl = await new Promise((resolve, reject)=>{
-          const r = new FileReader();
-          r.onload = ()=> resolve(r.result);
-          r.onerror = ()=> reject(new Error('read failed'));
-          r.readAsDataURL(file);
-        });
-        mime = file.type || 'application/octet-stream';
-      }
-      if(caAttachmentSize(dataUrl) > CA_ATTACHMENT_MAX_BYTES){
-        toast('That file is too large — take a photo instead of attaching a full-size file');
+      $('liqOthersFileStatus').innerHTML = icon('file')+' Uploading…';
+      const path = await caUploadReceipt(caLiqActiveRecord && caLiqActiveRecord.id, file);
+      if(!path){
+        $('liqOthersFileStatus').textContent = '';
+        toast('Could not upload that receipt — check your connection and try again');
         return;
       }
-      caLiqOthersAttachment = {data: dataUrl, mime, name: file.name};
+      caLiqOthersAttachment = {path, mime: 'image/jpeg', name: file.name};
       $('liqOthersFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
-    }catch(e){ toast('Could not attach that file'); }
+    }catch(e){
+      $('liqOthersFileStatus').textContent = '';
+      toast('Could not attach that file');
+    }
   });
   $('liqOthersAddItemBtn').addEventListener('click', ()=>{
     const date = $('liqOthersDate').value;
@@ -578,7 +617,7 @@
     caLiqItems.push({
       id: newItemId, type:'item', date, description, qty, amount,
       attachmentName: caLiqOthersAttachment.name,
-      attachmentData: caLiqOthersAttachment.data,
+      attachmentPath: caLiqOthersAttachment.path,
       attachmentMime: caLiqOthersAttachment.mime
     });
     caLiqCloseOthersModal();
@@ -910,6 +949,21 @@
     }else{
       $('liqAttachmentTitle').textContent = item.description || 'Attachment';
       $('liqAttachmentTransportWrap').style.display = 'none';
+      // New receipts live in Storage and carry only a path — resolve it to
+      // a short-lived signed URL. Legacy records (submitted before the
+      // move to Storage) still carry inline base64 in attachmentData and
+      // are handled by the branches below, so old liquidations keep
+      // displaying rather than breaking.
+      if(item.attachmentPath){
+        $('liqAttachmentImageWrap').style.display = '';
+        $('liqAttachmentImg').removeAttribute('src');
+        $('liqAttachmentOverlay').classList.add('open');
+        caReceiptSignedUrl(item.attachmentPath).then(url=>{
+          if(url) $('liqAttachmentImg').src = url;
+          else toast('Could not load that receipt');
+        });
+        return;
+      }
       if(!item.attachmentData){
         // List views deliberately fetch records without receipt payloads.
         $('liqAttachmentImageWrap').style.display = 'none';
@@ -1218,19 +1272,16 @@
       if(!item.amount || item.amount<=0){ toast('Every item needs a valid amount'); return; }
       if(!item.attachmentData){ toast('Attach a file for every item — "'+item.description+'" is missing one'); return; }
     }
-    // Reject oversized receipts up front, with a message that says what to do,
-    // instead of letting the whole submission fail opaquely at the database.
-    let totalBytes = 0;
-    for(const item of caLiqItems){
-      const size = caAttachmentSize(item.attachmentData);
-      if(size > CA_ATTACHMENT_MAX_BYTES){
-        toast('"'+(item.description||'An item')+'" attachment is too large — retake the photo or use a smaller file');
-        return;
-      }
-      totalBytes += size;
-    }
-    if(totalBytes > CA_RECORD_MAX_BYTES){
-      toast('These receipts total too much data — remove or retake a few and submit again');
+    // Receipts now live in Storage and the row carries only paths, so the
+    // old per-receipt and whole-record byte caps no longer apply. A draft
+    // started before that change can still hold inline base64, so those
+    // are still guarded — otherwise the submission would fail opaquely at
+    // the database.
+    const LEGACY_INLINE_MAX = 6_000_000;
+    let legacyBytes = 0;
+    for(const item of caLiqItems) legacyBytes += caAttachmentSize(item.attachmentData);
+    if(legacyBytes > LEGACY_INLINE_MAX){
+      toast('This draft has large receipts attached the old way — remove and re-attach them, then submit again');
       return;
     }
     const totalAmount = caLiqComputeTotals().total;
@@ -1758,27 +1809,26 @@
   $('caReimbFile').addEventListener('change', async ()=>{
     const file = $('caReimbFile').files[0];
     if(!file) return;
+    // Same Storage path as liquidation receipts above — image-only, resized
+    // to <=150KB, row keeps only attachmentPath.
+    if(!file.type.startsWith('image/')){
+      toast('Attach a photo of the receipt — other file types aren\'t supported');
+      return;
+    }
     try{
-      let dataUrl, mime;
-      if(file.type.startsWith('image/')){
-        dataUrl = await compressImageToDataURL(file, 1000, 0.6);
-        mime = 'image/jpeg';
-      }else{
-        dataUrl = await new Promise((resolve, reject)=>{
-          const r = new FileReader();
-          r.onload = ()=> resolve(r.result);
-          r.onerror = ()=> reject(new Error('read failed'));
-          r.readAsDataURL(file);
-        });
-        mime = file.type || 'application/octet-stream';
-      }
-      if(caAttachmentSize(dataUrl) > CA_ATTACHMENT_MAX_BYTES){
-        toast('That file is too large — take a photo instead of attaching a full-size file');
+      $('caReimbFileStatus').innerHTML = icon('file')+' Uploading…';
+      const path = await caUploadReceipt('reimbursement', file);
+      if(!path){
+        $('caReimbFileStatus').textContent = '';
+        toast('Could not upload that receipt — check your connection and try again');
         return;
       }
-      caReimbAttachment = {data: dataUrl, mime, name: file.name};
+      caReimbAttachment = {path, mime: 'image/jpeg', name: file.name};
       $('caReimbFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
-    }catch(e){ toast('Could not attach that file'); }
+    }catch(e){
+      $('caReimbFileStatus').textContent = '';
+      toast('Could not attach that file');
+    }
   });
   $('caReimbAddItemBtn').addEventListener('click', ()=>{
     const dateIncurred = $('caReimbDate').value;
@@ -1791,7 +1841,7 @@
     caReimbItems.push({
       id: caReimbItemId(), dateIncurred, description, amount,
       attachmentName: caReimbAttachment.name,
-      attachmentData: caReimbAttachment.data,
+      attachmentPath: caReimbAttachment.path,
       attachmentMime: caReimbAttachment.mime
     });
     caReimbAttachment = null;
@@ -1805,8 +1855,10 @@
 
   async function caReimbSubmit(){
     if(caReimbItems.length===0){ toast('Add at least one expense first'); return; }
+    // Receipts live in Storage now; only a draft started before that
+    // change can still carry inline base64 large enough to matter.
     const totalSize = caReimbItems.reduce((s,it)=> s+caAttachmentSize(it.attachmentData), 0);
-    if(totalSize > CA_RECORD_MAX_BYTES){ toast('These receipts total too much data — remove or retake a few and submit again'); return; }
+    if(totalSize > 6_000_000){ toast('This draft has large receipts attached the old way — remove and re-attach them, then submit again'); return; }
     if(!currentUser){ toast('Please sign in again'); return; }
     const id = caGenId(currentUser.id);
     const amount = caReimbItems.reduce((s,it)=> s+(Number(it.amount)||0), 0);

@@ -23,7 +23,7 @@
     chat:'<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
     folder:'<path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>',
     settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-    cash:'<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    cash:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/>',
     calculator:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/>',
     handshake:'<path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/>',
     archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
@@ -7088,7 +7088,7 @@
     // report — see dtCloseTicket). Once closed, the Job Order is finalized,
     // so it shouldn't keep showing up here as something still needing a
     // report to be filed against it.
-    const openOnes = mine.filter(r=> dtEffectiveStatus(r)!=='closed' && (r.equipmentList||[]).some(it=> !it.reportSrNo));
+    const openOnes = mine.filter(r=> !dtIsTerminal(r) && (r.equipmentList||[]).some(it=> !it.reportSrNo));
     if(openOnes.length===0){
       list.innerHTML = '<div class="empty-state">No Job Order tickets with equipment still needing a report.</div>';
       return;
@@ -7950,6 +7950,17 @@
   // status. If the date field is edited or the ticket already reached
   // completed/closed, this stops applying on its own — no cleanup needed.
   function dtIsPastDue(r){ return !!r.date && r.date < todayISO(); }
+  // Expiry is TERMINAL, exactly like closed/cancelled: a job order whose
+  // scheduled date passed without being acknowledged means the visit never
+  // happened, and there's no attendance record for that day to back it up.
+  // Letting it be acknowledged or reported on afterwards would be recording
+  // a site visit that didn't occur, so every action is blocked and admin
+  // raises a fresh job order instead. dtIsTerminal is the single check the
+  // list filters, action buttons and report picker all share.
+  function dtIsTerminal(r){
+    return ['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(r));
+  }
+  function dtIsExpired(r){ return dtEffectiveStatus(r)==='expired'; }
   function dtEffectiveStatus(r){
     if(r.status==='completed' || r.status==='closed' || r.status==='cancelled') return r.status;
     if(dtIsPastDue(r)) return 'expired';
@@ -8139,16 +8150,22 @@
       return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);"><b>Cancelled</b>'+
         (r.cancelReason ? (' — '+escapeHtml(r.cancelReason)) : '')+'</div></div>';
     }
+    if(dtIsExpired(r)){
+      return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);">'+
+        '<b>Expired — closed automatically</b><br>The scheduled date passed without this being acknowledged, so it can no longer be acknowledged or reported on. Ask your admin to issue a new job order.</div></div>';
+    }
     const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
+    const enRoute = (r.enRouteBy||[]).includes(currentUser.id);
     const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
     const completed = r.status==='completed';
     const closed = r.status==='closed';
     const waitingOnOthers = doneBySelf && !completed;
     let stage = 0;
-    if(closed) stage = 3;
-    else if(completed) stage = 2;
-    else if(ack) stage = 1;
-    const steps = ['Open','Acknowledged','Completed','Closed'];
+    if(closed) stage = 4;
+    else if(completed) stage = 3;
+    else if(ack) stage = 2;
+    else if(enRoute) stage = 1;
+    const steps = ['Open','En Route','Acknowledged','Completed','Closed'];
     const stepsHtml = steps.map((label,i)=>{
       const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
       return '<div class="jo-step '+state+'">'+
@@ -8162,11 +8179,9 @@
     else if(completed) nextText = 'File the Service Report for this ticket, then open it below and run Close Job Order.';
     else if(waitingOnOthers) nextText = 'Recorded — waiting for the other assigned technician(s) to mark it completed.';
     else if(ack) nextText = 'You are on site. Tap Mark Completed once your visit here is done — that just closes out the fieldwork step, not that everything went perfectly; Close Job Order still lets you flag anything that wasn\'t finished.';
-    else nextText = 'New assignment. Tap Acknowledge to accept this job order.';
-    const expiredWarn = dtEffectiveStatus(r)==='expired'
-      ? '<div class="jo-stepper-warn">'+icon('alert')+' Scheduled date already passed. You can still Acknowledge, Complete, or Close this — check with your dispatcher/admin if unsure.</div>'
-      : '';
-    return '<div class="jo-stepper">'+expiredWarn+
+    else if(enRoute) nextText = 'The customer has been told you\'re on the way. Tap Acknowledge when you arrive on site — that also unlocks this ticket\'s Service Report.';
+    else nextText = 'New assignment. Tap Acknowledge to accept this job order, or On My Way to let the customer know you\'re heading over.';
+    return '<div class="jo-stepper">'+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
       '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
     '</div>';
@@ -8309,9 +8324,9 @@
     // is what's useful once a ticket is done — dtSortTechTickets's own
     // ascending date tie-break is aimed at the Active tab's upcoming work.
     const items = dtTechListTab==='closed'
-      ? sorted.filter(r=> r.status==='closed' || r.status==='cancelled').sort((a,b)=>
+      ? sorted.filter(r=> dtIsTerminal(r) && dtEffectiveStatus(r)!=='completed').sort((a,b)=>
           (b.closedAt||b.cancelledAt||b.date||'').localeCompare(a.closedAt||a.cancelledAt||a.date||''))
-      : sorted.filter(r=> r.status!=='closed' && r.status!=='cancelled');
+      : sorted.filter(r=> !dtIsTerminal(r) || dtEffectiveStatus(r)==='completed');
     dtLastTicketsById = {};
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
@@ -8331,12 +8346,15 @@
       // and one person's Complete closed it for everyone.
       const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
       const alreadyDone = r.status==='completed' || (r.completedBy||[]).includes(currentUser.id);
+      // An expired/cancelled/closed ticket takes no actions at all — see
+      // dtIsTerminal. Offering buttons here would only produce a refusal.
+      const locked = dtIsTerminal(r) && r.status!=='completed';
       card.innerHTML = dtCardHtml(r, false, dtStepperHtml(r)) +
         '<div class="user-card-actions">'+
-          (!alreadyAck && !alreadyDone ? '<button data-act="enroute" class="secondary">On My Way</button>' : '')+
-          (!alreadyAck && !alreadyDone ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
-          (alreadyAck && !alreadyDone ? '<button data-act="complete" class="primary">Mark Completed</button>' : '')+
-          (alreadyDone && r.status!=='completed' ? '<span class="u-status">Waiting for the other assigned technician(s)</span>' : '')+
+          (!locked && !alreadyAck && !alreadyDone ? '<button data-act="enroute" class="secondary">On My Way</button>' : '')+
+          (!locked && !alreadyAck && !alreadyDone ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
+          (!locked && alreadyAck && !alreadyDone ? '<button data-act="complete" class="primary">Mark Completed</button>' : '')+
+          (!locked && alreadyDone && r.status!=='completed' ? '<span class="u-status">Waiting for the other assigned technician(s)</span>' : '')+
         '</div>';
       const enRouteBtn = card.querySelector('[data-act="enroute"]');
       if(enRouteBtn) enRouteBtn.addEventListener('click', ()=> dtMarkEnRoute(r.id, enRouteBtn));
@@ -8430,24 +8448,36 @@
       return false;
     }
   }
-  // "On My Way" — a lightweight, optional signal a technician can send
-  // before acknowledging, purely so the customer's home screen shows a
-  // real "en route" state instead of jumping straight from "assigned" to
-  // "in progress". Deliberately does NOT touch the ticket itself (no
-  // acknowledgedBy change, no status change) — only the linked
-  // service_request, via srMarkEnRouteByTicket's RPC. Safe to tap more
-  // than once; the RPC just no-ops if the request has already moved past
-  // 'dispatched'.
+  // "On My Way" — an optional signal a technician sends before
+  // acknowledging. Records enRouteBy on the ticket (so the technician's OWN
+  // step tracker advances to En Route — it previously only ever touched the
+  // linked service_request, so tapping this changed nothing on their
+  // screen), AND syncs the customer's request via srMarkEnRouteByTicket.
+  // Does NOT acknowledge or change ticket status. Safe to tap twice.
   async function dtMarkEnRoute(id, btn){
-    if(typeof srMarkEnRouteByTicket !== 'function') return;
     if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
-    const ok = await srMarkEnRouteByTicket(id);
+    await dtApplyWorkerChange(id, (rec)=>{
+      const set = new Set(rec.enRouteBy||[]);
+      if(set.has(currentUser.id)) return null; // already sent — nothing to write
+      set.add(currentUser.id);
+      return Object.assign({}, rec, {
+        enRouteBy: Array.from(set),
+        enRouteAt: rec.enRouteAt || new Date().toISOString()
+      });
+    });
+    const ok = typeof srMarkEnRouteByTicket === 'function' ? await srMarkEnRouteByTicket(id) : true;
     if(btn){ btn.disabled = false; btn.textContent = 'On My Way'; }
-    toast(ok ? "Customer notified you're on the way" : 'Could not send — check your connection');
+    toast(ok ? "Customer notified you're on the way" : 'Could not notify the customer — check your connection');
+    dtRenderTechList();
   }
   async function dtAcknowledge(id){
     let becameAcknowledged = false;
     const ok = await dtApplyWorkerChange(id, (rec, assigned)=>{
+      // Guarded here rather than only by hiding the button: a list that was
+      // rendered before midnight can still be on screen after the ticket
+      // expired, and tapping it then would record a visit that never
+      // happened.
+      if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return null; }
       const ackBy = new Set(rec.acknowledgedBy||[]);
       if(ackBy.has(currentUser.id)){ toast('You already acknowledged this'); return null; }
       ackBy.add(currentUser.id);
@@ -10184,17 +10214,55 @@
       : genUUIDv4Fallback();
   }
 
-  // Receipt images live inside the JSONB row as base64 data URLs. That keeps the
-  // app dependency-free but means a row can be megabytes, so cap it: an
-  // oversized row is rejected outright by Postgres/PostgREST and the old code
-  // just showed "could not submit" with no explanation.
-  const CA_ATTACHMENT_MAX_BYTES = 1_500_000; // ~1.5 MB per receipt, post-compression
-  const CA_RECORD_MAX_BYTES = 6_000_000;     // ~6 MB for the whole liquidation
+  // Receipt images live in the private 'liquidation-receipts' Storage
+  // bucket (see 20260916_01_liquidation_receipts_storage.sql), NOT inside
+  // the cash_advances JSONB row. The row keeps only attachmentPath.
+  // Every upload is resized to <=150KB first by compressImageForUpload
+  // (shared with equipment photos), so the old per-receipt and
+  // whole-record byte caps are gone along with the base64 payloads that
+  // made them necessary.
+  //
+  // Records submitted before this change still carry inline base64 in
+  // attachmentData. Nothing migrates them — the viewer below simply reads
+  // whichever of the two a given item has, so existing liquidations keep
+  // displaying instead of breaking.
+  const LIQ_RECEIPT_BUCKET = 'liquidation-receipts';
   function caAttachmentSize(dataUrl){
     if(!dataUrl) return 0;
     const comma = dataUrl.indexOf(',');
     const b64 = comma>=0 ? dataUrl.slice(comma+1) : dataUrl;
     return Math.floor(b64.length * 3 / 4);
+  }
+  // Uploads one receipt and returns its storage path, or null on failure.
+  async function caUploadReceipt(recordId, file){
+    if(!file || !currentUser || !(await ensureCloud())) return null;
+    let blob;
+    try{ blob = await compressImageForUpload(file); }
+    catch(e){ console.error('compress receipt failed', e); return null; }
+    if(!blob) return null;
+    const safeName = (file.name||'receipt.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+    // First segment must be the uploader's uid — the storage INSERT policy
+    // checks exactly that.
+    const path = currentUser.id+'/'+(recordId||'draft')+'/'+Date.now()+'-'+safeName;
+    try{
+      const { error } = await db.storage.from(LIQ_RECEIPT_BUCKET).upload(path, blob, {
+        contentType: 'image/jpeg', upsert: false
+      });
+      if(error) throw error;
+      return path;
+    }catch(e){ console.error('upload receipt failed', describeCloudError(e)); return null; }
+  }
+  async function caReceiptSignedUrl(path){
+    if(!path || !(await ensureCloud())) return null;
+    try{
+      const { data, error } = await db.storage.from(LIQ_RECEIPT_BUCKET).createSignedUrl(path, 3600);
+      if(error) throw error;
+      return data ? data.signedUrl : null;
+    }catch(e){ console.error('sign receipt url failed', describeCloudError(e)); return null; }
+  }
+  async function caRemoveReceipt(path){
+    if(!path || !(await ensureCloud())) return;
+    try{ await db.storage.from(LIQ_RECEIPT_BUCKET).remove([path]); }catch(e){}
   }
 
   async function caSaveRequest(id, data){
@@ -10602,7 +10670,7 @@
 
   // ================= Liquidation (technician side) =================
   let caLiqActiveRecord = null;   // the cash-advance record currently being liquidated
-  let caLiqItems = [];            // in-progress itemized list {id, type, description, amount, attachmentName, attachmentData, attachmentMime, transportRows}
+  let caLiqItems = [];            // in-progress itemized list {id, type, description, amount, attachmentName, attachmentPath, attachmentMime, transportRows}
   let caTransportRows = [];       // in-progress transportation sub-form rows
 
   function caLiqItemId(){ return 'li_'+Date.now()+'_'+Math.floor(Math.random()*10000); }
@@ -10703,32 +10771,33 @@
   $('closeLiqOthersModal').addEventListener('click', caLiqCloseOthersModal);
   $('liqOthersModal').addEventListener('click', (e)=>{ if(e.target.id==='liqOthersModal') caLiqCloseOthersModal(); });
 
-  let caLiqOthersAttachment = null; // {data, mime, name} for the item currently being built
+  let caLiqOthersAttachment = null; // {path, mime, name} for the item currently being built
   $('liqOthersAttachBtn').addEventListener('click', ()=> $('liqOthersFile').click());
   $('liqOthersFile').addEventListener('change', async ()=>{
     const file = $('liqOthersFile').files[0];
     if(!file) return;
+    // Image-only: the <=150KB resize path is canvas-based, so a PDF or doc
+    // can't be shrunk and would go up at full size — exactly the bloat this
+    // whole change is meant to end. Receipts are photographed in the field
+    // anyway.
+    if(!file.type.startsWith('image/')){
+      toast('Attach a photo of the receipt — other file types aren\'t supported');
+      return;
+    }
     try{
-      let dataUrl, mime;
-      if(file.type.startsWith('image/')){
-        dataUrl = await compressImageToDataURL(file, 1000, 0.6);
-        mime = 'image/jpeg';
-      }else{
-        dataUrl = await new Promise((resolve, reject)=>{
-          const r = new FileReader();
-          r.onload = ()=> resolve(r.result);
-          r.onerror = ()=> reject(new Error('read failed'));
-          r.readAsDataURL(file);
-        });
-        mime = file.type || 'application/octet-stream';
-      }
-      if(caAttachmentSize(dataUrl) > CA_ATTACHMENT_MAX_BYTES){
-        toast('That file is too large — take a photo instead of attaching a full-size file');
+      $('liqOthersFileStatus').innerHTML = icon('file')+' Uploading…';
+      const path = await caUploadReceipt(caLiqActiveRecord && caLiqActiveRecord.id, file);
+      if(!path){
+        $('liqOthersFileStatus').textContent = '';
+        toast('Could not upload that receipt — check your connection and try again');
         return;
       }
-      caLiqOthersAttachment = {data: dataUrl, mime, name: file.name};
+      caLiqOthersAttachment = {path, mime: 'image/jpeg', name: file.name};
       $('liqOthersFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
-    }catch(e){ toast('Could not attach that file'); }
+    }catch(e){
+      $('liqOthersFileStatus').textContent = '';
+      toast('Could not attach that file');
+    }
   });
   $('liqOthersAddItemBtn').addEventListener('click', ()=>{
     const date = $('liqOthersDate').value;
@@ -10744,7 +10813,7 @@
     caLiqItems.push({
       id: newItemId, type:'item', date, description, qty, amount,
       attachmentName: caLiqOthersAttachment.name,
-      attachmentData: caLiqOthersAttachment.data,
+      attachmentPath: caLiqOthersAttachment.path,
       attachmentMime: caLiqOthersAttachment.mime
     });
     caLiqCloseOthersModal();
@@ -11076,6 +11145,21 @@
     }else{
       $('liqAttachmentTitle').textContent = item.description || 'Attachment';
       $('liqAttachmentTransportWrap').style.display = 'none';
+      // New receipts live in Storage and carry only a path — resolve it to
+      // a short-lived signed URL. Legacy records (submitted before the
+      // move to Storage) still carry inline base64 in attachmentData and
+      // are handled by the branches below, so old liquidations keep
+      // displaying rather than breaking.
+      if(item.attachmentPath){
+        $('liqAttachmentImageWrap').style.display = '';
+        $('liqAttachmentImg').removeAttribute('src');
+        $('liqAttachmentOverlay').classList.add('open');
+        caReceiptSignedUrl(item.attachmentPath).then(url=>{
+          if(url) $('liqAttachmentImg').src = url;
+          else toast('Could not load that receipt');
+        });
+        return;
+      }
       if(!item.attachmentData){
         // List views deliberately fetch records without receipt payloads.
         $('liqAttachmentImageWrap').style.display = 'none';
@@ -11384,19 +11468,16 @@
       if(!item.amount || item.amount<=0){ toast('Every item needs a valid amount'); return; }
       if(!item.attachmentData){ toast('Attach a file for every item — "'+item.description+'" is missing one'); return; }
     }
-    // Reject oversized receipts up front, with a message that says what to do,
-    // instead of letting the whole submission fail opaquely at the database.
-    let totalBytes = 0;
-    for(const item of caLiqItems){
-      const size = caAttachmentSize(item.attachmentData);
-      if(size > CA_ATTACHMENT_MAX_BYTES){
-        toast('"'+(item.description||'An item')+'" attachment is too large — retake the photo or use a smaller file');
-        return;
-      }
-      totalBytes += size;
-    }
-    if(totalBytes > CA_RECORD_MAX_BYTES){
-      toast('These receipts total too much data — remove or retake a few and submit again');
+    // Receipts now live in Storage and the row carries only paths, so the
+    // old per-receipt and whole-record byte caps no longer apply. A draft
+    // started before that change can still hold inline base64, so those
+    // are still guarded — otherwise the submission would fail opaquely at
+    // the database.
+    const LEGACY_INLINE_MAX = 6_000_000;
+    let legacyBytes = 0;
+    for(const item of caLiqItems) legacyBytes += caAttachmentSize(item.attachmentData);
+    if(legacyBytes > LEGACY_INLINE_MAX){
+      toast('This draft has large receipts attached the old way — remove and re-attach them, then submit again');
       return;
     }
     const totalAmount = caLiqComputeTotals().total;
@@ -11924,27 +12005,26 @@
   $('caReimbFile').addEventListener('change', async ()=>{
     const file = $('caReimbFile').files[0];
     if(!file) return;
+    // Same Storage path as liquidation receipts above — image-only, resized
+    // to <=150KB, row keeps only attachmentPath.
+    if(!file.type.startsWith('image/')){
+      toast('Attach a photo of the receipt — other file types aren\'t supported');
+      return;
+    }
     try{
-      let dataUrl, mime;
-      if(file.type.startsWith('image/')){
-        dataUrl = await compressImageToDataURL(file, 1000, 0.6);
-        mime = 'image/jpeg';
-      }else{
-        dataUrl = await new Promise((resolve, reject)=>{
-          const r = new FileReader();
-          r.onload = ()=> resolve(r.result);
-          r.onerror = ()=> reject(new Error('read failed'));
-          r.readAsDataURL(file);
-        });
-        mime = file.type || 'application/octet-stream';
-      }
-      if(caAttachmentSize(dataUrl) > CA_ATTACHMENT_MAX_BYTES){
-        toast('That file is too large — take a photo instead of attaching a full-size file');
+      $('caReimbFileStatus').innerHTML = icon('file')+' Uploading…';
+      const path = await caUploadReceipt('reimbursement', file);
+      if(!path){
+        $('caReimbFileStatus').textContent = '';
+        toast('Could not upload that receipt — check your connection and try again');
         return;
       }
-      caReimbAttachment = {data: dataUrl, mime, name: file.name};
+      caReimbAttachment = {path, mime: 'image/jpeg', name: file.name};
       $('caReimbFileStatus').innerHTML = icon('file')+' '+escapeHtml(file.name);
-    }catch(e){ toast('Could not attach that file'); }
+    }catch(e){
+      $('caReimbFileStatus').textContent = '';
+      toast('Could not attach that file');
+    }
   });
   $('caReimbAddItemBtn').addEventListener('click', ()=>{
     const dateIncurred = $('caReimbDate').value;
@@ -11957,7 +12037,7 @@
     caReimbItems.push({
       id: caReimbItemId(), dateIncurred, description, amount,
       attachmentName: caReimbAttachment.name,
-      attachmentData: caReimbAttachment.data,
+      attachmentPath: caReimbAttachment.path,
       attachmentMime: caReimbAttachment.mime
     });
     caReimbAttachment = null;
@@ -11971,8 +12051,10 @@
 
   async function caReimbSubmit(){
     if(caReimbItems.length===0){ toast('Add at least one expense first'); return; }
+    // Receipts live in Storage now; only a draft started before that
+    // change can still carry inline base64 large enough to matter.
     const totalSize = caReimbItems.reduce((s,it)=> s+caAttachmentSize(it.attachmentData), 0);
-    if(totalSize > CA_RECORD_MAX_BYTES){ toast('These receipts total too much data — remove or retake a few and submit again'); return; }
+    if(totalSize > 6_000_000){ toast('This draft has large receipts attached the old way — remove and re-attach them, then submit again'); return; }
     if(!currentUser){ toast('Please sign in again'); return; }
     const id = caGenId(currentUser.id);
     const amount = caReimbItems.reduce((s,it)=> s+(Number(it.amount)||0), 0);
@@ -12377,11 +12459,11 @@
     const attendLine =
       '<button type="button" class="greet-attend-line" id="greetAttendLink">'+
         '<svg class="greet-attend-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'+
-        '<span>Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
-        '<span>Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
+        '<span class="greet-attend-item">Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
+        '<span class="greet-attend-item">Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
         (todayDtr && todayDtr.otTimeIn ?
-          '<span>OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
-          '<span>OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
+          '<span class="greet-attend-item">OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
+          '<span class="greet-attend-item">OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
         : '')+
         '<span class="greet-attend-go">Open DTR ›</span>'+
       '</button>';
@@ -12418,9 +12500,13 @@
       dtCountUnreadMessages().catch(()=>0)
     ]);
 
-    // Job Order — open tickets (not yet Completed or Closed), plus whichever
-    // teammates are on those same tickets with me.
-    const openTickets = (tickets||[]).filter(t=> !['completed','closed'].includes(dtEffectiveStatus(t)));
+    // Job Order — open tickets, plus whichever teammates are on those same
+    // tickets with me. 'expired' and 'cancelled' matter as much as
+    // completed/closed here: dtEffectiveStatus() returns 'expired' for any
+    // past-dated ticket that was never acknowledged, and leaving those two
+    // out of this list is what left a permanent phantom count on the home
+    // screen after everything had actually been dealt with.
+    const openTickets = (tickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t)));
     const mateNames = new Set();
     openTickets.forEach(t=> (t.assignedWorkerNames||[]).forEach(n=>{
       if(n && n!==currentUser.name) mateNames.add(n);
@@ -13228,7 +13314,7 @@
     }
     setTxt('techMyProfileTimeIn', fmtT(todayDtr && todayDtr.timeIn));
     setTxt('techMyProfileTimeOut', fmtT(todayDtr && todayDtr.timeOut));
-    const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled'].includes(dtEffectiveStatus(t))).length;
+    const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t))).length;
     setTxt('techMyProfileOpenJo', String(openCount));
   }
   $('techMoreProfile').addEventListener('click', ()=>{ techCloseMoreSheet(); techOpenProfileSheet(); });

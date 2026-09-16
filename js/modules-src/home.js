@@ -183,11 +183,11 @@
     const attendLine =
       '<button type="button" class="greet-attend-line" id="greetAttendLink">'+
         '<svg class="greet-attend-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'+
-        '<span>Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
-        '<span>Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
+        '<span class="greet-attend-item">Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
+        '<span class="greet-attend-item">Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
         (todayDtr && todayDtr.otTimeIn ?
-          '<span>OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
-          '<span>OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
+          '<span class="greet-attend-item">OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
+          '<span class="greet-attend-item">OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
         : '')+
         '<span class="greet-attend-go">Open DTR ›</span>'+
       '</button>';
@@ -224,9 +224,13 @@
       dtCountUnreadMessages().catch(()=>0)
     ]);
 
-    // Job Order — open tickets (not yet Completed or Closed), plus whichever
-    // teammates are on those same tickets with me.
-    const openTickets = (tickets||[]).filter(t=> !['completed','closed'].includes(dtEffectiveStatus(t)));
+    // Job Order — open tickets, plus whichever teammates are on those same
+    // tickets with me. 'expired' and 'cancelled' matter as much as
+    // completed/closed here: dtEffectiveStatus() returns 'expired' for any
+    // past-dated ticket that was never acknowledged, and leaving those two
+    // out of this list is what left a permanent phantom count on the home
+    // screen after everything had actually been dealt with.
+    const openTickets = (tickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t)));
     const mateNames = new Set();
     openTickets.forEach(t=> (t.assignedWorkerNames||[]).forEach(n=>{
       if(n && n!==currentUser.name) mateNames.add(n);
@@ -1034,7 +1038,7 @@
     }
     setTxt('techMyProfileTimeIn', fmtT(todayDtr && todayDtr.timeIn));
     setTxt('techMyProfileTimeOut', fmtT(todayDtr && todayDtr.timeOut));
-    const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled'].includes(dtEffectiveStatus(t))).length;
+    const openCount = (myTickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t))).length;
     setTxt('techMyProfileOpenJo', String(openCount));
   }
   $('techMoreProfile').addEventListener('click', ()=>{ techCloseMoreSheet(); techOpenProfileSheet(); });
