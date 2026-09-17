@@ -948,7 +948,11 @@
     const sel = $('cpReqEquipment');
     const generalOpt = '<option value="">General inquiry (not a specific unit)</option>';
     sel.innerHTML = generalOpt + cpEquipment.map(eq=>
-      '<option value="'+eq.id+'">'+escapeHtml(equipDisplayName(eq))+' — '+escapeHtml(eq.equipLocation||'')+'</option>'
+      // equipDisplayName() already falls back to equipLocation for an
+      // unlabelled unit, so only append the location when it differs.
+      '<option value="'+eq.id+'">'+escapeHtml(equipDisplayName(eq))+
+        ((eq.equipLocation||'').trim() && (eq.equipLocation||'').trim()!==equipDisplayName(eq)
+          ? ' — '+escapeHtml(eq.equipLocation) : '')+'</option>'
     ).join('');
   }
   // Takes the full request (not just .status) because a fee_proposed row

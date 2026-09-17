@@ -271,8 +271,15 @@
   // stable identifier a technician or admin can tell units apart by, even
   // before any label exists.
   function equipSummaryLine(e){
-    const rest = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join('  ·  ') || '(no details on file)';
-    return equipDisplayName(e) + '  —  ' + rest;
+    const name = equipDisplayName(e);
+    // Same duplication guard as dtEquipSummaryLine (dispatch.js):
+    // equipDisplayName() falls back to equipLocation when a unit has no
+    // label, so also listing equipLocation in the details printed it twice.
+    const loc = (e.equipLocation||'').trim();
+    const parts = (loc && loc !== name) ? [loc] : [];
+    const rest = parts.concat([e.brand, e.mountType, e.equipType, e.coolCap])
+      .filter(Boolean).join('  ·  ') || '(no details on file)';
+    return name + '  —  ' + rest;
   }
   function renderEquipPicker(){
     const list = $('equipPickerList');

@@ -1,3 +1,44 @@
+// Bumped to v90 — REAL cause of admin-dispatched jobs never reaching the
+// customer portal: service_requests has NO admin INSERT policy. 20260910_02
+// created "customers insert own service requests" (requires the row's
+// customer_id to belong to the CALLER via customer_login_links), plus admin
+// SELECT and admin UPDATE — but nothing lets an admin INSERT. So
+// srCreateForAdminDispatch's insert was refused by RLS with 42501 every
+// time, the customer-facing row was never created, and the portal had
+// nothing to show. Fixed by 20260916_04_admin_insert_service_requests.sql,
+// which must be run.
+//
+// v89's typed-vs-selected confirm prompt is removed: a ticket is always
+// raised against a customer already on file, so that theory was wrong. The
+// stale-customerId clearing and the surfaced error toast from v89 are kept
+// — the silent failure is what hid this for so long.
+//
+// Bumped to v89 — a directly-created dispatch ticket still wasn't showing
+// on the customer portal. The customer-facing row is only created when
+// custId exists, and custId is stamped ONLY by picking a customer from the
+// combo's dropdown — typing the name leaves it unset. Every failure along
+// that path was silent, so it looked like dispatch simply doesn't reach
+// the customer. Three fixes:
+//   1. Saving a ticket whose customer was typed rather than selected now
+//      warns explicitly that the customer will NOT see it, and asks for
+//      confirmation.
+//   2. Typing after picking now CLEARS the stored id, which previously
+//      left the ticket linked to the PREVIOUS customer while showing the
+//      new name.
+//   3. srCreateForAdminDispatch reports its error with a toast instead of
+//      only console.error, and the caller flags a null result.
+//
+// Bumped to v88 — equipment location printed twice ("Bible House — Bible
+// House · Koppel · ..."). equipDisplayName() (core.js) falls back to
+// equipLocation when a unit has no label, and the summary builders then
+// listed equipLocation again in the details, so EVERY unlabelled unit —
+// which is most of them — showed its location as both the name and the
+// first detail. Fixed in all three builders (dtEquipSummaryLine in
+// dispatch.js, equipSummaryLine in customers.js, and the customer
+// portal's equipment <option>): the location is included in the details
+// only when it isn't already serving as the name. A unit WITH a label is
+// unaffected and still shows "ACU-1 — Bible House · Koppel".
+//
 // Bumped to v87 — the "Select From Job Order" card stayed pinned above
 // every step of the wizard. Two causes, both fixed:
 //   - srShowEntry re-SHOWED it on every srShowEntry(null) call, not just
@@ -691,7 +732,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v87';
+const CACHE_NAME = 'awes-sr-v90';
 
 // Split into two lists on purpose.
 //

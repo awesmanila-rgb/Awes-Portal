@@ -193,7 +193,15 @@
       }).select().single();
       if(error) throw error;
       return srRowToRequest(data);
-    }catch(e){ console.error('create admin-dispatch service request failed', describeCloudError(e)); return null; }
+    }catch(e){
+      // Reported, not just logged: this failing is exactly why a dispatched
+      // job can be invisible in the customer portal, and a console message
+      // nobody opens is indistinguishable from the feature not working.
+      const msg = describeCloudError(e);
+      console.error('create admin-dispatch service request failed', msg);
+      toast('Customer portal entry failed: '+msg);
+      return null;
+    }
   }
 
   // Customer-side history — explicit customer_id filter (RLS would already

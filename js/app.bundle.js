@@ -2978,8 +2978,15 @@
   // stable identifier a technician or admin can tell units apart by, even
   // before any label exists.
   function equipSummaryLine(e){
-    const rest = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join('  ·  ') || '(no details on file)';
-    return equipDisplayName(e) + '  —  ' + rest;
+    const name = equipDisplayName(e);
+    // Same duplication guard as dtEquipSummaryLine (dispatch.js):
+    // equipDisplayName() falls back to equipLocation when a unit has no
+    // label, so also listing equipLocation in the details printed it twice.
+    const loc = (e.equipLocation||'').trim();
+    const parts = (loc && loc !== name) ? [loc] : [];
+    const rest = parts.concat([e.brand, e.mountType, e.equipType, e.coolCap])
+      .filter(Boolean).join('  ·  ') || '(no details on file)';
+    return name + '  —  ' + rest;
   }
   function renderEquipPicker(){
     const list = $('equipPickerList');
@@ -7942,8 +7949,16 @@
   // set, its shortened fixed id) is visible everywhere a dispatch ticket
   // lists equipment, not just in the admin/customer-portal equipment views.
   function dtEquipSummaryLine(e){
-    const rest = [e.equipLocation, e.brand, e.mountType, e.equipType, e.coolCap].filter(Boolean).join('  ·  ') || '(no details on file)';
-    return equipDisplayName(e) + '  —  ' + rest;
+    const name = equipDisplayName(e);
+    // equipDisplayName() falls back to equipLocation when a unit has no
+    // label, so listing equipLocation in the details too printed it twice
+    // ("Bible House — Bible House · Koppel · ..."). Include it only when
+    // it isn't already doing duty as the name.
+    const loc = (e.equipLocation||'').trim();
+    const parts = (loc && loc !== name) ? [loc] : [];
+    const rest = parts.concat([e.brand, e.mountType, e.equipType, e.coolCap])
+      .filter(Boolean).join('  ·  ') || '(no details on file)';
+    return name + '  —  ' + rest;
   }
   // Checkbox multi-select — lets an admin add several (or all) of a
   // customer's known units to this ticket in one pass instead of loading
@@ -8149,6 +8164,12 @@
       dtResetEquipmentFields();
       dtLoadCustomerEquipment(c.id).then(dtDefaultEquipTabForCustomer);
     }
+    // Typing after picking must drop the stored id, or the ticket silently
+    // links to the PREVIOUS customer while displaying the new name.
+    input.addEventListener('input', ()=>{
+      const picked = (customersCache||[]).find(c=> String(c.id)===String(input.dataset.customerId||''));
+      if(picked && input.value.trim() !== (picked.name||'').trim()) delete input.dataset.customerId;
+    });
     function render(filterText){
       const q = (filterText||'').toLowerCase();
       const filtered = customersCache.filter(c=> c.name.toLowerCase().includes(q));
@@ -8353,6 +8374,11 @@
       .map(el=>({id: el.value, name: el.dataset.name}));
     const custName = $('dtCustName').value.trim();
     const custId = $('dtCustName').dataset.customerId || null;
+    // No confirm prompt here: a ticket is always raised against a customer
+    // already on file, so custId being missing would be a bug to fix
+    // rather than a choice to confirm. The real cause of dispatched jobs
+    // not reaching the portal was a missing admin INSERT policy on
+    // service_requests — see 20260916_04_admin_insert_service_requests.sql.
     if(workers.length===0){ toast('Assign at least one worker'); return; }
     if(reporters.length===0){ toast('Select at least one technician who can create the Service Report'); return; }
     if(!custName){ toast('Enter the customer\'s name'); return; }
@@ -8449,6 +8475,10 @@
         ticketId: id,
         description: $('dtRemarks').value.trim() || ('Scheduled service visit — '+jobOrderNo),
         requestedDate: $('dtDate').value || null
+      }).then(row=>{
+        // Silent failure here is what makes this look like "dispatch just
+        // doesn't reach the customer" — surface it so it can be fixed.
+        if(!row) toast('Job order saved, but the customer portal entry could not be created — they will not see this job');
       }).catch(()=>{});
     }
     // Mirrors the srLinkTicket call above, for the "Continue Tomorrow" case:
@@ -9886,7 +9916,15 @@
       }).select().single();
       if(error) throw error;
       return srRowToRequest(data);
-    }catch(e){ console.error('create admin-dispatch service request failed', describeCloudError(e)); return null; }
+    }catch(e){
+      // Reported, not just logged: this failing is exactly why a dispatched
+      // job can be invisible in the customer portal, and a console message
+      // nobody opens is indistinguishable from the feature not working.
+      const msg = describeCloudError(e);
+      console.error('create admin-dispatch service request failed', msg);
+      toast('Customer portal entry failed: '+msg);
+      return null;
+    }
   }
 
   // Customer-side history — explicit customer_id filter (RLS would already
@@ -15620,7 +15658,11 @@
     const sel = $('cpReqEquipment');
     const generalOpt = '<option value="">General inquiry (not a specific unit)</option>';
     sel.innerHTML = generalOpt + cpEquipment.map(eq=>
-      '<option value="'+eq.id+'">'+escapeHtml(equipDisplayName(eq))+' — '+escapeHtml(eq.equipLocation||'')+'</option>'
+      // equipDisplayName() already falls back to equipLocation for an
+      // unlabelled unit, so only append the location when it differs.
+      '<option value="'+eq.id+'">'+escapeHtml(equipDisplayName(eq))+
+        ((eq.equipLocation||'').trim() && (eq.equipLocation||'').trim()!==equipDisplayName(eq)
+          ? ' — '+escapeHtml(eq.equipLocation) : '')+'</option>'
     ).join('');
   }
   // Takes the full request (not just .status) because a fee_proposed row
