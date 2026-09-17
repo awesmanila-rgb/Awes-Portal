@@ -1,3 +1,11 @@
+// Bumped to v99 — the "Apply to this N equipment then edit later" checkbox
+// never showed its tick. Its own change handler calls srRenderOpUnitTabs(),
+// which rebuilds the unit card via innerHTML — recreating the checkbox
+// unchecked in the same tick it was ticked. The copy itself worked; only
+// the visual confirmation was lost, so it read as a dead control. The
+// checked state now lives in srOpApplyAllChecked, which survives the
+// re-render and is rendered back into the input; a new batch resets it.
+//
 // Bumped to v98 — five fixes:
 //  1. Suggestion dropdowns removed from Operating Data. Amperage, voltage,
 //     pressure, temperature and airflow are MEASURED off the unit in front
@@ -846,7 +854,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v98';
+const CACHE_NAME = 'awes-sr-v99';
 
 // Split into two lists on purpose.
 //

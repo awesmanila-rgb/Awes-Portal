@@ -5663,6 +5663,10 @@
   ];
   let srOpParamsByUnit = {};   // unitId -> {field: value}
   let srOpActiveUnitId = null;
+  // Survives srRenderOpUnitTabs(), which rebuilds the card via innerHTML —
+  // without this the checkbox was recreated unchecked the moment it was
+  // ticked, so the tick never appeared.
+  let srOpApplyAllChecked = false;
 
   function srOpReadFields(){
     const out = {};
@@ -5741,7 +5745,7 @@
             'Unit '+(idx+1)+' of '+items.length+' \u00b7 '+done+' complete \u2014 view all'+
           '</button>'+
           '<label class="sr-op-apply">'+
-            '<input type="checkbox" id="srOpApplyAll">'+
+            '<input type="checkbox" id="srOpApplyAll"'+(srOpApplyAllChecked?' checked':'')+'>'+
             '<span>Apply to this '+items.length+' equipment then edit later</span>'+
           '</label>'+
         '</div>'+
@@ -5766,15 +5770,17 @@
   // those edits.
   document.addEventListener('change', (e)=>{
     if(!e.target || e.target.id !== 'srOpApplyAll') return;
-    if(!e.target.checked) return;
+    if(!e.target.checked){ srOpApplyAllChecked = false; return; }
     const items = srBatchEquipItems || [];
     const vals = srOpReadFields();
     if(!srOpHasValues(vals)){
       toast('Enter this unit\'s readings first, then switch this on to copy them');
       e.target.checked = false;
+      srOpApplyAllChecked = false;
       return;
     }
     items.forEach(it=>{ srOpParamsByUnit[it.id] = Object.assign({}, vals); });
+    srOpApplyAllChecked = true;
     srRenderOpUnitTabs();
     toast('Readings copied to all '+items.length+' units — you can still edit each one');
   });
@@ -5787,6 +5793,7 @@
   // Called when the batch selection is made, to start clean.
   function srOpResetForBatch(items){
     srOpParamsByUnit = {};
+    srOpApplyAllChecked = false;
     srOpActiveUnitId = (items && items.length) ? (items[0].id || '0') : null;
     srRenderOpUnitTabs();
   }
