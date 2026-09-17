@@ -89,6 +89,8 @@
     // existing unit and a new one genuinely applies again. 'flex', not '',
     // because the bar's layout comes from an inline display:flex.
     if($('equipTabBar')) $('equipTabBar').style.display = 'flex';
+    if($('phase3Toggle')) $('phase3Toggle').checked = false;
+    if(typeof srApplyPhaseMode === 'function') srApplyPhaseMode();
     srCurrentEquipId = null;
     srBatchEquipItems = null;
     if($('srBatchBanner')) $('srBatchBanner').style.display = 'none';
@@ -616,23 +618,72 @@
     srOpWriteFields(srOpParamsByUnit[unitId]);
     srRenderOpUnitTabs();
   }
+  // One unit at a time: its name, a reminder that these readings belong to
+  // THIS unit only, a switch to copy the current readings across all of
+  // them, and arrows to step between units. Replaces the tab strip, which
+  // showed every unit at once and made it easy to lose track of which one
+  // the fields on screen actually belonged to.
   function srRenderOpUnitTabs(){
     const host = $('srOpUnitTabs');
     if(!host) return;
     const items = srBatchEquipItems || [];
     if(items.length < 2){ host.style.display = 'none'; host.innerHTML = ''; return; }
     host.style.display = '';
-    host.innerHTML = '<p class="sr-unit-hint">Readings are recorded separately for each unit. Tap a unit to enter its values.</p>' +
-      '<div style="display:flex; gap:8px; overflow-x:auto;">' +
-      items.map((it,idx)=>{
-        const id = it.id || String(idx);
-        const done = srOpHasValues(id===srOpActiveUnitId ? srOpReadFields() : srOpParamsByUnit[id]);
-        const cls = 'sr-unit-tab'+(id===srOpActiveUnitId ? ' active' : '');
-        return '<button type="button" class="'+cls+'" data-sr-unit="'+escapeHtml(id)+'">'+
-          escapeHtml(dtEquipSummaryLine ? dtEquipSummaryLine(it) : ('Unit '+(idx+1)))+
-          (done ? '<span class="tick">\u2713</span>' : '')+'</button>';
-      }).join('') + '</div>';
+    let idx = items.findIndex(it=> String(it.id)===String(srOpActiveUnitId));
+    if(idx < 0) idx = 0;
+    const item = items[idx];
+    const name = typeof dtEquipSummaryLine === 'function' ? dtEquipSummaryLine(item) : ('Unit '+(idx+1));
+    const filled = items.filter(it=> srOpHasValues(String(it.id)===String(srOpActiveUnitId) ? srOpReadFields() : srOpParamsByUnit[it.id])).length;
+    host.innerHTML =
+      '<div class="sr-op-unit">'+
+        '<div class="sr-op-unit-top">'+
+          '<button type="button" class="sr-op-arrow" data-sr-unit-step="-1"'+(idx===0?' disabled':'')+' aria-label="Previous unit">&#8249;</button>'+
+          '<div class="sr-op-unit-main">'+
+            '<div class="sr-op-unit-name">'+escapeHtml(name)+'</div>'+
+            '<div class="sr-op-unit-note">Record all readings for this particular unit.</div>'+
+          '</div>'+
+          '<button type="button" class="sr-op-arrow" data-sr-unit-step="1"'+(idx===items.length-1?' disabled':'')+' aria-label="Next unit">&#8250;</button>'+
+        '</div>'+
+        '<div class="sr-op-unit-foot">'+
+          '<span class="sr-op-unit-count">Unit '+(idx+1)+' of '+items.length+' \u00b7 '+filled+' with readings</span>'+
+          '<label class="sr-op-apply">'+
+            '<input type="checkbox" id="srOpApplyAll">'+
+            '<span>Apply to this '+items.length+' equipment then edit later</span>'+
+          '</label>'+
+        '</div>'+
+      '</div>';
   }
+  // Arrows step between units, saving whatever is on screen first.
+  document.addEventListener('click', (e)=>{
+    const arrow = e.target.closest('[data-sr-unit-step]');
+    if(!arrow || arrow.disabled) return;
+    const items = srBatchEquipItems || [];
+    let idx = items.findIndex(it=> String(it.id)===String(srOpActiveUnitId));
+    if(idx < 0) idx = 0;
+    const next = idx + parseInt(arrow.getAttribute('data-sr-unit-step'), 10);
+    if(next < 0 || next >= items.length) return;
+    srOpSelectUnit(items[next].id);
+  });
+  // "Apply to this N equipment then edit later" — copies the readings now
+  // on screen onto every other unit, as a ONE-TIME copy. Deliberately not a
+  // live link: "then edit later" means each unit stays independently
+  // editable afterwards, and a continuous sync would silently overwrite
+  // those edits.
+  document.addEventListener('change', (e)=>{
+    if(!e.target || e.target.id !== 'srOpApplyAll') return;
+    if(!e.target.checked) return;
+    const items = srBatchEquipItems || [];
+    const vals = srOpReadFields();
+    if(!srOpHasValues(vals)){
+      toast('Enter this unit\'s readings first, then switch this on to copy them');
+      e.target.checked = false;
+      return;
+    }
+    items.forEach(it=>{ srOpParamsByUnit[it.id] = Object.assign({}, vals); });
+    srRenderOpUnitTabs();
+    toast('Readings copied to all '+items.length+' units — you can still edit each one');
+  });
+
   document.addEventListener('click', (e)=>{
     const tab = e.target.closest('[data-sr-unit]');
     if(!tab) return;
@@ -649,3 +700,30 @@
     if(unitId===srOpActiveUnitId) srOpStashActive();
     return srOpParamsByUnit[unitId] || {};
   }
+
+  // ---- Single-phase vs 3-phase electrical fields ----
+  // Default is SINGLE phase: one Amperage box and one Voltage box. The
+  // three-box-per-row layout applied to every unit regardless, and most
+  // units on file are single-phase — three empty boxes invite blank or
+  // guessed readings, and a blank reading in a service report is worse
+  // than no row at all. Switching the toggle on reveals L2/L3 and
+  // L23/L31.
+  function srApplyPhaseMode(){
+    const on = !!($('phase3Toggle') && $('phase3Toggle').checked);
+    // Clear the extra phases when switching back to single: a hidden field
+    // that kept its value would put an L2/L3 reading on a report whose
+    // author was told the unit is single-phase.
+    $$('.sr-phase3').forEach(el=>{
+      el.style.display = on ? '' : 'none';
+      if(!on) el.value = '';
+    });
+    const amp = $('ampRowLabel'), volt = $('voltRowLabel');
+    if(amp) amp.textContent = on ? 'Amperage (L1/L2/L3)' : 'Amperage';
+    if(volt) volt.textContent = on ? 'Voltage (L12/L23/L31)' : 'Voltage';
+    // Placeholders only carry meaning once there's more than one box.
+    const l1 = $('a_amp_l1'), bl1 = $('b_amp_l1'), v12 = $('a_volt_l12'), bv12 = $('b_volt_l12');
+    [l1, bl1].forEach(el=>{ if(el) el.placeholder = on ? 'L1' : 'Amps'; });
+    [v12, bv12].forEach(el=>{ if(el) el.placeholder = on ? 'L12' : 'Volts'; });
+  }
+  if($('phase3Toggle')) $('phase3Toggle').addEventListener('change', srApplyPhaseMode);
+  srApplyPhaseMode();

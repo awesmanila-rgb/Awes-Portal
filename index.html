@@ -2392,6 +2392,13 @@ window.awesCss = {
   <div class="card" id="sec6Card" style="display:none;">
     <div class="card-head collapsible-head"><span><span class="num">5</span>Operation Parameters</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec6Body" style="display:none;">
+      <!-- Single-phase by default: one Amperage and one Voltage field.
+           Most units on file are single-phase, and three empty boxes per
+           row invited blank or guessed readings. -->
+      <label class="sr-phase-toggle">
+        <input type="checkbox" id="phase3Toggle">
+        <span>This unit is 3-phase (L1/L2/L3)</span>
+      </label>
       <!-- Multiple Reports: readings differ per unit, so this step gets a
            unit tab strip. Everything else in the wizard is shared; only
            these fields are per-unit. Hidden for a single report. -->
@@ -2403,14 +2410,14 @@ window.awesCss = {
         </thead>
         <tbody>
           <tr>
-            <td class="opdata-row-label">Amperage (L1/L2/L3)</td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="b_amp_l1" placeholder="L1"><input type="text" id="b_amp_l2" placeholder="L2"><input type="text" id="b_amp_l3" placeholder="L3"></div></td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="a_amp_l1" placeholder="L1"><input type="text" id="a_amp_l2" placeholder="L2"><input type="text" id="a_amp_l3" placeholder="L3"></div></td>
+            <td class="opdata-row-label"><span id="ampRowLabel">Amperage</span></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="b_amp_l1" placeholder="L1"><input type="text" id="b_amp_l2" class="sr-phase3" placeholder="L2"><input type="text" id="b_amp_l3" class="sr-phase3" placeholder="L3"></div></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="a_amp_l1" placeholder="L1"><input type="text" id="a_amp_l2" class="sr-phase3" placeholder="L2"><input type="text" id="a_amp_l3" class="sr-phase3" placeholder="L3"></div></td>
           </tr>
           <tr>
-            <td class="opdata-row-label">Voltage (L12/L23/L31)</td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="b_volt_l12" placeholder="L12"><input type="text" id="b_volt_l23" placeholder="L23"><input type="text" id="b_volt_l31" placeholder="L31"></div></td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="a_volt_l12" placeholder="L12"><input type="text" id="a_volt_l23" placeholder="L23"><input type="text" id="a_volt_l31" placeholder="L31"></div></td>
+            <td class="opdata-row-label"><span id="voltRowLabel">Voltage</span></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="b_volt_l12" placeholder="L12"><input type="text" id="b_volt_l23" class="sr-phase3" placeholder="L23"><input type="text" id="b_volt_l31" class="sr-phase3" placeholder="L31"></div></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="a_volt_l12" placeholder="L12"><input type="text" id="a_volt_l23" class="sr-phase3" placeholder="L23"><input type="text" id="a_volt_l31" class="sr-phase3" placeholder="L31"></div></td>
           </tr>
           <tr>
             <td class="opdata-row-label">Pressure (Suction/Discharge)</td>

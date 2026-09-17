@@ -1,3 +1,24 @@
+// Bumped to v94 — Operation Parameters reworked.
+//
+// Multiple Reports: the unit TAB STRIP is replaced by a one-unit card —
+// the equipment name, the note "Record all readings for this particular
+// unit", a "Unit 2 of 5 · N with readings" counter, left/right arrows to
+// step between units, and a switch reading "Apply to this N equipment then
+// edit later". The tab strip showed every unit at once, which made it easy
+// to lose track of which unit the fields on screen belonged to. The switch
+// is a ONE-TIME copy on purpose: "then edit later" means each unit stays
+// independently editable afterwards, so a live link would silently
+// overwrite those edits. It refuses to copy empty readings.
+//
+// Electrical fields now default to SINGLE phase — one Amperage box, one
+// Voltage box. Three boxes per row applied to every unit regardless, and
+// most are single-phase; three empty boxes invite blank or guessed
+// readings, and a blank reading on a service report is worse than no row.
+// A "This unit is 3-phase" toggle reveals L2/L3 and L23/L31 and switches
+// the row labels and placeholders. Switching back CLEARS the extra fields,
+// so a hidden box can't put an L2/L3 reading on a report whose author was
+// told the unit is single-phase.
+//
 // Bumped to v93 — Multiple Reports dead-ended on "Step 1 of 8 · Equipment
 // Details" with nothing on screen and no Next button. Batch mode fills
 // equipment details per unit at submit time, so srApplyJobOrderBatch hides
@@ -767,7 +788,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v93';
+const CACHE_NAME = 'awes-sr-v94';
 
 // Split into two lists on purpose.
 //
