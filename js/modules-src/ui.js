@@ -378,7 +378,13 @@
     if(typeof srShowTab === 'function') srShowTab('draft');
     if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
   });
-  if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=> srShowEntry('srEntryChoice'));
+  // Back from Single/Multiple returns to the JOB ORDER LIST — the screen
+  // it was actually reached from — not to the Create New / Saved Draft
+  // tiles two steps earlier.
+  if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=>{
+    srShowEntry(null);
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
+  });
 
   srInstallContinueButtons();
 

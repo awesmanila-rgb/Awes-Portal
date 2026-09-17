@@ -1,3 +1,15 @@
+// Bumped to v91 — tapping Single/Multiple bounced straight back to the job
+// order list, and picking a job order bounced back to Single/Multiple.
+// Both tile handlers called srRenderJobOrderPicker(), which REBUILDS the
+// whole list — detaching the pendingWrap element those same handlers close
+// over. The units were then appended to an orphaned node (invisible) while
+// the screen showed a freshly-rebuilt picker, which read as a loop between
+// the two screens. They now render into the EXISTING pendingWrap and just
+// re-show the job order card; the setTimeout that papered over the timing
+// is gone too. Back on that screen also now returns to the job order list
+// it was reached from, instead of the Create New / Saved Draft tiles two
+// steps earlier.
+//
 // Bumped to v90 — REAL cause of admin-dispatched jobs never reaching the
 // customer portal: service_requests has NO admin INSERT policy. 20260910_02
 // created "customers insert own service requests" (requires the row's
@@ -732,7 +744,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v90';
+const CACHE_NAME = 'awes-sr-v91';
 
 // Split into two lists on purpose.
 //

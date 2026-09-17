@@ -5437,7 +5437,13 @@
     if(typeof srShowTab === 'function') srShowTab('draft');
     if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
   });
-  if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=> srShowEntry('srEntryChoice'));
+  // Back from Single/Multiple returns to the JOB ORDER LIST — the screen
+  // it was actually reached from — not to the Create New / Saved Draft
+  // tiles two steps earlier.
+  if($('srEntryModeBack')) $('srEntryModeBack').addEventListener('click', ()=>{
+    srShowEntry(null);
+    if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
+  });
 
   srInstallContinueButtons();
 
@@ -7643,16 +7649,21 @@
         if(pending.length < 2 || !modeScreen){ renderSinglePickList(); pendingWrap.style.display=''; return; }
         $('srEntryModeTitle').textContent = 'Report Type — '+(r.jobOrderNo||'');
         if(typeof srShowEntry === 'function') srShowEntry('srEntryMode');
-        $('srTileSingle').onclick = ()=>{
+        // Render into the EXISTING pendingWrap — do NOT call
+        // srRenderJobOrderPicker() here. That rebuilds the whole list,
+        // which detaches the pendingWrap these handlers close over, so the
+        // units were being appended to an orphaned node while the screen
+        // showed a freshly-rebuilt job order list: tapping a tile looked
+        // like it bounced straight back to "Select from Job Order".
+        function backToUnits(render){
           if(typeof srShowEntry === 'function') srShowEntry(null);
-          if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
-          setTimeout(()=>{ renderSinglePickList(); pendingWrap.style.display=''; }, 0);
-        };
-        $('srTileMultiple').onclick = ()=>{
-          if(typeof srShowEntry === 'function') srShowEntry(null);
-          if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
-          setTimeout(()=>{ srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList); pendingWrap.style.display=''; }, 0);
-        };
+          if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
+          render();
+          pendingWrap.style.display = '';
+          row.scrollIntoView({behavior:'smooth', block:'start'});
+        }
+        $('srTileSingle').onclick = ()=> backToUnits(renderSinglePickList);
+        $('srTileMultiple').onclick = ()=> backToUnits(()=> srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList));
       }
       head.addEventListener('click', ()=>{
         const isOpen = pendingWrap.style.display !== 'none';
