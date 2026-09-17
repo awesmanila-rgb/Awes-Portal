@@ -112,6 +112,11 @@
   // srBatchBanner), so it's skipped rather than shown empty.
   function srSectionIsSkipped(n){
     if(n===1) return true; // customer info: inherited from the Job Order, never shown
+    // Batch mode fills equipment details per unit at submit time, so
+    // srApplyJobOrderBatch hides that card. Without this the wizard still
+    // counted it as the current step and parked on a hidden card with no
+    // Next button — a dead end on "Step 1 of 8 · Equipment Details".
+    if(n===2 && srBatchEquipItems && srBatchEquipItems.length > 1) return true;
     // Installation Parameters is behind a toggle — off means the unit wasn't
     // newly installed on this visit, so the step is skipped entirely.
     if(n===7){ const t = $('installToggle'); return !(t && t.checked); }

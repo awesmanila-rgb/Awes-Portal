@@ -467,6 +467,11 @@
     // Section 2 is skipped in batch mode, so section 1's Continue button
     // needs to name section 3 instead — see srRefreshContinueLabels.
     if(typeof srRefreshContinueLabels === 'function') srRefreshContinueLabels();
+    // Land on the first step that actually exists in batch mode — section 2
+    // is skipped here, so without this the wizard sat on a hidden card.
+    if(typeof srGoToSection === 'function' && typeof srNextSection === 'function'){
+      srGoToSection(srNextSection(1));
+    }
     $('srBatchBanner').style.display = '';
     $('srBatchList').innerHTML = equipItems.map(it=>
       '<div class="leave-note" style="margin-bottom:4px;">• '+escapeHtml(dtEquipSummaryLine(it))+'</div>'

@@ -5171,6 +5171,11 @@
   // srBatchBanner), so it's skipped rather than shown empty.
   function srSectionIsSkipped(n){
     if(n===1) return true; // customer info: inherited from the Job Order, never shown
+    // Batch mode fills equipment details per unit at submit time, so
+    // srApplyJobOrderBatch hides that card. Without this the wizard still
+    // counted it as the current step and parked on a hidden card with no
+    // Next button — a dead end on "Step 1 of 8 · Equipment Details".
+    if(n===2 && srBatchEquipItems && srBatchEquipItems.length > 1) return true;
     // Installation Parameters is behind a toggle — off means the unit wasn't
     // newly installed on this visit, so the step is skipped entirely.
     if(n===7){ const t = $('installToggle'); return !(t && t.checked); }
@@ -7868,6 +7873,11 @@
     // Section 2 is skipped in batch mode, so section 1's Continue button
     // needs to name section 3 instead — see srRefreshContinueLabels.
     if(typeof srRefreshContinueLabels === 'function') srRefreshContinueLabels();
+    // Land on the first step that actually exists in batch mode — section 2
+    // is skipped here, so without this the wizard sat on a hidden card.
+    if(typeof srGoToSection === 'function' && typeof srNextSection === 'function'){
+      srGoToSection(srNextSection(1));
+    }
     $('srBatchBanner').style.display = '';
     $('srBatchList').innerHTML = equipItems.map(it=>
       '<div class="leave-note" style="margin-bottom:4px;">• '+escapeHtml(dtEquipSummaryLine(it))+'</div>'

@@ -1,3 +1,14 @@
+// Bumped to v93 — Multiple Reports dead-ended on "Step 1 of 8 · Equipment
+// Details" with nothing on screen and no Next button. Batch mode fills
+// equipment details per unit at submit time, so srApplyJobOrderBatch hides
+// that card — but when the wizard was rewritten, srSectionIsSkipped lost
+// its batch check, so the wizard still treated section 2 as the current
+// step and parked on a hidden card. Restored the skip, and
+// srApplyJobOrderBatch now explicitly lands on the first step that
+// actually exists. Also refreshed the batch banner text, which still
+// referred to "Section 2" and "Section 8" from the pre-wizard numbering
+// and said nothing about Operation Parameters being per-unit.
+//
 // Bumped to v92 — the Single/Multiple "loop" again. v91 fixed the real
 // detached-node bug, but the screen still READ as a bounce back to the job
 // order list, because the unit list is rendered INSIDE the job order card:
@@ -756,7 +767,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v92';
+const CACHE_NAME = 'awes-sr-v93';
 
 // Split into two lists on purpose.
 //
