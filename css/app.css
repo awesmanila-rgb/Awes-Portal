@@ -2390,3 +2390,49 @@ html.role-tech-root body{ overscroll-behavior-x:none; overscroll-behavior-y:auto
   border:1px solid var(--border); border-radius:10px; font-size:13px; font-weight:600; cursor:pointer;
 }
 .sr-phase-toggle input{ width:20px; height:20px; flex-shrink:0; }
+
+/* Operation Parameters on a phone.
+   The table needs min-width:520px to fit the row-label column plus both
+   Before/After columns, so on a narrow screen it either scrolls sideways
+   or squeezes the inputs to unusable widths. On mobile the label column is
+   dropped and each field identifies itself by its placeholder (which is
+   why every input in this table has one). Desktop keeps the labelled table
+   exactly as it is. */
+@media (max-width:700px){
+  table.opdata-table{ min-width:0; }
+  table.opdata-table td.opdata-row-label,
+  table.opdata-table th:first-child{ display:none; }
+  table.opdata-table td{ padding:5px; }
+  table.opdata-table td .opdata-cell-inputs{ flex-wrap:wrap; }
+  table.opdata-table input{ font-size:13px; padding:9px 8px; }
+  .opdata-table-wrap{ overflow-x:visible; }
+}
+
+/* Operation Parameters — reading-status badges and the all-units list */
+.sr-op-badge{
+  display:inline-block; margin-top:6px; padding:3px 9px; border-radius:999px;
+  font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; white-space:nowrap;
+}
+.sr-op-badge.empty{ background:#F1F1EF; color:#6B6F6A; }
+.sr-op-badge.partial{ background:#FBF0DC; color:#8A6716; }
+.sr-op-badge.complete{ background:var(--green-light); color:var(--green-dark); }
+.sr-op-unit-count{
+  background:none; border:none; padding:0; font-family:inherit; cursor:pointer;
+  font-size:11.5px; font-weight:700; color:var(--teal); text-align:left;
+}
+.sr-op-head-link{
+  margin-left:auto; margin-right:10px; flex-shrink:0;
+  background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35); color:#fff;
+  border-radius:999px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer; font-family:inherit;
+}
+.sr-oplist-summary{ font-size:12.5px; color:var(--text-muted); margin:0 0 12px; }
+.sr-oplist-row{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;
+  background:none; border:none; border-top:1px solid var(--border); padding:12px 4px;
+  text-align:left; font-family:inherit; cursor:pointer;
+}
+.sr-oplist-row:first-of-type{ border-top:none; }
+.sr-oplist-row:active{ background:var(--green-light); }
+.sr-oplist-row.current{ background:var(--green-light); border-radius:8px; }
+.sr-oplist-name{ font-size:13px; font-weight:600; color:var(--text); line-height:1.35; }
+.sr-oplist-row .sr-op-badge{ margin-top:0; flex-shrink:0; }

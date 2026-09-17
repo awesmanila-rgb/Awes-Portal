@@ -1013,6 +1013,21 @@ window.awesCss = {
   </div>
 </div>
 
+<!-- All units and their reading status. Opened from the Operation
+     Parameters step header or its "view all" counter — a supervisor
+     reviewing later shouldn't have to swipe through ten units one at a
+     time to find the one that's missing readings. Built by
+     srRenderOpListOverlay() in ui.js. -->
+<div class="overlay" id="srOpListOverlay">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3>Operation Parameters — all units</h3>
+      <button class="sheet-close" id="closeSrOpList">&times;</button>
+    </div>
+    <div id="srOpListBody"></div>
+  </div>
+</div>
+
 <!-- Technician bottom nav — replaces the sidebar for this role only (admin
      keeps .admin-sidebar unchanged). Same .cp-nav/.cp-nav-btn classes as
      the customer portal's nav above: fixed bottom bar on mobile, top bar
@@ -2390,7 +2405,7 @@ window.awesCss = {
 
   <!-- 6. Operating Data -->
   <div class="card" id="sec6Card" style="display:none;">
-    <div class="card-head collapsible-head"><span><span class="num">5</span>Operation Parameters</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
+    <div class="card-head collapsible-head" id="sec6Head"><span><span class="num">5</span>Operation Parameters</span><span class="card-caret"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></div>
     <div class="card-body" id="sec6Body" style="display:none;">
       <!-- Single-phase by default: one Amperage and one Voltage field.
            Most units on file are single-phase, and three empty boxes per
@@ -2411,13 +2426,13 @@ window.awesCss = {
         <tbody>
           <tr>
             <td class="opdata-row-label"><span id="ampRowLabel">Amperage</span></td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="b_amp_l1" placeholder="L1"><input type="text" id="b_amp_l2" class="sr-phase3" placeholder="L2"><input type="text" id="b_amp_l3" class="sr-phase3" placeholder="L3"></div></td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="a_amp_l1" placeholder="L1"><input type="text" id="a_amp_l2" class="sr-phase3" placeholder="L2"><input type="text" id="a_amp_l3" class="sr-phase3" placeholder="L3"></div></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="b_amp_l1" placeholder="Amps"><input type="text" id="b_amp_l2" class="sr-phase3" placeholder="A₂"><input type="text" id="b_amp_l3" class="sr-phase3" placeholder="A₃"></div></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="a_amp_l1" placeholder="Amps"><input type="text" id="a_amp_l2" class="sr-phase3" placeholder="A₂"><input type="text" id="a_amp_l3" class="sr-phase3" placeholder="A₃"></div></td>
           </tr>
           <tr>
             <td class="opdata-row-label"><span id="voltRowLabel">Voltage</span></td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="b_volt_l12" placeholder="L12"><input type="text" id="b_volt_l23" class="sr-phase3" placeholder="L23"><input type="text" id="b_volt_l31" class="sr-phase3" placeholder="L31"></div></td>
-            <td><div class="opdata-cell-inputs"><input type="text" id="a_volt_l12" placeholder="L12"><input type="text" id="a_volt_l23" class="sr-phase3" placeholder="L23"><input type="text" id="a_volt_l31" class="sr-phase3" placeholder="L31"></div></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="b_volt_l12" placeholder="Volts"><input type="text" id="b_volt_l23" class="sr-phase3" placeholder="V₂"><input type="text" id="b_volt_l31" class="sr-phase3" placeholder="V₃"></div></td>
+            <td><div class="opdata-cell-inputs"><input type="text" id="a_volt_l12" placeholder="Volts"><input type="text" id="a_volt_l23" class="sr-phase3" placeholder="V₂"><input type="text" id="a_volt_l31" class="sr-phase3" placeholder="V₃"></div></td>
           </tr>
           <tr>
             <td class="opdata-row-label">Pressure (Suction/Discharge)</td>
@@ -2426,13 +2441,13 @@ window.awesCss = {
           </tr>
           <tr>
             <td class="opdata-row-label">Supply Air Temp (°C)</td>
-            <td><input type="text" id="b_temp"></td>
-            <td><input type="text" id="a_temp"></td>
+            <td><input type="text" id="b_temp" placeholder="Supply air temp (°C)"></td>
+            <td><input type="text" id="a_temp" placeholder="Supply air temp (°C)"></td>
           </tr>
           <tr>
             <td class="opdata-row-label">Air Volume Flow Rate (cfm)</td>
-            <td><input type="text" id="b_airflow"></td>
-            <td><input type="text" id="a_airflow"></td>
+            <td><input type="text" id="b_airflow" placeholder="Air volume flow (cfm)"></td>
+            <td><input type="text" id="a_airflow" placeholder="Air volume flow (cfm)"></td>
           </tr>
         </tbody>
       </table>

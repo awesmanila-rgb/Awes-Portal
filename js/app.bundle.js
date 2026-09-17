@@ -5667,6 +5667,29 @@
   function srOpHasValues(vals){
     return !!vals && SR_OP_FIELDS.some(f=> (vals[f]||'').trim());
   }
+  // Which readings actually apply right now. A single-phase unit has no
+  // L2/L3 or L23/L31, so counting them would make every single-phase unit
+  // look permanently incomplete.
+  function srOpRequiredFields(){
+    const phase3 = !!($('phase3Toggle') && $('phase3Toggle').checked);
+    return SR_OP_FIELDS.filter(f=>{
+      if(phase3) return true;
+      return !/_l2$|_l3$|_l23$|_l31$/.test(f);
+    });
+  }
+  // empty / partial / complete — what a tech (or a supervisor reviewing
+  // later) needs to see at a glance across ten-plus units in a building.
+  function srOpStatus(vals){
+    const req = srOpRequiredFields();
+    const filled = req.filter(f=> (vals && (vals[f]||'').trim())).length;
+    if(filled===0) return {key:'empty', label:'Empty', filled:0, total:req.length};
+    if(filled<req.length) return {key:'partial', label:'Partial', filled, total:req.length};
+    return {key:'complete', label:'Complete', filled, total:req.length};
+  }
+  // A unit's values, using what's on screen for the one being edited.
+  function srOpValuesFor(unitId){
+    return String(unitId)===String(srOpActiveUnitId) ? srOpReadFields() : (srOpParamsByUnit[unitId] || {});
+  }
   // Store whatever is on screen against the unit currently selected.
   function srOpStashActive(){
     if(srOpActiveUnitId) srOpParamsByUnit[srOpActiveUnitId] = srOpReadFields();
@@ -5692,7 +5715,8 @@
     if(idx < 0) idx = 0;
     const item = items[idx];
     const name = typeof dtEquipSummaryLine === 'function' ? dtEquipSummaryLine(item) : ('Unit '+(idx+1));
-    const filled = items.filter(it=> srOpHasValues(String(it.id)===String(srOpActiveUnitId) ? srOpReadFields() : srOpParamsByUnit[it.id])).length;
+    const st = srOpStatus(srOpValuesFor(item.id));
+    const done = items.filter(it=> srOpStatus(srOpValuesFor(it.id)).key==='complete').length;
     host.innerHTML =
       '<div class="sr-op-unit">'+
         '<div class="sr-op-unit-top">'+
@@ -5700,17 +5724,21 @@
           '<div class="sr-op-unit-main">'+
             '<div class="sr-op-unit-name">'+escapeHtml(name)+'</div>'+
             '<div class="sr-op-unit-note">Record all readings for this particular unit.</div>'+
+            '<span class="sr-op-badge '+st.key+'">'+st.label+' \u00b7 '+st.filled+'/'+st.total+'</span>'+
           '</div>'+
           '<button type="button" class="sr-op-arrow" data-sr-unit-step="1"'+(idx===items.length-1?' disabled':'')+' aria-label="Next unit">&#8250;</button>'+
         '</div>'+
         '<div class="sr-op-unit-foot">'+
-          '<span class="sr-op-unit-count">Unit '+(idx+1)+' of '+items.length+' \u00b7 '+filled+' with readings</span>'+
+          '<button type="button" class="sr-op-unit-count" id="srOpOpenList">'+
+            'Unit '+(idx+1)+' of '+items.length+' \u00b7 '+done+' complete \u2014 view all'+
+          '</button>'+
           '<label class="sr-op-apply">'+
             '<input type="checkbox" id="srOpApplyAll">'+
             '<span>Apply to this '+items.length+' equipment then edit later</span>'+
           '</label>'+
         '</div>'+
       '</div>';
+    srOpSyncHeaderLink();
   }
   // Arrows step between units, saving whatever is on screen first.
   document.addEventListener('click', (e)=>{
@@ -5779,13 +5807,78 @@
     const amp = $('ampRowLabel'), volt = $('voltRowLabel');
     if(amp) amp.textContent = on ? 'Amperage (L1/L2/L3)' : 'Amperage';
     if(volt) volt.textContent = on ? 'Voltage (L12/L23/L31)' : 'Voltage';
-    // Placeholders only carry meaning once there's more than one box.
+    // The FIRST box of each row names its measurement even in 3-phase mode
+    // ("Amps L1", not just "L1"): on a phone the row-label column is hidden
+    // (see the max-width:700px rules in app.css), so a bare "L1" would
+    // leave nothing on screen saying whether the row is amperage or
+    // voltage. The 2nd/3rd boxes sit beside it, so L2/L3 read fine.
+    // A/V with UNICODE subscripts (U+2081..2083) — an input placeholder is
+    // plain text, so <sub> markup isn't possible here. The A and V prefixes
+    // also keep each row self-identifying on mobile, where the row-label
+    // column is hidden.
     const l1 = $('a_amp_l1'), bl1 = $('b_amp_l1'), v12 = $('a_volt_l12'), bv12 = $('b_volt_l12');
-    [l1, bl1].forEach(el=>{ if(el) el.placeholder = on ? 'L1' : 'Amps'; });
-    [v12, bv12].forEach(el=>{ if(el) el.placeholder = on ? 'L12' : 'Volts'; });
+    [l1, bl1].forEach(el=>{ if(el) el.placeholder = on ? 'A\u2081' : 'Amps'; });
+    [v12, bv12].forEach(el=>{ if(el) el.placeholder = on ? 'V\u2081' : 'Volts'; });
   }
   if($('phase3Toggle')) $('phase3Toggle').addEventListener('change', srApplyPhaseMode);
   srApplyPhaseMode();
+
+  // ---- All-units list (Operation Parameters) ----
+  // Secondary entry point into the same per-unit data: tapping the step
+  // header or the "view all" counter shows every unit with its status, so
+  // completeness can be checked without stepping through each one.
+  function srRenderOpListOverlay(){
+    const body = $('srOpListBody');
+    if(!body) return;
+    const items = srBatchEquipItems || [];
+    if(items.length===0){ body.innerHTML = '<div class="empty-state">No units in this report.</div>'; return; }
+    const done = items.filter(it=> srOpStatus(srOpValuesFor(it.id)).key==='complete').length;
+    body.innerHTML =
+      '<p class="sr-oplist-summary">'+done+' of '+items.length+' units have complete readings. Tap a unit to open it.</p>'+
+      items.map((it,i)=>{
+        const st = srOpStatus(srOpValuesFor(it.id));
+        const name = typeof dtEquipSummaryLine === 'function' ? dtEquipSummaryLine(it) : ('Unit '+(i+1));
+        const current = String(it.id)===String(srOpActiveUnitId);
+        return '<button type="button" class="sr-oplist-row'+(current?' current':'')+'" data-sr-oplist="'+escapeHtml(String(it.id))+'">'+
+          '<span class="sr-oplist-name">'+escapeHtml(name)+'</span>'+
+          '<span class="sr-op-badge '+st.key+'">'+st.label+' \u00b7 '+st.filled+'/'+st.total+'</span>'+
+        '</button>';
+      }).join('');
+  }
+  function srOpOpenList(){
+    // Stash what's on screen first, or the unit being edited shows its
+    // previously-saved status instead of what the tech just typed.
+    srOpStashActive();
+    srRenderOpListOverlay();
+    $('srOpListOverlay').classList.add('open');
+  }
+  function srOpCloseList(){ $('srOpListOverlay').classList.remove('open'); }
+  if($('closeSrOpList')) $('closeSrOpList').addEventListener('click', srOpCloseList);
+  if($('srOpListOverlay')) $('srOpListOverlay').addEventListener('click', (e)=>{ if(e.target.id==='srOpListOverlay') srOpCloseList(); });
+  document.addEventListener('click', (e)=>{
+    if(e.target.closest('#srOpOpenList')){ srOpOpenList(); return; }
+    const row = e.target.closest('[data-sr-oplist]');
+    if(row){ srOpSelectUnit(row.getAttribute('data-sr-oplist')); srOpCloseList(); }
+  });
+  // The step header is the other way in, but it ALSO toggles the card's
+  // collapse — so opening the list on any header tap would fight that.
+  // A dedicated "View all" chip is injected into the header instead, and
+  // only in batch mode, where there is more than one unit to compare.
+  function srOpSyncHeaderLink(){
+    const head = $('sec6Head');
+    if(!head) return;
+    let chip = head.querySelector('.sr-op-head-link');
+    const many = (srBatchEquipItems||[]).length > 1;
+    if(!many){ if(chip) chip.remove(); return; }
+    if(!chip){
+      chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'sr-op-head-link';
+      chip.textContent = 'View all units';
+      chip.addEventListener('click', (e)=>{ e.stopPropagation(); srOpOpenList(); });
+      head.insertBefore(chip, head.querySelector('.card-caret'));
+    }
+  }
 
 
 // ---------- build PDF ----------

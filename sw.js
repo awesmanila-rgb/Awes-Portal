@@ -1,3 +1,41 @@
+// Bumped to v97 — reading-status visibility on Operation Parameters.
+//
+// 1. STATUS BADGES (Empty / Partial / Complete, with an n/total count) on
+//    the unit card, so a tech can see at a glance which units still need
+//    readings. "Required" adapts to the phase toggle: a single-phase unit
+//    has no L2/L3 or L23/L31, and counting those would leave every
+//    single-phase unit permanently stuck at Partial.
+// 2. ALL-UNITS LIST (#srOpListOverlay) as a second way in — from a "View
+//    all units" chip in the step header, or the counter on the unit card.
+//    Shows every unit with its badge and jumps straight to whichever is
+//    tapped, so checking completeness across ten-plus units doesn't mean
+//    swiping through them one by one. Opening it stashes whatever is on
+//    screen first, or the unit being edited would report its last SAVED
+//    status rather than what was just typed.
+//    The chip is a separate control rather than the header itself, since
+//    the header already toggles the card's collapse.
+//
+// Bumped to v96 — 3-phase placeholders are now A1/A2/A3 and V1/V2/V3 with
+// the numbers as real subscripts, using Unicode U+2081..2083 (A\u2081 etc).
+// An input placeholder is plain text, so <sub> markup is not possible
+// there; the Unicode characters are the only way to get true subscripts.
+// The A/V prefixes also keep each row self-identifying on mobile, where
+// the row-label column is hidden. Single-phase still reads "Amps"/"Volts",
+// and the static markup now says that too — it previously shipped "L1"/
+// "L12", which flashed on screen before srApplyPhaseMode corrected it.
+//
+// Bumped to v95 — Operation Parameters on a phone. The table carries
+// min-width:520px to fit the row-label column plus Before/After, so on a
+// narrow screen it either scrolled sideways or squeezed the inputs. On
+// mobile (<=700px) the row-label column is now hidden and each field
+// identifies itself by its placeholder; desktop keeps the labelled table
+// unchanged. Two prerequisites for that: Supply Air Temp and Air Volume
+// Flow Rate had NO placeholders at all (they rendered as blank boxes with
+// the labels hidden — visible in the report), so they got them; and the
+// first box of the amperage/voltage rows now reads "Amps L1" / "Volts L12"
+// in 3-phase mode rather than a bare "L1", which without the label column
+// said nothing about which measurement the row was.
+//
 // Bumped to v94 — Operation Parameters reworked.
 //
 // Multiple Reports: the unit TAB STRIP is replaced by a one-unit card —
@@ -788,7 +826,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v94';
+const CACHE_NAME = 'awes-sr-v97';
 
 // Split into two lists on purpose.
 //
