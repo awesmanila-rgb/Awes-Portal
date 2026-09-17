@@ -7545,6 +7545,11 @@
       return;
     }
     card.style.display = '';
+    // Reset anything the unit step changed (see backToUnits below), so a
+    // re-render always comes back as the full "Select From Job Order" list.
+    const t = $('srJobOrderTitle');
+    if(t && t.dataset.originalHtml) t.innerHTML = t.dataset.originalHtml;
+    else if(t) t.dataset.originalHtml = t.innerHTML;
     list.innerHTML = '<div class="empty-state">Loading…</div>';
     const mine = await dtListForReporter(currentUser.id);
     // A ticket can be closed with some equipment left unreported (closing
@@ -7646,7 +7651,10 @@
       // choose, so that case goes straight to the unit list.
       function openUnitStep(){
         const modeScreen = $('srEntryMode');
-        if(pending.length < 2 || !modeScreen){ renderSinglePickList(); pendingWrap.style.display=''; return; }
+        // One unit pending: nothing to choose between Single and Multiple,
+        // so go straight to the unit step — but through the same isolation
+        // so it reads as its own screen rather than an inline expansion.
+        if(pending.length < 2 || !modeScreen){ backToUnits(renderSinglePickList); return; }
         $('srEntryModeTitle').textContent = 'Report Type — '+(r.jobOrderNo||'');
         if(typeof srShowEntry === 'function') srShowEntry('srEntryMode');
         // Render into the EXISTING pendingWrap — do NOT call
@@ -7658,9 +7666,21 @@
         function backToUnits(render){
           if(typeof srShowEntry === 'function') srShowEntry(null);
           if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
+          // Show ONLY the chosen job order's units and retitle the card.
+          // The unit list lives inside this card, so simply re-showing it
+          // with every other job order still listed looked identical to
+          // being sent back to "Select From Job Order" — which is exactly
+          // what it was read as.
+          const title = $('srJobOrderTitle');
+          if(title) title.textContent = 'Select unit for this report — '+(r.jobOrderNo||'');
+          Array.from($('srJobOrderList').children).forEach(el=>{
+            el.style.display = (el===row) ? '' : 'none';
+          });
+          // The row's own header is redundant now that it's the only one.
+          if(head) head.style.display = 'none';
           render();
           pendingWrap.style.display = '';
-          row.scrollIntoView({behavior:'smooth', block:'start'});
+          window.scrollTo({top:0, behavior:'smooth'});
         }
         $('srTileSingle').onclick = ()=> backToUnits(renderSinglePickList);
         $('srTileMultiple').onclick = ()=> backToUnits(()=> srRenderBatchPicker(pendingWrap, r, pending, renderSinglePickList));

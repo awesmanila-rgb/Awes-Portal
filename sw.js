@@ -1,3 +1,15 @@
+// Bumped to v92 — the Single/Multiple "loop" again. v91 fixed the real
+// detached-node bug, but the screen still READ as a bounce back to the job
+// order list, because the unit list is rendered INSIDE the job order card:
+// re-showing that card with every other job order still listed below is
+// visually identical to being sent back to "Select From Job Order". Now
+// choosing Single or Multiple hides every other job order row, hides the
+// chosen row's own header, and retitles the card to "Select unit for this
+// report — JO-...", so the unit step reads as its own screen. The
+// single-unit case goes through the same path instead of expanding
+// inline. srRenderJobOrderPicker restores the original title and rows on
+// any re-render.
+//
 // Bumped to v91 — tapping Single/Multiple bounced straight back to the job
 // order list, and picking a job order bounced back to Single/Multiple.
 // Both tile handlers called srRenderJobOrderPicker(), which REBUILDS the
@@ -744,7 +756,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v91';
+const CACHE_NAME = 'awes-sr-v92';
 
 // Split into two lists on purpose.
 //
