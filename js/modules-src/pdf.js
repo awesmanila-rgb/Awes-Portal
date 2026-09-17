@@ -344,23 +344,102 @@
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
+      canvas.className = 'preview-page';
       canvas.style.cssText = 'max-width:100%; height:auto; display:block; margin:0 auto 12px; box-shadow:0 1px 4px rgba(0,0,0,.2); background:#fff;';
       const ctx = canvas.getContext('2d');
       await page.render({ canvasContext: ctx, viewport }).promise;
       if(myToken !== previewRenderToken) return;
       frame.appendChild(canvas);
     }
+    applyPreviewZoom(); // pages created after the zoom was set
   }
+  // Renders several reports one after another in the same scrollable
+  // frame, each under its unit's name.
+  async function renderPdfPreviewMulti(docs){
+    const myToken = ++previewRenderToken;
+    const frame = $('previewFrame');
+    frame.innerHTML = '<div class="empty-state">Rendering '+docs.length+' reports…</div>';
+    await ensurePdfJs();
+    frame.innerHTML = '';
+    for(let i=0; i<docs.length; i++){
+      if(myToken !== previewRenderToken) return;
+      const head = document.createElement('div');
+      head.className = 'preview-doc-head';
+      head.textContent = 'Report '+(i+1)+' of '+docs.length+(docs[i].label ? ' — '+docs[i].label : '');
+      frame.appendChild(head);
+      const pdf = await pdfjsLib.getDocument({ data: docs[i].doc.output('arraybuffer') }).promise;
+      for(let pageNum=1; pageNum<=pdf.numPages; pageNum++){
+        if(myToken !== previewRenderToken) return;
+        const page = await pdf.getPage(pageNum);
+        const scale = Math.min(2, (frame.clientWidth || 700) / page.getViewport({scale:1}).width);
+        const viewport = page.getViewport({ scale: Math.max(scale, 1) });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        canvas.className = 'preview-page';
+        canvas.style.cssText = 'max-width:100%; height:auto; display:block; margin:0 auto 12px; box-shadow:0 1px 4px rgba(0,0,0,.2); background:#fff;';
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        if(myToken !== previewRenderToken) return;
+        frame.appendChild(canvas);
+      }
+    }
+    // Keep the first doc downloadable from the preview's own button.
+    previewCurrentDoc = docs[0] ? docs[0].doc : null;
+    applyPreviewZoom(); // pages created after the zoom was set
+  }
+  // ---- Preview zoom ----
+  // A report rendered to fit a phone screen is unreadable; zoom lets a
+  // technician (or the customer signing) actually check the figures
+  // before it goes out.
+  let previewZoom = 1;
+  function applyPreviewZoom(){
+    $$('.preview-page', $('previewFrame')).forEach(c=>{
+      c.style.maxWidth = (100 * previewZoom)+'%';
+      c.style.width = (100 * previewZoom)+'%';
+    });
+    const lbl = $('previewZoomLabel');
+    if(lbl) lbl.textContent = Math.round(previewZoom*100)+'%';
+    // Only let the frame scroll sideways once there's something to scroll.
+    $('previewFrame').style.overflowX = previewZoom > 1 ? 'auto' : 'hidden';
+  }
+  function setPreviewZoom(z){
+    previewZoom = Math.min(3, Math.max(0.5, Math.round(z*10)/10));
+    applyPreviewZoom();
+  }
+  if($('previewZoomIn')) $('previewZoomIn').addEventListener('click', ()=> setPreviewZoom(previewZoom + 0.25));
+  if($('previewZoomOut')) $('previewZoomOut').addEventListener('click', ()=> setPreviewZoom(previewZoom - 0.25));
+  if($('previewZoomReset')) $('previewZoomReset').addEventListener('click', ()=> setPreviewZoom(1));
+
   $('previewBtn').addEventListener('click', async ()=>{
     if(!validate()){ toast('Please fill required fields before previewing'); return; }
     $('previewBtn').disabled = true; $('previewBtn').textContent = 'Building preview…';
     try{
       const data = await gatherDataForOutput();
-      const doc = await buildPdf(data);
+      const batch = (typeof srBatchEquipItems !== 'undefined' && srBatchEquipItems) ? srBatchEquipItems : null;
       $('previewOverlay').querySelector('h3').textContent = 'Report Preview';
       $('previewOkBtn').textContent = 'Looks Good — Continue to Signatures';
       $('previewOverlay').classList.add('open');
-      await renderPdfPreview(doc, (data.srNo||'service-report')+'.pdf');
+      setPreviewZoom(1); // every preview starts at fit-to-width
+      if(batch && batch.length > 1){
+        // Batch produces ONE REPORT PER UNIT, but preview only ever built
+        // the first — so the other units' reports went out having never
+        // been looked at. Build them all, each with its own equipment
+        // fields and its own operating readings, exactly as
+        // submitBatchReports will.
+        const docs = [];
+        for(const item of batch){
+          const d = Object.assign({}, data);
+          if(typeof EQUIP_FIELD_KEYS !== 'undefined') EQUIP_FIELD_KEYS.forEach(k=> d[k] = item[k] || '');
+          if(typeof srOpParamsFor === 'function' && typeof SR_OP_FIELDS !== 'undefined'){
+            const own = srOpParamsFor(item.id || '');
+            SR_OP_FIELDS.forEach(f=> d[f] = own[f] || '');
+          }
+          docs.push({ doc: await buildPdf(d), label: (typeof dtEquipSummaryLine==='function' ? dtEquipSummaryLine(item) : '') });
+        }
+        await renderPdfPreviewMulti(docs);
+      }else{
+        const doc = await buildPdf(data);
+        await renderPdfPreview(doc, (data.srNo||'service-report')+'.pdf');
+      }
     }catch(e){
       console.error(e);
       toast('Could not build preview');

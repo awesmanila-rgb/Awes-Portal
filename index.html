@@ -2593,6 +2593,14 @@ window.awesCss = {
       <h3>Report Preview</h3>
       <button class="sheet-close" id="closePreview">&times;</button>
     </div>
+    <!-- Zoom: a report scaled to fit a phone is unreadable, and this is
+         the last look anyone gets before the customer signs. -->
+    <div class="preview-zoombar">
+      <button type="button" id="previewZoomOut" aria-label="Zoom out">&minus;</button>
+      <span id="previewZoomLabel">100%</span>
+      <button type="button" id="previewZoomIn" aria-label="Zoom in">+</button>
+      <button type="button" id="previewZoomReset" class="reset">Fit</button>
+    </div>
     <div id="previewFrame" style="flex:1; width:100%; overflow-y:auto; border:1px solid var(--border); border-radius:8px; background:#eee; padding:10px; text-align:center;">
       <div class="empty-state" style="display:none;">Rendering preview…</div>
     </div>

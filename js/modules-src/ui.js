@@ -378,12 +378,14 @@
     if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
   });
   if($('srTileSavedDraft')) $('srTileSavedDraft').addEventListener('click', ()=>{
-    srShowEntry(null);
-    // srShowTab — NOT showServiceReportTab, which doesn't exist. The
-    // typeof guard meant the wrong name failed silently rather than
-    // throwing, so the tile just did nothing at all.
-    if(typeof srShowTab === 'function') srShowTab('draft');
+    // Hide every entry screen outright rather than going through
+    // srShowEntry(null), which also re-reveals a form section on the way
+    // out — pointless here and a source of flicker before the panel
+    // switches. srShowTab does the rest (panel swap + loads the drafts).
+    ['srEntryGate','srEntryChoice','srEntryMode'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
+    // srShowTab — NOT showServiceReportTab, which doesn't exist.
+    if(typeof srShowTab === 'function') srShowTab('draft');
   });
   // Back from Single/Multiple returns to the JOB ORDER LIST — the screen
   // it was actually reached from — not to the Create New / Saved Draft

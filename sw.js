@@ -1,3 +1,23 @@
+// Bumped to v98 — five fixes:
+//  1. Suggestion dropdowns removed from Operating Data. Amperage, voltage,
+//     pressure, temperature and airflow are MEASURED off the unit in front
+//     of the technician; offering past readings from other units as
+//     pickable options is useless and a way to put a wrong number on a
+//     report. attachAllCombos now skips the whole 'Operating Data' group.
+//  2. Preview in batch mode built only the FIRST report, so the other
+//     units' reports went out having never been looked at. It now builds
+//     and shows every one, each with its own equipment fields and its own
+//     per-unit readings, exactly as submitBatchReports will.
+//  3. Preview zoom (50%-300%, +/- and Fit). A report scaled to fit a phone
+//     is unreadable, and this is the last look anyone gets before the
+//     customer signs.
+//  4. Saved Draft tile no longer routes through srShowEntry(null), which
+//     re-revealed a form section on the way out and could flash before the
+//     panel switched; it hides the entry screens directly.
+//  5. The all-units jump list from v97 is reachable from the "View all
+//     units" chip in the Operation Parameters header and the counter on
+//     the unit card — both appear only in Multiple Reports mode (2+ units).
+//
 // Bumped to v97 — reading-status visibility on Operation Parameters.
 //
 // 1. STATUS BADGES (Empty / Partial / Complete, with an n/total count) on
@@ -826,7 +846,7 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v97';
+const CACHE_NAME = 'awes-sr-v98';
 
 // Split into two lists on purpose.
 //

@@ -698,6 +698,12 @@
     // Admin inputs all sprouted an empty suggestion panel and a caret button.
     Object.keys(FIELD_META).forEach(key=>{
       if(key==='custName') return; // has its own customer-record combo below
+      // Operating Data is measured, not chosen: amperage, voltage,
+      // pressure, temperature and airflow are readings taken off the unit
+      // in front of the technician. A suggestion list there offers past
+      // readings from OTHER units as if they were options, which is both
+      // useless and a way to put a wrong number on a report.
+      if(FIELD_META[key] && FIELD_META[key].group==='Operating Data') return;
       const el = $(key);
       if(el && el.tagName==='INPUT' && el.type==='text') attachCombo(el);
     });

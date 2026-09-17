@@ -2436,3 +2436,20 @@ html.role-tech-root body{ overscroll-behavior-x:none; overscroll-behavior-y:auto
 .sr-oplist-row.current{ background:var(--green-light); border-radius:8px; }
 .sr-oplist-name{ font-size:13px; font-weight:600; color:var(--text); line-height:1.35; }
 .sr-oplist-row .sr-op-badge{ margin-top:0; flex-shrink:0; }
+
+/* Report preview — zoom bar and multi-report headings */
+.preview-zoombar{
+  display:flex; align-items:center; gap:8px; padding:8px 0 10px; flex-shrink:0;
+}
+.preview-zoombar button{
+  width:34px; height:34px; border-radius:8px; cursor:pointer; font-family:inherit;
+  border:1px solid var(--border); background:var(--surface); color:var(--text);
+  font-size:18px; line-height:1; display:flex; align-items:center; justify-content:center;
+}
+.preview-zoombar button.reset{ width:auto; padding:0 12px; font-size:12.5px; font-weight:700; }
+.preview-zoombar #previewZoomLabel{ font-size:12.5px; font-weight:700; color:var(--text-muted); min-width:44px; text-align:center; }
+.preview-doc-head{
+  font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.4px;
+  color:var(--green-dark); background:var(--green-light); border-radius:8px;
+  padding:8px 10px; margin:4px 0 10px; text-align:left;
+}
