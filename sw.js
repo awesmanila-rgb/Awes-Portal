@@ -874,7 +874,17 @@
 //   - Dates are computed from a server-anchored business timezone, so a
 //     device with a skewed clock or wrong timezone can no longer
 //     acknowledge early or expire a job order a day late.
-const CACHE_NAME = 'awes-sr-v100';
+// Bumped to v101 — customer service card fixes. Without the bump, devices
+// already running v100 keep serving their cached bundle and never see them:
+//   - The status line said "A technician is on the way" at every stage,
+//     including Work in Progress, where they have already arrived. Each
+//     stage now has its own wording.
+//   - Technician names never appeared. The card read them from
+//     dispatch_tickets, which RLS closes to customers, so the lookup
+//     silently returned nothing. Names now come from the
+//     service_request_tech_names() RPC, which exposes only the names and
+//     only for a request that customer owns.
+const CACHE_NAME = 'awes-sr-v101';
 
 // Split into two lists on purpose.
 //

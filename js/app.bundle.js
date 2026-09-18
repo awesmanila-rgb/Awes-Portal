@@ -16923,19 +16923,56 @@
   // the day. A confirmed-but-not-yet-started visit renders here too, with
   // the tracker sitting before step 1 — so the customer watches a single
   // card fill in rather than cards swapping underneath them.
+  // Who is coming, for the customer's own request. Empty is a normal
+  // answer — before anyone is assigned, or offline — and the card falls
+  // back to wording that doesn't name a person.
+  async function cpFetchTechNames(requestId){
+    if(!requestId || !(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.rpc('service_request_tech_names', { p_request_id: requestId });
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('fetch technician names failed', describeCloudError(e)); return []; }
+  }
+
   function cpHeroActive(req, eq, techNames){
     const notStarted = req.status === 'schedule_confirmed';
     const finished = req.status === 'completed';
     const label = notStarted ? 'Scheduled' : srStatusLabel(req.status);
     // 'on the way' is wrong in both directions — before the day, and after
     // the work is done and only admin's sign-off is outstanding.
-    const techLine = notStarted
-      ? 'Your technician will be assigned on the day'
-      : (finished
-          ? 'Work finished — being reviewed before sign-off'
-          : (techNames && techNames.length
-              ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
-              : 'A technician is on the way'));
+    // One line per stage. Everything except 'completed' used to fall
+    // through to "on the way", so the card claimed a technician was
+    // travelling while they were standing on site working — and again
+    // before they had even acknowledged the job.
+    const who = (techNames && techNames.length)
+      ? (techNames.length === 1 ? techNames[0] : techNames.length + ' technicians')
+      : null;
+    let techLine;
+    if(notStarted){
+      techLine = 'Your technician will be assigned on the day';
+    }else if(finished){
+      techLine = 'Work finished — being reviewed before sign-off';
+    }else if(req.status === 'closed'){
+      // Unreachable today: the hero stops at 'completed' and a closed
+      // service returns the customer to the all-clear card. Handled anyway
+      // so this never silently falls through to the 'preparing' wording if
+      // that selection is ever widened.
+      techLine = 'Service complete and signed off';
+    }else if(req.status === 'in_progress'){
+      // They have arrived. Plural reads better as "are working on site".
+      techLine = who
+        ? who + (techNames.length === 1 ? ' is working on site' : ' are working on site')
+        : 'Work is under way on site';
+    }else if(req.status === 'en_route'){
+      techLine = who
+        ? who + (techNames.length === 1 ? ' is on the way' : ' are on the way')
+        : 'A technician is on the way';
+    }else{
+      // 'preparing' — the visit is today but nobody has accepted it yet,
+      // so promising someone is travelling would be a guess.
+      techLine = who ? ('Assigned to ' + who) : 'Getting your service ready';
+    }
     // Scheduled date/time this visit was actually dispatched for — the
     // confirmed proposed schedule normally, falling back to the original
     // requested date on the off chance a request reached 'dispatched'
@@ -17040,8 +17077,12 @@
       // Technician names live on the linked dispatch ticket, not the
       // request row itself — a separate fetch, so the hero shows without
       // them for a moment on first paint, then fills in.
-      const techNames = (subject.linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
-        ? await dtFetchTicketTechNames(subject.linkedDispatchTicketId) : [];
+      // Via the RPC, not dtFetchTicketTechNames: that reads dispatch_tickets
+      // directly, and RLS grants customers no access to that table, so it
+      // silently returned an empty list and the card never named anyone.
+      // The RPC returns only the names, and only for a request this
+      // customer owns.
+      const techNames = subject.linkedDispatchTicketId ? (await cpFetchTechNames(subject.id)) : [];
       html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), techNames);
     } else {
       html = cpHeroAllClear(); isAllClear = true;
