@@ -293,20 +293,6 @@
       '</div>'
     );
   }
-  function cpHeroScheduled(req, eq){
-    const dateStr = req.proposedScheduleDate ? fmtDate(req.proposedScheduleDate) : 'a date to be confirmed';
-    const timeStr = req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '';
-    return (
-      '<div class="cp-hero-scheduled" data-req-id="'+req.id+'">'+
-        '<div style="display:flex; align-items:center; gap:12px;">'+
-          '<div class="ic">'+CP_ICON.calendar+'</div>'+
-          '<div><p class="cp-hero-eyebrow teal">Scheduled</p><p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
-          '<p class="cp-hero-sub">'+dateStr+timeStr+'</p></div>'+
-        '</div>'+
-        '<a data-action="reschedule" style="font-size:12px; font-weight:600; color:var(--teal); cursor:pointer;">Details</a>'+
-      '</div>'
-    );
-  }
   // Deterministic small color per technician so the same person's avatar
   // is always the same color across renders (not random each time).
   const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
@@ -331,11 +317,28 @@
   // The plain bar tracker in service-requests.js's srProgressStepsHtml is
   // a separate, simpler version used in the admin/customer detail
   // overlay, which isn't built to this visual theme.
+  // A service the crew is actively working through, in the order the
+  // customer sees it. 'dispatched' is the pre-lifecycle name for
+  // 'preparing' and is accepted on every READ path so rows written before
+  // the migration still register as active; nothing writes it any more.
+  // 'completed' is NOT here — the work is done, it is waiting on admin's
+  // close, and the card should stop presenting it as in-flight.
+  function cpIsActiveStatus(status){
+    return ['preparing','dispatched','en_route','in_progress'].includes(status);
+  }
+
   function cpHeroTrackHtml(status){
-    const steps = ['dispatched','en_route','in_progress'];
-    const labels = ['Received','En route','In progress'];
-    const idx = steps.indexOf(status);
-    if(idx<0) return '';
+    // Five stages now, matching the technician's tracker and the job order
+    // help card word for word — a customer on the phone to the crew hears
+    // the same status they can see.
+    const steps = ['preparing','en_route','in_progress','completed','closed'];
+    const labels = ['Preparing','En route','Work in progress','Completed','Closed'];
+    // Legacy rows carry the pre-lifecycle name for the first stage.
+    if(status==='dispatched') status = 'preparing';
+    // A confirmed schedule shows the same track with nothing lit yet: the
+    // visit is booked but the day hasn't come. -1 leaves every dot dim.
+    const idx = status==='schedule_confirmed' ? -1 : steps.indexOf(status);
+    if(idx < -1 || (idx===-1 && status!=='schedule_confirmed')) return '';
     let dots = '';
     steps.forEach((s,i)=>{
       dots += '<i class="pt'+(i<idx?' on':i===idx?' now':'')+'"></i>';
@@ -344,11 +347,24 @@
     const labelsHtml = labels.map((l,i)=> '<span'+(i===idx?' class="cur"':'')+'>'+l+'</span>').join('');
     return '<div class="cp-hero-track">'+dots+'</div><div class="cp-hero-labels">'+labelsHtml+'</div>';
   }
+  // ONE card for the whole life of a service, rather than a separate
+  // "Scheduled" card that vanished and was replaced by a different card on
+  // the day. A confirmed-but-not-yet-started visit renders here too, with
+  // the tracker sitting before step 1 — so the customer watches a single
+  // card fill in rather than cards swapping underneath them.
   function cpHeroActive(req, eq, techNames){
-    const label = srStatusLabel(req.status);
-    const techLine = techNames && techNames.length
-      ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
-      : 'A technician is on the way';
+    const notStarted = req.status === 'schedule_confirmed';
+    const finished = req.status === 'completed';
+    const label = notStarted ? 'Scheduled' : srStatusLabel(req.status);
+    // 'on the way' is wrong in both directions — before the day, and after
+    // the work is done and only admin's sign-off is outstanding.
+    const techLine = notStarted
+      ? 'Your technician will be assigned on the day'
+      : (finished
+          ? 'Work finished — being reviewed before sign-off'
+          : (techNames && techNames.length
+              ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
+              : 'A technician is on the way'));
     // Scheduled date/time this visit was actually dispatched for — the
     // confirmed proposed schedule normally, falling back to the original
     // requested date on the off chance a request reached 'dispatched'
@@ -361,13 +377,14 @@
       '<div data-req-id="'+req.id+'">'+
         '<div class="cp-hero-head">'+
           '<div>'+
-            '<p class="cp-hero-eyebrow amber">Active service · '+escapeHtml(label)+'</p>'+
+            '<p class="cp-hero-eyebrow '+(notStarted?'teal':(finished?'teal':'amber'))+'">'+
+              (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label)+'</p>'+
             '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
             (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
         '</div>'+
-        (techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
+        (!notStarted && techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
         cpHeroTrackHtml(req.status)+
         '<div class="cp-hero-foot">'+
           '<span class="loc">'+CP_ICON.pin+' '+escapeHtml(techLine)+'</span>'+
@@ -420,8 +437,14 @@
     if(!hero) return;
     rows = rows || [];
 
-    const flagged = rows.filter(r=> r.origin==='technician_flag' && !['completed','cancelled','dispatched','en_route','in_progress'].includes(r.status));
-    const active = rows.filter(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress');
+    const flagged = rows.filter(r=> r.origin==='technician_flag' && !['completed','closed','cancelled','preparing','dispatched','en_route','in_progress'].includes(r.status));
+    // Includes 'completed' deliberately, which cpIsActiveStatus does NOT:
+    // work is finished but admin hasn't closed the job order yet, and the
+    // card disappearing in that gap told the customer their service had
+    // stopped existing. cpIsActiveStatus still means "crew is working on
+    // it" for cancellation and the list badge, which is a different
+    // question — a finished service can't be cancelled.
+    const active = rows.filter(r=> cpIsActiveStatus(r.status) || r.status==='completed');
     const overdueNoRequest = cpEquipment.filter(eq=>{
       if(eq.status.key!=='overdue') return false;
       return !rows.some(r=> String(r.equipmentId)===String(eq.id) && r.status!=='completed' && r.status!=='cancelled');
@@ -439,15 +462,16 @@
       html = cpHeroDanger(ready ? 'ready' : 'pending', req, cpFindEquip(req.equipmentId)); danger = true;
     } else if(overdueNoRequest.length === 1){
       html = cpHeroDanger('overdue', null, overdueNoRequest[0]); danger = true;
-    } else if(active.length > 0){
+    } else if(active.length > 0 || scheduled.length > 0){
+      // Scheduled and in-flight share ONE card. An in-flight service wins
+      // if somehow both exist, since it's the one actually happening.
+      const subject = active.length > 0 ? active[0] : scheduled[0];
       // Technician names live on the linked dispatch ticket, not the
       // request row itself — a separate fetch, so the hero shows without
       // them for a moment on first paint, then fills in.
-      const techNames = (active[0].linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
-        ? await dtFetchTicketTechNames(active[0].linkedDispatchTicketId) : [];
-      html = cpHeroActive(active[0], cpFindEquip(active[0].equipmentId), techNames);
-    } else if(scheduled.length > 0){
-      html = cpHeroScheduled(scheduled[0], cpFindEquip(scheduled[0].equipmentId));
+      const techNames = (subject.linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
+        ? await dtFetchTicketTechNames(subject.linkedDispatchTicketId) : [];
+      html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), techNames);
     } else {
       html = cpHeroAllClear(); isAllClear = true;
     }
@@ -464,8 +488,13 @@
       if(action==='requestService'){ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); return; }
       if(action==='overdue'){ const eq = overdueNoRequest[0]; if(eq) cpRequestServiceForEquip(eq); return; }
       if(action==='ready'){ if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]); return; }
-      if(action==='message'){ if(active[0] && typeof srOpenDetail==='function') srOpenDetail(active[0]); return; }
-      if(action==='reschedule'){ if(scheduled[0] && typeof srOpenDetail==='function') srOpenDetail(scheduled[0]); return; }
+      // Both actions now resolve against whichever request the single card
+      // is showing — active if there is one, otherwise the scheduled one.
+      const heroSubject = active[0] || scheduled[0];
+      if(action==='message' || action==='reschedule'){
+        if(heroSubject && typeof srOpenDetail==='function') srOpenDetail(heroSubject);
+        return;
+      }
       if(action==='viewUnits'){ cpShowScreen('Units'); return; }
       // Tap anywhere else on the card: open whichever single job it
       // represents, if any (all-clear has nothing to open).
@@ -858,7 +887,7 @@
   // there's no single conversation to jump into.
   function cpOpenCentralChat(){
     const rows = cpMyRequestsCache || [];
-    const target = rows.find(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress')
+    const target = rows.find(r=> cpIsActiveStatus(r.status))
       || rows.find(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed');
     if(target && typeof srOpenDetail === 'function') srOpenDetail(target);
     else cpShowScreen('History', 'Requests');
@@ -967,9 +996,12 @@
   //   green  = done
   //   gray   = closed (cancelled) — not a problem for the customer anymore
   function cpReqStatusPillClass(r){
-    if(r.status==='completed') return 'status-sr-done';
+    // 'closed' is the admin sign-off after 'completed'. Without it here a
+    // closed request fell through to status-sr-open and rendered as if it
+    // were still waiting on someone.
+    if(r.status==='completed' || r.status==='closed') return 'status-sr-done';
     if(r.status==='cancelled') return 'status-sr-cancelled';
-    if(r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress') return 'status-sr-active';
+    if(cpIsActiveStatus(r.status)) return 'status-sr-active';
     if(r.status==='fee_proposed' && r.feeStatus==='proposed') return 'status-sr-urgent';
     return 'status-sr-open'; // new, acknowledged, fee_accepted, schedule_proposed/confirmed, or a declined fee back with admin
   }
@@ -1230,7 +1262,7 @@
   }
 
   function cpRenderHistoryDashboard(){
-    const openStatuses = ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed','dispatched','en_route','in_progress'];
+    const openStatuses = ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed','preparing','dispatched','en_route','in_progress','completed'];
     $('cpHistStatVisits').textContent = String(cpReports.length);
     $('cpHistStatOpenReq').textContent = String(cpMyRequestsCache.filter(r=> openStatuses.includes(r.status)).length);
     $('cpHistStatQuotes').textContent = String(cpMyRequestsCache.filter(r=> r.feeAmount!=null).length);

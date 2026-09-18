@@ -59,6 +59,11 @@ export default [
       ecmaVersion: 2022,
       sourceType: 'script',
       globals: {
+        // Browser-provided, used by push.js for local notification
+        // permission checks. Absent from the globals list, so all 7 of its
+        // uses reported as no-undef — noise that made real errors easy to
+        // scroll past.
+        Notification: 'readonly',
         // Standard browser/runtime globals
         window: 'readonly', document: 'readonly', console: 'readonly',
         navigator: 'readonly', location: 'readonly', history: 'readonly',

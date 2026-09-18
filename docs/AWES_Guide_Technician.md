@@ -43,17 +43,24 @@ Open **Job Orders** and tap any card to expand it. The step tracker inside shows
 
 | Stage | What it means | What you do |
 |---|---|---|
-| **1. Open** | Assigned to you, not yet responded to | Tap **Acknowledge** when you arrive on site |
-| **2. En Route** | *(optional)* You're travelling | Tap **On My Way** when you set off — the customer sees it |
-| **3. Acknowledged** | You're on site, work has started | This also **unlocks the Service Report** |
-| **4. Completed** | Your fieldwork is done | Tap **Mark Completed** |
-| **5. Closed** | Fully finalised | Done through **Close Job Order** |
+| **Scheduled** | Booked ahead | You can open it and read the details. **Acknowledge appears 4 hours before the scheduled time.** |
+| **1. Preparing** | The window is open | Tap **Acknowledge** to accept the job order |
+| **2. En Route** | Everyone assigned has acknowledged; the customer knows you're coming | Tap **Arrived at Site** when you get there |
+| **3. Work in Progress** | Someone is on site and work has started | File a **Service Report** for each unit |
+| **4. Completed** | Every unit is resolved | Happens by itself — there is no button. Admin now reviews it. |
+| **5. Closed** | Admin has reviewed and signed it off | Nothing further from you. **Only admin can close a job order.** |
 
 ### Rules that matter
 
-- **Acknowledge unlocks the report.** You cannot file a service report for a job order you haven't acknowledged.
-- **More than one technician?** Everyone assigned must Acknowledge before the job moves on, and everyone must Mark Completed before it can be closed. If you've done your part you'll see *"Waiting for the other assigned technician(s)"*.
-- **Expired job orders are closed automatically.** If the scheduled date passes and nobody acknowledged it, it closes itself. You **cannot** acknowledge it or file a report against it afterwards — there is no attendance record for that day to support a visit. Ask the office to issue a new job order.
+- **Acknowledge opens 4 hours before the scheduled time.** A 9:00 AM job unlocks at 5:00 AM; an 11:59 PM job unlocks at 7:59 PM. The card tells you the exact time the button appears.
+- **Everyone must acknowledge before the job moves on.** On a shared job order, the customer isn't told the crew is coming until every assigned technician has acknowledged. If you've done your part you'll see *"Waiting for the other assigned technician(s) to acknowledge"*. If someone can't make it, the office replaces them — the job doesn't get stuck.
+- **Arrived at Site is one tap for the whole crew.** Whoever gets there first taps it. That timestamp fills in **Time In** on the Service Report, so you don't have to remember it. You can still edit Time In if you started before tapping.
+- **You can only file reports once someone has arrived.** Before that the job order won't appear in the Service Report picker.
+- **A unit you can't service:** tap **Can't do this one** on that unit and give the reason. It counts as resolved — no report is filed for it, it's just labelled so the office knows. If the situation changes during the same visit, tap **Undo — I can do this one** and file the report normally.
+- **Completion happens on its own.** Once every unit has either a report or a *Not yet done* reason, the job order moves to Completed by itself and goes to the office for review. There is no "Mark Completed" button any more.
+- **You can't close a job order.** Closing is the office's review step. If something needs sorting out, use the message thread on the job order.
+- **Expired job orders are closed automatically.** If **nobody** acknowledges within 8 hours of the scheduled time, it closes itself. A night job scheduled 11:59 PM stays open until 7:59 AM, so working past midnight is fine. You **cannot** acknowledge it or file a report against it afterwards — there is no attendance record for that day to support a visit. Ask the office to issue a new job order. A job order you *did* acknowledge will **not** expire, however long the work runs.
+- **If you're replaced:** the job order closes on your side and moves to your **Closed** tab, showing who replaced you and why. You can still read it as it stood when you came off it, but you can't act on it.
 
 ---
 
@@ -137,10 +144,8 @@ You'll then be alerted about new job orders even when the app is closed.
 ## 10. Quick checklist for every job
 
 - [ ] Time In on DTR
-- [ ] Tap **On My Way** when you set off
-- [ ] Tap **Acknowledge** when you arrive
-- [ ] Do the work
-- [ ] File the **Service Report**; customer signs, you sign
-- [ ] **Mark Completed**
+- [ ] Tap **Acknowledge** once the window opens (4 hours before the scheduled time)
+- [ ] Tap **Arrived at Site** when you reach the site
+- [ ] File a Service Report for each unit — or flag the ones you can't do, with a reason
 - [ ] **Close Job Order** — flag anything unfinished
 - [ ] Time Out on DTR

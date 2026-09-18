@@ -70,7 +70,13 @@ Open the request → **Convert to Dispatch Ticket**. The form is pre-filled, and
 
 ## 4. Monitoring work
 
-**Sidebar → Dispatch.** Filter tabs: Open · Acknowledged · Completed · Expired · Closed · Cancelled · All.
+**Sidebar → Dispatch.** Filter tabs: Preparing · En Route · Work in Progress · **Review** · Scheduled · Closed · Expired · Cancelled · Messages · All.
+
+**Review** is where job orders land once technicians have resolved every unit. Open one to read the Service Reports filed against it and anything flagged *Not yet done*, then **Close Job Order**. Closing is admin-only — technicians cannot do it. The dashboard shows a **Job Orders to Review** card when any are waiting; tapping it jumps straight to this tab.
+
+**Messages** gathers the conversation threads from every job order into one list, unread first. This is how you chase an unfinished job: technicians are not sent automated reminders, because they cannot close a job order themselves.
+
+**If a technician can't make it,** open the job order and use **Replace an Assigned Technician**. Their acknowledgement is cleared so the job order doesn't sit waiting on someone who isn't coming, and the replacement is notified. The job order closes on the replaced technician's side with the reason you give.
 
 - **Expired** — the date passed with nobody acknowledging. These close automatically and **cannot be revived**; create a new job order instead.
 - **Calendar view** shows scheduled tickets by date.

@@ -103,20 +103,75 @@
     const t = $('toast'); t.textContent = msg; t.classList.add('show');
     setTimeout(()=>t.classList.remove('show'), 2200);
   }
-  // IMPORTANT: must return the device's LOCAL calendar date, not UTC.
-  // toISOString() always converts to UTC first — for Philippine time (UTC+8),
-  // that meant anyone clocking in before 8:00 AM local time got their DTR
-  // entry filed under YESTERDAY's date, while clocking out later the same
-  // local day (after the UTC rollover) looked up TODAY's date instead and
-  // found no matching record — blocking Time Out or creating a duplicate,
-  // separate entry. Using local getters instead avoids this entirely.
+  // ---------- Business date, anchored to the server ----------
+  // Acknowledgement gating, the Preparing status and expiry are all
+  // computed from "what day is it" rather than stored, so that answer has
+  // to be trustworthy. Device time fails two different ways:
+  //
+  //   * CLOCK SKEW — the time is simply wrong. A server offset fixes it.
+  //   * WRONG TIMEZONE — the clock is right but the zone isn't. An offset
+  //     does NOT fix this; local date getters still return the wrong day.
+  //
+  // So the date is derived from a server-anchored instant rendered in a
+  // fixed business timezone, which covers both. A phone an hour fast, or
+  // left on a US timezone, still produces the correct Philippine date.
+  //
+  // The original local-getters note still applies and is why this does not
+  // use toISOString(): that converts to UTC first, which for UTC+8 filed
+  // anything before 8:00 AM under YESTERDAY — breaking DTR Time Out
+  // lookups. Formatting in an explicit timezone avoids that too.
+  const BUSINESS_TZ = 'Asia/Manila';
+  // serverNow - deviceNow, in ms. 0 until the first sync, so everything
+  // works normally offline — just on unverified device time.
+  let serverTimeOffsetMs = 0;
+  let serverTimeVerified = false;
+
+  // Intl formatter is built once: constructing one per call is
+  // surprisingly expensive and todayISO runs on every render pass.
+  const _bizDateFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TZ, year:'numeric', month:'2-digit', day:'2-digit'
+  });
+  // en-CA formats as YYYY-MM-DD natively, which is exactly the shape the
+  // rest of the app stores and compares dates in.
   function todayISO(){
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    const day = String(d.getDate()).padStart(2,'0');
-    return y+'-'+m+'-'+day;
+    return _bizDateFmt.format(new Date(Date.now() + serverTimeOffsetMs));
   }
+  // Current instant as the server sees it. Use this for any timestamp
+  // written to the database (arrival time, acknowledgement time) so a
+  // skewed device can't stamp a record minutes into the past or future.
+  function serverNowISO(){
+    return new Date(Date.now() + serverTimeOffsetMs).toISOString();
+  }
+  function isServerTimeVerified(){ return serverTimeVerified; }
+
+  // Called at sign-in, when the tab regains focus, and periodically — the
+  // periodic one matters because a device left open across midnight would
+  // otherwise keep computing yesterday's date all morning.
+  async function syncServerTime(){
+    try{
+      if(typeof ensureCloud === 'function' && !(await ensureCloud())) return false;
+      const t0 = Date.now();
+      const { data, error } = await db.rpc('server_now');
+      if(error || !data) return false;
+      const t1 = Date.now();
+      // Halve the round trip: the server's timestamp was generated roughly
+      // midway through the request, not when the response landed. Without
+      // this the offset absorbs the whole latency and drifts by however
+      // slow the connection is.
+      const serverMs = new Date(data).getTime() + Math.round((t1 - t0) / 2);
+      if(!isFinite(serverMs)) return false;
+      serverTimeOffsetMs = serverMs - t1;
+      serverTimeVerified = true;
+      return true;
+    }catch(e){ console.error('server time sync failed', e); return false; }
+  }
+  // 10 minutes. Frequent enough to catch a midnight rollover promptly,
+  // rare enough to be invisible in request volume.
+  const SERVER_TIME_RESYNC_MS = 10 * 60 * 1000;
+  setInterval(()=>{ syncServerTime(); }, SERVER_TIME_RESYNC_MS);
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible') syncServerTime();
+  });
   function fmtDate(iso){
     if(!iso) return '—';
     const d = new Date(iso+'T00:00:00');

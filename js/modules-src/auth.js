@@ -1046,6 +1046,10 @@
     trackerAdminTeardown();
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
+    // Job order ticket stream. Channel names are keyed by user id, so
+    // without this an account switch on a shared device would leave the
+    // previous person's subscription open alongside the new one.
+    if(typeof dtUnsubscribeTickets === 'function') dtUnsubscribeTickets();
     // Drop only THIS device's push subscription — other devices the same
     // person signs in on keep receiving. Awaited so the row is gone before
     // the auth session ends (deleting it needs that session).

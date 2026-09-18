@@ -52,10 +52,14 @@ Your request moves through these stages. **Home always shows where it is.**
 1. **Submitted** — we've received it.
 2. **Service fee proposed** *(if applicable)* — a card appears on your Home screen showing the amount. Open it and choose **Accept Fee** or **Decline**.
 3. **Schedule proposed** — if your preferred date doesn't work, we propose another. Open it and **Confirm** if the new date suits you.
-4. **Dispatched** — a technician is assigned. You'll see the scheduled date and time.
-5. **On the way** — the technician has set off.
-6. **In progress** — the technician has arrived and started work.
-7. **Completed** — the job is finished.
+4. **Scheduled** — a technician is assigned and the date is set. Your service card shows the date and time from here until the visit.
+5. **Preparing** — it's the day of your visit.
+6. **En Route** — the technician has confirmed and is on the way.
+7. **Work in Progress** — the technician has arrived and started work.
+8. **Completed** — the work is finished and is being reviewed before sign-off.
+9. **Closed** — the job is signed off and complete.
+
+> Stages 4 to 9 all appear on the **same card** on your Home screen — it fills in as the work progresses rather than being replaced by a different card.
 
 > **Important:** When something needs your response — a fee or a proposed date — a card appears on your **Home** screen beside the main status card. Nothing moves forward until you answer it.
 
@@ -71,7 +75,7 @@ Your request moves through these stages. **Home always shows where it is.**
 
 ## 6. During and after the visit
 
-- The **progress tracker** on your Home screen updates as the technician travels and works.
+- The **progress tracker** on your Home screen updates live as the technician confirms, travels, arrives and works — you don't need to refresh.
 - Use the **Message** button on the active service card to ask the office anything about that job.
 - When the work is finished, the technician will fill in the **service report** on their device and ask you to **sign on screen** to acknowledge the work.
 - Completed reports appear under **History**.

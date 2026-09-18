@@ -515,6 +515,12 @@
       const doc = await buildPdf(data);
       toShare.push({ srNo, doc, data });
     }
+    // Once, after the whole batch rather than per item: the ticket can only
+    // complete when the LAST unit lands, so checking inside the loop would
+    // fire a pointless read for every earlier one.
+    if(ticketId && typeof dtCheckAutoComplete === 'function'){
+      await dtCheckAutoComplete(ticketId);
+    }
     if(savedCount===0){
       toast('Could not save any of the '+items.length+' reports — fix the connection or free up space, then try again');
       return;
@@ -564,8 +570,16 @@
       // dispatch ticket, mark that item reported so the ticket's progress
       // ("38 of 100 reported") picks it up. Best-effort — never blocks or
       // fails the report save itself.
-      if(srCurrentTicketId && srCurrentEquipId) await dtMarkEquipmentReported(srCurrentTicketId, srCurrentEquipId, currentSrNo);
-      $('statusPill').textContent='Completed'; $('statusPill').className='status-pill status-done';
+      if(srCurrentTicketId && srCurrentEquipId){
+        await dtMarkEquipmentReported(srCurrentTicketId, srCurrentEquipId, currentSrNo);
+        // Filing the report IS the completion signal now — there is no
+        // "Mark Completed" tap any more. This flips the job order to
+        // Completed only when this was the last unresolved unit.
+        if(typeof dtCheckAutoComplete === 'function') await dtCheckAutoComplete(srCurrentTicketId);
+      }
+      // "Closed" throughout, so the word means the same thing on the report
+      // as it does on the job order it belongs to.
+      $('statusPill').textContent='Closed'; $('statusPill').className='status-pill status-done';
       srRenderStepper();
       const doc = await buildPdf(data);
       const filename = (currentSrNo||'service-report')+'.pdf';

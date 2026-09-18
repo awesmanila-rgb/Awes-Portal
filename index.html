@@ -440,6 +440,14 @@ window.awesCss = {
           <div class="overview-stat-value" id="ovDispatchValue">—</div>
           <div class="overview-stat-sub" id="ovDispatchSub">—</div>
         </div>
+        <!-- Job orders where every unit is resolved and the ticket is now
+             waiting on ADMIN to read the reports and close it. Hidden when
+             the queue is empty, since a permanent zero is noise. -->
+        <div class="overview-stat ov-amber" id="ovReviewCard" style="display:none;">
+          <div class="overview-stat-head"><span class="overview-stat-title">Job Orders to Review</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span></div>
+          <div class="overview-stat-value" id="ovReviewValue">—</div>
+          <div class="overview-stat-sub" id="ovReviewSub">—</div>
+        </div>
         <div class="overview-stat ov-gray">
           <div class="overview-stat-head"><span class="overview-stat-title">Unreviewed Reports</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span></div>
           <div class="overview-stat-value" id="ovReportsValue">—</div>
@@ -1498,11 +1506,35 @@ window.awesCss = {
     <div id="dtTicketSummary"></div>
     <div id="dtCancelSection" style="display:none; margin-top:14px;"></div>
 
+    <!-- Reassign a technician — admin only, and hidden entirely for
+         technicians (dtRenderReassignSection sets display). A job order only
+         reaches En Route once every assigned technician has acknowledged, so
+         one absence used to strand it with no way out: assignment was write-
+         once at creation. This is the escape hatch. -->
+    <!-- Admin review: what was actually filed against this job order.
+         Closing is admin's review step, and admin can't review what they
+         can't see — before this the overlay showed the COUNT of reported
+         units but not the reports themselves. -->
+    <div id="dtReviewSection" style="display:none; margin-top:14px;"></div>
+
+    <div id="dtReassignSection" style="display:none; margin-top:14px;">
+      <div class="field">
+        <label>Replace an Assigned Technician</label>
+        <p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">
+          Use this when someone can't make it. The replacement takes their place on this job order —
+          the person leaving has their acknowledgement cleared, so progress reflects who is actually going.
+        </p>
+        <div id="dtReassignList"></div>
+      </div>
+    </div>
+
     <div class="field" style="margin-top:14px;">
       <label>Close Job Order</label>
       <p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">
-        If any equipment's scope wasn't completed, check it below and give a reason — then Close Job Order.
-        Closing is available to the assigned technician(s) or admin, any time.
+        Admin's review step. Read the Service Report(s) filed against this job order above, then close it.
+        Every unit must have a report or be ticked as not completed with a reason — a unit with neither
+        can't be closed out. Technicians cannot close a job order; use the thread below to sort anything
+        outstanding with them first.
       </p>
       <div id="dtCloseSection"></div>
       <button type="button" class="btn btn-primary" id="dtCloseSubmitBtn" style="width:100%; margin-top:10px;">Close Job Order</button>
@@ -1624,6 +1656,7 @@ window.awesCss = {
           <button type="button" data-filter="approved">Approved</button>
           <button type="button" data-filter="disapproved">Disapproved</button>
           <button type="button" data-filter="all">All</button>
+          <button type="button" data-filter="messages">Messages</button>
         </div>
         <div id="leaveAdminList"><div class="empty-state">Loading…</div></div>
       </div>
@@ -1886,7 +1919,9 @@ window.awesCss = {
 
 </main>
 
-<!-- Service Dispatch Ticket — admin creates & assigns; assigned workers view/acknowledge/complete -->
+<!-- Service Dispatch Ticket — admin creates, assigns and closes; assigned
+     technicians acknowledge on the scheduled day, tap Arrived at Site, and
+     file a Service Report per unit. Completion is derived, not tapped. -->
 <main id="dispatchView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
 
   <!-- Admin: create + manage dispatch tickets -->
@@ -1996,15 +2031,22 @@ window.awesCss = {
       <div class="card-head"><span>All Dispatch Tickets</span></div>
       <div class="card-body">
         <div class="leave-filter-row" id="dtAdminFilterRow">
-          <button type="button" data-filter="open" class="active">Open</button>
-          <button type="button" data-filter="acknowledged">Acknowledged</button>
-          <button type="button" data-filter="completed">Completed</button>
-          <button type="button" data-filter="expired">Expired</button>
+          <button type="button" data-filter="preparing" class="active">Preparing</button>
+          <button type="button" data-filter="acknowledged">En Route</button>
+          <button type="button" data-filter="in_progress">Work in Progress</button>
+          <!-- Same stage the technician sees as "Completed": for admin it is
+               a queue of job orders waiting to be reviewed and closed. -->
+          <button type="button" data-filter="completed">Review</button>
+          <button type="button" data-filter="scheduled">Scheduled</button>
           <button type="button" data-filter="closed">Closed</button>
+          <button type="button" data-filter="expired">Expired</button>
           <button type="button" data-filter="cancelled">Cancelled</button>
           <button type="button" data-filter="all">All</button>
         </div>
         <div id="dtAdminList"><div class="empty-state">Loading…</div></div>
+        <!-- Shares dtRenderChatInbox with the technician view; only one of
+             the two containers exists on screen at a time. -->
+        <div id="dtAdminInboxList" style="display:none;"></div>
       </div>
     </div>
 
@@ -2024,9 +2066,10 @@ window.awesCss = {
           <button type="button" class="btn" id="dtCalTodayBtn">Today</button>
         </div>
         <div class="cal-legend">
-          <span class="cal-legend-item"><span class="cal-dot cal-dot-open"></span>Open</span>
-          <span class="cal-legend-item"><span class="cal-dot cal-dot-ack"></span>Acknowledged</span>
-          <span class="cal-legend-item"><span class="cal-dot cal-dot-done"></span>Completed</span>
+          <span class="cal-legend-item"><span class="cal-dot" style="background:#B9791F;"></span>Preparing</span>
+          <span class="cal-legend-item"><span class="cal-dot" style="background:#1F7A50;"></span>En Route</span>
+          <span class="cal-legend-item"><span class="cal-dot" style="background:#1F6F7A;"></span>Work in Progress</span>
+          <span class="cal-legend-item"><span class="cal-dot" style="background:#154D34;"></span>Completed</span>
           <span class="cal-legend-item"><span class="cal-dot cal-dot-expired"></span>Expired</span>
           <span class="cal-legend-item"><span class="cal-dot cal-dot-closed"></span>Closed</span>
         </div>
@@ -2052,28 +2095,32 @@ window.awesCss = {
         <div class="card-body">
           <p class="dt-jo-help-intro">Every job order moves through the stages below. Tap a job order to expand it — a step tracker shows exactly where it stands and what to do next.</p>
           <div class="dt-jo-help-item">
-            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#B8860B;"></span>1. Open</div>
-            <div class="dt-jo-help-desc">A new job order assigned to you that you haven't responded to yet. Tap <b>Acknowledge</b> when you arrive on site to accept it — that also unlocks its Service Report.</div>
+            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#B8860B;"></span>Scheduled</div>
+            <div class="dt-jo-help-desc">Booked ahead. You can open it and review the details. <b>Acknowledge</b> appears <b>4 hours before the scheduled time</b> — so an 11:59 PM job opens at 7:59 PM.</div>
           </div>
           <div class="dt-jo-help-item">
-            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#0D9488;"></span>2. En Route</div>
-            <div class="dt-jo-help-desc">Optional. Tap <b>On My Way</b> when you set off and the customer sees that you're heading over. You still Acknowledge when you actually arrive.</div>
+            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#B9791F;"></span>1. Preparing</div>
+            <div class="dt-jo-help-desc">The window is open. Tap <b>Acknowledge</b> to accept the job order. On a shared job order, everyone assigned has to acknowledge before the customer is told the crew is coming.</div>
           </div>
           <div class="dt-jo-help-item">
-            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:var(--green-dark);"></span>3. Acknowledged</div>
-            <div class="dt-jo-help-desc">You've accepted it and should currently be working on site. Tap <b>Mark Completed</b> once the fieldwork is done.</div>
+            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:var(--green-dark);"></span>2. En Route</div>
+            <div class="dt-jo-help-desc">Everyone has acknowledged and the customer can see you're on the way. Tap <b>Arrived at Site</b> when you get there — one tap from any assigned technician starts the work for the whole crew.</div>
+          </div>
+          <div class="dt-jo-help-item">
+            <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#1F6F7A;"></span>3. Work in Progress</div>
+            <div class="dt-jo-help-desc">Your arrival time fills in <b>Time In</b> on the Service Report automatically. File a report for each unit on the job order. If a unit can't be serviced, flag it as <b>Not Yet Done</b> and give the reason.</div>
           </div>
           <div class="dt-jo-help-item">
             <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#1F7A52;"></span>4. Completed</div>
-            <div class="dt-jo-help-desc">Fieldwork is finished. File the Service Report, then open the ticket and run <b>Close Job Order</b>.</div>
+            <div class="dt-jo-help-desc">Happens on its own once every unit has either a Service Report or a Not Yet Done reason — there's no button to press. Admin then reviews it.</div>
           </div>
           <div class="dt-jo-help-item">
             <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#4A524B;"></span>5. Closed</div>
-            <div class="dt-jo-help-desc">Fully finalized. No further action needed on these.</div>
+            <div class="dt-jo-help-desc">Admin has reviewed the reports and closed the job order. Nothing further is needed from you. Only admin can close a job order.</div>
           </div>
           <div class="dt-jo-help-item">
             <div class="dt-jo-help-label"><span class="dt-jo-help-dot" style="background:#B02A37;"></span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 1 21h22z"/><path d="M12 9v5"/><path d="M12 17h.01"/></svg> Expired</div>
-            <div class="dt-jo-help-desc">The scheduled date passed without this job order being acknowledged, so it closed automatically. It can no longer be acknowledged, and no Service Report can be filed against it — there is no attendance record for that day to support a visit. Ask your admin to issue a new job order for the work.</div>
+            <div class="dt-jo-help-desc">Nobody acknowledged it within <b>8 hours of the scheduled time</b>, so it closed automatically and no Service Report can be filed against it — there is no attendance record to support a visit. Ask your admin to issue a new job order. A job order you <i>did</i> acknowledge will not expire, however long the work runs.</div>
           </div>
           <p class="dt-jo-help-tip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 2z"/></svg> Tip: tap a job order's title bar to expand it and see its step tracker, or use "Expand all" to open everything at once.</p>
         </div>
@@ -2108,6 +2155,7 @@ window.awesCss = {
             <button type="button" class="dt-jo-toggle-all-btn" id="dtTechExpandAllBtn" data-mode="expand"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg> Expand all</button>
           </div>
           <div id="dtTechList"><div class="empty-state">Loading…</div></div>
+          <div id="dtInboxList" style="display:none;"></div>
         </div>
       </div>
     </div>
@@ -2175,6 +2223,14 @@ window.awesCss = {
 </main>
 
 <main id="serviceReportView" style="display:none;">
+
+  <!-- Shown when admin opened this report from a job order's review
+       section, so they can get back to the job order they were reviewing
+       instead of hunting for it again after each report. -->
+  <div id="dtReviewReturnBanner" class="dt-back-to-sr-banner" style="display:none;">
+    <span id="dtReviewReturnText"></span>
+    <button type="button" class="btn btn-secondary" id="dtReviewReturnBtn">Back to Job Order</button>
+  </div>
 
   <div class="seg-tabs" id="srSegTabs">
     <button type="button" class="seg-tab active" id="srTabNewBtn">Create New</button>

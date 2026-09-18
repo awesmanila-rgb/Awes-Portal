@@ -174,7 +174,7 @@
   // card, no progress tracker, no technician name, nothing to message
   // about. Creating the row here means the whole existing customer-facing
   // pipeline (hero, tracker, en-route/complete sync, cancellation) works
-  // for these tickets with no other changes. Starts at 'dispatched'
+  // for these tickets with no other changes. Starts at 'preparing'
   // because by definition the work is already scheduled and assigned —
   // there's no fee or scheduling to negotiate after the fact.
   async function srCreateForAdminDispatch({ customerId, equipmentId, ticketId, description, requestedDate }){
@@ -186,7 +186,7 @@
         description: description || 'Scheduled service visit',
         urgency: 'normal',
         origin: 'admin_dispatch',
-        status: 'dispatched',
+        status: 'preparing',
         requested_date: requestedDate || null,
         proposed_schedule_date: requestedDate || null,
         linked_dispatch_ticket_id: ticketId
@@ -233,7 +233,7 @@
   // request's status itself. In the v2 workflow this is only reachable
   // once a request has already reached 'schedule_confirmed' (see the admin
   // actions in srOpenDetail), so there's nothing to advance here; the
-  // actual 'dispatched' transition happens in srLinkTicket below, once the
+  // actual 'preparing' transition happens in srLinkTicket below, once the
   // ticket is actually saved. (v1 used to set 'acknowledged' here, back
   // when this was reachable straight from 'new'/'acknowledged' — that
   // would now be a backward step in the wider v2 state machine, so it's
@@ -248,12 +248,12 @@
   }
 
   // Called by dispatch.js once a ticket created from a request is actually
-  // saved — stamps the link and moves the request to 'dispatched'.
+  // saved — stamps the link and moves the request to 'preparing'.
   async function srLinkTicket(requestId, ticketId){
     if(!(await ensureCloud())) return false;
     try{
       const { error } = await db.from('service_requests')
-        .update({ linked_dispatch_ticket_id: ticketId, status: 'dispatched' })
+        .update({ linked_dispatch_ticket_id: ticketId, status: 'preparing' })
         .eq('id', requestId);
       if(error) throw error;
       return true;
@@ -275,11 +275,23 @@
     }catch(e){ console.error('complete-sync service request failed', describeCloudError(e)); return false; }
   }
 
-  // Called by dispatch.js's new "On my way" button — a technician can tap
-  // this before they tap Acknowledge, purely to give the customer a real
-  // middle state between "assigned" and "work started". Only ever moves a
-  // request that's still at 'dispatched'; harmless (silent no-op) to tap
-  // again or after the request has already moved on.
+  // Admin's review-and-close step, the last stage the customer sees. Only
+  // moves a request that already reached 'completed', so a job order can't
+  // be closed out while work is still open against it.
+  async function srMarkClosedByTicket(ticketId){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'closed' });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('close-sync service request failed', describeCloudError(e)); return false; }
+  }
+
+  // Fired when the LAST assigned technician acknowledges — not from a
+  // separate "On my way" tap, which is gone. That button let a technician
+  // tell the customer they were coming before accepting the job, so the
+  // two signals could contradict each other. Silent no-op if the request
+  // has already moved past this stage.
   async function srMarkEnRouteByTicket(ticketId){
     if(!(await ensureCloud())) return false;
     try{
@@ -409,7 +421,11 @@
   // actual cancellation has to cancel the linked dispatch ticket too, not
   // just the request — see dtCancelTicket in dispatch.js.
   function srIsActiveForCancelRequest(status){
-    return ['dispatched','en_route','in_progress'].includes(status);
+    // 'dispatched' is the pre-lifecycle name for 'preparing'. Kept on every
+    // READ path so rows written before the migration, or by an app version
+    // still in someone's cache, don't silently drop out of these filters.
+    // Nothing WRITES it any more — the status constraint no longer allows it.
+    return ['preparing','dispatched','en_route','in_progress'].includes(status);
   }
   // Customer-side — via customer_request_cancel_dispatched_service() RPC
   // (see 20260915_01_dispatch_cancellation.sql), same no-blanket-UPDATE
@@ -611,8 +627,13 @@
   // conveys "Cancelled" clearly, so cancelled requests just skip this
   // widget entirely rather than showing a misleading one.
   function srProgressStepsHtml(status){
-    const steps = ['dispatched','en_route','in_progress','completed'];
-    const labels = {dispatched:'Dispatched', en_route:'On The Way', in_progress:'In Progress', completed:'Completed'};
+    // Five stages, matching the technician's own tracker word for word so a
+    // customer on the phone to the crew hears the same status they can see.
+    const steps = ['preparing','en_route','in_progress','completed','closed'];
+    const labels = {preparing:'Preparing', en_route:'En Route', in_progress:'Work in Progress', completed:'Completed', closed:'Closed'};
+    // Rows written before the lifecycle change carry 'dispatched'; treat it
+    // as the stage that replaced it rather than rendering nothing.
+    if(status==='dispatched') status = 'preparing';
     if(!steps.includes(status)) return '';
     const currentIdx = steps.indexOf(status);
     return '<div style="display:flex; align-items:center; gap:6px;">'+steps.map((s,i)=>{
@@ -921,10 +942,17 @@
 
   // ---------- Admin queue screen ----------
   function srStatusLabel(status){
+    // The lifecycle stages read exactly as the technician's tracker and the
+    // job order help card do — a customer on the phone to the crew should
+    // hear the same words they can see. 'preparing' and 'closed' were
+    // missing entirely, so those fell through to the raw database value
+    // and the card displayed "preparing" in lower case.
     return { new:'New', acknowledged:'Acknowledged', fee_proposed:'Fee Proposed',
       fee_accepted:'Fee Accepted', schedule_proposed:'Schedule Proposed',
-      schedule_confirmed:'Schedule Confirmed', dispatched:'Dispatched',
-      en_route:'On The Way', in_progress:'In Progress', completed:'Completed', cancelled:'Cancelled' }[status] || status;
+      schedule_confirmed:'Schedule Confirmed',
+      preparing:'Preparing', dispatched:'Preparing',
+      en_route:'En Route', in_progress:'Work in Progress',
+      completed:'Completed', closed:'Closed', cancelled:'Cancelled' }[status] || status;
   }
   function srRowHtml(r){
     const cust = (typeof customersCache !== 'undefined' ? customersCache : []).find(c=> String(c.id)===String(r.customerId));

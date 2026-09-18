@@ -854,7 +854,27 @@
 // added it (picked from "Select Existing", or freshly typed via "+ Add
 // New") and carried forward as a real id from that point on — see
 // equipPickedId in app.bundle.js — never re-guessed from field content.
-const CACHE_NAME = 'awes-sr-v99';
+// Bumped to v100 to force every installed device to drop its old cache and
+// re-fetch index.html/css/app.css/js/app.bundle.js again — the Job Order
+// lifecycle rework (passes 1-3). This bump is not cosmetic: migration
+// 20260918_03 narrows the service_requests status constraint and migrates
+// 'dispatched' rows to 'preparing', so a device still serving the OLD
+// cached bundle against the NEW schema fails the moment it dispatches a
+// job order — it writes a status the database no longer accepts. Every
+// installed PWA must pick up the new bundle for the deploy to be safe.
+//
+//   - Lifecycle is now Scheduled -> Preparing -> En Route -> Work in
+//     Progress -> Completed -> Closed. "On My Way" and "Mark Completed"
+//     are gone; completion is derived from every equipment unit having a
+//     Service Report or a Not Yet Done reason, and closing is admin-only.
+//   - Acknowledge is locked to the scheduled day in both directions.
+//   - Arrived at Site stamps the Service Report's Time In from server time.
+//   - Admin can replace an absent technician; the replaced person keeps a
+//     read-only, frozen copy of the job order as it stood at handover.
+//   - Dates are computed from a server-anchored business timezone, so a
+//     device with a skewed clock or wrong timezone can no longer
+//     acknowledge early or expire a job order a day late.
+const CACHE_NAME = 'awes-sr-v100';
 
 // Split into two lists on purpose.
 //

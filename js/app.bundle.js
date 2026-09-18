@@ -105,20 +105,75 @@
     const t = $('toast'); t.textContent = msg; t.classList.add('show');
     setTimeout(()=>t.classList.remove('show'), 2200);
   }
-  // IMPORTANT: must return the device's LOCAL calendar date, not UTC.
-  // toISOString() always converts to UTC first — for Philippine time (UTC+8),
-  // that meant anyone clocking in before 8:00 AM local time got their DTR
-  // entry filed under YESTERDAY's date, while clocking out later the same
-  // local day (after the UTC rollover) looked up TODAY's date instead and
-  // found no matching record — blocking Time Out or creating a duplicate,
-  // separate entry. Using local getters instead avoids this entirely.
+  // ---------- Business date, anchored to the server ----------
+  // Acknowledgement gating, the Preparing status and expiry are all
+  // computed from "what day is it" rather than stored, so that answer has
+  // to be trustworthy. Device time fails two different ways:
+  //
+  //   * CLOCK SKEW — the time is simply wrong. A server offset fixes it.
+  //   * WRONG TIMEZONE — the clock is right but the zone isn't. An offset
+  //     does NOT fix this; local date getters still return the wrong day.
+  //
+  // So the date is derived from a server-anchored instant rendered in a
+  // fixed business timezone, which covers both. A phone an hour fast, or
+  // left on a US timezone, still produces the correct Philippine date.
+  //
+  // The original local-getters note still applies and is why this does not
+  // use toISOString(): that converts to UTC first, which for UTC+8 filed
+  // anything before 8:00 AM under YESTERDAY — breaking DTR Time Out
+  // lookups. Formatting in an explicit timezone avoids that too.
+  const BUSINESS_TZ = 'Asia/Manila';
+  // serverNow - deviceNow, in ms. 0 until the first sync, so everything
+  // works normally offline — just on unverified device time.
+  let serverTimeOffsetMs = 0;
+  let serverTimeVerified = false;
+
+  // Intl formatter is built once: constructing one per call is
+  // surprisingly expensive and todayISO runs on every render pass.
+  const _bizDateFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TZ, year:'numeric', month:'2-digit', day:'2-digit'
+  });
+  // en-CA formats as YYYY-MM-DD natively, which is exactly the shape the
+  // rest of the app stores and compares dates in.
   function todayISO(){
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    const day = String(d.getDate()).padStart(2,'0');
-    return y+'-'+m+'-'+day;
+    return _bizDateFmt.format(new Date(Date.now() + serverTimeOffsetMs));
   }
+  // Current instant as the server sees it. Use this for any timestamp
+  // written to the database (arrival time, acknowledgement time) so a
+  // skewed device can't stamp a record minutes into the past or future.
+  function serverNowISO(){
+    return new Date(Date.now() + serverTimeOffsetMs).toISOString();
+  }
+  function isServerTimeVerified(){ return serverTimeVerified; }
+
+  // Called at sign-in, when the tab regains focus, and periodically — the
+  // periodic one matters because a device left open across midnight would
+  // otherwise keep computing yesterday's date all morning.
+  async function syncServerTime(){
+    try{
+      if(typeof ensureCloud === 'function' && !(await ensureCloud())) return false;
+      const t0 = Date.now();
+      const { data, error } = await db.rpc('server_now');
+      if(error || !data) return false;
+      const t1 = Date.now();
+      // Halve the round trip: the server's timestamp was generated roughly
+      // midway through the request, not when the response landed. Without
+      // this the offset absorbs the whole latency and drifts by however
+      // slow the connection is.
+      const serverMs = new Date(data).getTime() + Math.round((t1 - t0) / 2);
+      if(!isFinite(serverMs)) return false;
+      serverTimeOffsetMs = serverMs - t1;
+      serverTimeVerified = true;
+      return true;
+    }catch(e){ console.error('server time sync failed', e); return false; }
+  }
+  // 10 minutes. Frequent enough to catch a midnight rollover promptly,
+  // rare enough to be invisible in request volume.
+  const SERVER_TIME_RESYNC_MS = 10 * 60 * 1000;
+  setInterval(()=>{ syncServerTime(); }, SERVER_TIME_RESYNC_MS);
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible') syncServerTime();
+  });
   function fmtDate(iso){
     if(!iso) return '—';
     const d = new Date(iso+'T00:00:00');
@@ -2249,6 +2304,10 @@
     trackerAdminTeardown();
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
+    // Job order ticket stream. Channel names are keyed by user id, so
+    // without this an account switch on a shared device would leave the
+    // previous person's subscription open alongside the new one.
+    if(typeof dtUnsubscribeTickets === 'function') dtUnsubscribeTickets();
     // Drop only THIS device's push subscription — other devices the same
     // person signs in on keep receiving. Awaited so the row is gone before
     // the auth session ends (deleting it needs that session).
@@ -6413,6 +6472,12 @@
       const doc = await buildPdf(data);
       toShare.push({ srNo, doc, data });
     }
+    // Once, after the whole batch rather than per item: the ticket can only
+    // complete when the LAST unit lands, so checking inside the loop would
+    // fire a pointless read for every earlier one.
+    if(ticketId && typeof dtCheckAutoComplete === 'function'){
+      await dtCheckAutoComplete(ticketId);
+    }
     if(savedCount===0){
       toast('Could not save any of the '+items.length+' reports — fix the connection or free up space, then try again');
       return;
@@ -6462,8 +6527,16 @@
       // dispatch ticket, mark that item reported so the ticket's progress
       // ("38 of 100 reported") picks it up. Best-effort — never blocks or
       // fails the report save itself.
-      if(srCurrentTicketId && srCurrentEquipId) await dtMarkEquipmentReported(srCurrentTicketId, srCurrentEquipId, currentSrNo);
-      $('statusPill').textContent='Completed'; $('statusPill').className='status-pill status-done';
+      if(srCurrentTicketId && srCurrentEquipId){
+        await dtMarkEquipmentReported(srCurrentTicketId, srCurrentEquipId, currentSrNo);
+        // Filing the report IS the completion signal now — there is no
+        // "Mark Completed" tap any more. This flips the job order to
+        // Completed only when this was the last unresolved unit.
+        if(typeof dtCheckAutoComplete === 'function') await dtCheckAutoComplete(srCurrentTicketId);
+      }
+      // "Closed" throughout, so the word means the same thing on the report
+      // as it does on the job order it belongs to.
+      $('statusPill').textContent='Closed'; $('statusPill').className='status-pill status-done';
       srRenderStepper();
       const doc = await buildPdf(data);
       const filename = (currentSrNo||'service-report')+'.pdf';
@@ -7715,7 +7788,7 @@
     if(await ensureCloud()){
       try{
         const { error } = await db.from('dispatch_tickets').upsert({
-          id, status: data.status||'open',
+          id, status: data.status||'preparing',
           created_at: data.createdAt || new Date().toISOString(), data
         });
         if(error) throw error;
@@ -7729,11 +7802,99 @@
   }
   registerOutboxHandler('dispatch', async (id, payload)=>{
     const { error } = await db.from('dispatch_tickets').upsert({
-      id, status: payload.status||'open',
+      id, status: payload.status||'preparing',
       created_at: payload.createdAt || new Date().toISOString(), data: payload
     });
     if(error) throw error;
   });
+
+  // ---------- Offline acknowledge / arrival ----------
+  // Acknowledge and Arrived at Site both required a live connection, which
+  // is the wrong requirement for where they actually happen: a plant room,
+  // a basement, a warehouse with no signal. Worse under the revised
+  // lifecycle than before it, because arrival is what unlocks the Service
+  // Report — a dead spot used to block a status update, and now blocks the
+  // entire visit.
+  //
+  // Queued as a per-ticket-per-action item so the replay is idempotent.
+  // The key is deliberately NOT unique per tap: tapping Acknowledge twice
+  // offline should produce one queued acknowledgement, not two.
+  //
+  // The replay re-reads the ticket and re-applies the SAME merge the online
+  // path uses, rather than replaying a stored copy of the whole ticket. A
+  // technician who acknowledged at 9am in a basement and surfaces at noon
+  // must not overwrite what the rest of the crew did in between.
+  registerOutboxHandler('dispatch-act', async (key, payload)=>{
+    const rec = await dtGetTicket(payload.ticketId);
+    if(!rec) return; // ticket deleted since — nothing to replay onto
+    if(payload.action === 'ack'){
+      const ackBy = new Set(rec.acknowledgedBy||[]);
+      if(ackBy.has(payload.userId)) return; // already landed
+      ackBy.add(payload.userId);
+      const list = Array.from(ackBy);
+      const assigned = rec.assignedWorkerIds || [];
+      // If they were replaced while offline, their acknowledgement is no
+      // longer meaningful — drop it rather than re-adding someone who has
+      // been taken off the job.
+      if(!assigned.includes(payload.userId)) return;
+      const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
+      const merged = Object.assign({}, rec, {
+        acknowledgedBy: list,
+        acknowledgedAt: rec.acknowledgedAt || payload.at,
+        status: everyone ? 'acknowledged' : 'preparing'
+      });
+      const { error } = await db.from('dispatch_tickets')
+        .update({ status: merged.status, data: merged }).eq('id', payload.ticketId);
+      if(error) throw error;
+      if(everyone && typeof srMarkEnRouteByTicket === 'function') srMarkEnRouteByTicket(payload.ticketId).catch(()=>{});
+      return;
+    }
+    if(payload.action === 'arrived'){
+      if(rec.arrivedAt) return; // someone else recorded arrival first
+      if(!(rec.assignedWorkerIds||[]).includes(payload.userId)) return;
+      const merged = Object.assign({}, rec, {
+        arrivedAt: payload.at, arrivedBy: payload.userName,
+        arrivedById: payload.userId, status: 'in_progress'
+      });
+      const { error } = await db.from('dispatch_tickets')
+        .update({ status:'in_progress', data: merged }).eq('id', payload.ticketId);
+      if(error) throw error;
+      if(typeof srMarkInProgressByTicket === 'function') srMarkInProgressByTicket(payload.ticketId).catch(()=>{});
+    }
+  });
+
+  // Applies the action to the LOCAL copy so the technician sees it take
+  // effect, and queues the replay. Offline there is no server clock, so the
+  // timestamp uses the last known server offset (serverNowISO falls back to
+  // device time with offset 0) — good enough for a Time In the technician
+  // can edit, and honest about where it came from.
+  async function dtQueueOfflineAction(ticketId, action){
+    if(!currentUser) return false;
+    const at = serverNowISO();
+    const rec = (await dtGetTicket(ticketId)) || dtLastTicketsById[ticketId];
+    if(!rec){ toast('Open this job order once while online first'); return false; }
+    const local = Object.assign({}, rec);
+    if(action === 'ack'){
+      const list = Array.from(new Set((local.acknowledgedBy||[]).concat([currentUser.id])));
+      local.acknowledgedBy = list;
+      local.acknowledgedAt = local.acknowledgedAt || at;
+      const assigned = local.assignedWorkerIds || [];
+      local.status = (assigned.length>0 && assigned.every(w=> list.includes(w))) ? 'acknowledged' : 'preparing';
+    }else{
+      if(local.arrivedAt){ toast('Arrival already recorded'); return false; }
+      local.arrivedAt = at; local.arrivedBy = currentUser.name || null;
+      local.arrivedById = currentUser.id; local.status = 'in_progress';
+      // Flags this timestamp as taken from the device, not the server, so
+      // it can be told apart later if the clock turns out to have been off.
+      if(!isServerTimeVerified || !isServerTimeVerified()) local.arrivedAtUnverified = true;
+    }
+    try{ await window.storage.set('dispatch:'+ticketId, JSON.stringify(local), false); }catch(e){}
+    dtLastTicketsById[ticketId] = local;
+    const ok = await outboxQueue('dispatch-act', ticketId+':'+action, {
+      ticketId, action, userId: currentUser.id, userName: currentUser.name || null, at
+    });
+    return ok;
+  }
 
   async function dtLocalList(){
     try{
@@ -7775,10 +7936,46 @@
     if(!workerId) return [];
     if(await ensureCloud()){
       try{
-        return await dtFetchPaged(q=> q.contains('data->assignedWorkerIds', JSON.stringify([workerId])));
+        // Two queries, not one `.or()`: PostgREST's or= syntax doesn't
+        // compose with jsonb containment cleanly, and two indexed
+        // containment scans are cheaper than the alternative anyway.
+        // The second picks up tickets this technician was REPLACED on —
+        // they keep read access (see the RLS policy) so the job order can
+        // close out on their side with a reason instead of vanishing.
+        const assigned = await dtFetchPaged(q=> q.contains('data->assignedWorkerIds', JSON.stringify([workerId])));
+        const removed  = await dtFetchPaged(q=> q.contains('data->removedWorkerIds',  JSON.stringify([workerId])));
+        // A technician can be removed from a ticket and later re-added, so
+        // the two sets can overlap — current assignment wins.
+        const seen = new Set(assigned.map(t=> t.id));
+        return assigned.concat(removed.filter(t=> !seen.has(t.id)));
       }catch(e){ console.error('dispatch worker list failed', describeCloudError(e)); }
     }
-    return (await dtLocalList()).filter(t=> (t.assignedWorkerIds||[]).includes(workerId));
+    return (await dtLocalList()).filter(t=>
+      (t.assignedWorkerIds||[]).includes(workerId) || (t.removedWorkerIds||[]).includes(workerId));
+  }
+  // Was THIS viewer replaced on this ticket? Everything about a removal is
+  // per-viewer: the ticket itself is alive and unchanged for the crew still
+  // on it, and only the replaced person sees it as finished.
+  function dtRemovalFor(r, userId){
+    if(!r || !userId) return null;
+    if((r.assignedWorkerIds||[]).includes(userId)) return null; // re-added since
+    if(!(r.removedWorkerIds||[]).includes(userId)) return null;
+    const entries = (r.removedWorkers||[]).filter(e=> e.id===userId);
+    return entries.length ? entries[entries.length-1] : { id:userId, reason:null };
+  }
+  // What a given viewer should actually SEE. For everyone still on the
+  // ticket that's the live record; for someone replaced it's the snapshot
+  // taken at their removal, so their copy stops updating at the moment they
+  // stopped being involved. The removal bookkeeping is preserved on top of
+  // the snapshot, since dtRemovalFor and dtEffectiveStatus read it to keep
+  // rendering the ticket as 'replaced'.
+  function dtViewFor(r, userId){
+    const removal = dtRemovalFor(r, userId);
+    if(!removal || !removal.snapshot) return r;
+    return Object.assign({}, r, removal.snapshot, {
+      removedWorkerIds: r.removedWorkerIds,
+      removedWorkers: r.removedWorkers
+    });
   }
   // Being ASSIGNED to a ticket and being ALLOWED to file its Service Report
   // are two different things — admin explicitly picks which assigned
@@ -7793,6 +7990,142 @@
       }catch(e){ console.error('dispatch reporter list failed', describeCloudError(e)); }
     }
     return (await dtLocalList()).filter(t=> (t.reportAllowedWorkerIds||[]).includes(workerId));
+  }
+
+  // ---------- Realtime: live ticket updates ----------
+  // Until now the job order lists only ever refreshed when the person
+  // looking at them did something. A technician acknowledging was invisible
+  // on admin's screen until admin reloaded, which defeats the point of a
+  // list-level progress tracker — dots that never move on their own are
+  // just a slower version of opening each ticket.
+  //
+  // Three deliberate choices here, all about not melting the database:
+  //
+  //   1. PATCH, DON'T REFETCH. The payload already carries the full new row
+  //      (data jsonb + status), so a change updates dtLastTicketsById in
+  //      place. A naive `=> dtListAll()` would re-page every ticket in the
+  //      system on every keystroke-level change; with a few hundred tickets
+  //      and a busy afternoon that is a self-inflicted outage.
+  //   2. DEBOUNCE THE RENDER, NOT THE PATCH. The cache updates immediately
+  //      so nothing is ever lost, but the DOM rebuild is coalesced — a
+  //      batch of writes (admin reassigning, then the trigger firing, then
+  //      the linked request syncing) repaints once, not four times.
+  //   3. LET RLS DO THE FILTERING. dispatch_select_assigned already limits
+  //      a technician to their own tickets, and Supabase realtime applies
+  //      the same policy to the stream, so the technician channel needs no
+  //      client-side filter to stay private. The explicit assignment check
+  //      below is for a different case — see the unassign note.
+  let dtTicketChannel = null;
+  let dtRenderTimer = null;
+  const DT_RENDER_DEBOUNCE_MS = 250;
+
+  function dtScheduleRender(){
+    if(dtRenderTimer) clearTimeout(dtRenderTimer);
+    dtRenderTimer = setTimeout(()=>{
+      dtRenderTimer = null;
+      if(!currentUser) return;
+      // Only repaint what's actually on screen. Rendering a hidden view
+      // costs the same as a visible one and buys nothing.
+      const dispatchVisible = $('dispatchView') && $('dispatchView').style.display !== 'none';
+      if(!dispatchVisible) return;
+      // The Messages tab replaces the list rather than filtering it, so a
+      // ticket change must not repaint a job order list underneath it —
+      // 'messages' is not a status and would match nothing anyway.
+      if(currentUser.role === 'admin'){
+        if(dtAdminFilter === 'messages') dtRenderChatInbox(); else dtRenderAdminList();
+      }else{
+        if(dtTechListTab === 'inbox') dtRenderChatInbox(); else dtRenderTechList();
+      }
+    }, DT_RENDER_DEBOUNCE_MS);
+  }
+
+  // Applies one realtime payload to the local cache. Returns true when the
+  // change is relevant to this user, so the caller can skip the repaint
+  // entirely for noise.
+  function dtApplyRealtimePayload(payload){
+    if(!payload || !currentUser) return false;
+    const isAdmin = currentUser.role === 'admin';
+    const newRow = payload.new && payload.new.data ? dtNormalizeTicket(payload.new.data) : null;
+    const oldRow = payload.old && payload.old.data ? payload.old.data : null;
+
+    if(payload.eventType === 'DELETE'){
+      const goneId = (oldRow && oldRow.id) || (payload.old && payload.old.id);
+      if(goneId && dtLastTicketsById[goneId]){ delete dtLastTicketsById[goneId]; return true; }
+      return false;
+    }
+    if(!newRow || !newRow.id) return false;
+
+    // The unassign case, and the reason this migration sets REPLICA
+    // IDENTITY FULL. When admin reassigns a ticket away from a technician,
+    // that technician stops satisfying the RLS policy — so the row simply
+    // stops arriving in future. Nothing tells them it's gone, and a ticket
+    // they can no longer act on would sit in their list until they reload.
+    // The update that REMOVED them is still delivered (they matched the
+    // old row), so this is the one chance to drop it from the cache.
+    if(!isAdmin){
+      const stillMine = (newRow.assignedWorkerIds || []).includes(currentUser.id);
+      const wasMine = oldRow ? (oldRow.assignedWorkerIds || []).includes(currentUser.id) : false;
+      const replaced = (newRow.removedWorkerIds || []).includes(currentUser.id);
+      if(!stillMine){
+        if(replaced){
+          // Not dropped — a replaced technician keeps a read-only record.
+          // Storing the live row is still correct: every render path runs it
+          // through dtViewFor, which swaps in the snapshot frozen at their
+          // removal, so later activity on the ticket never reaches them.
+          dtLastTicketsById[newRow.id] = newRow;
+          if(wasMine){
+            // Worth interrupting for: they may be standing in front of the
+            // site. Silence is how someone drives to a job that isn't theirs.
+            toast('A job order was reassigned — it has closed on your side');
+          }
+          return true;
+        }
+        if(wasMine && dtLastTicketsById[newRow.id]){
+          delete dtLastTicketsById[newRow.id];
+          return true;
+        }
+        return false;
+      }
+    }
+    dtLastTicketsById[newRow.id] = newRow;
+    // Keep an open overlay in step with the row behind it, otherwise admin
+    // can be reading a detail view that quietly stopped being true.
+    if(dtOverlayTicket && dtOverlayTicket.id === newRow.id) dtOverlayTicket = newRow;
+    return true;
+  }
+
+  // Messages, across every ticket. Separate from dtMsgChannel, which is
+  // per-ticket and only exists while that ticket's overlay is open — fine
+  // for the thread itself, useless for the inbox, whose entire purpose is
+  // showing messages on tickets you are NOT currently looking at. Without
+  // this, a message arriving while admin sits on the Messages tab is
+  // invisible until they navigate away and back.
+  let dtInboxMsgChannel = null;
+  function dtSubscribeTickets(){
+    dtUnsubscribeTickets();
+    if(!db || !currentUser) return;
+    try{
+      dtTicketChannel = db.channel('dispatch-tickets-'+currentUser.id)
+        .on('postgres_changes', { event:'*', schema:'public', table:'dispatch_tickets' }, (payload)=>{
+          if(dtApplyRealtimePayload(payload)) dtScheduleRender();
+        })
+        .subscribe();
+      dtInboxMsgChannel = db.channel('dispatch-inbox-'+currentUser.id)
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'dispatch_ticket_messages' }, ()=>{
+          // Badge always; the inbox only when it's the visible list.
+          if(typeof refreshUnreadMsgBadges === 'function') refreshUnreadMsgBadges();
+          const onInbox = (currentUser.role==='admin') ? dtAdminFilter==='messages' : dtTechListTab==='inbox';
+          if(onInbox) dtScheduleRender();
+        })
+        .subscribe();
+    }catch(e){ console.error('dispatch realtime subscribe failed', describeCloudError(e)); }
+  }
+  function dtUnsubscribeTickets(){
+    if(dtRenderTimer){ clearTimeout(dtRenderTimer); dtRenderTimer = null; }
+    if(dtTicketChannel && db){ try{ db.removeChannel(dtTicketChannel); }catch(e){} }
+    dtTicketChannel = null;
+    if(dtInboxMsgChannel && db){ try{ db.removeChannel(dtInboxMsgChannel); }catch(e){} }
+    dtInboxMsgChannel = null;
   }
 
   // ---------- Service Report: "From Job Order" picker ----------
@@ -7827,7 +8160,18 @@
     // report — see dtCloseTicket). Once closed, the Job Order is finalized,
     // so it shouldn't keep showing up here as something still needing a
     // report to be filed against it.
-    const openOnes = mine.filter(r=> !dtIsTerminal(r) && (r.equipmentList||[]).some(it=> !it.reportSrNo));
+    // Reports are filed DURING the visit, so the ticket must have reached
+    // Work in Progress — someone tapped Arrived at Site. Filtering only on
+    // "not terminal" used to let a future-dated job order appear here, so a
+    // technician could file next week's report today; and a Preparing
+    // ticket would have no arrival time to fill Time In from.
+    //
+    // A unit flagged Not Yet Done is resolved, not pending: it has no
+    // reportSrNo and would otherwise keep offering itself for a report the
+    // technician already said couldn't be done.
+    const openOnes = mine.filter(r=>
+      dtEffectiveStatus(r)==='in_progress' &&
+      (r.equipmentList||[]).some(it=> !it.reportSrNo && !it.notDone));
     if(openOnes.length===0){
       list.innerHTML = '<div class="empty-state">No Job Order tickets with equipment still needing a report.</div>';
       return;
@@ -7835,11 +8179,13 @@
     list.innerHTML = '';
     openOnes.forEach(r=>{
       const items = r.equipmentList||[];
-      const pending = items.filter(it=>!it.reportSrNo);
-      // A technician must acknowledge a Job Order (see My Job Order / the
-      // Acknowledge button) before they're allowed to file a report against
-      // it — filing implies the visit happened, which shouldn't be possible
-      // for a ticket the technician hasn't even confirmed receiving yet.
+      const pending = items.filter(it=> !it.reportSrNo && !it.notDone);
+      const resolved = items.filter(it=> it.reportSrNo || it.notDone).length;
+      // Filing implies the visit happened. The list above already restricts
+      // this to tickets someone has arrived at; this second check is
+      // per-person — on a shared job order, a colleague's arrival moves the
+      // ticket, but each technician still files under their own
+      // acknowledgement.
       const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
       const row = document.createElement('div');
       row.className = 'user-card' + (alreadyAck ? '' : ' jo-locked');
@@ -7848,7 +8194,7 @@
             '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
             '<div class="u-status">'+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+
               (r.siteAddress ? (' · '+escapeHtml(r.siteAddress)) : '')+'</div>'+
-            '<div class="u-status">'+(items.length-pending.length)+' of '+items.length+' equipment reported</div>'+
+            '<div class="u-status">'+resolved+' of '+items.length+' equipment resolved</div>'+
           '</div>'+
           (alreadyAck
             ? dtStatusPill(r)
@@ -8045,6 +8391,44 @@
   // the equipment load here, then applying the equipment fields and calling
   // setEquipTab('addnew') last, guarantees nothing can hide the section
   // afterward.
+  // ---------- Time In, from the arrival tap ----------
+  // The Service Report's Time In used to be a bare field the technician
+  // typed from memory, with no link to the job order at all. It now
+  // defaults to the moment someone tapped Arrived at Site — the same
+  // server-stamped instant that moved the ticket to Work in Progress, so
+  // the report and the job order agree on when work started.
+  //
+  // Left EDITABLE on purpose: a crew that started before anyone remembered
+  // to tap needs to be able to correct it, and forcing the stamped value
+  // would push them to falsify the rest instead.
+  function srPrefillTimeInFromTicket(ticket){
+    // The report's DATE follows the job order, not the wall clock. A night
+    // visit on a job order dated the 18th produces a report filed at 00:30
+    // on the 19th — defaulting to "today" dated that paperwork a day after
+    // the job it belongs to, with a Time In reading 23:59 the day before.
+    // Still editable, like every other prefill here.
+    const dateEl = $('svcDate');
+    if(dateEl && ticket && ticket.date && dateEl.value === todayISO()){
+      // Only when the field is still at its own default — never clobber a
+      // date the technician typed.
+      dateEl.value = ticket.date;
+    }
+    const el = $('timeIn');
+    if(!el || !ticket || !ticket.arrivedAt) return;
+    if(el.value) return; // never overwrite something already entered
+    try{
+      const d = new Date(ticket.arrivedAt);
+      if(isNaN(d.getTime())) return;
+      // Rendered in the business timezone for the same reason todayISO is:
+      // a device on the wrong zone would otherwise show a start time hours
+      // off from when the crew actually arrived.
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: BUSINESS_TZ, hour:'2-digit', minute:'2-digit', hour12:false
+      }).format(d);
+      el.value = parts;
+    }catch(e){ console.error('time-in prefill failed', e); }
+  }
+
   async function srApplyJobOrder(ticket, equipItem){
     resetForm();
     // A Job Order was actually picked — Customer's Info (and everything
@@ -8083,6 +8467,7 @@
       if(equipItem.scope && equipItem.scope.length) $('troubleCall').value = equipItem.scope.join('; ');
     }
     srCurrentTicketId = ticket.id;
+    srPrefillTimeInFromTicket(ticket);
     srCurrentEquipId = equipItem ? equipItem.id : null;
     // Hidden HERE, not in the wizard's own reveal pass: srCurrentTicketId
     // is only assigned on the line above, AFTER
@@ -8129,6 +8514,7 @@
     // fields come from its own item at submit time, not from this form.
     if($('sec2Card')) $('sec2Card').style.display = 'none';
     srCurrentTicketId = ticket.id;
+    srPrefillTimeInFromTicket(ticket);
     srCurrentEquipId = null;
     if($('equipTabBar')) $('equipTabBar').style.display = 'none';
     if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
@@ -8176,6 +8562,7 @@
     }
     await openReport(data);
     srCurrentTicketId = ticket.id;
+    srPrefillTimeInFromTicket(ticket);
     srCurrentEquipId = equipItem.id;
     // Same as the two paths above: once a unit is in play, the Job Order
     // picker and the equipment tab bar are done and must not sit above the
@@ -8708,7 +9095,7 @@
     // is stored with every real id already attached.
     if(custId) await dtAddCustomerEquipmentBatch(custId, equipmentList);
     const data = {
-      id, jobOrderNo: id, status: 'open',
+      id, jobOrderNo: id, status: 'preparing',
       date: $('dtDate').value, expectedTime: $('dtExpectedTime').value,
       assignedWorkerIds: workers.map(w=>w.id), assignedWorkerNames: workers.map(w=>w.name),
       reportAllowedWorkerIds: reporters.map(w=>w.id), reportAllowedWorkerNames: reporters.map(w=>w.name),
@@ -8721,9 +9108,16 @@
         safety: $('dtReqSafety').checked, others: $('dtReqOthers').checked,
         othersDetail: $('dtReqOthersDetail').value.trim()
       },
-      createdAt: new Date().toISOString(),
+      // Server time, like every other lifecycle timestamp — a device with a
+      // skewed clock would otherwise stamp a creation time that disagrees
+      // with the acknowledgement and arrival times recorded against it.
+      createdAt: serverNowISO(),
       createdBy: currentUser ? currentUser.name : 'Admin',
-      acknowledgedBy: [], completedBy: [], completedAt: null,
+      acknowledgedBy: [], acknowledgedAt: null, arrivedAt: null, arrivedBy: null, arrivedById: null, completedAt: null,
+      // Initialised so the reassignment audit trail and the replaced-
+      // technician read path (dispatch_select_assigned matches on
+      // removedWorkerIds) never have to cope with a missing key.
+      removedWorkerIds: [], removedWorkers: [],
       // Denormalized so a later "Continue Tomorrow" (see dtContinueClosedTicket)
       // can prefill straight from this ticket and re-link the follow-up ticket
       // to the same originating request, without a round trip to fetch it.
@@ -8814,41 +9208,140 @@
     }
     return items.length ? items.join(', ') : 'None specified';
   }
-  // ---------- Auto-expire (display-only) ----------
-  // A ticket is never silently rewritten by this — "expired" is computed
-  // fresh every render, purely from today's date vs. the ticket's scheduled
-  // date. Nothing is actually resolved until someone uses Close Job Order
-  // (see dtCloseTicket below), which is the only thing that writes a final
-  // status. If the date field is edited or the ticket already reached
-  // completed/closed, this stops applying on its own — no cleanup needed.
-  function dtIsPastDue(r){ return !!r.date && r.date < todayISO(); }
-  // Expiry is TERMINAL, exactly like closed/cancelled: a job order whose
-  // scheduled date passed without being acknowledged means the visit never
-  // happened, and there's no attendance record for that day to back it up.
-  // Letting it be acknowledged or reported on afterwards would be recording
-  // a site visit that didn't occur, so every action is blocked and admin
-  // raises a fresh job order instead. dtIsTerminal is the single check the
-  // list filters, action buttons and report picker all share.
+  // ---------- Computed lifecycle status ----------
+  // Two of the stages are never stored, only derived on every render from
+  // the server-anchored business date (see todayISO in core.js):
+  //
+  //   PREPARING — true on the scheduled day, before anyone acknowledges.
+  //     Deriving it means no midnight job has to run and then be monitored;
+  //     a ticket created on the 20th for the 25th simply starts rendering
+  //     as Preparing on the 25th, untouched in the database. It also
+  //     self-corrects when admin edits the scheduled date, where a stored
+  //     value would need a cleanup pass.
+  //
+  //   EXPIRED — the scheduled day ended with NOBODY having acknowledged.
+  //     This is narrower than it used to be: expiry keyed on "past due and
+  //     not finished", which killed jobs that were legitimately acknowledged
+  //     and still running past midnight. Multi-day work is normal, so only
+  //     an untouched job order expires now.
+  //
+  // Neither writes to the row, so nothing needs cleaning up if a date moves.
+  // ---------- The acknowledgement window ----------
+  // Anchored to the APPOINTMENT, not the calendar day. Keying off the date
+  // alone broke late-night work: a job order scheduled 11:59pm was
+  // acknowledgeable only during that calendar day, so a crew arriving at
+  // 12:02am found it already expired — permanently, with no report
+  // possible. For after-hours plant and building work that is the normal
+  // case, not an edge case.
+  //
+  //   opens    = scheduled time - 4h   (Preparing begins, Acknowledge unlocks)
+  //   expires  = scheduled time + 8h   (only if NOBODY acknowledged)
+  //
+  // 4 hours ahead lets a crew accept the job while travelling; 8 hours
+  // after means someone held up on an earlier call can still take it,
+  // without an abandoned job order lingering into the next afternoon.
+  const DT_WINDOW_OPEN_HOURS = 4;
+  const DT_EXPIRE_HOURS = 8;
+  // The Philippines has no daylight saving, so a fixed offset is exact
+  // year-round and avoids parsing a local-time string through the device's
+  // own timezone — which is the thing we don't trust.
+  const BUSINESS_TZ_OFFSET = '+08:00';
+
+  function dtNowMs(){ return new Date(serverNowISO()).getTime(); }
+  // Returns { opens, expires } in ms, or null when the ticket has no date.
+  function dtWindow(r){
+    if(!r || !r.date) return null;
+    if(r.expectedTime){
+      const at = new Date(r.date+'T'+r.expectedTime+':00'+BUSINESS_TZ_OFFSET).getTime();
+      if(!isFinite(at)) return null;
+      return { opens: at - DT_WINDOW_OPEN_HOURS*3600000, expires: at + DT_EXPIRE_HOURS*3600000 };
+    }
+    // No time given — the field has always been optional and plenty of
+    // existing tickets have it blank. Those get the whole scheduled day
+    // plus the same 8 hours, which is strictly MORE generous than the old
+    // midnight cutoff, so nothing in the database becomes unacknowledgeable
+    // the moment this ships.
+    const dayStart = new Date(r.date+'T00:00:00'+BUSINESS_TZ_OFFSET).getTime();
+    if(!isFinite(dayStart)) return null;
+    return { opens: dayStart, expires: dayStart + 24*3600000 + DT_EXPIRE_HOURS*3600000 };
+  }
+  // Past its window with nobody having acknowledged.
+  function dtIsPastDue(r){
+    const w = dtWindow(r);
+    return !!w && dtNowMs() > w.expires;
+  }
+  // Before the window opens a ticket shows no status label at all — it
+  // isn't due yet, and labelling it invites a technician to act early.
+  function dtIsFuture(r){
+    const w = dtWindow(r);
+    return !!w && dtNowMs() < w.opens;
+  }
+  // For the "come back on the day" note — says the hour, not just the date,
+  // now that the hour is what actually governs.
+  function dtWindowOpensText(r){
+    const w = dtWindow(r);
+    if(!w) return '';
+    const d = new Date(w.opens);
+    const day = new Intl.DateTimeFormat('en-PH', { timeZone: BUSINESS_TZ, month:'short', day:'numeric' }).format(d);
+    const time = new Intl.DateTimeFormat('en-PH', { timeZone: BUSINESS_TZ, hour:'numeric', minute:'2-digit', hour12:true }).format(d);
+    return day+' at '+time;
+  }
+  function dtHasAnyAck(r){ return ((r.acknowledgedBy||[]).length > 0); }
+  // Expiry is TERMINAL: a job order whose scheduled day passed with no
+  // acknowledgement means the visit never happened, and there's no
+  // attendance record for that day to back it up. Letting it be
+  // acknowledged or reported on afterwards would record a site visit that
+  // didn't occur, so every action is blocked and admin raises a fresh job
+  // order instead. dtIsTerminal is the single check the list filters,
+  // action buttons and report picker all share.
   function dtIsTerminal(r){
-    return ['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(r));
+    return ['completed','closed','cancelled','expired','replaced'].includes(dtEffectiveStatus(r));
   }
   function dtIsExpired(r){ return dtEffectiveStatus(r)==='expired'; }
   function dtEffectiveStatus(r){
-    if(r.status==='completed' || r.status==='closed' || r.status==='cancelled') return r.status;
-    if(dtIsPastDue(r)) return 'expired';
-    return r.status || 'open';
+    // 'replaced' is PER-VIEWER and deliberately checked first: the ticket
+    // itself is alive and unchanged for the crew still on it — only the
+    // technician who was swapped out sees it as finished. Admin never sees
+    // this branch (dtRemovalFor keys off the viewer's own id), so the
+    // admin list and filters keep showing the ticket's real status.
+    if(currentUser && dtRemovalFor(r, currentUser.id)) return 'replaced';
+    // Stored terminal states win over anything computed.
+    if(r.status==='closed' || r.status==='cancelled' || r.status==='completed') return r.status;
+    // Stored in-flight states. Once someone has acknowledged or arrived,
+    // the date no longer decides anything — the work is underway and runs
+    // until it's resolved, however many days that takes.
+    if(r.status==='in_progress') return 'in_progress';
+    if(r.status==='acknowledged') return 'acknowledged';
+    // Nothing stored beyond 'open'/'preparing', so the date decides.
+    if(dtIsPastDue(r)) return dtHasAnyAck(r) ? 'acknowledged' : 'expired';
+    if(dtIsFuture(r)) return 'scheduled';
+    return 'preparing';
   }
+  // Legacy rows created before the lifecycle change carry status 'open'.
+  // dtEffectiveStatus maps those onto the new stages by date, so no
+  // destructive backfill is needed — see dtNormalizeTicket for the same
+  // approach applied to pre-equipmentList tickets.
   function dtStatusPill(r){
     const status = dtEffectiveStatus(r);
+    if(status==='replaced') return '<span class="status-pill" style="background:#E4E7E4; color:#4A524B;">Status: Closed — Replaced</span>';
     if(status==='cancelled') return '<span class="status-pill" style="background:#F8D7DA; color:#B02A37;">Status: Cancelled</span>';
-    if(status==='completed') return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: Completed</span>';
+    if(status==='expired') return '<span class="status-pill" style="background:#F8D7DA; color:#B02A37;">Status: Expired</span>';
     if(status==='closed'){
       const hasExceptions = (r.equipmentList||[]).some(it=> it.notDone);
       return '<span class="status-pill" style="background:#E4E7E4; color:#4A524B;">Status: Closed'+(hasExceptions ? ' \u26A0' : '')+'</span>';
     }
-    if(status==='expired') return '<span class="status-pill" style="background:#F8D7DA; color:#B02A37;">Status: Expired</span>';
-    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCEAE0; color:var(--green-dark);">Status: Acknowledged</span>';
-    return '<span class="status-pill status-draft">Status: Open</span>';
+    // Admin reviews a Completed job order before closing it, so the same
+    // stage is labelled for what each side is meant to do with it.
+    if(status==='completed'){
+      const label = (currentUser && currentUser.role==='admin') ? 'For Review' : 'Completed';
+      return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: '+label+'</span>';
+    }
+    if(status==='in_progress') return '<span class="status-pill" style="background:#E4F0F1; color:#1F6F7A;">Status: Work in Progress</span>';
+    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCEAE0; color:var(--green-dark);">Status: En Route</span>';
+    if(status==='preparing') return '<span class="status-pill" style="background:#FBF0DC; color:#B9791F;">Status: Preparing</span>';
+    // Future-dated: deliberately no "Status:" prefix — it isn't in the
+    // lifecycle yet, it's just booked.
+    return '<span class="status-pill status-draft">Scheduled</span>';
   }
   // Shows every equipment item on the ticket with its own scope and
   // report status, capped so a 100-unit ticket doesn't blow up the card —
@@ -8861,18 +9354,43 @@
   function dtEquipmentSummaryBlock(r){
     const items = r.equipmentList || [];
     if(items.length===0) return '';
-    const reported = items.filter(it=>it.reportSrNo).length;
+    // Counts RESOLVED, not merely reported: a unit flagged Not Yet Done is
+    // a finished question, and it is what auto-completion counts too, so
+    // the header has to agree or a ticket completes at "3 of 5".
+    const resolved = items.filter(it=> it.reportSrNo || it.notDone).length;
+    // Flagging belongs to the technician doing the visit, and only while
+    // the visit is happening. Admin resolves exceptions at review instead.
+    const canFlag = currentUser && currentUser.role!=='admin' &&
+      dtEffectiveStatus(r)==='in_progress' && !dtRemovalFor(r, currentUser.id) &&
+      (r.assignedWorkerIds||[]).includes(currentUser.id);
     const cap = 8;
     const rows = items.slice(0,cap).map((it,i)=>{
       const scope = (it.scope||[]).map(escapeHtml).join('; ');
-      return '<div class="dt-equip-row" data-ticket-id="'+escapeHtml(r.id)+'" data-equip-idx="'+i+'" '+
-        'style="margin:4px 0; padding-left:8px; border-left:2px solid var(--border); cursor:pointer;">'+
-        '<div>'+escapeHtml(dtEquipSummaryLine(it))+(it.reportSrNo ? ' <span style="color:var(--green-dark);">&#10003; Reported</span>' : '')+
-          ' <span style="color:var(--green-dark); text-decoration:underline; font-size:12px;">View details ›</span></div>'+
-        (scope ? '<div style="font-size:12px; color:var(--text-muted);">Scope: '+scope+'</div>' : '')+
+      let state = '';
+      if(it.reportSrNo) state = ' <span style="color:var(--green-dark);">&#10003; Reported</span>';
+      else if(it.notDone) state = ' <span style="color:var(--amber);">&#9888; Not yet done</span>';
+      // Only ONE control per row, chosen by the unit's state — a reported
+      // unit gets neither, so there is no path to flag work that is already
+      // filed.
+      let action = '';
+      if(canFlag && it.notDone){
+        action = '<button type="button" class="dt-equip-undo secondary" data-ticket-id="'+escapeHtml(r.id)+'" data-equip-id="'+escapeHtml(it.id)+'" '+
+          'style="margin-top:4px; font-size:11.5px; padding:4px 10px;">Undo — I can do this one</button>';
+      }else if(canFlag && !it.reportSrNo){
+        action = '<button type="button" class="dt-equip-notdone" data-ticket-id="'+escapeHtml(r.id)+'" data-equip-id="'+escapeHtml(it.id)+'" '+
+          'style="margin-top:4px; font-size:11.5px; padding:4px 10px;">Can\'t do this one</button>';
+      }
+      return '<div style="margin:4px 0; padding-left:8px; border-left:2px solid var(--border);">'+
+        '<div class="dt-equip-row" data-ticket-id="'+escapeHtml(r.id)+'" data-equip-idx="'+i+'" style="cursor:pointer;">'+
+          '<div>'+escapeHtml(dtEquipSummaryLine(it))+state+
+            ' <span style="color:var(--green-dark); text-decoration:underline; font-size:12px;">View details ›</span></div>'+
+          (scope ? '<div style="font-size:12px; color:var(--text-muted);">Scope: '+scope+'</div>' : '')+
+        '</div>'+
+        (it.notDone && it.notDoneReason ? '<div style="font-size:12px; color:var(--amber);">Reason: '+escapeHtml(it.notDoneReason)+'</div>' : '')+
+        action+
       '</div>';
     }).join('') + (items.length>cap ? '<div style="font-size:12px; color:var(--text-muted);">+'+(items.length-cap)+' more…</div>' : '');
-    return '<div class="leave-comment"><b>Equipment ('+reported+' of '+items.length+' reported)</b>'+rows+'</div>';
+    return '<div class="leave-comment"><b>Equipment ('+resolved+' of '+items.length+' resolved)</b>'+rows+'</div>';
   }
   // Full-detail view for one equipment line item — every field the
   // Equipment Information section of a Service Report would show, plus
@@ -8960,6 +9478,25 @@
       }
       return;
     }
+    // Flag / un-flag are checked BEFORE the row handler: both buttons sit
+    // inside the equipment block, and without this a tap would also open
+    // the detail overlay on top of the prompt.
+    const notDoneBtn = e.target.closest('.dt-equip-notdone');
+    if(notDoneBtn){
+      e.stopPropagation();
+      const reason = prompt('Why can\'t this unit be serviced today?\n\nAdmin sees this when reviewing the job order, so be specific — "customer locked the plant room", "needs a part we don\'t carry".');
+      // prompt returns null on Cancel and '' on an empty OK. Only the
+      // second deserves a complaint; cancelling is not an error.
+      if(reason === null) return;
+      dtMarkEquipmentNotDone(notDoneBtn.dataset.ticketId, notDoneBtn.dataset.equipId, reason);
+      return;
+    }
+    const undoBtn = e.target.closest('.dt-equip-undo');
+    if(undoBtn){
+      e.stopPropagation();
+      dtClearEquipmentNotDone(undoBtn.dataset.ticketId, undoBtn.dataset.equipId);
+      return;
+    }
     const row = e.target.closest('.dt-equip-row');
     if(!row) return;
     e.stopPropagation();
@@ -9000,6 +9537,10 @@
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
           '<div class="u-status">'+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+'</div>'+
+          // Admin only, and outside jo-card-body on purpose: this has to be
+          // readable without expanding the card, otherwise monitoring ten
+          // live tickets still means ten taps.
+          (forAdmin ? dtAdminProgressHtml(r) : '')+
         '</div>'+
         '<div class="jo-card-head-actions">'+
           (hideOpenBtn ? '' : '<button type="button" class="jo-open-btn" data-jo-open="'+escapeHtml(r.id)+'">Open Job Order</button>')+
@@ -9008,12 +9549,71 @@
       '</div>'+
       '<div class="jo-card-body" style="display:none;">'+detailBody+'</div>';
   }
+  // ---------- Admin list: ticket-wide progress tracker ----------
+  // dtStepperHtml below is SELF-centric: it asks "did I acknowledge, did I
+  // complete", which is the right question for a technician and a useless
+  // one for admin — on a three-technician ticket admin isn't any of them.
+  // This is the aggregate view instead: how many of the assigned crew have
+  // acknowledged, and how many equipment units are resolved. It renders in
+  // the card HEAD (always visible) rather than the collapsed body, because
+  // the whole point is monitoring several tickets without opening any.
+  function dtAdminProgressHtml(r){
+    const status = dtEffectiveStatus(r);
+    if(status==='cancelled' || status==='expired') return '';
+    // Not in the lifecycle yet — a four-segment bar on a job order booked
+    // for next week reads as "stalled at step 1" rather than "not due".
+    if(status==='scheduled'){
+      return '<div class="jo-admin-progress" style="margin-top:6px;">'+
+        '<div class="u-status" style="font-size:10.5px;">Scheduled — technicians can acknowledge from '+escapeHtml(dtWindowOpensText(r))+'</div>'+
+      '</div>';
+    }
+
+    const assigned = (r.assignedWorkerIds||[]).length;
+    const acked = (r.acknowledgedBy||[]).filter(id=> (r.assignedWorkerIds||[]).includes(id)).length;
+    const units = (r.equipmentList||[]).length;
+    // "Resolved" deliberately counts BOTH a filed report and a unit the
+    // technician flagged as not done — an inaccessible unit is a finished
+    // question, not outstanding work. Counting only reports would leave
+    // tickets looking permanently stalled at 4/5.
+    const resolved = (r.equipmentList||[]).filter(it=> it.reportSrNo || it.notDone).length;
+
+    // Four segments matching the lifecycle stages admin actually watches.
+    // Each is filled/half/empty rather than a single percentage, because
+    // "which stage is it stuck at" is the question, not "how far along".
+    const stages = [
+      { label:'Ack',      done: assigned>0 && acked>=assigned, part: acked>0 },
+      { label:'On Site',  done: !!r.arrivedAt,                 part: !!r.arrivedAt },
+      { label:'Reported', done: units>0 && resolved>=units,    part: resolved>0 },
+      // Half-lit at Completed: the work is done and the job order is now
+      // waiting on ADMIN to review and close it. That distinction is the
+      // whole reason this bar exists on the admin list.
+      { label:'Closed',   done: status==='closed',             part: status==='completed' }
+    ];
+    const bar = stages.map(s=>{
+      const color = s.done ? 'var(--green)' : (s.part ? 'var(--amber, #B8860B)' : 'var(--border)');
+      return '<div style="flex:1; height:5px; border-radius:3px; background:'+color+';"></div>';
+    }).join('');
+
+    // Counts only where they carry information. "2 of 3 acknowledged" tells
+    // admin exactly who to chase; "3 of 3" is noise once it's complete.
+    const bits = [];
+    if(assigned>0 && acked<assigned) bits.push(acked+' of '+assigned+' acknowledged');
+    if(units>0 && resolved<units)    bits.push(resolved+' of '+units+' units reported');
+    if(r.arrivedAt && resolved<units) bits.push('on site');
+    if(status==='completed') bits.push('waiting on your review');
+
+    return '<div class="jo-admin-progress" style="margin-top:6px;">'+
+        '<div style="display:flex; gap:3px; margin-bottom:3px;">'+bar+'</div>'+
+        (bits.length ? '<div class="u-status" style="font-size:10.5px;">'+escapeHtml(bits.join(' · '))+'</div>' : '')+
+      '</div>';
+  }
+
   // ---------- Technician list: progressive step tracker ----------
   // Shown at the top of each expanded job order card in "My Job Order" (not
   // on admin's list) so a technician can see at a glance where a ticket
   // stands and exactly what to do next, without reading through the full
   // detail block below it. Stage is derived from the same acknowledgedBy /
-  // completedBy / status fields the action buttons already use — "Expired"
+  // acknowledgedBy / arrivedAt / status fields the action buttons use — "Expired"
   // is deliberately NOT one of the stages: it's a date-based warning (see
   // dtEffectiveStatus) that can appear at any stage before Closed, not a
   // step the ticket passes through.
@@ -9022,22 +9622,41 @@
       return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);"><b>Cancelled</b>'+
         (r.cancelReason ? (' — '+escapeHtml(r.cancelReason)) : '')+'</div></div>';
     }
+    // Checked before expiry: a technician taken off a ticket that later
+    // expired should be told they were replaced, not blamed for not
+    // acknowledging something that stopped being theirs.
+    const removal = dtRemovalFor(r, currentUser.id);
+    if(removal){
+      return '<div class="jo-stepper"><div class="jo-stepper-next">'+
+        '<b>Closed for you — replaced</b><br>'+
+        'You were taken off this job order'+
+        (removal.replacedByName ? ' and replaced by '+escapeHtml(removal.replacedByName) : '')+
+        (removal.removedBy ? ' by '+escapeHtml(removal.removedBy) : '')+
+        '.<br>Reason: '+escapeHtml(removal.reason || 'Admin input')+
+        '<br>No further action is needed from you, and no Service Report can be filed against it.'+
+        '</div></div>';
+    }
     if(dtIsExpired(r)){
       return '<div class="jo-stepper"><div class="jo-stepper-next" style="color:var(--danger);">'+
-        '<b>Expired — closed automatically</b><br>The scheduled date passed without this being acknowledged, so it can no longer be acknowledged or reported on. Ask your admin to issue a new job order.</div></div>';
+        '<b>Expired — closed automatically</b><br>Nobody acknowledged this within 8 hours of the scheduled time, so it can no longer be acknowledged or reported on. Ask your admin to issue a new job order.</div></div>';
     }
+    const stage_ = dtEffectiveStatus(r);
     const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
-    const enRoute = (r.enRouteBy||[]).includes(currentUser.id);
-    const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
-    const completed = r.status==='completed';
-    const closed = r.status==='closed';
-    const waitingOnOthers = doneBySelf && !completed;
+    const arrived = !!r.arrivedAt;
+    const units = r.equipmentList || [];
+    const resolved = units.filter(it=> it.reportSrNo || it.notDone).length;
+
+    // Five stages, matching what the customer sees on their own card.
+    // "Scheduled" is not one of them: a ticket dated in the future hasn't
+    // entered the lifecycle yet, so it gets the note below instead of a
+    // track implying step 1 is underway.
+    const steps = ['Preparing','En Route','Work in Progress','Completed','Closed'];
     let stage = 0;
-    if(closed) stage = 4;
-    else if(completed) stage = 3;
-    else if(ack) stage = 2;
-    else if(enRoute) stage = 1;
-    const steps = ['Open','En Route','Acknowledged','Completed','Closed'];
+    if(stage_==='closed') stage = 4;
+    else if(stage_==='completed') stage = 3;
+    else if(stage_==='in_progress') stage = 2;
+    else if(stage_==='acknowledged') stage = 1;
+
     const stepsHtml = steps.map((label,i)=>{
       const state = i<stage ? 'done' : (i===stage ? 'current' : 'upcoming');
       return '<div class="jo-step '+state+'">'+
@@ -9046,13 +9665,26 @@
           '<span class="jo-step-label">'+label+'</span>'+
         '</div>';
     }).join('');
+
     let nextText;
-    if(closed) nextText = 'Fully closed — no further action needed.';
-    else if(completed) nextText = 'File the Service Report for this ticket, then open it below and run Close Job Order.';
-    else if(waitingOnOthers) nextText = 'Recorded — waiting for the other assigned technician(s) to mark it completed.';
-    else if(ack) nextText = 'You are on site. Tap Mark Completed once your visit here is done — that just closes out the fieldwork step, not that everything went perfectly; Close Job Order still lets you flag anything that wasn\'t finished.';
-    else if(enRoute) nextText = 'The customer has been told you\'re on the way. Tap Acknowledge when you arrive on site — that also unlocks this ticket\'s Service Report.';
-    else nextText = 'New assignment. Tap Acknowledge to accept this job order, or On My Way to let the customer know you\'re heading over.';
+    if(stage_==='scheduled'){
+      // The whole point of the date-lock: they can see the job, prepare for
+      // it, and know exactly when it becomes actionable.
+      return '<div class="jo-stepper"><div class="jo-stepper-next">'+
+        '<b>Scheduled for '+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+'</b><br>'+
+        'You can review the details now. The <b>Acknowledge</b> button appears from '+
+        escapeHtml(dtWindowOpensText(r))+' — four hours before the scheduled time.'+
+        '</div></div>';
+    }
+    if(stage_==='closed') nextText = 'Fully closed by admin — no further action needed.';
+    else if(stage_==='completed') nextText = 'All equipment resolved. Admin is reviewing the Service Report(s) and will close this job order.';
+    else if(stage_==='in_progress'){
+      nextText = resolved+' of '+units.length+' unit(s) resolved. File a Service Report for each one — or flag a unit as not done, with a reason, if it can\'t be serviced. The job order completes on its own once none are left.';
+    }
+    else if(ack && stage_==='acknowledged') nextText = 'The customer knows you\'re on the way. Tap Arrived at Site when you get there — that starts the work and fills Time In on the Service Report.';
+    else if(ack) nextText = 'Acknowledged — waiting for the other assigned technician(s) before the customer is told the crew is en route.';
+    else nextText = 'Scheduled for today. Tap Acknowledge to accept this job order.';
+
     return '<div class="jo-stepper">'+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
       '<div class="jo-stepper-next"><b>Next:</b> '+nextText+'</div>'+
@@ -9071,10 +9703,20 @@
       if(!rec || !rec.equipmentList) return;
       const idx = rec.equipmentList.findIndex(it=> it.id===equipId);
       if(idx<0 || rec.equipmentList[idx].reportSrNo===srNo) return;
-      const equipmentList = rec.equipmentList.slice();
-      equipmentList[idx] = Object.assign({}, equipmentList[idx], { reportSrNo: srNo });
-      const merged = Object.assign({}, rec, { equipmentList });
-      const { error } = await db.from('dispatch_tickets').update({ data: merged }).eq('id', ticketId);
+      // Patches ONE array element server-side under a row lock. Writing the
+      // whole equipmentList back from here lost concurrent edits: two
+      // technicians finishing different units on the same job order each
+      // sent their own copy of the list, and the slower write erased the
+      // other's reportSrNo — the report row survived but the ticket forgot
+      // it, so that unit never resolved and the job order could never
+      // complete.
+      const { error } = await db.rpc('dispatch_set_equipment_state', {
+        p_ticket_id: ticketId, p_equip_id: equipId,
+        // draftSrNo is dropped in the same write: once a report is filed
+        // the draft pointer is stale, and leaving it made the review
+        // section show both against one unit.
+        p_patch: { reportSrNo: srNo }, p_clear_keys: ['draftSrNo']
+      });
       if(error) throw error;
     }catch(e){ console.error('mark equipment reported failed', describeCloudError(e)); }
   }
@@ -9092,15 +9734,16 @@
       // Never downgrade an item that's already fully reported, and skip the
       // write if it's already flagged with this exact draft.
       if(idx<0 || rec.equipmentList[idx].reportSrNo || rec.equipmentList[idx].draftSrNo===srNo) return;
-      const equipmentList = rec.equipmentList.slice();
-      equipmentList[idx] = Object.assign({}, equipmentList[idx], { draftSrNo: srNo });
-      const merged = Object.assign({}, rec, { equipmentList });
-      const { error } = await db.from('dispatch_tickets').update({ data: merged }).eq('id', ticketId);
+      const { error } = await db.rpc('dispatch_set_equipment_state', {
+        p_ticket_id: ticketId, p_equip_id: equipId, p_patch: { draftSrNo: srNo }
+      });
       if(error) throw error;
     }catch(e){ console.error('mark equipment draft failed', describeCloudError(e)); }
   }
 
-  let dtAdminFilter = 'open';
+  // Must match the button marked .active in index.html. 'open' no longer
+  // exists as a status, so leaving it here would open the admin list empty.
+  let dtAdminFilter = 'preparing';
   async function dtRenderAdminList(){
     const list = $('dtAdminList');
     list.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -9108,7 +9751,16 @@
     const items = dtAdminFilter==='all' ? all : all.filter(r=> dtEffectiveStatus(r)===dtAdminFilter);
     dtLastTicketsById = {};
     items.forEach(r=> dtLastTicketsById[r.id] = r);
-    if(items.length===0){ list.innerHTML = '<div class="empty-state">No '+(dtAdminFilter==='all'?'':dtAdminFilter+' ')+'dispatch tickets.</div>'; return; }
+    if(items.length===0){
+      // Raw filter keys read badly here — "No in_progress dispatch tickets".
+      const FILTER_LABELS = { preparing:'preparing', acknowledged:'en route', in_progress:'in-progress',
+        completed:'job orders awaiting review', scheduled:'scheduled', closed:'closed',
+        expired:'expired', cancelled:'cancelled' };
+      const label = dtAdminFilter==='all' ? 'dispatch tickets'
+        : (dtAdminFilter==='completed' ? FILTER_LABELS.completed : (FILTER_LABELS[dtAdminFilter]||dtAdminFilter)+' dispatch tickets');
+      list.innerHTML = '<div class="empty-state">No '+label+'.</div>';
+      return;
+    }
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
@@ -9117,11 +9769,32 @@
       list.appendChild(card);
     });
   }
+  // Selects a filter programmatically and keeps the button row's .active
+  // state in step — used by the dashboard's "Job Orders to Review" card,
+  // which deep-links straight into that queue.
+  function dtSetAdminFilter(filter){
+    const btn = document.querySelector('#dtAdminFilterRow button[data-filter="'+filter+'"]');
+    if(!btn) return false;
+    document.querySelectorAll('#dtAdminFilterRow button').forEach(b=> b.classList.remove('active'));
+    btn.classList.add('active');
+    dtAdminFilter = filter;
+    // 'messages' is not a status — it swaps the whole list for the thread
+    // inbox, so it can't go through the status filter below.
+    const inbox = filter==='messages';
+    if($('dtAdminList')) $('dtAdminList').style.display = inbox ? 'none' : '';
+    if($('dtAdminInboxList')) $('dtAdminInboxList').style.display = inbox ? '' : 'none';
+    if(inbox) dtRenderChatInbox(); else dtRenderAdminList();
+    return true;
+  }
   document.querySelectorAll('#dtAdminFilterRow button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('#dtAdminFilterRow button').forEach(b=> b.classList.remove('active'));
       btn.classList.add('active');
       dtAdminFilter = btn.dataset.filter;
+      const inboxSel = dtAdminFilter==='messages';
+      if($('dtAdminList')) $('dtAdminList').style.display = inboxSel ? 'none' : '';
+      if($('dtAdminInboxList')) $('dtAdminInboxList').style.display = inboxSel ? '' : 'none';
+      if(inboxSel){ dtRenderChatInbox(); return; }
       dtRenderAdminList();
     });
   });
@@ -9134,6 +9807,7 @@
     $('dtCalendarCard').style.display = which==='calendar' ? '' : 'none';
     if(which==='new') dtResetForm();
     else if(which==='calendar') dtRenderCalendarTab();
+    else if(dtAdminFilter === 'messages') dtSetAdminFilter('messages');
     else dtRenderAdminList();
   }
   $('dtTabNew').addEventListener('click', ()=> dtShowAdminTab('new'));
@@ -9150,10 +9824,19 @@
     dtTechListTab = tab;
     if($('dtTechTabActive')) $('dtTechTabActive').classList.toggle('active', tab==='active');
     if($('dtTechTabClosed')) $('dtTechTabClosed').classList.toggle('active', tab==='closed');
-    dtRenderTechList();
+    if($('dtTechTabInbox')) $('dtTechTabInbox').classList.toggle('active', tab==='inbox');
+    // The inbox lists threads, not job orders, so it swaps the whole list
+    // rather than filtering it — and the job-order-only controls above
+    // (expand all) would do nothing there.
+    const inbox = tab==='inbox';
+    if($('dtTechList')) $('dtTechList').style.display = inbox ? 'none' : '';
+    if($('dtInboxList')) $('dtInboxList').style.display = inbox ? '' : 'none';
+    if($('dtTechExpandAllBtn')) $('dtTechExpandAllBtn').style.display = inbox ? 'none' : '';
+    if(inbox) dtRenderChatInbox(); else dtRenderTechList();
   }
   if($('dtTechTabActive')) $('dtTechTabActive').addEventListener('click', ()=> dtSetTechListTab('active'));
   if($('dtTechTabClosed')) $('dtTechTabClosed').addEventListener('click', ()=> dtSetTechListTab('closed'));
+  if($('dtTechTabInbox')) $('dtTechTabInbox').addEventListener('click', ()=> dtSetTechListTab('inbox'));
   // No more status tabs — every job order assigned to the technician is
   // always shown. This just orders the list so the ones needing action sit
   // above ones that don't: unacknowledged first, then acknowledged/in
@@ -9161,13 +9844,15 @@
   // scheduled date.
   function dtSortTechTickets(items){
     function priority(r){
-      const ack = (r.acknowledgedBy||[]).includes(currentUser.id);
-      const doneBySelf = (r.completedBy||[]).includes(currentUser.id);
-      if(r.status==='closed') return 4;
-      if(r.status==='completed') return 3;
-      if(doneBySelf) return 2; // acknowledged + done own part, waiting on others
-      if(ack) return 1;
-      return 0; // not yet acknowledged — most urgent
+      const st = dtEffectiveStatus(r);
+      // Most urgent first: an unacknowledged job order due today is the one
+      // thing a technician must act on right now.
+      if(st==='closed' || st==='replaced' || st==='cancelled' || st==='expired') return 6;
+      if(st==='completed') return 5;
+      if(st==='scheduled') return 4;   // not actionable yet
+      if(st==='in_progress') return 2; // work underway — units still to report
+      if(st==='acknowledged') return 1;
+      return 0; // preparing, not yet acknowledged
     }
     return items.slice().sort((a,b)=>{
       const pa = priority(a), pb = priority(b);
@@ -9195,12 +9880,26 @@
     // available, falling back to the scheduled date), since "recent on top"
     // is what's useful once a ticket is done — dtSortTechTickets's own
     // ascending date tie-break is aimed at the Active tab's upcoming work.
+    // A replaced ticket is finished from this technician's side, so it
+    // belongs in Closed with the rest of their finished work rather than
+    // sitting in Active as something they might still act on. Sorted by
+    // the removal timestamp where there is one, so "why did that job
+    // disappear" is answered at the top of the list.
+    const removedAtOf = (r)=>{
+      const rem = dtRemovalFor(r, currentUser.id);
+      return (rem && rem.removedAt) || r.closedAt || r.cancelledAt || r.date || '';
+    };
     const items = dtTechListTab==='closed'
-      ? sorted.filter(r=> dtIsTerminal(r) && dtEffectiveStatus(r)!=='completed').sort((a,b)=>
-          (b.closedAt||b.cancelledAt||b.date||'').localeCompare(a.closedAt||a.cancelledAt||a.date||''))
+      ? sorted.filter(r=> dtIsTerminal(r) && dtEffectiveStatus(r)!=='completed')
+          .sort((a,b)=> removedAtOf(b).localeCompare(removedAtOf(a)))
       : sorted.filter(r=> !dtIsTerminal(r) || dtEffectiveStatus(r)==='completed');
     dtLastTicketsById = {};
-    items.forEach(r=> dtLastTicketsById[r.id] = r);
+    // Store what was RENDERED, not the live row. The equipment "View
+    // details" overlay resolves against this map using a data-equip-idx
+    // computed from the card's own equipment list — caching the live row
+    // while rendering a frozen one means a replaced technician taps a unit
+    // and gets current data, or with a changed list, the wrong unit.
+    items.forEach(r=> dtLastTicketsById[r.id] = dtViewFor(r, currentUser.id));
     if(items.length===0){
       list.innerHTML = dtTechListTab==='closed'
         ? '<div class="empty-state">'+icon('folder')+' No closed job orders yet</div>'
@@ -9208,7 +9907,11 @@
       return;
     }
     list.innerHTML = '';
-    items.forEach(r=>{
+    items.forEach(rLive=>{
+      // Replaced tickets render from their snapshot, so a technician sees
+      // the job exactly as it stood when they came off it — not how it went
+      // on without them.
+      const r = dtViewFor(rLive, currentUser.id);
       const card = document.createElement('div');
       card.className = 'user-card';
       card.dataset.ticketId = r.id;
@@ -9216,24 +9919,37 @@
       // ticket's status. Previously a shared ticket could sit at "open" so a
       // colleague who had already acknowledged never got a Complete button,
       // and one person's Complete closed it for everyone.
+      // Buttons follow the ticket's lifecycle stage, not a per-person tally.
+      // Only two actions remain for a technician: Acknowledge (their own,
+      // on the scheduled day) and Arrived at Site (one tap, whole crew).
+      // Completion is now derived from equipment being reported, and
+      // closing is admin-only — neither is a button here any more.
+      const stage = dtEffectiveStatus(r);
       const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
-      const alreadyDone = r.status==='completed' || (r.completedBy||[]).includes(currentUser.id);
+      const arrived = !!r.arrivedAt;
       // An expired/cancelled/closed ticket takes no actions at all — see
       // dtIsTerminal. Offering buttons here would only produce a refusal.
-      const locked = dtIsTerminal(r) && r.status!=='completed';
+      // A replaced technician is locked out unconditionally.
+      const locked = !!dtRemovalFor(r, currentUser.id) || dtIsTerminal(r);
+      // Viewable before the scheduled day, but not actionable — the note in
+      // the stepper explains when to come back.
+      const notYetDue = stage==='scheduled';
       card.innerHTML = dtCardHtml(r, false, dtStepperHtml(r)) +
         '<div class="user-card-actions">'+
-          (!locked && !alreadyAck && !alreadyDone ? '<button data-act="enroute" class="secondary">On My Way</button>' : '')+
-          (!locked && !alreadyAck && !alreadyDone ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
-          (!locked && alreadyAck && !alreadyDone ? '<button data-act="complete" class="primary">Mark Completed</button>' : '')+
-          (!locked && alreadyDone && r.status!=='completed' ? '<span class="u-status">Waiting for the other assigned technician(s)</span>' : '')+
+          (!locked && !notYetDue && !alreadyAck ? '<button data-act="ack" class="primary">Acknowledge</button>' : '')+
+          // Arrival requires the ticket to have reached En Route — i.e.
+          // EVERY assigned technician acknowledged. Offering it while the
+          // crew is still partly unacknowledged let one person jump the
+          // ticket from Preparing straight to Work in Progress, so the
+          // customer never saw En Route at all.
+          (!locked && stage==='acknowledged' && !arrived ? '<button data-act="arrived" class="primary">Arrived at Site</button>' : '')+
+          (!locked && alreadyAck && stage==='preparing' ? '<span class="u-status">Waiting for the other assigned technician(s) to acknowledge</span>' : '')+
+          (!locked && arrived && stage==='in_progress' ? '<span class="u-status">File a Service Report for each unit, or flag it as not done</span>' : '')+
         '</div>';
-      const enRouteBtn = card.querySelector('[data-act="enroute"]');
-      if(enRouteBtn) enRouteBtn.addEventListener('click', ()=> dtMarkEnRoute(r.id, enRouteBtn));
       const ackBtn = card.querySelector('[data-act="ack"]');
       if(ackBtn) ackBtn.addEventListener('click', ()=> dtAcknowledge(r.id));
-      const compBtn = card.querySelector('[data-act="complete"]');
-      if(compBtn) compBtn.addEventListener('click', ()=> dtComplete(r.id));
+      const arrivedBtn = card.querySelector('[data-act="arrived"]');
+      if(arrivedBtn) arrivedBtn.addEventListener('click', ()=> dtMarkArrived(r.id, arrivedBtn));
       list.appendChild(card);
     });
   }
@@ -9249,6 +9965,16 @@
     if(!srAckReturnTicketId){ banner.style.display = 'none'; return; }
     const ticket = (mine||[]).find(t=> t.id===srAckReturnTicketId);
     const jo = ticket ? ticket.jobOrderNo : 'That Job Order';
+    // A technician sent here from the Service Report to acknowledge a ticket
+    // can be replaced while standing on this screen. Without this branch the
+    // banner would keep telling them to acknowledge a job order that is now
+    // locked, with no button to do it — an instruction they cannot follow.
+    const removal = ticket && currentUser ? dtRemovalFor(ticket, currentUser.id) : null;
+    if(removal){
+      $('dtBackToSrText').innerHTML = icon('lock')+' '+jo+' was reassigned — you can no longer file its Service Report.';
+      banner.style.display = '';
+      return;
+    }
     const nowAck = ticket && currentUser && (ticket.acknowledgedBy||[]).includes(currentUser.id);
     $('dtBackToSrText').innerHTML = nowAck
       ? (icon('checkCircle')+' '+jo+' is acknowledged — you can head back now.')
@@ -9320,100 +10046,645 @@
       return false;
     }
   }
-  // "On My Way" — an optional signal a technician sends before
-  // acknowledging. Records enRouteBy on the ticket (so the technician's OWN
-  // step tracker advances to En Route — it previously only ever touched the
-  // linked service_request, so tapping this changed nothing on their
-  // screen), AND syncs the customer's request via srMarkEnRouteByTicket.
-  // Does NOT acknowledge or change ticket status. Safe to tap twice.
-  async function dtMarkEnRoute(id, btn){
-    if(btn){ btn.disabled = true; btn.textContent = 'Sending…'; }
-    await dtApplyWorkerChange(id, (rec)=>{
-      const set = new Set(rec.enRouteBy||[]);
-      if(set.has(currentUser.id)) return null; // already sent — nothing to write
-      set.add(currentUser.id);
-      return Object.assign({}, rec, {
-        enRouteBy: Array.from(set),
-        enRouteAt: rec.enRouteAt || new Date().toISOString()
-      });
-    });
-    const ok = typeof srMarkEnRouteByTicket === 'function' ? await srMarkEnRouteByTicket(id) : true;
-    const _enrTicket = dtLastTicketsById[id];
-    if(_enrTicket && _enrTicket.custId && typeof notifyCustomer === 'function'){
-      notifyCustomer(_enrTicket.custId, 'Your technician is on the way',
-        (currentUser && currentUser.name ? currentUser.name : 'A technician')+' is heading to your site now.', 'jo-enroute');
+  // ---------- Admin: replace an assigned technician ----------
+  // The absence problem. A ticket only reaches "En Route" once EVERY
+  // assigned technician has acknowledged, so one person calling in sick
+  // used to strand the ticket permanently — there was no way to edit
+  // assignment after creation at all, and no amount of admin authority
+  // could unstick it.
+  //
+  // Swapping has to touch more than assignedWorkerIds, because the
+  // "everyone acknowledged" gate reads those arrays fresh every time. Leave
+  // the departing technician's acknowledgment behind and the ticket would
+  // count a person who isn't on the job any more, reporting itself as fully
+  // acknowledged when the replacement hasn't even seen it.
+  //
+  // What deliberately SURVIVES a swap: arrivedAt. It records a fact about
+  // the visit — someone was on site at that time, and the Service Report's
+  // Time In is derived from it — not a fact about a particular person.
+  // Stripping it would knock a ticket backwards out of Work in Progress and
+  // silently change what the report says about when work started.
+  async function dtReassignWorker(ticketId, outgoingId, incomingWorker, reason){
+    if(!currentUser || currentUser.role!=='admin'){ toast('Only an admin can reassign a job order'); return false; }
+    if(!incomingWorker || !incomingWorker.id){ toast('Pick a replacement technician'); return false; }
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec){ toast('Job order not found'); return false; }
+      if(rec.status==='closed' || rec.status==='cancelled'){ toast('This job order is already finalized'); return false; }
+
+      const assigned = (rec.assignedWorkerIds||[]).slice();
+      const names    = (rec.assignedWorkerNames||[]).slice();
+      const idx = assigned.indexOf(outgoingId);
+      if(idx === -1){ toast('That technician is not assigned to this job order'); return false; }
+      if(assigned.includes(incomingWorker.id)){ toast('That technician is already on this job order'); return false; }
+
+      const outgoingName = names[idx] || 'Technician';
+      assigned[idx] = incomingWorker.id;
+      names[idx]    = incomingWorker.name;
+
+      // Report permission follows assignment: someone off the job should
+      // not keep the right to file its Service Report. The replacement does
+      // NOT silently inherit it — admin picks report permission explicitly
+      // at creation, so inheriting it here would grant a permission nobody
+      // chose. If the outgoing tech was a reporter, the replacement takes
+      // that slot; otherwise neither is a reporter.
+      const repIds   = (rec.reportAllowedWorkerIds||[]).slice();
+      const repNames = (rec.reportAllowedWorkerNames||[]).slice();
+      const repIdx = repIds.indexOf(outgoingId);
+      if(repIdx !== -1){ repIds[repIdx] = incomingWorker.id; repNames[repIdx] = incomingWorker.name; }
+
+      const strip = (arr)=> (arr||[]).filter(id=> id !== outgoingId);
+      const change = {
+        assignedWorkerIds: assigned,
+        assignedWorkerNames: names,
+        reportAllowedWorkerIds: repIds,
+        reportAllowedWorkerNames: repNames,
+        // Progress belonging to the departing person goes with them.
+        acknowledgedBy: strip(rec.acknowledgedBy),
+        // Why a swap happened matters weeks later when someone asks why a
+        // job ran long. Cheap to keep, impossible to reconstruct.
+        removedWorkers: (rec.removedWorkers||[]).concat([{
+          id: outgoingId, name: outgoingName,
+          replacedById: incomingWorker.id, replacedByName: incomingWorker.name,
+          reason: (reason||'').trim() || null,
+          removedAt: serverNowISO(),
+          removedBy: currentUser.name || 'Admin',
+          // Frozen copy of the ticket as it stood when they were taken off.
+          // Their record has to stop here: once replaced they have no part
+          // in what happens next, and showing them the job continuing to
+          // move — new reports, a different crew arriving, a later closure —
+          // would misrepresent what they were actually involved in. Only the
+          // fields their card and overlay render are kept, so a 40-unit
+          // ticket doesn't multiply its jsonb on every swap.
+          snapshot: {
+            status: rec.status,
+            equipmentList: rec.equipmentList || [],
+            assignedWorkerNames: (rec.assignedWorkerNames||[]).slice(),
+            acknowledgedBy: (rec.acknowledgedBy||[]).slice(),
+            arrivedAt: rec.arrivedAt || null,
+            remarks: rec.remarks || null,
+            date: rec.date, expectedTime: rec.expectedTime || null
+          }
+        }]),
+        // Id-only mirror of the above. RLS reads THIS (dispatch_select_assigned)
+        // to keep the replaced technician's read access alive — without it the
+        // ticket disappears from their app the instant they're swapped out,
+        // with no closing record and no reason. Deduped because the same
+        // person can be swapped off a ticket, re-added, and swapped off again.
+        removedWorkerIds: Array.from(new Set((rec.removedWorkerIds||[]).concat([outgoingId])))
+      };
+
+      // Removing an acknowledgement can move the ticket BACKWARDS — if the
+      // crew was fully acknowledged and the replacement hasn't confirmed,
+      // the ticket is no longer En Route and must say so. A ticket already
+      // in Work in Progress stays there: somebody arrived on site, and
+      // arrivedAt (which the Service Report's Time In reads) records the
+      // visit, not the person.
+      const stillAllAcked = assigned.length>0 && assigned.every(w=> change.acknowledgedBy.includes(w));
+      if(rec.status==='acknowledged' && !stillAllAcked) change.status = 'preparing';
+
+      const merged = Object.assign({}, rec, change);
+      const { data: rows, error } = await db.from('dispatch_tickets')
+        .update({ status: merged.status, data: merged }).eq('id', ticketId).select('id');
+      if(error) throw error;
+      if(!rows || !rows.length){ toast('This job order changed elsewhere — refreshing'); return false; }
+
+      // The replacement needs to know they have a job today. Best-effort,
+      // exactly like dtCreateTicket's notifications — a failed push must
+      // never roll back a completed reassignment.
+      if(typeof notifyUser === 'function'){
+        try{
+          notifyUser(incomingWorker.id, 'New job order assigned to you',
+            rec.jobOrderNo+' — '+(rec.custName||'')+' on '+leaveFmtDate(rec.date)+
+            '. You are covering for '+outgoingName+'.', 'jo-reassign');
+          notifyUser(outgoingId, 'You were removed from a job order',
+            rec.jobOrderNo+' has been reassigned to '+incomingWorker.name+'.', 'jo-reassign');
+        }catch(e){}
+      }
+      toast(outgoingName+' replaced by '+incomingWorker.name);
+      return true;
+    }catch(e){
+      console.error('dispatch reassign failed', describeCloudError(e));
+      toast('Could not reassign — please try again');
+      return false;
     }
-    if(btn){ btn.disabled = false; btn.textContent = 'On My Way'; }
-    toast(ok ? "Customer notified you're on the way" : 'Could not notify the customer — check your connection');
-    dtRenderTechList();
   }
+
+  // ---------- Admin: reassignment UI ----------
+  // One row per currently assigned technician, each showing whether they've
+  // acknowledged yet — because that's the whole reason admin is on this
+  // screen. Someone who already acknowledged and is working needs a
+  // different decision from someone who hasn't responded all morning, and a
+  // bare list of names doesn't distinguish them.
+  async function dtRenderReassignSection(rec){
+    const sec = $('dtReassignSection');
+    if(!sec) return;
+    const isAdmin = currentUser && currentUser.role==='admin';
+    const finalized = rec.status==='closed' || rec.status==='cancelled' || dtIsExpired(rec);
+    if(!isAdmin || finalized){ sec.style.display='none'; sec.innerHTML=''; return; }
+
+    const box = $('dtReassignList');
+    const assignedIds = rec.assignedWorkerIds || [];
+    const assignedNames = rec.assignedWorkerNames || [];
+    if(assignedIds.length===0){ sec.style.display='none'; return; }
+
+    sec.style.display = '';
+    box.innerHTML = '<div class="empty-state">Loading technicians…</div>';
+    const users = (await cloudListUsers()) || [];
+    // Anyone already on the ticket can't also be their own replacement.
+    const candidates = users.filter(u=> u.active!==false && !assignedIds.includes(u.id))
+      .sort((a,b)=> a.name.localeCompare(b.name));
+
+    box.innerHTML = '';
+    assignedIds.forEach((wid, i)=>{
+      const acked = (rec.acknowledgedBy||[]).includes(wid);
+      const isReporter = (rec.reportAllowedWorkerIds||[]).includes(wid);
+      const row = document.createElement('div');
+      row.className = 'leave-comment';
+      row.style.marginBottom = '8px';
+      row.innerHTML =
+        '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">'+
+          '<div>'+
+            '<b>'+escapeHtml(assignedNames[i]||'Technician')+'</b>'+
+            '<div class="u-status" style="font-size:11px;">'+
+              (acked ? 'Acknowledged' : 'Not yet acknowledged')+
+              (isReporter ? ' · can file report' : '')+
+            '</div>'+
+          '</div>'+
+          '<button type="button" class="btn btn-secondary dt-reassign-open" '+
+            'data-wid="'+escapeHtml(wid)+'" style="flex:none; padding:6px 12px; font-size:12px;">Replace</button>'+
+        '</div>'+
+        '<div class="dt-reassign-form" style="display:none; margin-top:8px;">'+
+          (candidates.length===0
+            ? '<div class="empty-state">No other active technician is available.</div>'
+            : '<select class="dt-reassign-pick" style="margin-bottom:8px;">'+
+                '<option value="">Select replacement…</option>'+
+                candidates.map(c=> '<option value="'+escapeHtml(c.id)+'" data-name="'+escapeHtml(c.name)+'">'+escapeHtml(c.name)+'</option>').join('')+
+              '</select>'+
+              '<input type="text" class="dt-reassign-reason" placeholder="Reason (optional) — e.g. sick leave" style="margin-bottom:8px;">'+
+              '<button type="button" class="btn btn-primary dt-reassign-confirm" style="width:100%;">Confirm Replacement</button>')+
+        '</div>';
+      box.appendChild(row);
+    });
+
+    box.querySelectorAll('.dt-reassign-open').forEach(btn=>{
+      btn.onclick = ()=>{
+        const form = btn.closest('.leave-comment').querySelector('.dt-reassign-form');
+        const opening = form.style.display === 'none';
+        // Only one open at a time — two half-filled swap forms on screen is
+        // how the wrong person gets replaced.
+        box.querySelectorAll('.dt-reassign-form').forEach(f=> f.style.display='none');
+        box.querySelectorAll('.dt-reassign-open').forEach(b=> b.textContent='Replace');
+        if(opening){ form.style.display=''; btn.textContent='Cancel'; }
+      };
+    });
+
+    box.querySelectorAll('.dt-reassign-confirm').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const row = btn.closest('.leave-comment');
+        const outgoingId = row.querySelector('.dt-reassign-open').dataset.wid;
+        const pick = row.querySelector('.dt-reassign-pick');
+        const incomingId = pick.value;
+        if(!incomingId){ toast('Select a replacement'); return; }
+        const incomingName = pick.options[pick.selectedIndex].dataset.name;
+        const reason = row.querySelector('.dt-reassign-reason').value;
+        const outgoingName = row.querySelector('b').textContent;
+        if(!confirm('Replace '+outgoingName+' with '+incomingName+' on this job order?')) return;
+        btn.disabled = true; btn.textContent = 'Replacing…';
+        const ok = await dtReassignWorker(rec.id, outgoingId, { id: incomingId, name: incomingName }, reason);
+        btn.disabled = false; btn.textContent = 'Confirm Replacement';
+        if(ok){
+          // Re-read rather than patching the local copy: the swap may have
+          // moved the ticket backwards out of 'acknowledged', and the
+          // status pill and close gate both read from it.
+          const fresh = await dtGetTicket(rec.id);
+          if(fresh) dtOpenTicketOverlay(fresh.id);
+        }
+      };
+    });
+  }
+
+  // ---------- Acknowledge ----------
+  // Gated to the scheduled day in BOTH directions. The upper bound was
+  // already here (an expired ticket can't be acknowledged); the lower bound
+  // is new — a technician could previously acknowledge a job order dated
+  // next week, which told the customer someone was en route days early and
+  // unlocked its Service Report before the visit.
+  //
+  // Checked here rather than only by hiding the button because a list
+  // rendered before midnight can still be on screen after the date rolled,
+  // and tapping it then would record a visit that never happened.
   async function dtAcknowledge(id){
+    // Offline, the online guards can't run — so the ones that matter are
+    // re-checked here against the local copy before queueing. The date lock
+    // especially: it's the whole point of the stage, and a technician with
+    // no signal should not be able to bypass it by going offline.
+    if(!(await ensureCloud())){
+      const rec = dtLastTicketsById[id] || (await dtGetTicket(id));
+      if(!rec){ toast('Open this job order once while online first'); return; }
+      if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return; }
+      if(dtIsFuture(rec)){ toast('You can acknowledge this from '+dtWindowOpensText(rec)); return; }
+      if((rec.acknowledgedBy||[]).includes(currentUser.id)){ toast('You already acknowledged this'); return; }
+      const queued = await dtQueueOfflineAction(id, 'ack');
+      toast(queued ? 'Acknowledged — will sync when you are back online' : 'Could not save offline');
+      dtRenderTechList();
+      return;
+    }
     let becameAcknowledged = false;
     const ok = await dtApplyWorkerChange(id, (rec, assigned)=>{
-      // Guarded here rather than only by hiding the button: a list that was
-      // rendered before midnight can still be on screen after the ticket
-      // expired, and tapping it then would record a visit that never
-      // happened.
       if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return null; }
+      if(dtIsFuture(rec)){
+        toast('You can acknowledge this from '+dtWindowOpensText(rec));
+        return null;
+      }
       const ackBy = new Set(rec.acknowledgedBy||[]);
       if(ackBy.has(currentUser.id)){ toast('You already acknowledged this'); return null; }
       ackBy.add(currentUser.id);
       const list = Array.from(ackBy);
-      // A multi-worker ticket is only fully "acknowledged" once everyone
-      // assigned has confirmed; before that it stays open so the remaining
-      // technicians still see the Acknowledge button.
+      // A multi-worker ticket only reaches En Route once EVERYONE assigned
+      // has confirmed; until then it stays Preparing so the remaining
+      // technicians still see the Acknowledge button. If someone can't make
+      // it, admin replaces them (dtReassignWorker) rather than the ticket
+      // sitting stuck.
       const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
       if(everyone) becameAcknowledged = true;
-      return { acknowledgedBy: list, status: everyone ? 'acknowledged' : (rec.status||'open') };
+      return {
+        acknowledgedBy: list,
+        acknowledgedAt: rec.acknowledgedAt || serverNowISO(),
+        status: everyone ? 'acknowledged' : 'preparing'
+      };
     });
-    if(ok) toast('Acknowledged');
-    // If this ticket originated from a customer's service request, move
-    // that request from 'dispatched' to 'in_progress' now that work has
-    // actually started — see srMarkInProgressByTicket in
-    // service-requests.js and the homepage progress tracker it feeds.
-    if(ok && becameAcknowledged && typeof srMarkInProgressByTicket === 'function'){
-      srMarkInProgressByTicket(id).catch(()=>{});
-    }
+    if(ok) toast(becameAcknowledged ? 'Acknowledged — customer notified you are on the way' : 'Acknowledged — waiting for the other assigned technician(s)');
+    // Full acknowledgement is what now drives the customer's card to En
+    // Route. This used to fire srMarkInProgressByTicket, which jumped the
+    // customer straight to "In Progress" before anyone had arrived.
     if(ok && becameAcknowledged){
-      const _ackTicket = dtLastTicketsById[id];
-      if(_ackTicket && _ackTicket.custId && typeof notifyCustomer === 'function'){
-        notifyCustomer(_ackTicket.custId, 'Your technician has arrived',
-          'Work has started on your service.', 'jo-started');
+      if(typeof srMarkEnRouteByTicket === 'function') srMarkEnRouteByTicket(id).catch(()=>{});
+      const t = dtLastTicketsById[id];
+      if(t && t.custId && typeof notifyCustomer === 'function'){
+        notifyCustomer(t.custId, 'Your technician is on the way',
+          'Your service team has confirmed and is heading to your site.', 'jo-enroute');
       }
       if(typeof notifyAdmins === 'function'){
-        notifyAdmins('Job order started', (_ackTicket ? _ackTicket.jobOrderNo : id)+' was acknowledged on site.', 'jo-ack');
+        notifyAdmins('Job order acknowledged', (t ? t.jobOrderNo : id)+' — crew is en route.', 'jo-ack');
       }
     }
     dtRenderTechList();
   }
-  async function dtComplete(id){
-    let becameCompleted = false;
-    const ok = await dtApplyWorkerChange(id, (rec, assigned)=>{
-      if(rec.status==='completed'){ toast('Already completed'); return null; }
+
+  // ---------- Arrived at Site ----------
+  // ONE tap from ANY assigned technician moves the whole ticket to Work in
+  // Progress — unlike Acknowledge, this is not a per-person gate. Whoever
+  // gets there first starts the clock for the crew.
+  //
+  // arrivedAt is the single source of truth for the Service Report's Time
+  // In, which is why it is stamped from server time rather than the
+  // device's: a phone running minutes fast would otherwise write a start
+  // time into a report that doesn't match when work actually began.
+  async function dtMarkArrived(id, btn){
+    if(!(await ensureCloud())){
+      const rec = dtLastTicketsById[id] || (await dtGetTicket(id));
+      if(!rec){ toast('Open this job order once while online first'); return; }
+      if(rec.arrivedAt){ toast('Arrival already recorded for this job order'); return; }
+      if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return; }
+      if(!(rec.acknowledgedBy||[]).includes(currentUser.id)){ toast('Acknowledge this job order first'); return; }
+      if(rec.status !== 'acknowledged'){ toast('Waiting for the other assigned technician(s) to acknowledge'); return; }
+      const queued = await dtQueueOfflineAction(id, 'arrived');
+      // Said plainly: the Service Report needs this timestamp, and the
+      // technician should know it came from their own device.
+      toast(queued ? 'Arrival recorded on this device — will sync when you are back online' : 'Could not save offline');
+      dtRenderTechList();
+      return;
+    }
+    if(btn){ btn.disabled = true; btn.textContent = 'Recording…'; }
+    let becameInProgress = false;
+    const ok = await dtApplyWorkerChange(id, (rec)=>{
+      if(rec.arrivedAt){ toast('Arrival already recorded for this job order'); return null; }
+      if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return null; }
       const ackBy = rec.acknowledgedBy || [];
-      if(currentUser.role!=='admin' && !ackBy.includes(currentUser.id)){
-        toast('Acknowledge this ticket first'); return null;
+      if(currentUser.role!=='admin'){
+        if(!ackBy.includes(currentUser.id)){
+          toast('Acknowledge this job order first'); return null;
+        }
+        // Guarded here as well as by hiding the button: a card rendered
+        // before a colleague acknowledged can still be on screen, and
+        // arriving out of order would skip the customer's En Route stage.
+        if(rec.status !== 'acknowledged'){
+          toast('Waiting for the other assigned technician(s) to acknowledge'); return null;
+        }
       }
-      const done = new Set(rec.completedBy||[]);
-      done.add(currentUser.id);
-      const list = Array.from(done);
-      const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
-      if(!everyone){
-        toast('Recorded — waiting for the other assigned technician(s)');
-        return { completedBy: list, status: rec.status||'acknowledged' };
-      }
-      becameCompleted = true;
-      return { completedBy: list, status: 'completed', completedAt: new Date().toISOString() };
+      becameInProgress = true;
+      return {
+        arrivedAt: serverNowISO(),
+        arrivedBy: currentUser.name || null,
+        arrivedById: currentUser.id,
+        status: 'in_progress'
+      };
     });
-    if(ok) toast('Marked completed');
-    // NOTE: this used to also sync the linked service request to
-    // 'completed' here. Moved to dtCloseTicket() below — "Mark Completed"
-    // only means every assigned technician has finished their part for
-    // today; whether the job is ACTUALLY done (no equipment left with
-    // notDone checked) is only known once Close Job Order runs its
-    // per-unit checklist, which is also where a multi-day job's next
-    // visit gets carved off via dtContinueClosedTicket.
+    if(btn){ btn.disabled = false; btn.textContent = 'Arrived at Site'; }
+    if(ok && becameInProgress){
+      if(typeof srMarkInProgressByTicket === 'function') srMarkInProgressByTicket(id).catch(()=>{});
+      const t = dtLastTicketsById[id];
+      if(t && t.custId && typeof notifyCustomer === 'function'){
+        notifyCustomer(t.custId, 'Your technician has arrived',
+          'Work has started on your service.', 'jo-started');
+      }
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins('Technician on site', (t ? t.jobOrderNo : id)+' — work has started.', 'jo-arrived');
+      }
+      toast('Arrival recorded — this fills Time In on the Service Report');
+    }
     dtRenderTechList();
+  }
+
+  // ---------- Auto-complete ----------
+  // Completion is no longer a button. A job order is finished when every
+  // equipment line has been RESOLVED — either a Service Report was filed
+  // against it, or the technician flagged it as not done with a reason.
+  // Nothing else can mark it complete, so a ticket can't be closed out with
+  // units left silently unreported (which the old "Mark Completed" tap
+  // allowed: it checked acknowledgement and nothing else).
+  //
+  // Called after every dtMarkEquipmentReported and dtMarkEquipmentNotDone.
+  // Safe to call repeatedly — it no-ops unless the last unit just landed.
+  function dtAllUnitsResolved(rec){
+    const units = rec.equipmentList || [];
+    // A ticket with NO equipment lines can never satisfy "every unit
+    // resolved", so it would sit in Work in Progress forever waiting for a
+    // condition that cannot occur. Only legacy tickets predating
+    // equipmentList can be in this state — dtCreateTicket requires at least
+    // one unit — but "forever" is the wrong answer for any of them, and
+    // admin shouldn't have to notice a stuck ticket to rescue it. Treating
+    // it as resolved sends it to Review, where admin closes it normally.
+    if(units.length === 0) return true;
+    return units.every(it=> it.reportSrNo || it.notDone);
+  }
+  async function dtCheckAutoComplete(ticketId){
+    // Offline, the report itself is queued and this simply doesn't run —
+    // the next report filed while online re-checks and completes the ticket
+    // then. Without the guard, db is null here and the throw would surface
+    // as a scary error on an otherwise successful save.
+    if(!(await ensureCloud())) return false;
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec) return false;
+      if(['completed','closed','cancelled'].includes(rec.status)) return false;
+      if(!dtAllUnitsResolved(rec)) return false;
+      // Only the two status fields are written, NOT the whole data blob.
+      // Two technicians filing the last two reports at once would otherwise
+      // race: each re-reads, each writes its own copy of equipmentList, and
+      // the slower write erases the faster one's reportSrNo — losing a
+      // filed report from the ticket while the report row itself survives.
+      // Merging into the stored row server-side keeps both.
+      const { error } = await db.rpc('dispatch_mark_completed', { p_ticket_id: ticketId, p_completed_at: serverNowISO() });
+      if(error) throw error;
+      // The customer's request only reaches 'completed' when every unit was
+      // actually reported. If any were flagged not done, the work isn't
+      // finished from their side — it stays in progress until admin either
+      // closes it or raises a continuation ticket.
+      const hasExceptions = (rec.equipmentList||[]).some(it=> it.notDone);
+      if(!hasExceptions && typeof srMarkCompletedByTicket === 'function'){
+        srMarkCompletedByTicket(ticketId).catch(()=>{});
+      }
+      if(typeof notifyAdmins === 'function'){
+        notifyAdmins('Job order ready for review',
+          rec.jobOrderNo+' — all equipment resolved'+(hasExceptions ? ' (with exceptions)' : '')+'. Review and close it.', 'jo-review');
+      }
+      toast('All equipment resolved — job order sent to admin for review');
+      return true;
+    }catch(e){
+      console.error('auto-complete check failed', describeCloudError(e));
+      return false;
+    }
+  }
+
+  // ---------- Flag a unit as not done ----------
+  // Moved AHEAD of completion. It used to live only in the Close Job Order
+  // checklist, which created a deadlock under the new rules: a unit that
+  // can never be reported (site inaccessible, customer declined, parts
+  // missing) would stop the ticket ever reaching Completed, and Close was
+  // gated behind Completed. Resolving it here is what keeps the lifecycle
+  // moving.
+  async function dtMarkEquipmentNotDone(ticketId, equipId, reason){
+    if(!reason || !reason.trim()){ toast('Give a reason so admin knows what happened'); return false; }
+    if(!currentUser) return false;
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    let ok = false;
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec){ toast('Job order not found'); return false; }
+      if(currentUser.role!=='admin' && !(rec.assignedWorkerIds||[]).includes(currentUser.id)){
+        toast('This job order is not assigned to you'); return false;
+      }
+      const target = (rec.equipmentList||[]).find(it=> it.id===equipId);
+      if(!target){ toast('Unit not found on this job order'); return false; }
+      if(target.reportSrNo){ toast('This unit already has a Service Report'); return false; }
+      // Per-unit patch rather than a whole-list write, so a colleague
+      // filing a report for a different unit at the same moment isn't
+      // clobbered — see dispatch_set_equipment_state.
+      const { error } = await db.rpc('dispatch_set_equipment_state', {
+        p_ticket_id: ticketId, p_equip_id: equipId,
+        p_patch: {
+          notDone: true,
+          notDoneReason: reason.trim(),
+          notDoneBy: currentUser.name || null,
+          notDoneAt: serverNowISO()
+        }
+      });
+      if(error) throw error;
+      ok = true;
+    }catch(e){
+      console.error('mark equipment not done failed', describeCloudError(e));
+      toast('Could not save — please try again');
+      return false;
+    }
+    if(ok){
+      toast('Marked as not done');
+      await dtCheckAutoComplete(ticketId);
+      dtRenderTechList();
+    }
+    return ok;
+  }
+
+  // ---------- Undo a Not Yet Done flag ----------
+  // Same-visit correction. A technician flags a unit because the customer
+  // is unavailable or a panel is locked, and half an hour later the
+  // situation clears — without this they are stuck: the report picker hides
+  // a flagged unit, so no report can ever be filed against it, and the job
+  // order would auto-complete claiming a unit was undone that actually got
+  // done. The flag is the technician's own statement about their own
+  // visit, so they can withdraw it.
+  //
+  // Only while the ticket is still in progress. Once it reaches Completed
+  // the job order is in admin's review queue, and quietly reopening a unit
+  // underneath that review is how two people end up working from different
+  // pictures of the same job — from there it is a conversation in the
+  // thread, not a silent edit.
+  async function dtClearEquipmentNotDone(ticketId, equipId){
+    if(!currentUser) return false;
+    if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
+    let ok = false;
+    try{
+      const rec = await dtGetTicket(ticketId);
+      if(!rec){ toast('Job order not found'); return false; }
+      if(currentUser.role!=='admin' && !(rec.assignedWorkerIds||[]).includes(currentUser.id)){
+        toast('This job order is not assigned to you'); return false;
+      }
+      if(dtEffectiveStatus(rec) !== 'in_progress'){
+        toast('This job order has moved on — ask admin to reopen the unit'); return false;
+      }
+      const target = (rec.equipmentList||[]).find(it=> it.id === equipId);
+      if(!target || !target.notDone){ toast('That unit is not flagged'); return false; }
+      // Keys removed, not set false: a leftover notDoneBy on an un-flagged
+      // unit still reads as flagged anywhere that checks for the field.
+      const { error } = await db.rpc('dispatch_set_equipment_state', {
+        p_ticket_id: ticketId, p_equip_id: equipId, p_patch: {},
+        p_clear_keys: ['notDone','notDoneReason','notDoneBy','notDoneAt']
+      });
+      if(error) throw error;
+      ok = true;
+    }catch(e){
+      console.error('clear not-done failed', describeCloudError(e));
+      toast('Could not save — please try again');
+      return false;
+    }
+    if(ok){
+      toast('Unit reopened — you can file its Service Report now');
+      dtRenderTechList();
+      if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
+    }
+    return ok;
+  }
+
+  // Set when admin opens a Service Report from a job order's review
+  // section, so the report screen can offer a way back to the job order
+  // they were reviewing. Cleared once used or once they navigate elsewhere.
+  let dtReviewReturnTicketId = null;
+  function dtShowReviewReturnBanner(){
+    const banner = $('dtReviewReturnBanner');
+    if(!banner) return;
+    if(!dtReviewReturnTicketId){ banner.style.display = 'none'; return; }
+    const t = dtLastTicketsById[dtReviewReturnTicketId];
+    $('dtReviewReturnText').innerHTML = icon('clipboard')+' Reviewing '+
+      escapeHtml(t ? t.jobOrderNo : 'a job order')+' — go back when you are done with this report.';
+    banner.style.display = '';
+  }
+  async function dtReviewReturn(){
+    const id = dtReviewReturnTicketId;
+    dtReviewReturnTicketId = null;
+    const banner = $('dtReviewReturnBanner');
+    if(banner) banner.style.display = 'none';
+    if(!id) return;
+    await showDispatchView('all');
+    dtOpenTicketOverlay(id);
+  }
+
+  // ---------- Admin review: the reports filed against a job order ----------
+  // Closing is admin's review step, and admin cannot review what they
+  // cannot see. Before this, the overlay showed which units were reported
+  // but not WHAT was reported — so "close the job order" meant trusting the
+  // count rather than reading the work. This lists each report filed
+  // against the ticket, tapping through to the full report.
+  //
+  // Fetched per unit from the ticket's own equipmentList rather than
+  // querying service_reports by ticket: the ticket is the authority on
+  // which reports belong to it (reportSrNo is written there when the
+  // report saves), and a report can be edited or re-filed afterwards
+  // without that link changing.
+  async function dtFetchTicketReports(rec){
+    const srNos = (rec.equipmentList||[]).map(it=> it.reportSrNo).filter(Boolean);
+    if(srNos.length===0) return [];
+    if(!(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('service_reports')
+        .select('sr_no, date, technician_name, equip_type, equip_location, trouble_call, completed, findings')
+        .in('sr_no', srNos);
+      if(error) throw error;
+      return data || [];
+    }catch(e){ console.error('load ticket reports failed', describeCloudError(e)); return []; }
+  }
+
+  async function dtRenderReviewSection(rec){
+    const sec = $('dtReviewSection');
+    if(!sec) return;
+    const isAdmin = currentUser && currentUser.role==='admin';
+    const units = rec.equipmentList || [];
+    const anyResolved = units.some(it=> it.reportSrNo || it.notDone);
+    // Only worth showing once there is something to review. A job order
+    // still being worked has nothing filed against it yet.
+    if(!isAdmin || !anyResolved){ sec.style.display='none'; sec.innerHTML=''; return; }
+
+    sec.style.display = '';
+    sec.innerHTML = '<div class="field"><label>Service Reports on this Job Order</label>'+
+      '<div id="dtReviewList"><div class="empty-state">Loading…</div></div></div>';
+    const reports = await dtFetchTicketReports(rec);
+    const byNo = {};
+    reports.forEach(rp=> byNo[rp.sr_no] = rp);
+
+    const rows = units.map(it=>{
+      const label = escapeHtml(dtEquipSummaryLine(it));
+      if(it.reportSrNo){
+        const rp = byNo[it.reportSrNo];
+        return '<div class="leave-comment" style="margin-bottom:6px;">'+
+            '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">'+
+              '<div>'+
+                '<b>'+escapeHtml(it.reportSrNo)+'</b> · '+label+
+                '<div class="u-status" style="font-size:11px;">'+
+                  (rp ? escapeHtml([rp.technician_name, rp.date ? leaveFmtDate(rp.date) : '', rp.trouble_call || ''].filter(Boolean).join(' · '))
+                      : 'Report details unavailable offline')+
+                '</div>'+
+              '</div>'+
+              '<button type="button" class="btn btn-secondary dt-review-open" data-sr="'+escapeHtml(it.reportSrNo)+'" '+
+                'style="flex:none; padding:6px 12px; font-size:12px;">Open</button>'+
+            '</div>'+
+          '</div>';
+      }
+      if(it.notDone){
+        // The exceptions are the part admin actually has to act on, so they
+        // are called out rather than listed the same as a filed report.
+        return '<div class="leave-comment" style="margin-bottom:6px; border-left:3px solid var(--amber);">'+
+            '<b style="color:var(--amber);">&#9888; Not yet done</b> · '+label+
+            '<div class="u-status" style="font-size:11px;">Reason: '+escapeHtml(it.notDoneReason||'—')+
+              (it.notDoneBy ? (' · flagged by '+escapeHtml(it.notDoneBy)) : '')+'</div>'+
+          '</div>';
+      }
+      return '<div class="leave-comment" style="margin-bottom:6px;">'+
+          '<span class="u-status">Not yet resolved</span> · '+label+
+        '</div>';
+    }).join('');
+
+    const exceptions = units.filter(it=> it.notDone).length;
+    $('dtReviewList').innerHTML = rows +
+      (exceptions>0
+        ? '<div class="u-status" style="margin-top:6px;">'+exceptions+' unit(s) flagged. Use the thread below to sort it out with the technician, or close the job order and raise a follow-up for the remaining work.</div>'
+        : '');
+
+    sec.querySelectorAll('.dt-review-open').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const srNo = btn.dataset.sr;
+        btn.disabled = true; btn.textContent = 'Opening…';
+        try{
+          // Same path the Report History list uses, so admin lands in the
+          // identical read-only view rather than a second, diverging one.
+          const rec = await cloudGetReport(srNo);
+          if(!rec){ toast('Could not load '+srNo); return; }
+          // openReport switches the whole view, so the overlay has to go.
+          // Remembering which job order we came from lets the report screen
+          // offer a way back — reviewing five reports on one job order
+          // otherwise means finding and reopening that ticket five times.
+          dtReviewReturnTicketId = dtOverlayTicket ? dtOverlayTicket.id : null;
+          $('dtTicketOverlay').classList.remove('open');
+          await openReport(rec);
+          dtShowReviewReturnBanner();
+        }catch(e){
+          console.error('open ticket report failed', describeCloudError(e));
+          toast('Could not open '+srNo);
+        }finally{
+          btn.disabled = false; btn.textContent = 'Open';
+        }
+      };
+    });
   }
 
   // ---------- Job Order detail overlay: close-with-exceptions + inquiry thread ----------
@@ -9430,6 +10701,13 @@
     if(dtMsgChannel && db){ try{ db.removeChannel(dtMsgChannel); }catch(e){} }
     dtMsgChannel = null;
     dtOverlayTicket = null;
+    // Opening a thread marks it read (dtRefreshMessages), but the inbox row
+    // behind the overlay still showed its old unread count — so a thread
+    // just read appeared unread until the list was rebuilt some other way.
+    if(currentUser){
+      const onInbox = (currentUser.role==='admin') ? dtAdminFilter==='messages' : dtTechListTab==='inbox';
+      if(onInbox) dtRenderChatInbox();
+    }
   }
 
   function dtRenderCloseChecklist(rec){
@@ -9457,10 +10735,14 @@
   }
 
   async function dtOpenTicketOverlay(ticketId){
-    const rec = await dtGetTicket(ticketId);
-    if(!rec){ toast('Ticket not found'); return; }
+    const live = await dtGetTicket(ticketId);
+    if(!live){ toast('Ticket not found'); return; }
+    // A replaced technician opens their frozen copy. Admin and the current
+    // crew always get the live record — dtViewFor only substitutes for a
+    // viewer who was actually taken off this ticket.
+    const rec = currentUser ? dtViewFor(live, currentUser.id) : live;
     dtOverlayTicket = rec;
-    dtLastTicketsById[rec.id] = rec; // so equipment "View details" rows inside this overlay resolve
+    dtLastTicketsById[rec.id] = rec; // equipment "View details" rows resolve against this — frozen for a replaced viewer, live for everyone else
     const canAct = dtCanActOnTicket(rec);
     const alreadyClosed = dtEffectiveStatus(rec)==='closed';
     const isCancelled = rec.status==='cancelled';
@@ -9476,12 +10758,13 @@
     const joSummaryHead = $('dtTicketSummary').querySelector('.jo-card-toggle');
     if(joSummaryHead){ joSummaryHead.classList.remove('jo-card-toggle'); joSummaryHead.removeAttribute('data-jo-toggle'); }
 
-    // Cancel Dispatch — admin-only, only reachable before Mark Completed
-    // (see dtCancelTicket's own comment for why). Independent container
+    // Cancel Dispatch — admin-only, only reachable before anyone arrives
+    // on site (see dtCancelTicket's own comment for why). Independent container
     // from dtCloseSection since its visibility condition is different.
     const cancelSecEl = $('dtCancelSection');
     if(cancelSecEl){
-      if(currentUser && currentUser.role==='admin' && !isCancelled && !alreadyClosed && (rec.status==='open' || rec.status==='acknowledged')){
+      const cancellable = ['preparing','open','acknowledged'].includes(rec.status);
+      if(currentUser && currentUser.role==='admin' && !isCancelled && !alreadyClosed && cancellable){
         cancelSecEl.innerHTML = '<div class="field"><label style="color:var(--danger);">Cancel this dispatch</label>'+
           '<select id="dtCancelReasonSelect" style="margin-bottom:8px;"><option value="">Select a reason…</option>'+
             (typeof SR_CANCEL_REASONS!=='undefined' ? SR_CANCEL_REASONS.map(r=>'<option value="'+r.value+'">'+escapeHtml(r.label)+'</option>').join('') : '')+
@@ -9517,6 +10800,9 @@
       }
     }
 
+    await dtRenderReassignSection(rec);
+    await dtRenderReviewSection(rec);
+
     if(isCancelled){
       $('dtCloseSection').innerHTML = '<div class="leave-comment"><b>Cancelled</b>'+
         escapeHtml(rec.cancelledBy||'—')+' · '+(rec.cancelledAt ? leaveFmtDate(rec.cancelledAt.slice(0,10)) : '')+
@@ -9531,9 +10817,13 @@
       if(exceptionItems.length>0){
         continueHtml = rec.continuedTicketId
           ? '<div class="leave-comment"><b>Continuation</b>Continued as '+escapeHtml(rec.continuedTicketId)+'</div>'
-          : (dtCanActOnTicket(rec)
+          // Admin only, and not merely because closing is: continuing opens
+          // the Create Dispatch Ticket form, which is itself admin-only.
+          // dtCanActOnTicket includes assigned technicians, so this used to
+          // offer a button that dead-ended for them.
+          : ((currentUser && currentUser.role==='admin')
               ? '<button type="button" class="btn btn-primary" id="dtContinueBtn" style="width:100%; margin-top:8px;">Continue Tomorrow ('+exceptionItems.length+' unit'+(exceptionItems.length===1?'':'s')+' remaining)</button>'
-              : '');
+              : '<div class="u-status">'+exceptionItems.length+' unit(s) left unfinished — admin will raise the follow-up job order.</div>');
       }
       $('dtCloseSection').innerHTML = closedNote + continueHtml + '<div style="margin-top:10px;">'+dtRenderCloseChecklist(rec)+'</div>';
       $$('#dtCloseSection .dt-notdone-chk, #dtCloseSection .dt-close-row textarea', document).forEach(el=> el.disabled = true);
@@ -9542,24 +10832,27 @@
       if(continueBtn) continueBtn.onclick = ()=>{ dtCloseTicketOverlay(); dtContinueClosedTicket(rec); };
     }else if(canAct){
       // Closing used to be reachable straight from "Open", skipping
-      // Acknowledge and Mark Completed entirely — which made those two
-      // steps optional in practice even though the step tracker implies
-      // they're required. For a technician (not admin), Close Job Order now
+      // Acknowledge entirely — which made that step optional in practice
+      // even though the step tracker implies it's required. Close Job Order now
       // only unlocks once every assigned technician has marked their part
       // completed (rec.status==='completed'); until then this section
       // explains which of the two steps to do next instead of showing the
       // close form. Admin keeps the ability to close directly as an
       // override (e.g. a tech is unavailable to complete the app flow).
-      const readyToClose = rec.status==='completed';
-      if(!readyToClose && currentUser.role!=='admin'){
-        const ack = (rec.acknowledgedBy||[]).includes(currentUser.id);
-        const doneSelf = (rec.completedBy||[]).includes(currentUser.id);
-        const nextStep = !ack
-          ? 'Acknowledge this job order'
-          : (!doneSelf ? 'Mark Completed once your visit here is done' : 'Wait for the other assigned technician(s) to mark it completed');
+      // Closing belongs to admin now — a technician opening this overlay
+      // sees where the job order stands instead of a form they can't use.
+      if(currentUser.role!=='admin'){
+        const st = dtEffectiveStatus(rec);
+        const units = rec.equipmentList || [];
+        const left = units.filter(it=> !it.reportSrNo && !it.notDone).length;
+        const msg = st==='completed'
+          ? 'All units resolved. Admin is reviewing this job order and will close it.'
+          : (left>0
+              ? left+' unit(s) still need a Service Report, or to be flagged as not done.'
+              : 'Acknowledge and arrive on site before filing reports for this job order.');
         $('dtCloseSection').innerHTML =
-          '<div class="empty-state">'+icon('lock')+' '+nextStep+' — from My Job Order — before you can close this ticket.'+
-          '<br><span class="dt-jo-empty-sub">Marking it completed doesn\'t mean everything went perfectly — you can still note anything that wasn\'t finished right here when you close it.</span></div>';
+          '<div class="empty-state">'+icon('lock')+' '+escapeHtml(msg)+
+          '<br><span class="dt-jo-empty-sub">Job orders are closed by admin after review. Use the thread below if something needs sorting out.</span></div>';
         $('dtCloseSubmitBtn').style.display = 'none';
       }else{
         $('dtCloseSection').innerHTML =
@@ -9569,9 +10862,30 @@
         $('dtCloseSubmitBtn').style.display = '';
       }
     }else{
-      $('dtCloseSection').innerHTML = '<div class="empty-state">Only the assigned technician(s) or admin can close this ticket.</div>';
+      // A replaced technician gets the real reason rather than the generic
+      // permission line, which would read as if they'd been left off by
+      // mistake.
+      const myRemoval = currentUser ? dtRemovalFor(live, currentUser.id) : null;
+      $('dtCloseSection').innerHTML = myRemoval
+        ? '<div class="empty-state">'+icon('lock')+' This job order closed on your side when you were replaced'+
+          (myRemoval.replacedByName ? ' by '+escapeHtml(myRemoval.replacedByName) : '')+
+          '.<br><span class="dt-jo-empty-sub">Reason: '+escapeHtml(myRemoval.reason || 'Admin input')+'</span></div>'
+        : '<div class="empty-state">Only the assigned technician(s) or admin can close this ticket.</div>';
       $('dtCloseSubmitBtn').style.display = 'none';
     }
+
+    // The message thread belongs to the people currently working the job.
+    // A replaced technician keeps read access to their record but has no
+    // business posting into a ticket they're no longer on — and the insert
+    // would be a silent write into someone else's live coordination thread.
+    const myRemovalForChat = currentUser ? dtRemovalFor(live, currentUser.id) : null;
+    if($('dtMsgInput')){
+      $('dtMsgInput').disabled = !!myRemovalForChat;
+      $('dtMsgInput').placeholder = myRemovalForChat
+        ? 'You were replaced on this job order'
+        : 'Ask a question about this Job Order…';
+    }
+    if($('dtMsgSendBtn')) $('dtMsgSendBtn').style.display = myRemovalForChat ? 'none' : '';
 
     $('dtTicketOverlay').classList.add('open');
     await dtRefreshMessages();
@@ -9583,6 +10897,7 @@
     }
   }
   $('closeDtTicketOverlay').addEventListener('click', dtCloseTicketOverlay);
+  if($('dtReviewReturnBtn')) $('dtReviewReturnBtn').addEventListener('click', dtReviewReturn);
   $('dtTicketOverlay').addEventListener('click', (e)=>{ if(e.target.id==='dtTicketOverlay') dtCloseTicketOverlay(); });
 
   // Toggle a unit's reason textarea as its "not completed" checkbox changes.
@@ -9646,11 +10961,9 @@
   }
 
   // Admin aborts an ongoing dispatch outright — wrong dispatch, customer
-  // unreachable, no longer needed, etc. Deliberately only reachable while
-  // status is 'open' or 'acknowledged' (before Mark Completed): once
-  // technicians have actually done work, Close Job Order (with its
-  // per-unit notDone checklist) is the correct way to wind it down, not a
-  // blunt cancel. Called from dtCancelSection's button below, and
+  // unreachable, no longer needed, etc. Only reachable while the ticket is
+  // Preparing or En Route: once a technician has arrived on site, the work
+  // happened and Close Job Order is the correct way to wind it down. Called from dtCancelSection's button below, and
   // cross-called from service-requests.js's srAdminCancelActive when
   // admin cancels from the request side instead of the ticket side.
   async function dtCancelTicket(ticketId, reason){
@@ -9659,14 +10972,20 @@
     try{
       const rec = await dtGetTicket(ticketId);
       if(!rec){ toast('Ticket not found'); return false; }
-      if(rec.status!=='open' && rec.status!=='acknowledged'){
+      // 'open' is the pre-lifecycle name for 'preparing' and is kept so
+      // tickets created before the change can still be cancelled. Cancelling
+      // stays unavailable from Work in Progress onward: once technicians
+      // have actually done work, Close Job Order (with its per-unit notDone
+      // reasons) is the honest way to wind it down, not a blunt cancel that
+      // erases the visit.
+      if(!['preparing','open','acknowledged'].includes(rec.status)){
         toast('This dispatch has already moved past the point it can be cancelled directly'); return false;
       }
       const merged = Object.assign({}, rec, {
         status: 'cancelled',
         cancelledBy: currentUser.name,
         cancelledById: currentUser.id,
-        cancelledAt: new Date().toISOString(),
+        cancelledAt: serverNowISO(),
         cancelReason: reason || ''
       });
       const { data: rows, error } = await db.from('dispatch_tickets')
@@ -9687,21 +11006,26 @@
     try{
       const rec = await dtGetTicket(ticketId);
       if(!rec){ toast('Ticket not found'); return false; }
-      if(!dtCanActOnTicket(rec)){ toast('This ticket is not assigned to you'); return false; }
-      if(dtEffectiveStatus(rec)==='closed'){ toast('Already closed'); return false; }
-      // Mirrors the gating in dtOpenTicketOverlay — checked here too so a
-      // technician can't reach Close Job Order some other way (e.g. a stale
-      // overlay left open from before they closed a different browser tab)
-      // and skip Acknowledge/Mark Completed. Admin keeps its override.
-      if(currentUser.role!=='admin' && rec.status!=='completed'){
-        toast('Acknowledge and Mark Completed this job order first'); return false;
+      // Closing is ADMIN-ONLY. It is the review step: admin reads the
+      // Service Report(s) filed against the job order, resolves anything
+      // flagged not done (usually through the ticket's chat thread), and
+      // only then closes it. A technician finishing their units moves the
+      // ticket to Completed automatically — that is as far as they take it.
+      //
+      // Enforced in three places, not one: the button is hidden, this
+      // function refuses, and guard_dispatch_worker_fields in the database
+      // normalises a non-admin 'closed' write back to the old status. A
+      // hidden button alone is not a permission.
+      if(currentUser.role!=='admin'){
+        toast('Only admin can close a job order'); return false;
       }
+      if(dtEffectiveStatus(rec)==='closed'){ toast('Already closed'); return false; }
       const merged = Object.assign({}, rec, {
         equipmentList,
         status: 'closed',
         closedBy: currentUser.name,
         closedById: currentUser.id,
-        closedAt: new Date().toISOString(),
+        closedAt: serverNowISO(),
         closeRemarks: remarks || ''
       });
       const { data: rows, error } = await db.from('dispatch_tickets')
@@ -9714,8 +11038,14 @@
       // stays exactly where it was (normally 'in_progress'), and admin picks
       // up the outstanding units via Continue Tomorrow (dtContinueClosedTicket).
       const stillHasWork = equipmentList.some(it=> it.notDone);
-      if(!stillHasWork && typeof srMarkCompletedByTicket === 'function'){
-        srMarkCompletedByTicket(ticketId).catch(()=>{});
+      // Admin closing is the customer's last stage too, so their card
+      // reaches Closed rather than stopping at Completed. A job order with
+      // units left not done still closes on the ticket side — but the
+      // customer's request stays where it is, because the work as a whole
+      // isn't finished; admin carves the remainder off with Continue
+      // Tomorrow (dtContinueClosedTicket).
+      if(!stillHasWork && typeof srMarkClosedByTicket === 'function'){
+        srMarkClosedByTicket(ticketId).catch(()=>{});
       }
       if(typeof notifyAdmins === 'function'){
         notifyAdmins(stillHasWork ? 'Job order closed with remaining work' : 'Job order completed',
@@ -9746,7 +11076,36 @@
         reasonEl.focus();
         return;
       }
-      equipmentList[i] = Object.assign({}, equipmentList[i], { notDone, notDoneReason: notDone ? reason : '' });
+      const base = Object.assign({}, equipmentList[i]);
+      if(notDone){
+        base.notDone = true;
+        base.notDoneReason = reason;
+        // Preserve who flagged it and when if the technician already did so
+        // during the visit; stamp admin only when this is a new flag.
+        if(!equipmentList[i].notDone){
+          base.notDoneBy = currentUser ? (currentUser.name || 'Admin') : 'Admin';
+          base.notDoneAt = serverNowISO();
+        }
+      }else{
+        // Cleared outright rather than set to false — leaving notDoneBy /
+        // notDoneAt behind on an un-flagged unit meant the review section
+        // and the audit trail still showed a technician as having flagged
+        // a unit that is no longer flagged.
+        delete base.notDone; delete base.notDoneReason;
+        delete base.notDoneBy; delete base.notDoneAt;
+      }
+      equipmentList[i] = base;
+    }
+    // Every unit must end up either REPORTED or FLAGGED. Unchecking a box
+    // here used to leave a unit that has no Service Report and no reason —
+    // closed out in limbo, which is exactly the hole the whole lifecycle
+    // change was meant to shut. Auto-completion enforces this invariant on
+    // the way in; closing has to enforce it on the way out too, because
+    // admin can uncheck a flag a technician set.
+    const unresolved = equipmentList.filter(it=> !it.reportSrNo && !it.notDone);
+    if(unresolved.length > 0){
+      toast(unresolved.length+' unit(s) have no Service Report — tick "Scope not completed" and give a reason, or ask the technician to file the report');
+      return;
     }
     const exceptionCount = equipmentList.filter(it=>it.notDone).length;
     const confirmMsg = exceptionCount>0
@@ -9833,6 +11192,95 @@
       return count;
     }catch(e){ console.error('unread JO message count failed', describeCloudError(e)); return 0; }
   }
+  // ---------- Central chat inbox ----------
+  // Every job order carries its own thread, which is the right place for a
+  // conversation about that job — but it also means an unanswered question
+  // is invisible unless you happen to open that ticket. Admin coordinating
+  // with technicians is now the ONLY reminder mechanism in the lifecycle
+  // (there is no automated nag to technicians, because they cannot close a
+  // job order themselves), so a message nobody notices stalls the job.
+  //
+  // This gathers every thread with something waiting into one list. Built
+  // on the same single query that already feeds the unread badge — RLS
+  // scopes it per role, so a technician sees only their own tickets'
+  // threads and admin sees all of them.
+  async function dtLoadChatInbox(){
+    if(!currentUser || !(await ensureCloud())) return [];
+    try{
+      const { data, error } = await db.from('dispatch_ticket_messages')
+        .select('ticket_id, sender_id, sender_name, body, created_at')
+        .order('created_at', { ascending:false })
+        .limit(300);
+      if(error) throw error;
+      // Newest first from the query, so the FIRST row seen for a ticket is
+      // its latest message — no per-thread sorting needed.
+      const threads = {};
+      (data||[]).forEach(m=>{
+        let t = threads[m.ticket_id];
+        if(!t){
+          t = threads[m.ticket_id] = { ticketId: m.ticket_id, last: m, unread: 0 };
+        }
+        const lastRead = dtGetLastRead(m.ticket_id);
+        if(m.sender_id !== currentUser.id && (!lastRead || new Date(m.created_at) > new Date(lastRead))) t.unread++;
+      });
+      const list = Object.values(threads);
+      // Resolve job order numbers from tickets already in hand where
+      // possible; only fetch the ones that aren't, so opening the inbox
+      // doesn't re-page the whole ticket table.
+      const missing = list.filter(t=> !dtLastTicketsById[t.ticketId]).map(t=> t.ticketId);
+      if(missing.length){
+        try{
+          const { data: rows } = await db.from('dispatch_tickets').select('data').in('id', missing);
+          (rows||[]).forEach(r=>{ const n = dtNormalizeTicket(r.data); if(n && n.id) dtLastTicketsById[n.id] = n; });
+        }catch(e){ console.error('inbox ticket lookup failed', describeCloudError(e)); }
+      }
+      list.forEach(t=>{
+        const tk = dtLastTicketsById[t.ticketId];
+        t.jobOrderNo = tk ? tk.jobOrderNo : t.ticketId;
+        t.custName = tk ? tk.custName : '';
+        t.status = tk ? dtEffectiveStatus(tk) : null;
+      });
+      // Unread first — the whole point is surfacing what needs an answer —
+      // then most recent. Read threads stay listed so a conversation can be
+      // picked back up without hunting for its ticket.
+      list.sort((a,b)=>{
+        if((b.unread>0) !== (a.unread>0)) return b.unread - a.unread;
+        return String(b.last.created_at).localeCompare(String(a.last.created_at));
+      });
+      return list;
+    }catch(e){ console.error('chat inbox load failed', describeCloudError(e)); return []; }
+  }
+
+  async function dtRenderChatInbox(){
+    // Admin and technician views have their own container; only one is on
+    // screen at a time, so the renderer targets whichever is visible rather
+    // than each view keeping its own copy of this logic.
+    const el = (currentUser && currentUser.role==='admin') ? $('dtAdminInboxList') : $('dtInboxList');
+    if(!el) return;
+    el.innerHTML = '<div class="empty-state">Loading…</div>';
+    const threads = await dtLoadChatInbox();
+    if(threads.length===0){
+      el.innerHTML = '<div class="empty-state">No job order messages yet.</div>';
+      return;
+    }
+    el.innerHTML = threads.map(t=>{
+      const preview = (t.last.body||'').length>90 ? (t.last.body.slice(0,90)+'…') : (t.last.body||'');
+      const who = t.last.sender_id===currentUser.id ? 'You' : (t.last.sender_name||'Technician');
+      return '<div class="user-card dt-inbox-row" data-ticket-id="'+escapeHtml(t.ticketId)+'" style="cursor:pointer;">'+
+          '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">'+
+            '<div style="min-width:0;">'+
+              '<b>'+escapeHtml(t.jobOrderNo)+'</b>'+(t.custName ? ' · '+escapeHtml(t.custName) : '')+
+              '<div class="u-status" style="font-size:12px;">'+escapeHtml(who)+': '+escapeHtml(preview)+'</div>'+
+            '</div>'+
+            (t.unread>0 ? '<span class="status-pill" style="background:var(--danger); color:#fff; flex:none;">'+t.unread+'</span>' : '')+
+          '</div>'+
+        '</div>';
+    }).join('');
+    el.querySelectorAll('.dt-inbox-row').forEach(row=>{
+      row.onclick = ()=> dtOpenTicketOverlay(row.dataset.ticketId);
+    });
+  }
+
   async function dtSendMessage(){
     if(!dtOverlayTicket) return;
     const input = $('dtMsgInput');
@@ -9850,6 +11298,24 @@
       if(error) throw error;
       input.value = '';
       await dtRefreshMessages();
+      // Realtime only reaches someone who already has THIS ticket's overlay
+      // open. Chat is the sole channel admin has to chase an unresolved job
+      // order, so a message nobody is notified about is a coordination loop
+      // that stalls silently. Best-effort: a failed push must not look like
+      // a failed send, since the message itself is already saved.
+      try{
+        const t = dtOverlayTicket;
+        const preview = body.length > 80 ? body.slice(0,80)+'…' : body;
+        if(currentUser.role === 'admin'){
+          const targets = new Set([].concat(t.assignedWorkerIds||[], t.reportAllowedWorkerIds||[]));
+          targets.forEach(id=>{
+            if(typeof notifyUser === 'function') notifyUser(id, 'Message on '+t.jobOrderNo, preview, 'jo-chat-'+t.id);
+          });
+        }else if(typeof notifyAdmins === 'function'){
+          notifyAdmins('Message on '+t.jobOrderNo,
+            (currentUser.name||'A technician')+': '+preview, 'jo-chat-'+t.id);
+        }
+      }catch(e){ console.error('JO chat notify failed', e); }
     }catch(e){ console.error('send JO message failed', describeCloudError(e)); toast('Could not send — try again'); }
     $('dtMsgSendBtn').disabled = false;
   }
@@ -9867,7 +11333,14 @@
   // reuses the tickets renderHomeOverview() already fetched rather than
   // querying again. State (which month/day is showing) is kept per prefix
   // so the two widgets can be on different months at once.
-  const DT_CAL_STATUS_COLORS = { open:'#B9791F', acknowledged:'#1F7A50', completed:'#154D34', expired:'#B3402D', closed:'#8A9089' };
+  // Keys are dtEffectiveStatus values, so every stage the pill can show has
+  // a dot. 'open' stays mapped for tickets created before the lifecycle
+  // change; anything unmatched falls back to grey at the call site.
+  const DT_CAL_STATUS_COLORS = {
+    scheduled:'#8A9089', preparing:'#B9791F', open:'#B9791F',
+    acknowledged:'#1F7A50', in_progress:'#1F6F7A', completed:'#154D34',
+    closed:'#8A9089', expired:'#B3402D', cancelled:'#B3402D'
+  };
   const dtCalStates = {};
   function dtCalState(prefix){
     if(!dtCalStates[prefix]){
@@ -9991,8 +11464,16 @@
     }else{
       $('dispatchAdminArea').style.display = 'none';
       $('dispatchTechArea').style.display = '';
-      await dtRenderTechList();
+      // dtTechListTab is module-level, so leaving and returning keeps the
+      // tab you were on — including Messages. Rendering the job order list
+      // unconditionally painted it into a container the inbox had hidden,
+      // leaving stale threads on screen that never refreshed.
+      dtSetTechListTab(dtTechListTab);
     }
+    // Safe to call on every view open — dtSubscribeTickets drops any
+    // previous channel before opening a new one, so repeated navigation
+    // can't stack subscriptions.
+    dtSubscribeTickets();
   }
 
   async function showLeaveView(){
@@ -10203,7 +11684,7 @@
   // card, no progress tracker, no technician name, nothing to message
   // about. Creating the row here means the whole existing customer-facing
   // pipeline (hero, tracker, en-route/complete sync, cancellation) works
-  // for these tickets with no other changes. Starts at 'dispatched'
+  // for these tickets with no other changes. Starts at 'preparing'
   // because by definition the work is already scheduled and assigned —
   // there's no fee or scheduling to negotiate after the fact.
   async function srCreateForAdminDispatch({ customerId, equipmentId, ticketId, description, requestedDate }){
@@ -10215,7 +11696,7 @@
         description: description || 'Scheduled service visit',
         urgency: 'normal',
         origin: 'admin_dispatch',
-        status: 'dispatched',
+        status: 'preparing',
         requested_date: requestedDate || null,
         proposed_schedule_date: requestedDate || null,
         linked_dispatch_ticket_id: ticketId
@@ -10262,7 +11743,7 @@
   // request's status itself. In the v2 workflow this is only reachable
   // once a request has already reached 'schedule_confirmed' (see the admin
   // actions in srOpenDetail), so there's nothing to advance here; the
-  // actual 'dispatched' transition happens in srLinkTicket below, once the
+  // actual 'preparing' transition happens in srLinkTicket below, once the
   // ticket is actually saved. (v1 used to set 'acknowledged' here, back
   // when this was reachable straight from 'new'/'acknowledged' — that
   // would now be a backward step in the wider v2 state machine, so it's
@@ -10277,12 +11758,12 @@
   }
 
   // Called by dispatch.js once a ticket created from a request is actually
-  // saved — stamps the link and moves the request to 'dispatched'.
+  // saved — stamps the link and moves the request to 'preparing'.
   async function srLinkTicket(requestId, ticketId){
     if(!(await ensureCloud())) return false;
     try{
       const { error } = await db.from('service_requests')
-        .update({ linked_dispatch_ticket_id: ticketId, status: 'dispatched' })
+        .update({ linked_dispatch_ticket_id: ticketId, status: 'preparing' })
         .eq('id', requestId);
       if(error) throw error;
       return true;
@@ -10304,11 +11785,23 @@
     }catch(e){ console.error('complete-sync service request failed', describeCloudError(e)); return false; }
   }
 
-  // Called by dispatch.js's new "On my way" button — a technician can tap
-  // this before they tap Acknowledge, purely to give the customer a real
-  // middle state between "assigned" and "work started". Only ever moves a
-  // request that's still at 'dispatched'; harmless (silent no-op) to tap
-  // again or after the request has already moved on.
+  // Admin's review-and-close step, the last stage the customer sees. Only
+  // moves a request that already reached 'completed', so a job order can't
+  // be closed out while work is still open against it.
+  async function srMarkClosedByTicket(ticketId){
+    if(!(await ensureCloud())) return false;
+    try{
+      const { data, error } = await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'closed' });
+      if(error) throw error;
+      return !!data;
+    }catch(e){ console.error('close-sync service request failed', describeCloudError(e)); return false; }
+  }
+
+  // Fired when the LAST assigned technician acknowledges — not from a
+  // separate "On my way" tap, which is gone. That button let a technician
+  // tell the customer they were coming before accepting the job, so the
+  // two signals could contradict each other. Silent no-op if the request
+  // has already moved past this stage.
   async function srMarkEnRouteByTicket(ticketId){
     if(!(await ensureCloud())) return false;
     try{
@@ -10438,7 +11931,11 @@
   // actual cancellation has to cancel the linked dispatch ticket too, not
   // just the request — see dtCancelTicket in dispatch.js.
   function srIsActiveForCancelRequest(status){
-    return ['dispatched','en_route','in_progress'].includes(status);
+    // 'dispatched' is the pre-lifecycle name for 'preparing'. Kept on every
+    // READ path so rows written before the migration, or by an app version
+    // still in someone's cache, don't silently drop out of these filters.
+    // Nothing WRITES it any more — the status constraint no longer allows it.
+    return ['preparing','dispatched','en_route','in_progress'].includes(status);
   }
   // Customer-side — via customer_request_cancel_dispatched_service() RPC
   // (see 20260915_01_dispatch_cancellation.sql), same no-blanket-UPDATE
@@ -10640,8 +12137,13 @@
   // conveys "Cancelled" clearly, so cancelled requests just skip this
   // widget entirely rather than showing a misleading one.
   function srProgressStepsHtml(status){
-    const steps = ['dispatched','en_route','in_progress','completed'];
-    const labels = {dispatched:'Dispatched', en_route:'On The Way', in_progress:'In Progress', completed:'Completed'};
+    // Five stages, matching the technician's own tracker word for word so a
+    // customer on the phone to the crew hears the same status they can see.
+    const steps = ['preparing','en_route','in_progress','completed','closed'];
+    const labels = {preparing:'Preparing', en_route:'En Route', in_progress:'Work in Progress', completed:'Completed', closed:'Closed'};
+    // Rows written before the lifecycle change carry 'dispatched'; treat it
+    // as the stage that replaced it rather than rendering nothing.
+    if(status==='dispatched') status = 'preparing';
     if(!steps.includes(status)) return '';
     const currentIdx = steps.indexOf(status);
     return '<div style="display:flex; align-items:center; gap:6px;">'+steps.map((s,i)=>{
@@ -10950,10 +12452,17 @@
 
   // ---------- Admin queue screen ----------
   function srStatusLabel(status){
+    // The lifecycle stages read exactly as the technician's tracker and the
+    // job order help card do — a customer on the phone to the crew should
+    // hear the same words they can see. 'preparing' and 'closed' were
+    // missing entirely, so those fell through to the raw database value
+    // and the card displayed "preparing" in lower case.
     return { new:'New', acknowledged:'Acknowledged', fee_proposed:'Fee Proposed',
       fee_accepted:'Fee Accepted', schedule_proposed:'Schedule Proposed',
-      schedule_confirmed:'Schedule Confirmed', dispatched:'Dispatched',
-      en_route:'On The Way', in_progress:'In Progress', completed:'Completed', cancelled:'Cancelled' }[status] || status;
+      schedule_confirmed:'Schedule Confirmed',
+      preparing:'Preparing', dispatched:'Preparing',
+      en_route:'En Route', in_progress:'Work in Progress',
+      completed:'Completed', closed:'Closed', cancelled:'Cancelled' }[status] || status;
   }
   function srRowHtml(r){
     const cust = (typeof customersCache !== 'undefined' ? customersCache : []).find(c=> String(c.id)===String(r.customerId));
@@ -13610,7 +15119,7 @@
       '</button>';
     // Orientation note — tells the technician what to actually do next
     // rather than leaving them to guess.
-    const note = '<p class="greet-note">Use <b>Job Orders</b> below to see your assigned work — open one and <b>Acknowledge</b> it to unlock its Service Report. When the work is done, file the report, then <b>Close Job Order</b>.</p>';
+    const note = '<p class="greet-note">Use <b>Job Orders</b> below to see your assigned work. <b>Acknowledge</b> it on the day of the schedule, tap <b>Arrived at Site</b> when you get there, then file a Service Report for each unit.</p>';
 
     $('homeGreetingText').innerHTML =
       '<div class="greet-compact">'+
@@ -13647,7 +15156,13 @@
     // past-dated ticket that was never acknowledged, and leaving those two
     // out of this list is what left a permanent phantom count on the home
     // screen after everything had actually been dealt with.
-    const openTickets = (tickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t)));
+    // 'replaced' belongs here for the same reason as the other four, and is
+    // the same phantom-count bug in a new form: after admin swaps a
+    // technician off a job order, dtEffectiveStatus returns 'replaced' for
+    // THAT technician, and leaving it out left the job order counted on
+    // their home screen — and picked as their "Next Job Order" — for work
+    // that is no longer theirs.
+    const openTickets = (tickets||[]).filter(t=> !dtIsTerminal(t));
     const mateNames = new Set();
     openTickets.forEach(t=> (t.assignedWorkerNames||[]).forEach(n=>{
       if(n && n!==currentUser.name) mateNames.add(n);
@@ -13863,12 +15378,19 @@
     if(toReimburse>0) settleParts.push('To reimburse: '+caFmtPeso(toReimburse));
     $('ovSettleSub').textContent = settleParts.length ? settleParts.join(' · ') : 'Nothing pending';
 
-    // Dispatch Status — open tickets, split into assigned/unassigned.
-    const openTickets = (tickets||[]).filter(t=> t.status!=='completed');
-    const unassigned = openTickets.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
-    const inProgress = openTickets.length - unassigned;
-    $('ovDispatchValue').textContent = String(openTickets.length);
-    $('ovDispatchSub').textContent = inProgress+' In Progress · '+unassigned+' Unassigned';
+    // Dispatch Status — job orders still live, split by whether anyone is
+    // on them yet. The old filter excluded ONLY 'completed', which the new
+    // lifecycle inverts twice over: closed, cancelled and expired tickets
+    // were all counted as open, while 'completed' — now an intermediate
+    // stage waiting on admin's review, not the end — was excluded. Using
+    // dtIsTerminal keeps this correct as stages change.
+    const liveTickets = (tickets||[]).filter(t=> !dtIsTerminal(t) || dtEffectiveStatus(t)==='completed');
+    const unassigned = liveTickets.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
+    const assignedCount = liveTickets.length - unassigned;
+    $('ovDispatchValue').textContent = String(liveTickets.length);
+    // "In Progress" would now collide with the Work in Progress stage,
+    // which means something specific and narrower.
+    $('ovDispatchSub').textContent = assignedCount+' Assigned · '+unassigned+' Unassigned';
 
     // Unreviewed Reports — completed drafts still waiting to be finished
     // (which is where the customer's acknowledgment sign-off happens).
@@ -13882,9 +15404,34 @@
     // just below already reflects it on this first render.
     const openServiceRequests = (typeof srAdminInit === 'function') ? (await srAdminInit()) || 0 : 0;
 
+    // Job orders awaiting review — every unit resolved, now sitting on
+    // ADMIN to read the reports and close it. This is the only automated
+    // reminder in the lifecycle: technicians are not nagged, because they
+    // cannot close a job order themselves, and admin coordinates with them
+    // through the job order's own thread instead.
+    const awaitingReview = (tickets||[]).filter(t=> t.status==='completed').length;
+    if($('ovReviewCard')){
+      $('ovReviewCard').style.display = awaitingReview > 0 ? '' : 'none';
+      $('ovReviewValue').textContent = String(awaitingReview);
+      $('ovReviewSub').textContent = awaitingReview+' Job Order'+(awaitingReview===1?'':'s')+' Awaiting Your Review';
+      // Straight into the Review filter rather than the default list — a
+      // count you then have to go hunting for is a worse reminder than no
+      // count at all. Assigned rather than added so repeated dashboard
+      // renders don't stack handlers.
+      $('ovReviewCard').style.cursor = 'pointer';
+      $('ovReviewCard').onclick = async ()=>{
+        // Awaited: showDispatchView is async and renders the admin list
+        // itself. Setting the filter without waiting let that first render
+        // land AFTER this one, leaving the Review button highlighted above
+        // an unfiltered list.
+        if(typeof showDispatchView === 'function') await showDispatchView('all');
+        if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed');
+      };
+    }
+
     // Notification bell in the dashboard top bar — total items anywhere in
     // the app that are waiting on an admin decision or sign-off.
-    const notifTotal = pendingCA + pendingLiq + pendingLeave + draftReports + openServiceRequests;
+    const notifTotal = pendingCA + pendingLiq + pendingLeave + draftReports + openServiceRequests + awaitingReview;
     const notifEl = $('notifBadge');
     if(notifEl){
       notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);
@@ -14303,6 +15850,14 @@
   }
 
   async function enterApp(opts){
+    // Awaited before anything else: the very next line reads todayISO() for
+    // the DTR lookup, and from here on the job order lifecycle gates
+    // acknowledgement, Preparing and expiry on the same answer. Syncing
+    // after the first read would mean the app briefly runs on unverified
+    // device time. Failure is non-fatal — syncServerTime leaves the offset
+    // at zero and the app carries on using device time, which is what it
+    // did before this existed.
+    await syncServerTime();
     // Location sharing follows today's DTR, not just sign-in — see
     // dtrIsOnClock() and the tracker calls inside dtrDoTimeIn/Out and
     // dtrDoOtTimeIn/Out in history.js. This lookup only matters for
@@ -15309,20 +16864,6 @@
       '</div>'
     );
   }
-  function cpHeroScheduled(req, eq){
-    const dateStr = req.proposedScheduleDate ? fmtDate(req.proposedScheduleDate) : 'a date to be confirmed';
-    const timeStr = req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '';
-    return (
-      '<div class="cp-hero-scheduled" data-req-id="'+req.id+'">'+
-        '<div style="display:flex; align-items:center; gap:12px;">'+
-          '<div class="ic">'+CP_ICON.calendar+'</div>'+
-          '<div><p class="cp-hero-eyebrow teal">Scheduled</p><p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
-          '<p class="cp-hero-sub">'+dateStr+timeStr+'</p></div>'+
-        '</div>'+
-        '<a data-action="reschedule" style="font-size:12px; font-weight:600; color:var(--teal); cursor:pointer;">Details</a>'+
-      '</div>'
-    );
-  }
   // Deterministic small color per technician so the same person's avatar
   // is always the same color across renders (not random each time).
   const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
@@ -15347,11 +16888,28 @@
   // The plain bar tracker in service-requests.js's srProgressStepsHtml is
   // a separate, simpler version used in the admin/customer detail
   // overlay, which isn't built to this visual theme.
+  // A service the crew is actively working through, in the order the
+  // customer sees it. 'dispatched' is the pre-lifecycle name for
+  // 'preparing' and is accepted on every READ path so rows written before
+  // the migration still register as active; nothing writes it any more.
+  // 'completed' is NOT here — the work is done, it is waiting on admin's
+  // close, and the card should stop presenting it as in-flight.
+  function cpIsActiveStatus(status){
+    return ['preparing','dispatched','en_route','in_progress'].includes(status);
+  }
+
   function cpHeroTrackHtml(status){
-    const steps = ['dispatched','en_route','in_progress'];
-    const labels = ['Received','En route','In progress'];
-    const idx = steps.indexOf(status);
-    if(idx<0) return '';
+    // Five stages now, matching the technician's tracker and the job order
+    // help card word for word — a customer on the phone to the crew hears
+    // the same status they can see.
+    const steps = ['preparing','en_route','in_progress','completed','closed'];
+    const labels = ['Preparing','En route','Work in progress','Completed','Closed'];
+    // Legacy rows carry the pre-lifecycle name for the first stage.
+    if(status==='dispatched') status = 'preparing';
+    // A confirmed schedule shows the same track with nothing lit yet: the
+    // visit is booked but the day hasn't come. -1 leaves every dot dim.
+    const idx = status==='schedule_confirmed' ? -1 : steps.indexOf(status);
+    if(idx < -1 || (idx===-1 && status!=='schedule_confirmed')) return '';
     let dots = '';
     steps.forEach((s,i)=>{
       dots += '<i class="pt'+(i<idx?' on':i===idx?' now':'')+'"></i>';
@@ -15360,11 +16918,24 @@
     const labelsHtml = labels.map((l,i)=> '<span'+(i===idx?' class="cur"':'')+'>'+l+'</span>').join('');
     return '<div class="cp-hero-track">'+dots+'</div><div class="cp-hero-labels">'+labelsHtml+'</div>';
   }
+  // ONE card for the whole life of a service, rather than a separate
+  // "Scheduled" card that vanished and was replaced by a different card on
+  // the day. A confirmed-but-not-yet-started visit renders here too, with
+  // the tracker sitting before step 1 — so the customer watches a single
+  // card fill in rather than cards swapping underneath them.
   function cpHeroActive(req, eq, techNames){
-    const label = srStatusLabel(req.status);
-    const techLine = techNames && techNames.length
-      ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
-      : 'A technician is on the way';
+    const notStarted = req.status === 'schedule_confirmed';
+    const finished = req.status === 'completed';
+    const label = notStarted ? 'Scheduled' : srStatusLabel(req.status);
+    // 'on the way' is wrong in both directions — before the day, and after
+    // the work is done and only admin's sign-off is outstanding.
+    const techLine = notStarted
+      ? 'Your technician will be assigned on the day'
+      : (finished
+          ? 'Work finished — being reviewed before sign-off'
+          : (techNames && techNames.length
+              ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
+              : 'A technician is on the way'));
     // Scheduled date/time this visit was actually dispatched for — the
     // confirmed proposed schedule normally, falling back to the original
     // requested date on the off chance a request reached 'dispatched'
@@ -15377,13 +16948,14 @@
       '<div data-req-id="'+req.id+'">'+
         '<div class="cp-hero-head">'+
           '<div>'+
-            '<p class="cp-hero-eyebrow amber">Active service · '+escapeHtml(label)+'</p>'+
+            '<p class="cp-hero-eyebrow '+(notStarted?'teal':(finished?'teal':'amber'))+'">'+
+              (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label)+'</p>'+
             '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
             (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
         '</div>'+
-        (techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
+        (!notStarted && techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
         cpHeroTrackHtml(req.status)+
         '<div class="cp-hero-foot">'+
           '<span class="loc">'+CP_ICON.pin+' '+escapeHtml(techLine)+'</span>'+
@@ -15436,8 +17008,14 @@
     if(!hero) return;
     rows = rows || [];
 
-    const flagged = rows.filter(r=> r.origin==='technician_flag' && !['completed','cancelled','dispatched','en_route','in_progress'].includes(r.status));
-    const active = rows.filter(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress');
+    const flagged = rows.filter(r=> r.origin==='technician_flag' && !['completed','closed','cancelled','preparing','dispatched','en_route','in_progress'].includes(r.status));
+    // Includes 'completed' deliberately, which cpIsActiveStatus does NOT:
+    // work is finished but admin hasn't closed the job order yet, and the
+    // card disappearing in that gap told the customer their service had
+    // stopped existing. cpIsActiveStatus still means "crew is working on
+    // it" for cancellation and the list badge, which is a different
+    // question — a finished service can't be cancelled.
+    const active = rows.filter(r=> cpIsActiveStatus(r.status) || r.status==='completed');
     const overdueNoRequest = cpEquipment.filter(eq=>{
       if(eq.status.key!=='overdue') return false;
       return !rows.some(r=> String(r.equipmentId)===String(eq.id) && r.status!=='completed' && r.status!=='cancelled');
@@ -15455,15 +17033,16 @@
       html = cpHeroDanger(ready ? 'ready' : 'pending', req, cpFindEquip(req.equipmentId)); danger = true;
     } else if(overdueNoRequest.length === 1){
       html = cpHeroDanger('overdue', null, overdueNoRequest[0]); danger = true;
-    } else if(active.length > 0){
+    } else if(active.length > 0 || scheduled.length > 0){
+      // Scheduled and in-flight share ONE card. An in-flight service wins
+      // if somehow both exist, since it's the one actually happening.
+      const subject = active.length > 0 ? active[0] : scheduled[0];
       // Technician names live on the linked dispatch ticket, not the
       // request row itself — a separate fetch, so the hero shows without
       // them for a moment on first paint, then fills in.
-      const techNames = (active[0].linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
-        ? await dtFetchTicketTechNames(active[0].linkedDispatchTicketId) : [];
-      html = cpHeroActive(active[0], cpFindEquip(active[0].equipmentId), techNames);
-    } else if(scheduled.length > 0){
-      html = cpHeroScheduled(scheduled[0], cpFindEquip(scheduled[0].equipmentId));
+      const techNames = (subject.linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
+        ? await dtFetchTicketTechNames(subject.linkedDispatchTicketId) : [];
+      html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), techNames);
     } else {
       html = cpHeroAllClear(); isAllClear = true;
     }
@@ -15480,8 +17059,13 @@
       if(action==='requestService'){ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); return; }
       if(action==='overdue'){ const eq = overdueNoRequest[0]; if(eq) cpRequestServiceForEquip(eq); return; }
       if(action==='ready'){ if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]); return; }
-      if(action==='message'){ if(active[0] && typeof srOpenDetail==='function') srOpenDetail(active[0]); return; }
-      if(action==='reschedule'){ if(scheduled[0] && typeof srOpenDetail==='function') srOpenDetail(scheduled[0]); return; }
+      // Both actions now resolve against whichever request the single card
+      // is showing — active if there is one, otherwise the scheduled one.
+      const heroSubject = active[0] || scheduled[0];
+      if(action==='message' || action==='reschedule'){
+        if(heroSubject && typeof srOpenDetail==='function') srOpenDetail(heroSubject);
+        return;
+      }
       if(action==='viewUnits'){ cpShowScreen('Units'); return; }
       // Tap anywhere else on the card: open whichever single job it
       // represents, if any (all-clear has nothing to open).
@@ -15874,7 +17458,7 @@
   // there's no single conversation to jump into.
   function cpOpenCentralChat(){
     const rows = cpMyRequestsCache || [];
-    const target = rows.find(r=> r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress')
+    const target = rows.find(r=> cpIsActiveStatus(r.status))
       || rows.find(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed');
     if(target && typeof srOpenDetail === 'function') srOpenDetail(target);
     else cpShowScreen('History', 'Requests');
@@ -15983,9 +17567,12 @@
   //   green  = done
   //   gray   = closed (cancelled) — not a problem for the customer anymore
   function cpReqStatusPillClass(r){
-    if(r.status==='completed') return 'status-sr-done';
+    // 'closed' is the admin sign-off after 'completed'. Without it here a
+    // closed request fell through to status-sr-open and rendered as if it
+    // were still waiting on someone.
+    if(r.status==='completed' || r.status==='closed') return 'status-sr-done';
     if(r.status==='cancelled') return 'status-sr-cancelled';
-    if(r.status==='dispatched' || r.status==='en_route' || r.status==='in_progress') return 'status-sr-active';
+    if(cpIsActiveStatus(r.status)) return 'status-sr-active';
     if(r.status==='fee_proposed' && r.feeStatus==='proposed') return 'status-sr-urgent';
     return 'status-sr-open'; // new, acknowledged, fee_accepted, schedule_proposed/confirmed, or a declined fee back with admin
   }
@@ -16246,7 +17833,7 @@
   }
 
   function cpRenderHistoryDashboard(){
-    const openStatuses = ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed','dispatched','en_route','in_progress'];
+    const openStatuses = ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed','schedule_confirmed','preparing','dispatched','en_route','in_progress','completed'];
     $('cpHistStatVisits').textContent = String(cpReports.length);
     $('cpHistStatOpenReq').textContent = String(cpMyRequestsCache.filter(r=> openStatuses.includes(r.status)).length);
     $('cpHistStatQuotes').textContent = String(cpMyRequestsCache.filter(r=> r.feeAmount!=null).length);

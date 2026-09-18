@@ -193,7 +193,7 @@
       '</button>';
     // Orientation note — tells the technician what to actually do next
     // rather than leaving them to guess.
-    const note = '<p class="greet-note">Use <b>Job Orders</b> below to see your assigned work — open one and <b>Acknowledge</b> it to unlock its Service Report. When the work is done, file the report, then <b>Close Job Order</b>.</p>';
+    const note = '<p class="greet-note">Use <b>Job Orders</b> below to see your assigned work. <b>Acknowledge</b> it on the day of the schedule, tap <b>Arrived at Site</b> when you get there, then file a Service Report for each unit.</p>';
 
     $('homeGreetingText').innerHTML =
       '<div class="greet-compact">'+
@@ -230,7 +230,13 @@
     // past-dated ticket that was never acknowledged, and leaving those two
     // out of this list is what left a permanent phantom count on the home
     // screen after everything had actually been dealt with.
-    const openTickets = (tickets||[]).filter(t=> !['completed','closed','cancelled','expired'].includes(dtEffectiveStatus(t)));
+    // 'replaced' belongs here for the same reason as the other four, and is
+    // the same phantom-count bug in a new form: after admin swaps a
+    // technician off a job order, dtEffectiveStatus returns 'replaced' for
+    // THAT technician, and leaving it out left the job order counted on
+    // their home screen — and picked as their "Next Job Order" — for work
+    // that is no longer theirs.
+    const openTickets = (tickets||[]).filter(t=> !dtIsTerminal(t));
     const mateNames = new Set();
     openTickets.forEach(t=> (t.assignedWorkerNames||[]).forEach(n=>{
       if(n && n!==currentUser.name) mateNames.add(n);
@@ -446,12 +452,19 @@
     if(toReimburse>0) settleParts.push('To reimburse: '+caFmtPeso(toReimburse));
     $('ovSettleSub').textContent = settleParts.length ? settleParts.join(' · ') : 'Nothing pending';
 
-    // Dispatch Status — open tickets, split into assigned/unassigned.
-    const openTickets = (tickets||[]).filter(t=> t.status!=='completed');
-    const unassigned = openTickets.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
-    const inProgress = openTickets.length - unassigned;
-    $('ovDispatchValue').textContent = String(openTickets.length);
-    $('ovDispatchSub').textContent = inProgress+' In Progress · '+unassigned+' Unassigned';
+    // Dispatch Status — job orders still live, split by whether anyone is
+    // on them yet. The old filter excluded ONLY 'completed', which the new
+    // lifecycle inverts twice over: closed, cancelled and expired tickets
+    // were all counted as open, while 'completed' — now an intermediate
+    // stage waiting on admin's review, not the end — was excluded. Using
+    // dtIsTerminal keeps this correct as stages change.
+    const liveTickets = (tickets||[]).filter(t=> !dtIsTerminal(t) || dtEffectiveStatus(t)==='completed');
+    const unassigned = liveTickets.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
+    const assignedCount = liveTickets.length - unassigned;
+    $('ovDispatchValue').textContent = String(liveTickets.length);
+    // "In Progress" would now collide with the Work in Progress stage,
+    // which means something specific and narrower.
+    $('ovDispatchSub').textContent = assignedCount+' Assigned · '+unassigned+' Unassigned';
 
     // Unreviewed Reports — completed drafts still waiting to be finished
     // (which is where the customer's acknowledgment sign-off happens).
@@ -465,9 +478,34 @@
     // just below already reflects it on this first render.
     const openServiceRequests = (typeof srAdminInit === 'function') ? (await srAdminInit()) || 0 : 0;
 
+    // Job orders awaiting review — every unit resolved, now sitting on
+    // ADMIN to read the reports and close it. This is the only automated
+    // reminder in the lifecycle: technicians are not nagged, because they
+    // cannot close a job order themselves, and admin coordinates with them
+    // through the job order's own thread instead.
+    const awaitingReview = (tickets||[]).filter(t=> t.status==='completed').length;
+    if($('ovReviewCard')){
+      $('ovReviewCard').style.display = awaitingReview > 0 ? '' : 'none';
+      $('ovReviewValue').textContent = String(awaitingReview);
+      $('ovReviewSub').textContent = awaitingReview+' Job Order'+(awaitingReview===1?'':'s')+' Awaiting Your Review';
+      // Straight into the Review filter rather than the default list — a
+      // count you then have to go hunting for is a worse reminder than no
+      // count at all. Assigned rather than added so repeated dashboard
+      // renders don't stack handlers.
+      $('ovReviewCard').style.cursor = 'pointer';
+      $('ovReviewCard').onclick = async ()=>{
+        // Awaited: showDispatchView is async and renders the admin list
+        // itself. Setting the filter without waiting let that first render
+        // land AFTER this one, leaving the Review button highlighted above
+        // an unfiltered list.
+        if(typeof showDispatchView === 'function') await showDispatchView('all');
+        if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed');
+      };
+    }
+
     // Notification bell in the dashboard top bar — total items anywhere in
     // the app that are waiting on an admin decision or sign-off.
-    const notifTotal = pendingCA + pendingLiq + pendingLeave + draftReports + openServiceRequests;
+    const notifTotal = pendingCA + pendingLiq + pendingLeave + draftReports + openServiceRequests + awaitingReview;
     const notifEl = $('notifBadge');
     if(notifEl){
       notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);
@@ -886,6 +924,14 @@
   }
 
   async function enterApp(opts){
+    // Awaited before anything else: the very next line reads todayISO() for
+    // the DTR lookup, and from here on the job order lifecycle gates
+    // acknowledgement, Preparing and expiry on the same answer. Syncing
+    // after the first read would mean the app briefly runs on unverified
+    // device time. Failure is non-fatal — syncServerTime leaves the offset
+    // at zero and the app carries on using device time, which is what it
+    // did before this existed.
+    await syncServerTime();
     // Location sharing follows today's DTR, not just sign-in — see
     // dtrIsOnClock() and the tracker calls inside dtrDoTimeIn/Out and
     // dtrDoOtTimeIn/Out in history.js. This lookup only matters for
