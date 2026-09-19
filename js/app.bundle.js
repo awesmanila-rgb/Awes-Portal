@@ -8012,6 +8012,17 @@
     if(payload.action === 'arrived'){
       if(rec.arrivedAt) return; // someone else recorded arrival first
       if(!(rec.assignedWorkerIds||[]).includes(payload.userId)) return;
+      // A queued arrival can surface hours later, by which time the
+      // technician may have started a different job order. Replaying it
+      // then would put them on two sites at once — exactly what the live
+      // check prevents. Dropped rather than applied: the arrival did not
+      // happen in the order the queue implies, and the technician is
+      // demonstrably somewhere else.
+      const other = dtFindOpenSiteFor(payload.userId, payload.ticketId);
+      if(other){
+        console.warn('queued arrival dropped — technician already on site at', other.jobOrderNo);
+        return;
+      }
       const merged = Object.assign({}, rec, {
         arrivedAt: payload.at, arrivedBy: payload.userName,
         arrivedById: payload.userId, status: 'in_progress'
@@ -10087,6 +10098,9 @@
       const stage = dtEffectiveStatus(r);
       const alreadyAck = (r.acknowledgedBy||[]).includes(currentUser.id);
       const arrived = !!r.arrivedAt;
+      // Another job order this technician is physically in the middle of.
+      // Admin is exempt — they record arrivals on someone's behalf.
+      const openSite = (currentUser.role === 'admin') ? null : dtFindOpenSiteFor(currentUser.id, r.id);
       // An expired/cancelled/closed ticket takes no actions at all — see
       // dtIsTerminal. Offering buttons here would only produce a refusal.
       // A replaced technician is locked out unconditionally.
@@ -10102,7 +10116,15 @@
           // crew is still partly unacknowledged let one person jump the
           // ticket from Preparing straight to Work in Progress, so the
           // customer never saw En Route at all.
-          (!locked && stage==='acknowledged' && !arrived ? '<button data-act="arrived" class="primary">Arrived at Site</button>' : '')+
+          // Replaced by an explanation, not just hidden: a technician who
+          // expects this button and finds nothing assumes the app is
+          // broken. Naming the job order holding them up also tells them
+          // exactly what to go and finish.
+          (!locked && stage==='acknowledged' && !arrived
+            ? (openSite
+                ? '<span class="u-status">'+escapeHtml('Still on site at '+(openSite.jobOrderNo||'another job order')+' — finish it first')+'</span>'
+                : '<button data-act="arrived" class="primary">Arrived at Site</button>')
+            : '')+
           (!locked && alreadyAck && stage==='preparing' ? '<span class="u-status">Waiting for the other assigned technician(s) to acknowledge</span>' : '')+
           (!locked && arrived && stage==='in_progress' ? '<span class="u-status">File a Service Report for each unit, or flag it as not done</span>' : '')+
         '</div>';
@@ -10502,6 +10524,64 @@
   // In, which is why it is stamped from server time rather than the
   // device's: a phone running minutes fast would otherwise write a start
   // time into a report that doesn't match when work actually began.
+  // ---------- One site at a time ----------
+  // A technician cannot be at two places at once, but nothing stopped them
+  // tapping Arrived at Site on two job orders — which then both sat in Work
+  // in Progress, both told their customers work had started, and both
+  // stamped a Time In the technician was not present for.
+  //
+  // "Still on site" means a job order that reached Work in Progress and has
+  // not resolved all its units yet. That is a real state with a real way
+  // out: file the outstanding reports, or flag the units that can't be done
+  // with a reason. Either finishes the job order and frees the technician.
+  // A job that genuinely has to continue another day is exactly the
+  // Not-Yet-Done case, and admin raises a continuation for the remainder.
+  //
+  // Returns the conflicting ticket, or null. Admin is exempt: they record
+  // arrivals on a technician's behalf and are not the one standing there.
+  function dtFindOpenSiteFor(userId, exceptTicketId){
+    if(!userId) return null;
+    const all = Object.values(dtLastTicketsById || {});
+    for(const t of all){
+      if(!t || t.id === exceptTicketId) continue;
+      if(!(t.assignedWorkerIds||[]).includes(userId)) continue;
+      if(!t.arrivedAt) continue;
+      if(dtEffectiveStatus(t) !== 'in_progress') continue;
+      return t;
+    }
+    return null;
+  }
+  // Authoritative version for the moment of the tap. dtFindOpenSiteFor
+  // reads the rendered cache, which is right for deciding what to draw but
+  // can be incomplete — it only holds the tickets in the current tab. A
+  // technician sitting on the Closed tab, or with a job order started on
+  // another device, would pass a cache-only check. Fetching costs one query
+  // on a rare action, which is worth it to avoid recording a visit that
+  // didn't happen.
+  async function dtFindOpenSiteLive(userId, exceptTicketId){
+    try{
+      const mine = await dtListForWorker(userId);
+      for(const t of (mine||[])){
+        if(!t || t.id === exceptTicketId) continue;
+        if(!(t.assignedWorkerIds||[]).includes(userId)) continue;
+        if(!t.arrivedAt) continue;
+        if(dtEffectiveStatus(t) !== 'in_progress') continue;
+        return t;
+      }
+      return null;
+    }catch(e){
+      console.error('open-site check failed', describeCloudError(e));
+      // Fall back to the cache rather than blocking on a failed lookup: a
+      // technician standing on site should not be stuck because a query
+      // timed out.
+      return dtFindOpenSiteFor(userId, exceptTicketId);
+    }
+  }
+  function dtOpenSiteMessage(other){
+    return 'You are still on site at '+(other.jobOrderNo||'another job order')+
+      '. File its Service Reports, or flag the units you can\'t do, before arriving at another job.';
+  }
+
   async function dtMarkArrived(id, btn){
     if(!(await ensureCloud())){
       const rec = dtLastTicketsById[id] || (await dtGetTicket(id));
@@ -10510,6 +10590,10 @@
       if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return; }
       if(!(rec.acknowledgedBy||[]).includes(currentUser.id)){ toast('Acknowledge this job order first'); return; }
       if(rec.status !== 'acknowledged'){ toast('Waiting for the other assigned technician(s) to acknowledge'); return; }
+      if(currentUser.role !== 'admin'){
+        const other = dtFindOpenSiteFor(currentUser.id, id);
+        if(other){ toast(dtOpenSiteMessage(other)); return; }
+      }
       const queued = await dtQueueOfflineAction(id, 'arrived');
       // Said plainly: the Service Report needs this timestamp, and the
       // technician should know it came from their own device.
@@ -10518,6 +10602,9 @@
       return;
     }
     if(btn){ btn.disabled = true; btn.textContent = 'Recording…'; }
+    // Fresh check before the write, not from the rendered cache.
+    const openSiteConflict = (currentUser.role === 'admin')
+      ? null : (await dtFindOpenSiteLive(currentUser.id, id));
     let becameInProgress = false;
     const ok = await dtApplyWorkerChange(id, (rec)=>{
       if(rec.arrivedAt){ toast('Arrival already recorded for this job order'); return null; }
@@ -10533,6 +10620,9 @@
         if(rec.status !== 'acknowledged'){
           toast('Waiting for the other assigned technician(s) to acknowledge'); return null;
         }
+        // openSiteConflict is resolved before dtApplyWorkerChange runs —
+        // this mutator is synchronous, so the lookup cannot happen here.
+        if(openSiteConflict){ toast(dtOpenSiteMessage(openSiteConflict)); return null; }
       }
       becameInProgress = true;
       return {

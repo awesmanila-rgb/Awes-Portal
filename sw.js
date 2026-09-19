@@ -884,18 +884,21 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v104 — admin can now record a past service.
+// Bumped to v105 — a technician can no longer be on site at two job
+// orders at once.
 //
-// Work that never went through a job order, or that predates the app, can
-// be entered by admin against a customer's unit and lands in that unit's
-// service history like any other report. Admin still cannot author a blank
-// report as if they were the technician: the new path names the technician
-// who did the work, leaves both signature boxes empty (nobody was there to
-// sign weeks later), and stamps the record with who entered it and when.
-// The PDF says so on the page rather than leaving an unexplained gap.
+// Arrived at Site had no check against the technician's other work, so the
+// same person could start two job orders simultaneously: both moved to
+// Work in Progress, both told their customer work had started, and both
+// stamped a Time In for a visit that was not happening. Arrival is now
+// refused while another job order they are assigned to is still in Work in
+// Progress, with the blocking job order named so they know what to finish.
+// Acknowledging several job orders is unaffected — that is normal.
 //
-// Needs migration 20260919_01_report_back_entry.sql.
-const CACHE_NAME = 'awes-sr-v104';
+// Also in v104, if you are coming from an older build: admin can record a
+// past service against a customer's unit (migration
+// 20260919_01_report_back_entry.sql).
+const CACHE_NAME = 'awes-sr-v105';
 
 // Split into two lists on purpose.
 //
