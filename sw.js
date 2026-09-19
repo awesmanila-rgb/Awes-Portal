@@ -884,13 +884,18 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v103 — customer service card: names the technician who will
-// sign the Service Report (rather than whoever happens to be first in the
-// assigned list), names the unit properly with its mount type instead of
-// "your unit", and explains each stage in plain language under the tracker.
-// CSS changed too, so the bump matters — a cached app.css would leave the
-// new paragraph unstyled.
-const CACHE_NAME = 'awes-sr-v103';
+// Bumped to v104 — admin can now record a past service.
+//
+// Work that never went through a job order, or that predates the app, can
+// be entered by admin against a customer's unit and lands in that unit's
+// service history like any other report. Admin still cannot author a blank
+// report as if they were the technician: the new path names the technician
+// who did the work, leaves both signature boxes empty (nobody was there to
+// sign weeks later), and stamps the record with who entered it and when.
+// The PDF says so on the page rather than leaving an unexplained gap.
+//
+// Needs migration 20260919_01_report_back_entry.sql.
+const CACHE_NAME = 'awes-sr-v104';
 
 // Split into two lists on purpose.
 //

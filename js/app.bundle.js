@@ -392,7 +392,13 @@
     ['cool_cap','coolCap'], ['mount_type','mountType'], ['brand','brand'], ['refrigerant_type','refrigerantType'],
     ['compressor_type','compressorType'], ['equip_location','equipLocation'], ['trouble_call','troubleCall'],
     ['time_in','timeIn'], ['time_out','timeOut'], ['remarks','remarks'],
-    ['customer_printed_name','custPrintedName'], ['technician_name','techName']
+    ['customer_printed_name','custPrintedName'], ['technician_name','techName'],
+    // Back-entry: a report admin keyed in for work a technician already
+    // performed. technician_name above still names who DID the work;
+    // these record who entered the record and when, so a report with
+    // blank signatures is never mistaken for an unfinished one.
+    ['back_entered_by','backEnteredBy'], ['back_entered_by_id','backEnteredById'],
+    ['back_entered_at','backEnteredAt']
   ];
   function reportToRow(data){
     const row = {};
@@ -429,6 +435,7 @@
     row.before_data   = data.before || {};
     row.after_data    = data.after || {};
     row.is_install    = !!data.isInstall;
+    row.back_entered  = !!data.backEntered;
     row.installation  = data.install || {};
     // Signatures are PNG data-URL strings. Default to null, never {} — an
     // empty object is indistinguishable from "signature was lost in transit".
@@ -441,6 +448,7 @@
     if(!row) return null;
     const data = {};
     REPORT_STRING_FIELDS.forEach(([col, key])=>{ data[key] = row[col]; });
+    data.backEntered  = !!row.back_entered;
     data.findings     = row.findings || [];
     data.recs         = row.recommendations || [];
     data.materials    = row.materials || [];
@@ -1684,6 +1692,10 @@
     // directly. Admin and tech both still resolve exactly as before.)
     setVis('newBtn', false);
     setVis('srTabNewBtn', isTech);
+    // Admin's own route into the report form. Not the same thing as
+    // authoring a blank report: this one names the technician who did the
+    // work and marks the record as entered afterwards.
+    setVis('srTabBackEntryBtn', isAdmin);
     // Logout is now a direct, always-visible top-right button for EVERY
     // logged-in role, not just technicians — admin's only path used to be
     // buried inside "☰ Menu", which read as "there's no logout button in
@@ -2762,6 +2774,126 @@
     'equipType','modelCU','serialCU','modelFCU','serialFCU',
     'coolCap','mountType','brand','refrigerantType','compressorType','equipLocation'
   ]);
+  // ---------- Admin: record a past service ----------
+  // A Service Report is evidence of who performed work and who signed for
+  // it, which is why admin cannot author a blank one — the form would fill
+  // in a technician's name and signature with nothing recording that the
+  // technician wasn't the author.
+  //
+  // This is the honest path for work that never went through a job order,
+  // or that predates the app: admin names the technician who actually did
+  // it, the report is stamped as back-entered, and the signature blocks are
+  // left EMPTY rather than signed by the wrong hand. A blank signature on a
+  // report marked "entered by admin" tells the truth; an admin-drawn
+  // squiggle in the technician's box does not.
+  //
+  // Equipment history needs nothing extra — saveReport() already resolves
+  // the unit through cloudAddCustomerEquipment() and stamps equipment_id,
+  // which is what the customer's history reads.
+  let srBackEntryMode = false;
+
+  function srIsBackEntry(){ return srBackEntryMode; }
+
+  async function srStartBackEntry(){
+    if(!currentUser || currentUser.role !== 'admin'){ toast('Admin only'); return; }
+    // Deliberately no skipReset: a back-entered report starts from a
+    // clean form, never inheriting whatever was half-filled before.
+    srShowTab('new');
+    srBackEntryMode = true;
+
+    // Date: required, and never in the future — a back-entered report for
+    // next week is someone using this by mistake.
+    const dateEl = $('svcDate');
+    if(dateEl){ dateEl.value = ''; dateEl.max = todayISO(); }
+
+    // Technician is PICKED, not typed. Typed names don't resolve to a
+    // person, so the report couldn't be attributed or found by technician.
+    await srRenderBackEntryTechPicker();
+
+    // Signatures stay blank and locked — see the note above.
+    ['sigCustomer','sigTech'].forEach(id=>{
+      if(typeof lockSignature === 'function'){ try{ lockSignature(id); }catch(e){} }
+    });
+
+    const banner = $('srBackEntryBanner');
+    if(banner){
+      $('srBackEntryText').innerHTML = icon('clipboard')+
+        ' <b>Recording a past service.</b> Pick the technician who did the work and set the date it happened. ' +
+        'Signatures are left blank and the report is marked as entered by you.';
+      banner.style.display = '';
+    }
+    window.scrollTo({ top:0 });
+  }
+
+  function srEndBackEntry(){
+    srBackEntryMode = false;
+    const banner = $('srBackEntryBanner');
+    if(banner) banner.style.display = 'none';
+    const dateEl = $('svcDate');
+    if(dateEl) dateEl.removeAttribute('max');
+    const wrap = $('srBackEntryTechWrap');
+    if(wrap) wrap.remove();
+    const techEl = $('techName');
+    if(techEl) techEl.style.display = '';
+  }
+
+  // Replaces the free-text technician field with a picker while in
+  // back-entry mode. The hidden input still carries the name, so every
+  // downstream reader (the PDF, the row, the history list) is unchanged.
+  async function srRenderBackEntryTechPicker(){
+    const techEl = $('techName');
+    if(!techEl) return;
+    if($('srBackEntryTechWrap')) $('srBackEntryTechWrap').remove();
+
+    const users = (await cloudListUsers()) || [];
+    const techs = users.filter(u=> u.active !== false).sort((a,b)=> a.name.localeCompare(b.name));
+
+    const wrap = document.createElement('div');
+    wrap.id = 'srBackEntryTechWrap';
+    wrap.style.marginTop = '8px';
+    wrap.innerHTML = techs.length
+      ? '<select id="srBackEntryTechSelect"><option value="">Who performed this service?</option>'+
+          techs.map(t=> '<option value="'+escapeHtml(t.id)+'" data-name="'+escapeHtml(t.name)+'">'+escapeHtml(t.name)+'</option>').join('')+
+        '</select>'
+      : '<div class="empty-state">No active technicians on file.</div>';
+    techEl.style.display = 'none';
+    techEl.parentNode.insertBefore(wrap, techEl.nextSibling);
+
+    const sel = $('srBackEntryTechSelect');
+    if(sel) sel.onchange = ()=>{
+      const opt = sel.options[sel.selectedIndex];
+      techEl.value = opt && opt.value ? (opt.dataset.name || '') : '';
+      // currentTechnicianId is what links the report to a person rather
+      // than a string; without it the report is attributed to whoever
+      // saved it, which here would be admin.
+      currentTechnicianId = sel.value || null;
+      if(typeof srRenderStepper === 'function') srRenderStepper();
+    };
+  }
+
+  // Checks specific to back-entry, run before the normal save validation.
+  function srValidateBackEntry(){
+    if(!srBackEntryMode) return null;
+    const d = $('svcDate') ? $('svcDate').value : '';
+    if(!d) return 'Set the date this service actually happened';
+    if(d > todayISO()) return 'A past service can\'t be dated in the future';
+    if(!currentTechnicianId) return 'Pick the technician who performed this service';
+    return null;
+  }
+
+  // Fields stamped onto the saved report so the record says what it is.
+  // Read by the PDF footer and anything else that needs to distinguish a
+  // signed-on-site report from one keyed in later.
+  function srBackEntryFields(){
+    if(!srBackEntryMode) return {};
+    return {
+      backEntered: true,
+      backEnteredBy: currentUser ? (currentUser.name || 'Admin') : 'Admin',
+      backEnteredById: currentUser ? currentUser.id : null,
+      backEnteredAt: serverNowISO()
+    };
+  }
+
 
 
 // ---------- Customer database (table: customers) ----------
@@ -5263,6 +5395,13 @@
   // disclosure into an obstacle rather than a simplification.
   function srSectionBlocker(n){
     if(n===1){
+      // Back-entry rules first: they're stricter, and reporting the generic
+      // "set the service date" message when the real problem is a future
+      // date would send someone round in circles.
+      if(typeof srValidateBackEntry === 'function'){
+        const beErr = srValidateBackEntry();
+        if(beErr) return beErr;
+      }
       if(!$('custName').value.trim()) return 'Enter the customer name to continue';
       if(!$('svcDate').value) return 'Set the service date to continue';
       const email = $('custEmail').value.trim();
@@ -5590,6 +5729,9 @@
     return {
       srNo: currentSrNo,
       technicianId: currentTechnicianId || (currentUser ? currentUser.id : null),
+      // Marks a report keyed in after the fact by admin, naming who entered
+      // it. Empty object for a normal report, so nothing changes there.
+      ...(typeof srBackEntryFields === 'function' ? srBackEntryFields() : {}),
       date: $('svcDate').value,
       custName: $('custName').value.trim(),
       custAddress: $('custAddress').value.trim(),
@@ -6227,13 +6369,31 @@
     doc.rect(margin+colW+20, sigY, colW, 80);
     if(data.sigCustomer){ try{ doc.addImage(data.sigCustomer,'PNG', margin+6, sigY+6, colW-12, 55); }catch(e){} }
     if(data.sigTech){ try{ doc.addImage(data.sigTech,'PNG', margin+colW+26, sigY+6, colW-12, 55); }catch(e){} }
+    // A back-entered report has both signature boxes empty by design —
+    // nobody was present to sign work that happened weeks ago. Say so on
+    // the page: an unexplained empty box reads as a report someone forgot
+    // to finish, or worse, as one whose signatures were removed.
+    if(data.backEntered){
+      doc.setFontSize(7.5); doc.setTextColor(150,120,40);
+      doc.text('Signatures not captured — record entered after the visit',
+        margin+6, sigY+38, { maxWidth: colW-12 });
+      doc.text('Signatures not captured — record entered after the visit',
+        margin+colW+26, sigY+38, { maxWidth: colW-12 });
+      doc.setTextColor(0,0,0);
+    }
     doc.setFontSize(8.5);
     doc.text('Customer — '+(data.custPrintedName||'_______________'), margin+4, sigY+72);
     doc.text('Technician — '+(data.techName||'_______________'), margin+colW+24, sigY+72);
     y = sigY + 96;
 
     doc.setFontSize(8); doc.setTextColor(120,130,124);
-    doc.text('Generated on '+new Date().toLocaleString('en-PH'), margin, 815);
+    let footLine = 'Generated on '+new Date().toLocaleString('en-PH');
+    // Who keyed it in, and when — so the record of a past visit is never
+    // mistaken for one filed on the day by the technician named above.
+    if(data.backEntered && data.backEnteredBy){
+      footLine += '   ·   Past service recorded by '+data.backEnteredBy;
+    }
+    doc.text(footLine, margin, 815);
 
     return doc;
   }
@@ -15713,8 +15873,12 @@
   // form — used by openReport() (Continue), which already populated the form
   // with a draft's data and just needs the panel switched, not cleared again.
   function srShowTab(which, opts){
+    // Any move off the form clears back-entry, otherwise the NEXT report
+    // admin opens would still be stamped as back-entered.
+    if(which !== 'new' && typeof srEndBackEntry === 'function') srEndBackEntry();
     opts = opts || {};
     $('srTabNewBtn').classList.toggle('active', which==='new');
+    if($('srTabBackEntryBtn')) $('srTabBackEntryBtn').classList.toggle('active', which==='new' && typeof srIsBackEntry==='function' && srIsBackEntry());
     $('srTabDraftBtn').classList.toggle('active', which==='draft');
     $('srTabCompletedBtn').classList.toggle('active', which==='completed');
     $('srTabAllBtn').classList.toggle('active', which==='all');
@@ -15757,6 +15921,11 @@
     }
   }
   $('srTabNewBtn').addEventListener('click', ()=> srShowTab('new'));
+  if($('srTabBackEntryBtn')) $('srTabBackEntryBtn').addEventListener('click', ()=> srStartBackEntry());
+  if($('srBackEntryCancelBtn')) $('srBackEntryCancelBtn').addEventListener('click', ()=>{
+    srEndBackEntry();
+    srShowTab('all');
+  });
   $('srTabDraftBtn').addEventListener('click', ()=> srShowTab('draft'));
   $('srTabCompletedBtn').addEventListener('click', ()=> srShowTab('completed'));
   $('srTabAllBtn').addEventListener('click', ()=> srShowTab('all'));
