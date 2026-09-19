@@ -884,13 +884,13 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v102 — customer service card: names the technician who will
+// Bumped to v103 — customer service card: names the technician who will
 // sign the Service Report (rather than whoever happens to be first in the
 // assigned list), names the unit properly with its mount type instead of
 // "your unit", and explains each stage in plain language under the tracker.
 // CSS changed too, so the bump matters — a cached app.css would leave the
 // new paragraph unstyled.
-const CACHE_NAME = 'awes-sr-v102';
+const CACHE_NAME = 'awes-sr-v103';
 
 // Split into two lists on purpose.
 //

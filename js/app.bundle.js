@@ -16852,6 +16852,20 @@
   // several. equipDisplayName already resolves their own label first, then
   // the location, then a short id; the mount type is appended because it is
   // what distinguishes two units in the same room.
+  // The name of what is being serviced on the active card.
+  //
+  // The customer's own equipment record is preferred when we have it, but
+  // service_requests.equipment_id is only populated for a job order
+  // covering exactly ONE registered unit — multi-unit jobs and free-typed
+  // equipment leave it null, which is why this card kept saying "your
+  // unit". So the ticket's own equipment line is the fallback, and for a
+  // job covering several units the honest answer is the count.
+  function cpActiveUnitName(eq, info){
+    if(eq) return cpEquipLabelDetailed(eq);
+    if(info && info.unitLabel) return escapeHtml(info.unitLabel);
+    if(info && info.unitCount > 1) return info.unitCount + ' units';
+    return 'your unit';
+  }
   function cpEquipLabelDetailed(eq){
     if(!eq) return 'your unit';
     const name = (equipDisplayName(eq) || '').trim();
@@ -16953,16 +16967,24 @@
   // Who is coming, for the customer's own request. Empty is a normal
   // answer — before anyone is assigned, or offline — and the card falls
   // back to wording that doesn't name a person.
-  async function cpFetchTechNames(requestId){
-    if(!requestId || !(await ensureCloud())) return [];
+  // Who is coming and which unit, in one call. Both come from the dispatch
+  // ticket, which RLS closes to customers — the RPC returns just these two
+  // things for a request this customer owns.
+  async function cpFetchCardInfo(requestId){
+    const empty = { techNames: [], unitLabel: null, unitCount: 0 };
+    if(!requestId || !(await ensureCloud())) return empty;
     try{
-      const { data, error } = await db.rpc('service_request_tech_names', { p_request_id: requestId });
+      const { data, error } = await db.rpc('service_request_card_info', { p_request_id: requestId });
       if(error) throw error;
-      return data || [];
-    }catch(e){ console.error('fetch technician names failed', describeCloudError(e)); return []; }
+      return {
+        techNames: (data && data.techNames) || [],
+        unitLabel: (data && data.unitLabel) || null,
+        unitCount: (data && data.unitCount) || 0
+      };
+    }catch(e){ console.error('fetch card info failed', describeCloudError(e)); return empty; }
   }
 
-  function cpHeroActive(req, eq, techNames){
+  function cpHeroActive(req, eq, techNames, info){
     const notStarted = req.status === 'schedule_confirmed';
     const finished = req.status === 'completed';
     const label = notStarted ? 'Scheduled' : srStatusLabel(req.status);
@@ -17015,7 +17037,7 @@
           '<div>'+
             '<p class="cp-hero-eyebrow '+(notStarted?'teal':(finished?'teal':'amber'))+'">'+
               (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label)+'</p>'+
-            '<p class="cp-hero-name">'+cpEquipLabelDetailed(eq)+'</p>'+
+            '<p class="cp-hero-name">'+cpActiveUnitName(eq, info)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
             (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
@@ -17113,8 +17135,8 @@
       // silently returned an empty list and the card never named anyone.
       // The RPC returns only the names, and only for a request this
       // customer owns.
-      const techNames = subject.linkedDispatchTicketId ? (await cpFetchTechNames(subject.id)) : [];
-      html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), techNames);
+      const info = subject.linkedDispatchTicketId ? (await cpFetchCardInfo(subject.id)) : { techNames: [], unitLabel: null, unitCount: 0 };
+      html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), info.techNames, info);
     } else {
       html = cpHeroAllClear(); isAllClear = true;
     }
