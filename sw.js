@@ -884,21 +884,22 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v105 — a technician can no longer be on site at two job
-// orders at once.
+// Bumped to v106 — acknowledgement can no longer move a job order
+// backwards.
 //
-// Arrived at Site had no check against the technician's other work, so the
-// same person could start two job orders simultaneously: both moved to
-// Work in Progress, both told their customer work had started, and both
-// stamped a Time In for a visit that was not happening. Arrival is now
-// refused while another job order they are assigned to is still in Work in
-// Progress, with the blocking job order named so they know what to finish.
-// Acknowledging several job orders is unaffected — that is normal.
+// It used to set the status outright, so an acknowledgement landing AFTER
+// the crew had arrived knocked the ticket from Work in Progress back to En
+// Route — while the customer's side, which only ever moves forward, stayed
+// at Work in Progress. The two then disagreed about the same job order.
+// Happens when admin replaces a technician mid-visit and the replacement
+// acknowledges, or when an offline acknowledgement replays after arrival.
 //
-// Also in v104, if you are coming from an older build: admin can record a
-// past service against a customer's unit (migration
+// Rows already in that state are repaired by REPAIR_status_mismatch.sql.
+//
+// Also carries v105 (a technician can't be on site at two job orders at
+// once) and v104 (admin can record a past service — needs migration
 // 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v105';
+const CACHE_NAME = 'awes-sr-v106';
 
 // Split into two lists on purpose.
 //

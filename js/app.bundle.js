@@ -7998,15 +7998,20 @@
       // been taken off the job.
       if(!assigned.includes(payload.userId)) return;
       const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
+      const nextStatus = dtStatusAfterAck(rec, everyone);
       const merged = Object.assign({}, rec, {
         acknowledgedBy: list,
         acknowledgedAt: rec.acknowledgedAt || payload.at,
-        status: everyone ? 'acknowledged' : 'preparing'
+        status: nextStatus
       });
       const { error } = await db.from('dispatch_tickets')
         .update({ status: merged.status, data: merged }).eq('id', payload.ticketId);
       if(error) throw error;
-      if(everyone && typeof srMarkEnRouteByTicket === 'function') srMarkEnRouteByTicket(payload.ticketId).catch(()=>{});
+      // Only when the ticket actually reached En Route — never for a
+      // replayed acknowledgement on a job already under way.
+      if(everyone && nextStatus === 'acknowledged' && typeof srMarkEnRouteByTicket === 'function'){
+        srMarkEnRouteByTicket(payload.ticketId).catch(()=>{});
+      }
       return;
     }
     if(payload.action === 'arrived'){
@@ -10447,6 +10452,25 @@
     });
   }
 
+  // Acknowledgement must never move a job order BACKWARDS.
+  //
+  // It used to set the status outright, which meant an acknowledgement
+  // arriving after the crew was already on site knocked the ticket from
+  // Work in Progress back to En Route. Two ways that happens for real:
+  // admin replaces a technician mid-visit and the replacement acknowledges,
+  // or an acknowledgement queued offline replays after someone has arrived.
+  //
+  // The customer's side does not follow it back — sync_service_request_ticket_status
+  // only ever moves forward — so the technician saw En Route while the
+  // customer still read Work in Progress, for the same job order.
+  //
+  // Anything from in_progress onwards is later than acknowledgement and is
+  // left exactly as it is; the acknowledgement itself is still recorded.
+  function dtStatusAfterAck(rec, everyone){
+    if(['in_progress','completed','closed','cancelled'].includes(rec.status)) return rec.status;
+    return everyone ? 'acknowledged' : 'preparing';
+  }
+
   // ---------- Acknowledge ----------
   // Gated to the scheduled day in BOTH directions. The upper bound was
   // already here (an expired ticket can't be acknowledged); the lower bound
@@ -10490,11 +10514,15 @@
       // it, admin replaces them (dtReassignWorker) rather than the ticket
       // sitting stuck.
       const everyone = assigned.length>0 && assigned.every(w=> list.includes(w));
-      if(everyone) becameAcknowledged = true;
+      // Only counts as "just became acknowledged" if the ticket actually
+      // moved there — otherwise a late acknowledgement on an in-progress
+      // job would re-notify the customer that the crew is on the way.
+      const nextStatus = dtStatusAfterAck(rec, everyone);
+      if(everyone && nextStatus === 'acknowledged' && rec.status !== 'acknowledged') becameAcknowledged = true;
       return {
         acknowledgedBy: list,
         acknowledgedAt: rec.acknowledgedAt || serverNowISO(),
-        status: everyone ? 'acknowledged' : 'preparing'
+        status: nextStatus
       };
     });
     if(ok) toast(becameAcknowledged ? 'Acknowledged — customer notified you are on the way' : 'Acknowledged — waiting for the other assigned technician(s)');
