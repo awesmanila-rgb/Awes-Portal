@@ -1482,6 +1482,28 @@ window.awesCss = {
      reported)" list on a Dispatch Ticket card, so admin/technicians can see
      every field on one unit (model/serial numbers, refrigerant, scope, its
      report status, etc.) without leaving the ticket list. -->
+<!-- Reason for flagging a unit Not Yet Done. Was a browser prompt(),
+     which is unstyled, cramped on mobile, and gives no room to read the
+     unit name you are flagging. -->
+<div class="overlay" id="dtNotDoneOverlay">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3>Can't do this one</h3>
+      <button class="sheet-close" id="closeDtNotDone">&times;</button>
+    </div>
+    <p id="dtNotDoneUnit" style="font-weight:600; margin:0 0 4px;"></p>
+    <p style="font-size:12.5px; color:var(--text-muted); margin:0 0 10px;">
+      Why can't this unit be serviced today? Admin sees this when reviewing the job order,
+      so be specific — "customer locked the plant room", "needs a part we don't carry".
+    </p>
+    <div class="field">
+      <textarea id="dtNotDoneReason" rows="3" placeholder="Reason"></textarea>
+    </div>
+    <button type="button" class="btn btn-primary" id="dtNotDoneSubmit" style="width:100%;">Mark as Not Yet Done</button>
+    <button type="button" class="btn btn-secondary" id="dtNotDoneCancel" style="width:100%; margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
 <div class="overlay" id="dtEquipDetailOverlay">
   <div class="sheet">
     <div class="sheet-head">

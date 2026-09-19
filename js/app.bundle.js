@@ -9684,11 +9684,7 @@
     const notDoneBtn = e.target.closest('.dt-equip-notdone');
     if(notDoneBtn){
       e.stopPropagation();
-      const reason = prompt('Why can\'t this unit be serviced today?\n\nAdmin sees this when reviewing the job order, so be specific — "customer locked the plant room", "needs a part we don\'t carry".');
-      // prompt returns null on Cancel and '' on an empty OK. Only the
-      // second deserves a complaint; cancelling is not an error.
-      if(reason === null) return;
-      dtMarkEquipmentNotDone(notDoneBtn.dataset.ticketId, notDoneBtn.dataset.equipId, reason);
+      dtOpenNotDoneOverlay(notDoneBtn.dataset.ticketId, notDoneBtn.dataset.equipId);
       return;
     }
     const undoBtn = e.target.closest('.dt-equip-undo');
@@ -10381,6 +10377,58 @@
       return false;
     }
   }
+
+  // ---------- "Can't do this one" reason ----------
+  // An in-page sheet rather than a browser prompt(): the native dialog is
+  // unstyled, cramped on a phone, single-line for what is often a sentence
+  // or two, and shows no room to name the unit being flagged — so on a
+  // multi-unit job order there was nothing confirming WHICH one you tapped.
+  let dtNotDoneTarget = null;
+
+  function dtOpenNotDoneOverlay(ticketId, equipId){
+    const t = dtLastTicketsById[ticketId];
+    const item = t ? (t.equipmentList||[]).find(it=> it.id === equipId) : null;
+    dtNotDoneTarget = { ticketId, equipId };
+    const unitEl = $('dtNotDoneUnit');
+    // Naming the unit is the point of having room for it.
+    if(unitEl) unitEl.textContent = item ? dtEquipSummaryLine(item) : '';
+    const ta = $('dtNotDoneReason');
+    if(ta) ta.value = '';
+    const ov = $('dtNotDoneOverlay');
+    if(ov) ov.classList.add('open');
+    if(ta) setTimeout(()=> ta.focus(), 50);
+  }
+
+  function dtCloseNotDoneOverlay(){
+    const ov = $('dtNotDoneOverlay');
+    if(ov) ov.classList.remove('open');
+    dtNotDoneTarget = null;
+  }
+
+  async function dtSubmitNotDone(){
+    if(!dtNotDoneTarget) return;
+    const reason = ($('dtNotDoneReason') ? $('dtNotDoneReason').value : '').trim();
+    // Checked here so the sheet stays open with what they typed, rather
+    // than closing and reporting the problem behind it.
+    if(!reason){ toast('Give a reason so admin knows what happened'); return; }
+    const btn = $('dtNotDoneSubmit');
+    const { ticketId, equipId } = dtNotDoneTarget;
+    if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+    const ok = await dtMarkEquipmentNotDone(ticketId, equipId, reason);
+    if(btn){ btn.disabled = false; btn.textContent = 'Mark as Not Yet Done'; }
+    // Left open on failure so the typed reason isn't lost to a dropped
+    // connection.
+    if(ok) dtCloseNotDoneOverlay();
+  }
+
+  if($('dtNotDoneSubmit')) $('dtNotDoneSubmit').addEventListener('click', dtSubmitNotDone);
+  if($('dtNotDoneCancel')) $('dtNotDoneCancel').addEventListener('click', dtCloseNotDoneOverlay);
+  if($('closeDtNotDone')) $('closeDtNotDone').addEventListener('click', dtCloseNotDoneOverlay);
+  if($('dtNotDoneOverlay')) $('dtNotDoneOverlay').addEventListener('click', (e)=>{
+    // Backdrop only — clicking inside the sheet must not discard a
+    // half-typed reason.
+    if(e.target === $('dtNotDoneOverlay')) dtCloseNotDoneOverlay();
+  });
 
   // ---------- Admin: reassignment UI ----------
   // One row per currently assigned technician, each showing whether they've

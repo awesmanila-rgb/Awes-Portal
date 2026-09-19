@@ -884,25 +884,18 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v108 — signature pads that silently swallowed every stroke.
+// Bumped to v109 — the "Can't do this one" reason is now an in-page sheet
+// instead of a browser prompt(). The native dialog was unstyled, cramped
+// on a phone, single-line for what is usually a sentence or two, and had
+// no room to name the unit — so on a multi-unit job order nothing
+// confirmed which one you had tapped.
 //
-// The canvas takes its drawable size from its parent's measured box, 50ms
-// after it is created. The report form reveals its sections progressively,
-// so a pad created while its section was still collapsed measured ZERO and
-// was built 0x0 — after which no resize event ever fires on expanding a
-// section, so nothing re-measured it. The bordered box still looked
-// correct, because that border belongs to .sig-box rather than the canvas
-// inside it, so the pad appeared present and simply did nothing.
-//
-// The parent is now watched, so the canvas re-measures the moment it goes
-// from zero to its real width, and on any later layout change (keyboard
-// opening, rotation) the window handler would miss.
-//
-// Also carries v107 (closing a job order closes the customer's card),
-// v106 (acknowledgement can't move a job order backwards), v105 (one site
-// at a time) and v104 (Record Past Service — needs migration
+// Also carries v108 (signature pads that silently swallowed strokes),
+// v107 (closing a job order closes the customer's card), v106
+// (acknowledgement can't move a job order backwards), v105 (one site at a
+// time) and v104 (Record Past Service — needs migration
 // 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v108';
+const CACHE_NAME = 'awes-sr-v109';
 
 // Split into two lists on purpose.
 //
