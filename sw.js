@@ -884,18 +884,26 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v109 — the "Can't do this one" reason is now an in-page sheet
-// instead of a browser prompt(). The native dialog was unstyled, cramped
-// on a phone, single-line for what is usually a sentence or two, and had
-// no room to name the unit — so on a multi-unit job order nothing
-// confirmed which one you had tapped.
+// Bumped to v110 — the customer's card no longer stalls behind its job
+// order when units were flagged Not Yet Done.
 //
-// Also carries v108 (signature pads that silently swallowed strokes),
-// v107 (closing a job order closes the customer's card), v106
-// (acknowledgement can't move a job order backwards), v105 (one site at a
-// time) and v104 (Record Past Service — needs migration
-// 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v109';
+// The sync was skipped in TWO places on the same mistaken reasoning — that
+// the work wasn't really finished, so the customer shouldn't be told
+// "completed" or "closed". At auto-completion the job order reached
+// Completed while the customer stayed at Work in Progress; at close it
+// reached Closed while the customer stayed at Completed. Nothing would
+// ever reconcile them, because those calls are the only thing that moves
+// the customer forward. The customer is also now notified on close either
+// way, with wording that matches what actually happened — before, a visit
+// with unfinished items closed in silence.
+//
+// Stalled cards are repaired by REPAIR_card_behind_ticket.sql.
+//
+// Also carries v109 (in-page sheet for the Not Yet Done reason), v108
+// (signature pads that swallowed strokes), v106 (acknowledgement can't
+// move a job order backwards), v105 (one site at a time) and v104 (Record
+// Past Service — needs migration 20260919_01_report_back_entry.sql).
+const CACHE_NAME = 'awes-sr-v110';
 
 // Split into two lists on purpose.
 //

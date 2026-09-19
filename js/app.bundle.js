@@ -10789,12 +10789,22 @@
       // Merging into the stored row server-side keeps both.
       const { error } = await db.rpc('dispatch_mark_completed', { p_ticket_id: ticketId, p_completed_at: serverNowISO() });
       if(error) throw error;
-      // The customer's request only reaches 'completed' when every unit was
-      // actually reported. If any were flagged not done, the work isn't
-      // finished from their side — it stays in progress until admin either
-      // closes it or raises a continuation ticket.
       const hasExceptions = (rec.equipmentList||[]).some(it=> it.notDone);
-      if(!hasExceptions && typeof srMarkCompletedByTicket === 'function'){
+      // The customer's card follows the job order — ALWAYS, including when
+      // units were flagged not done.
+      //
+      // This used to skip the sync whenever anything was flagged, on the
+      // reasoning that the work wasn't really finished so the customer
+      // shouldn't be told "completed". Same mistake as the one at close
+      // time: it left the customer reading Work in Progress while the
+      // technician and admin both saw Completed, with nothing that would
+      // ever reconcile them — this call is the only thing that moves the
+      // customer forward from here.
+      //
+      // Flagged units aren't hidden by this. They're exactly what admin
+      // reviews before closing, and the remainder becomes a continuation
+      // job order with its own card.
+      if(typeof srMarkCompletedByTicket === 'function'){
         srMarkCompletedByTicket(ticketId).catch(()=>{});
       }
       if(typeof notifyAdmins === 'function'){
@@ -11409,9 +11419,19 @@
         notifyAdmins(stillHasWork ? 'Job order closed with remaining work' : 'Job order completed',
           (rec.jobOrderNo||ticketId)+' \u2014 '+(rec.custName||''), 'jo-closed');
       }
-      if(!stillHasWork && rec.custId && typeof notifyCustomer === 'function'){
-        notifyCustomer(rec.custId, 'Your service is complete',
-          'The work has been finished and closed out. Thank you!', 'jo-done');
+      // Notified either way, with wording that matches what happened. It
+      // used to send nothing at all when units were left not done — so the
+      // customer's card went to Closed with no word of why, which is the
+      // case where an explanation matters MOST. "Your service is complete"
+      // would have been the wrong message; silence was worse.
+      if(rec.custId && typeof notifyCustomer === 'function'){
+        if(stillHasWork){
+          notifyCustomer(rec.custId, 'Your service visit is closed',
+            'Some items could not be completed on this visit. We will be in touch about scheduling the remaining work.', 'jo-done');
+        }else{
+          notifyCustomer(rec.custId, 'Your service is complete',
+            'The work has been finished and closed out. Thank you!', 'jo-done');
+        }
       }
       return true;
     }catch(e){
