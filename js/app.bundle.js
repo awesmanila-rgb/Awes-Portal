@@ -16847,6 +16847,33 @@
   // resolves — the hero just reflects equipment status alone until then,
   // then re-renders with the fuller picture a moment later).
   function cpEquipLabel(eq){ return eq ? escapeHtml(equipDisplayName(eq)) : 'your unit'; }
+  // Fuller name for the active service card, where the customer is looking
+  // at ONE specific unit and "your unit" tells them nothing — they may have
+  // several. equipDisplayName already resolves their own label first, then
+  // the location, then a short id; the mount type is appended because it is
+  // what distinguishes two units in the same room.
+  function cpEquipLabelDetailed(eq){
+    if(!eq) return 'your unit';
+    const name = (equipDisplayName(eq) || '').trim();
+    const mount = (eq.mountType || '').trim();
+    if(!name) return 'your unit';
+    return escapeHtml(mount ? (name + ' — ' + mount) : name);
+  }
+
+  // What each stage means, in the customer's words. Shown under the
+  // tracker so the card explains itself rather than relying on a two-word
+  // label the customer has to interpret.
+  function cpStageMessage(status){
+    if(status === 'dispatched') status = 'preparing';
+    return {
+      schedule_confirmed: 'Your service visit is booked. Our team will be assigned on the day.',
+      preparing: 'Our team is getting ready for your service visit.',
+      en_route: 'Our team is on the way to your location. If the contact person has changed, or anything else needs our attention, please send us a message.',
+      in_progress: 'Our team is now working on your equipment. It is in the hands of skilled technicians and will be handled with care.',
+      completed: 'The job is complete and the Service Report has been submitted. Our management team is reviewing it now and will close this ticket shortly. Thank you for trusting us with your service.',
+      closed: 'This ticket is now closed. Thank you for your business.'
+    }[status] || '';
+  }
 
   function cpHeroAllClear(){
     // Matches the reference mock: icon + heading + subtext + the primary
@@ -16977,6 +17004,7 @@
     // confirmed proposed schedule normally, falling back to the original
     // requested date on the off chance a request reached 'dispatched'
     // without one ever being proposed.
+    const stageMsg = cpStageMessage(req.status);
     const schedDate = req.proposedScheduleDate || req.requestedDate;
     const scheduleLine = schedDate
       ? fmtDate(schedDate) + (req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '')
@@ -16987,13 +17015,16 @@
           '<div>'+
             '<p class="cp-hero-eyebrow '+(notStarted?'teal':(finished?'teal':'amber'))+'">'+
               (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label)+'</p>'+
-            '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
+            '<p class="cp-hero-name">'+cpEquipLabelDetailed(eq)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
             (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
         '</div>'+
         (!notStarted && techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
         cpHeroTrackHtml(req.status)+
+        // Under the tracker, above the who-is-working line: the customer
+        // reads the stage label, then what it means, then who is on it.
+        (stageMsg ? '<p class="cp-hero-stage-msg">'+escapeHtml(stageMsg)+'</p>' : '')+
         '<div class="cp-hero-foot">'+
           '<span class="loc">'+CP_ICON.pin+' '+escapeHtml(techLine)+'</span>'+
           '<a data-action="message">'+CP_ICON.chat+' Message</a>'+

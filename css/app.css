@@ -1893,6 +1893,16 @@ body.role-customer .main-wrap{ padding-bottom:calc(64px + env(safe-area-inset-bo
 .cp-hero-track .seg.on{ background:var(--green); }
 .cp-hero-labels{ display:flex; justify-content:space-between; padding:0 20px 15px; font-size:10px; font-weight:600; color:var(--text-muted); }
 .cp-hero-labels .cur{ color:var(--green-dark); }
+/* Stage explanation under the tracker. Sits between the track and the
+   footer, so it needs breathing room above it — the tracker's own labels
+   run right to the baseline. Slightly muted and a touch smaller than body
+   text: it explains, it isn't the headline. */
+.cp-hero-stage-msg{
+  margin:14px 0 0;
+  font-size:12.5px;
+  line-height:1.55;
+  color:var(--text-muted);
+}
 .cp-hero-foot{
   border-top:1px solid var(--border); padding:12px 16px; display:flex; align-items:center; justify-content:space-between;
   gap:8px; background:#fbfdfc; font-size:12px; color:var(--text-muted);
