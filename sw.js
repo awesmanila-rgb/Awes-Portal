@@ -884,23 +884,25 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v107 — closing a job order now always closes the customer's
-// card.
+// Bumped to v108 — signature pads that silently swallowed every stroke.
 //
-// It used to skip that sync whenever a unit had been flagged Not Yet Done,
-// on the reasoning that the work as a whole wasn't finished. The effect
-// was worse than the problem: the card sat at Completed indefinitely,
-// telling the customer their ticket would be closed shortly — a promise
-// nothing would keep, since that sync was the only thing that closes it.
-// Unfinished units still aren't lost; admin raises a continuation job
-// order, which creates its own card.
+// The canvas takes its drawable size from its parent's measured box, 50ms
+// after it is created. The report form reveals its sections progressively,
+// so a pad created while its section was still collapsed measured ZERO and
+// was built 0x0 — after which no resize event ever fires on expanding a
+// section, so nothing re-measured it. The bordered box still looked
+// correct, because that border belongs to .sig-box rather than the canvas
+// inside it, so the pad appeared present and simply did nothing.
 //
-// Cards already stranded are repaired by CHECK_and_REPAIR_closed.sql.
+// The parent is now watched, so the canvas re-measures the moment it goes
+// from zero to its real width, and on any later layout change (keyboard
+// opening, rotation) the window handler would miss.
 //
-// Also carries v106 (acknowledgement can't move a job order backwards),
-// v105 (one site at a time) and v104 (Record Past Service — needs
-// migration 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v107';
+// Also carries v107 (closing a job order closes the customer's card),
+// v106 (acknowledgement can't move a job order backwards), v105 (one site
+// at a time) and v104 (Record Past Service — needs migration
+// 20260919_01_report_back_entry.sql).
+const CACHE_NAME = 'awes-sr-v108';
 
 // Split into two lists on purpose.
 //

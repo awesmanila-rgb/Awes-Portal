@@ -2578,6 +2578,30 @@
     const pad = new SignaturePad(canvas, {penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)'});
     pad.addEventListener('beginStroke', ()=>{ $(phId).style.display='none'; });
     window.addEventListener('resize', resize);
+    // The canvas takes its drawable size from the parent's measured box, so
+    // it MUST be measured while actually visible. The form reveals its
+    // sections progressively, so a pad created while its section is still
+    // collapsed measures zero — and a zero-width canvas silently swallows
+    // every stroke. The box still looks right, because that border belongs
+    // to .sig-box, not to the canvas inside it.
+    //
+    // No resize event fires when a section is expanded, so the timeout
+    // below could never recover from that. Watching the parent does: the
+    // observer fires the moment the box goes from 0 to its real width, and
+    // on any later layout change (keyboard opening, rotation) that the
+    // window handler would miss.
+    if(typeof ResizeObserver === 'function'){
+      try{
+        const ro = new ResizeObserver(()=>{
+          const w = canvas.parentElement.getBoundingClientRect().width;
+          // Only when there is something to measure, and only when the
+          // canvas doesn't already match — resize() clears and redraws, so
+          // running it needlessly is wasted work on every layout tick.
+          if(w > 0 && Math.abs(canvas.width - w * Math.max(window.devicePixelRatio||1,1)) > 1) resize();
+        });
+        ro.observe(canvas.parentElement);
+      }catch(e){ console.error('signature pad observer failed', e); }
+    }
     setTimeout(resize, 50);
     return pad;
   }
