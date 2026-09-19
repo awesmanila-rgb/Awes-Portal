@@ -11316,13 +11316,21 @@
       // stays exactly where it was (normally 'in_progress'), and admin picks
       // up the outstanding units via Continue Tomorrow (dtContinueClosedTicket).
       const stillHasWork = equipmentList.some(it=> it.notDone);
-      // Admin closing is the customer's last stage too, so their card
-      // reaches Closed rather than stopping at Completed. A job order with
-      // units left not done still closes on the ticket side — but the
-      // customer's request stays where it is, because the work as a whole
-      // isn't finished; admin carves the remainder off with Continue
-      // Tomorrow (dtContinueClosedTicket).
-      if(!stillHasWork && typeof srMarkClosedByTicket === 'function'){
+      // Closing the job order closes the customer's card too — ALWAYS,
+      // including when units were left not done.
+      //
+      // This used to skip the sync whenever anything was flagged, on the
+      // reasoning that the work as a whole wasn't finished so the customer
+      // shouldn't be told "closed". The effect was worse than the problem:
+      // their card sat at Completed indefinitely, showing "our management
+      // team will close this ticket shortly" — a promise nothing would
+      // ever keep, because the only thing that closes it is this line.
+      //
+      // Unfinished units don't disappear: admin raises a continuation job
+      // order (dtContinueClosedTicket), which creates its own request and
+      // its own card. The customer sees this visit closed and the
+      // follow-up appear, which is what actually happened.
+      if(typeof srMarkClosedByTicket === 'function'){
         srMarkClosedByTicket(ticketId).catch(()=>{});
       }
       if(typeof notifyAdmins === 'function'){

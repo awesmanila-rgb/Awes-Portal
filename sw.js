@@ -884,22 +884,23 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v106 — acknowledgement can no longer move a job order
-// backwards.
+// Bumped to v107 — closing a job order now always closes the customer's
+// card.
 //
-// It used to set the status outright, so an acknowledgement landing AFTER
-// the crew had arrived knocked the ticket from Work in Progress back to En
-// Route — while the customer's side, which only ever moves forward, stayed
-// at Work in Progress. The two then disagreed about the same job order.
-// Happens when admin replaces a technician mid-visit and the replacement
-// acknowledges, or when an offline acknowledgement replays after arrival.
+// It used to skip that sync whenever a unit had been flagged Not Yet Done,
+// on the reasoning that the work as a whole wasn't finished. The effect
+// was worse than the problem: the card sat at Completed indefinitely,
+// telling the customer their ticket would be closed shortly — a promise
+// nothing would keep, since that sync was the only thing that closes it.
+// Unfinished units still aren't lost; admin raises a continuation job
+// order, which creates its own card.
 //
-// Rows already in that state are repaired by REPAIR_status_mismatch.sql.
+// Cards already stranded are repaired by CHECK_and_REPAIR_closed.sql.
 //
-// Also carries v105 (a technician can't be on site at two job orders at
-// once) and v104 (admin can record a past service — needs migration
-// 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v106';
+// Also carries v106 (acknowledgement can't move a job order backwards),
+// v105 (one site at a time) and v104 (Record Past Service — needs
+// migration 20260919_01_report_back_entry.sql).
+const CACHE_NAME = 'awes-sr-v107';
 
 // Split into two lists on purpose.
 //
