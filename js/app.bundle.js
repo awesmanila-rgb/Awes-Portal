@@ -17358,7 +17358,7 @@
   // ticket, which RLS closes to customers — the RPC returns just these two
   // things for a request this customer owns.
   async function cpFetchCardInfo(requestId){
-    const empty = { techNames: [], unitLabel: null, unitCount: 0 };
+    const empty = { techNames: [], unitLabel: null, unitCount: 0, expired: false };
     if(!requestId || !(await ensureCloud())) return empty;
     try{
       const { data, error } = await db.rpc('service_request_card_info', { p_request_id: requestId });
@@ -17366,7 +17366,8 @@
       return {
         techNames: (data && data.techNames) || [],
         unitLabel: (data && data.unitLabel) || null,
-        unitCount: (data && data.unitCount) || 0
+        unitCount: (data && data.unitCount) || 0,
+        expired:   !!(data && data.expired)
       };
     }catch(e){ console.error('fetch card info failed', describeCloudError(e)); return empty; }
   }
@@ -17374,6 +17375,14 @@
   function cpHeroActive(req, eq, techNames, info){
     const notStarted = req.status === 'schedule_confirmed';
     const finished = req.status === 'completed';
+    // Nobody acknowledged the job order in time, so the visit never
+    // happened and now cannot. Expiry is computed rather than stored (no
+    // nightly job, and it self-corrects if a date is edited) — which meant
+    // nothing ever moved the customer's request, and their card went on
+    // announcing "Active service · Preparing" for a visit that was never
+    // going to take place. The stage tracker is wrong here in a way no
+    // stage can express, so the card drops it entirely.
+    const expired = !!(info && info.expired);
     const label = notStarted ? 'Scheduled' : srStatusLabel(req.status);
     // 'on the way' is wrong in both directions — before the day, and after
     // the work is done and only admin's sign-off is outstanding.
@@ -17385,7 +17394,9 @@
       ? (techNames.length === 1 ? techNames[0] : techNames.length + ' technicians')
       : null;
     let techLine;
-    if(notStarted){
+    if(expired){
+      techLine = 'No visit took place on this booking';
+    }else if(notStarted){
       techLine = 'Your technician will be assigned on the day';
     }else if(finished){
       techLine = 'Work finished — being reviewed before sign-off';
@@ -17413,7 +17424,9 @@
     // confirmed proposed schedule normally, falling back to the original
     // requested date on the off chance a request reached 'dispatched'
     // without one ever being proposed.
-    const stageMsg = cpStageMessage(req.status);
+    const stageMsg = (info && info.expired)
+      ? 'This visit did not go ahead as scheduled. Please message us and we will arrange a new date.'
+      : cpStageMessage(req.status);
     const schedDate = req.proposedScheduleDate || req.requestedDate;
     const scheduleLine = schedDate
       ? fmtDate(schedDate) + (req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '')
@@ -17422,15 +17435,18 @@
       '<div data-req-id="'+req.id+'">'+
         '<div class="cp-hero-head">'+
           '<div>'+
-            '<p class="cp-hero-eyebrow '+(notStarted?'teal':(finished?'teal':'amber'))+'">'+
-              (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label)+'</p>'+
+            '<p class="cp-hero-eyebrow '+(expired?'amber':(notStarted?'teal':(finished?'teal':'amber')))+'">'+
+              (expired ? 'Visit not completed'
+                       : (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label))+'</p>'+
             '<p class="cp-hero-name">'+cpActiveUnitName(eq, info)+'</p>'+
             '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
             (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
           '</div>'+
         '</div>'+
-        (!notStarted && techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
-        cpHeroTrackHtml(req.status)+
+        (!expired && !notStarted && techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
+        // No tracker on an expired visit: every stage would be a claim
+        // about work that did not happen.
+        (expired ? '' : cpHeroTrackHtml(req.status))+
         // Under the tracker, above the who-is-working line: the customer
         // reads the stage label, then what it means, then who is on it.
         (stageMsg ? '<p class="cp-hero-stage-msg">'+escapeHtml(stageMsg)+'</p>' : '')+
@@ -17522,7 +17538,7 @@
       // silently returned an empty list and the card never named anyone.
       // The RPC returns only the names, and only for a request this
       // customer owns.
-      const info = subject.linkedDispatchTicketId ? (await cpFetchCardInfo(subject.id)) : { techNames: [], unitLabel: null, unitCount: 0 };
+      const info = subject.linkedDispatchTicketId ? (await cpFetchCardInfo(subject.id)) : { techNames: [], unitLabel: null, unitCount: 0, expired: false };
       html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), info.techNames, info);
     } else {
       html = cpHeroAllClear(); isAllClear = true;

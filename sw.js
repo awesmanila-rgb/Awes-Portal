@@ -884,26 +884,25 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v110 — the customer's card no longer stalls behind its job
-// order when units were flagged Not Yet Done.
+// Bumped to v111 — an expired job order no longer shows the customer an
+// active service.
 //
-// The sync was skipped in TWO places on the same mistaken reasoning — that
-// the work wasn't really finished, so the customer shouldn't be told
-// "completed" or "closed". At auto-completion the job order reached
-// Completed while the customer stayed at Work in Progress; at close it
-// reached Closed while the customer stayed at Completed. Nothing would
-// ever reconcile them, because those calls are the only thing that moves
-// the customer forward. The customer is also now notified on close either
-// way, with wording that matches what actually happened — before, a visit
-// with unfinished items closed in silence.
+// Expiry is computed rather than stored (no nightly job to run and
+// monitor, and it self-corrects if a date is edited) — but nothing ever
+// told the customer's side. Their request stayed at 'preparing' and their
+// card went on announcing "Active service - Preparing" for a visit nobody
+// acknowledged, which never happened and now cannot. The card now drops
+// the stage tracker entirely, since every stage would be a claim about
+// work that did not take place, and says plainly that the visit did not go
+// ahead.
 //
-// Stalled cards are repaired by REPAIR_card_behind_ticket.sql.
+// Needs migration 20260919_02_card_info_expiry.sql.
 //
-// Also carries v109 (in-page sheet for the Not Yet Done reason), v108
-// (signature pads that swallowed strokes), v106 (acknowledgement can't
-// move a job order backwards), v105 (one site at a time) and v104 (Record
+// Also carries v110 (the customer's card no longer stalls behind its job
+// order), v109 (in-page sheet for the Not Yet Done reason), v108
+// (signature pads that swallowed strokes), v106, v105 and v104 (Record
 // Past Service — needs migration 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v110';
+const CACHE_NAME = 'awes-sr-v111';
 
 // Split into two lists on purpose.
 //
