@@ -884,7 +884,16 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v112 — service reports now carry their own review state.
+// Bumped to v113 — Record Past Service skipped straight past the date.
+//
+// Section 1 (customer and service date) is normally inherited from a Job
+// Order and never shown, so the wizard marks it skipped unconditionally.
+// Record Past Service has no job order behind it and the DATE is the whole
+// point — but picking a customer jumped past the only field that asks for
+// it. Section 1 is now shown for back-entry, and does not count as
+// finished until both the date and the technician are set.
+//
+// Also in v112 — service reports now carry their own review state.
 //
 // Review was tracked only at the JOB ORDER level, so reports belonging to
 // no job order — Record Past Service entries, and anything filed against
@@ -905,7 +914,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v112';
+const CACHE_NAME = 'awes-sr-v113';
 
 // Split into two lists on purpose.
 //

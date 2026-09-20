@@ -2867,6 +2867,9 @@
   let srBackEntryMode = false;
 
   function srIsBackEntry(){ return srBackEntryMode; }
+  // Whether a technician has been picked for a back-entered report. Read
+  // by the wizard so section 1 isn't treated as finished without one.
+  function srBackEntryTechChosen(){ return !!currentTechnicianId; }
 
   async function srStartBackEntry(){
     if(!currentUser || currentUser.role !== 'admin'){ toast('Admin only'); return; }
@@ -2883,6 +2886,12 @@
     // Technician is PICKED, not typed. Typed names don't resolve to a
     // person, so the report couldn't be attributed or found by technician.
     await srRenderBackEntryTechPicker();
+
+    // Land on section 1 explicitly. It is the only place the service date
+    // and the customer are entered, and for a past service it is where the
+    // work starts — the normal flow inherits both from a Job Order and
+    // begins at section 2.
+    if(typeof srGoToSection === 'function') srGoToSection(1);
 
     // Signatures stay blank and locked — see the note above.
     ['sigCustomer','sigTech'].forEach(id=>{
@@ -2942,6 +2951,9 @@
       // saved it, which here would be admin.
       currentTechnicianId = sel.value || null;
       if(typeof srRenderStepper === 'function') srRenderStepper();
+      // The section-1 "finished" test now includes this choice, so the nav
+      // has to re-evaluate or Next stays disabled after a valid pick.
+      if(typeof srRenderSectionNav === 'function') srRenderSectionNav();
     };
   }
 
@@ -5443,7 +5455,17 @@
   // Section 2 is filled automatically per unit in batch mode (see
   // srBatchBanner), so it's skipped rather than shown empty.
   function srSectionIsSkipped(n){
-    if(n===1) return true; // customer info: inherited from the Job Order, never shown
+    if(n===1){
+      // Customer info and the service date normally come from the Job
+      // Order, so this section is inherited rather than shown.
+      //
+      // Record Past Service has no job order behind it — admin is entering
+      // a visit that happened weeks ago, and the DATE is the whole point.
+      // Skipping section 1 there jumped straight past the only field that
+      // asks for it, the moment a customer was picked.
+      if(typeof srIsBackEntry === 'function' && srIsBackEntry()) return false;
+      return true;
+    }
     // Batch mode fills equipment details per unit at submit time, so
     // srApplyJobOrderBatch hides that card. Without this the wizard still
     // counted it as the current step and parked on a hidden card with no
@@ -5507,7 +5529,14 @@
   // usefully change.
   function srSectionPrefilled(n){
     if(n===1){
-      return !!$('custName').value.trim() && !!$('svcDate').value && !!$('custEmail').value.trim();
+      const base = !!$('custName').value.trim() && !!$('svcDate').value && !!$('custEmail').value.trim();
+      // Back-entry needs one thing more: the technician who performed the
+      // work. Without this the section counts as finished before anyone is
+      // named, and the wizard moves on.
+      if(typeof srIsBackEntry === 'function' && srIsBackEntry()){
+        return base && !!(typeof srBackEntryTechChosen === 'function' && srBackEntryTechChosen());
+      }
+      return base;
     }
     if(n===2){
       return srSectionIsSkipped(2)
