@@ -398,7 +398,11 @@
     // these record who entered the record and when, so a report with
     // blank signatures is never mistaken for an unfinished one.
     ['back_entered_by','backEnteredBy'], ['back_entered_by_id','backEnteredById'],
-    ['back_entered_at','backEnteredAt']
+    ['back_entered_at','backEnteredAt'],
+    // Admin sign-off. Separate from back-entry above: that records who
+    // keyed a report in, this records who checked it.
+    ['reviewed_by','reviewedBy'], ['reviewed_by_id','reviewedById'],
+    ['reviewed_at','reviewedAt']
   ];
   function reportToRow(data){
     const row = {};
@@ -539,6 +543,50 @@
       return !!(data && data.length > 0);
     }catch(e){ console.error('cloud delete report failed', srNo, describeCloudError(e)); return false; }
   }
+  // Admin sign-off on a report. Set explicitly from Saved Reports, or
+  // automatically for every report on a job order when that job order is
+  // closed — closing IS the review, and asking admin to repeat it per unit
+  // would train them to click through it.
+  //
+  // Writes only the three review columns, so it can never disturb the
+  // report's own content.
+  async function srMarkReportReviewed(srNo){
+    if(!srNo || !currentUser || currentUser.role !== 'admin') return false;
+    if(!(await ensureCloud())) { toast('This needs a connection'); return false; }
+    try{
+      const { error } = await db.from('service_reports').update({
+        reviewed_by: currentUser.name || 'Admin',
+        reviewed_by_id: currentUser.id,
+        reviewed_at: serverNowISO()
+      }).eq('sr_no', srNo);
+      if(error) throw error;
+      return true;
+    }catch(e){
+      console.error('mark report reviewed failed', describeCloudError(e));
+      toast('Could not save — please try again');
+      return false;
+    }
+  }
+  // Every report on a job order, in one write. Called when admin closes
+  // the job order.
+  async function srMarkReportsReviewedForSrNos(srNos){
+    const list = (srNos||[]).filter(Boolean);
+    if(list.length === 0 || !currentUser || currentUser.role !== 'admin') return false;
+    if(!(await ensureCloud())) return false;
+    try{
+      const { error } = await db.from('service_reports').update({
+        reviewed_by: currentUser.name || 'Admin',
+        reviewed_by_id: currentUser.id,
+        reviewed_at: serverNowISO()
+      }).in('sr_no', list).is('reviewed_at', null);
+      if(error) throw error;
+      return true;
+    }catch(e){
+      console.error('bulk mark reviewed failed', describeCloudError(e));
+      return false;
+    }
+  }
+
   async function cloudGetReport(srNo){
     if(!(await ensureCloud())) return null;
     try{
@@ -1696,6 +1744,8 @@
     // authoring a blank report: this one names the technician who did the
     // work and marks the record as entered afterwards.
     setVis('srTabBackEntryBtn', isAdmin);
+    // Sign-off is an admin job; a technician has no use for the filter.
+    setVis('srMgrNeedsReviewBtn', isAdmin);
     // Logout is now a direct, always-visible top-right button for EVERY
     // logged-in role, not just technicians — admin's only path used to be
     // buried inside "☰ Menu", which read as "there's no logout button in
@@ -6777,6 +6827,10 @@
     if(onlyUserId) reports = reports.filter(d=> d.technicianId===onlyUserId);
     if(filter==='draft') reports = reports.filter(d=> !d.completed);
     else if(filter==='completed') reports = reports.filter(d=> d.completed);
+    // Waiting on admin: finished by the technician, not yet signed off.
+    // Drafts are excluded — an unfinished report is the technician's work
+    // in progress, not something admin can act on.
+    else if(filter==='needs_review') reports = reports.filter(d=> d.completed && !d.reviewedAt);
     // filter==='all' (or omitted) keeps everything, unfiltered.
     const q = (searchText||'').trim().toLowerCase();
     if(q) reports = reports.filter(d=> (d.custName||'').toLowerCase().includes(q) || (d.srNo||'').toLowerCase().includes(q));
@@ -6800,12 +6854,33 @@
       // state (not the current tab) so it's also correct on the "All" tab,
       // which mixes drafts and completed reports in one list.
       const isDraft = !d.completed;
+      // Sign-off state, admin only. A finished report with no reviewedAt is
+      // waiting on them; drafts are the technician's unfinished work and
+      // are never described as awaiting review.
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      const needsReview = !isDraft && !d.reviewedAt;
+      const reviewTag = (!isAdmin || isDraft) ? ''
+        : (d.reviewedAt
+            ? ' · <span style="color:var(--green-dark);">Reviewed</span>'
+            : ' · <span style="color:var(--amber); font-weight:600;">Needs review</span>');
       row.innerHTML =
         '<div class="hist-info"><b>'+escapeHtml(d.custName||'Untitled')+'</b>'+
-        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+'</span></div>'+
+        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+reviewTag+'</span></div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button><button data-act="share">Share</button></div>');
+          : '<div class="hist-actions"><button data-act="view">View</button><button data-act="share">Share</button>'+
+            (isAdmin && needsReview ? '<button data-act="review" class="primary">Mark Reviewed</button>' : '')+
+            '</div>');
+      const reviewBtn = row.querySelector('[data-act="review"]');
+      if(reviewBtn) reviewBtn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        reviewBtn.disabled = true; reviewBtn.textContent = 'Saving…';
+        const ok = await srMarkReportReviewed(d.srNo);
+        reviewBtn.disabled = false; reviewBtn.textContent = 'Mark Reviewed';
+        // Re-render rather than patching the row: on the Needs Review tab
+        // the report should drop out of the list entirely once signed off.
+        if(ok) loadHistory(containerId, filter, onlyUserId, searchText);
+      });
       if(isDraft){
         // "Continue" reopens the draft in the form so the technician can
         // finish filling it out and submit it — same underlying action as
@@ -11398,6 +11473,13 @@
       // stays exactly where it was (normally 'in_progress'), and admin picks
       // up the outstanding units via Continue Tomorrow (dtContinueClosedTicket).
       const stillHasWork = equipmentList.some(it=> it.notDone);
+      // Closing the job order IS the review of the reports filed against
+      // it, so they are signed off here rather than queued again in Saved
+      // Reports. Only reports not already reviewed are touched, so an
+      // earlier individual sign-off keeps its own name and timestamp.
+      if(typeof srMarkReportsReviewedForSrNos === 'function'){
+        srMarkReportsReviewedForSrNos(equipmentList.map(it=> it.reportSrNo)).catch(()=>{});
+      }
       // Closing the job order closes the customer's card too — ALWAYS,
       // including when units were left not done.
       //
@@ -15770,11 +15852,22 @@
     // which means something specific and narrower.
     $('ovDispatchSub').textContent = assignedCount+' Assigned · '+unassigned+' Unassigned';
 
-    // Unreviewed Reports — completed drafts still waiting to be finished
-    // (which is where the customer's acknowledgment sign-off happens).
+    // Two different things were conflated under one heading called
+    // "Unreviewed Reports": it counted DRAFTS, which are the technician's
+    // unfinished work, and called them unreviewed — while reports actually
+    // waiting on admin had no count anywhere.
+    //
+    // For admin the card now counts what is waiting on them: completed
+    // reports with no sign-off. Technicians keep seeing their own drafts,
+    // which is what they can act on.
     const draftReports = (reports||[]).filter(r=> !r.completed).length;
-    $('ovReportsValue').textContent = String(draftReports);
-    $('ovReportsSub').textContent = draftReports+' Service Report'+(draftReports===1?'':'s')+' Pending Sign-off';
+    const pendingReview = (reports||[]).filter(r=> r.completed && !r.reviewedAt).length;
+    const isAdminUser = currentUser && currentUser.role === 'admin';
+    const reportStat = isAdminUser ? pendingReview : draftReports;
+    $('ovReportsValue').textContent = String(reportStat);
+    $('ovReportsSub').textContent = isAdminUser
+      ? pendingReview+' Service Report'+(pendingReview===1?'':'s')+' Awaiting Sign-off'
+      : draftReports+' Draft'+(draftReports===1?'':'s')+' To Finish';
 
     // Service Requests — customer-filed, admin-only (service-requests.js).
     // srAdminInit() renders the value itself (and keeps it live afterward
@@ -15809,7 +15902,7 @@
 
     // Notification bell in the dashboard top bar — total items anywhere in
     // the app that are waiting on an admin decision or sign-off.
-    const notifTotal = pendingCA + pendingLiq + pendingLeave + draftReports + openServiceRequests + awaitingReview;
+    const notifTotal = pendingCA + pendingLiq + pendingLeave + reportStat + openServiceRequests + awaitingReview;
     const notifEl = $('notifBadge');
     if(notifEl){
       notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);

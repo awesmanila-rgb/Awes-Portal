@@ -884,25 +884,28 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v111 — an expired job order no longer shows the customer an
-// active service.
+// Bumped to v112 — service reports now carry their own review state.
 //
-// Expiry is computed rather than stored (no nightly job to run and
-// monitor, and it self-corrects if a date is edited) — but nothing ever
-// told the customer's side. Their request stayed at 'preparing' and their
-// card went on announcing "Active service - Preparing" for a visit nobody
-// acknowledged, which never happened and now cannot. The card now drops
-// the stage tracker entirely, since every stage would be a claim about
-// work that did not take place, and says plainly that the visit did not go
-// ahead.
+// Review was tracked only at the JOB ORDER level, so reports belonging to
+// no job order — Record Past Service entries, and anything filed against
+// an already-closed job order — landed in Saved Reports among every report
+// ever filed with nothing to surface them.
 //
-// Needs migration 20260919_02_card_info_expiry.sql.
+// Reports now have a sign-off of their own, a "Needs Review" filter, and a
+// dashboard count. Closing a job order signs off its reports
+// automatically, so normal work is unchanged and nobody signs off twice.
 //
-// Also carries v110 (the customer's card no longer stalls behind its job
-// order), v109 (in-page sheet for the Not Yet Done reason), v108
-// (signature pads that swallowed strokes), v106, v105 and v104 (Record
-// Past Service — needs migration 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v111';
+// The dashboard card was also mislabelled: "Unreviewed Reports" counted
+// DRAFTS, which are the technician's unfinished work, while reports
+// actually waiting on admin had no count anywhere. Admin now sees what is
+// waiting on them; technicians still see their own drafts.
+//
+// Needs migration 20260919_03_report_review.sql.
+//
+// Also carries v111 (expired job orders no longer show the customer an
+// active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
+// v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
+const CACHE_NAME = 'awes-sr-v112';
 
 // Split into two lists on purpose.
 //

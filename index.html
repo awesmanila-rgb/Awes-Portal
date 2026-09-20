@@ -449,7 +449,7 @@ window.awesCss = {
           <div class="overview-stat-sub" id="ovReviewSub">—</div>
         </div>
         <div class="overview-stat ov-gray">
-          <div class="overview-stat-head"><span class="overview-stat-title">Unreviewed Reports</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span></div>
+          <div class="overview-stat-head"><span class="overview-stat-title">Reports to Sign Off</span><span class="overview-stat-icon ov-icon-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span></div>
           <div class="overview-stat-value" id="ovReportsValue">—</div>
           <div class="overview-stat-sub" id="ovReportsSub">—</div>
         </div>
@@ -3066,6 +3066,11 @@ window.awesCss = {
       <div class="leave-filter-row" id="srMgrFilterRow">
         <button type="button" data-filter="all" class="active">All</button>
         <button type="button" data-filter="draft">Saved Draft</button>
+        <!-- Admin only (auth.js). Completed reports that nobody has signed
+             off yet — mostly Record Past Service entries and reports filed
+             against an already-closed job order, since closing a job order
+             signs off its own reports. -->
+        <button type="button" data-filter="needs_review" id="srMgrNeedsReviewBtn" style="display:none;">Needs Review</button>
         <button type="button" data-filter="completed">Completed</button>
       </div>
       <div class="field"><input type="text" id="srMgrSearch" placeholder="Search by customer or SR number…"></div>
