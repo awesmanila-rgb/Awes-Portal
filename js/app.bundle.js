@@ -2914,7 +2914,7 @@
     if(banner) banner.style.display = 'none';
     const dateEl = $('svcDate');
     if(dateEl) dateEl.removeAttribute('max');
-    const wrap = $('srBackEntryTechWrap');
+    const wrap = $live('srBackEntryTechWrap');
     if(wrap) wrap.remove();
     const techEl = $('techName');
     if(techEl) techEl.style.display = '';
@@ -2923,10 +2923,16 @@
   // Replaces the free-text technician field with a picker while in
   // back-entry mode. The hidden input still carries the name, so every
   // downstream reader (the PDF, the row, the history list) is unchanged.
+  // $live(), not $(): the picker is created and removed each time back-entry
+  // starts and ends, and $() would keep returning the first, detached copy.
+  // The second use in a session then attached its change handler to a
+  // select no longer on screen — picking a technician did nothing and the
+  // report couldn't proceed — and ending back-entry removed the detached
+  // copy instead of the visible one, so pickers stacked up.
   async function srRenderBackEntryTechPicker(){
     const techEl = $('techName');
     if(!techEl) return;
-    if($('srBackEntryTechWrap')) $('srBackEntryTechWrap').remove();
+    if($live('srBackEntryTechWrap')) $live('srBackEntryTechWrap').remove();
 
     const users = (await cloudListUsers()) || [];
     const techs = users.filter(u=> u.active !== false).sort((a,b)=> a.name.localeCompare(b.name));
@@ -2942,7 +2948,7 @@
     techEl.style.display = 'none';
     techEl.parentNode.insertBefore(wrap, techEl.nextSibling);
 
-    const sel = $('srBackEntryTechSelect');
+    const sel = $live('srBackEntryTechSelect');
     if(sel) sel.onchange = ()=>{
       const opt = sel.options[sel.selectedIndex];
       techEl.value = opt && opt.value ? (opt.dataset.name || '') : '';
@@ -11159,6 +11165,12 @@
     }
   }
 
+  // Every lookup inside this section uses $live(), never $(). The section's
+  // markup is rebuilt on each render, and $() caches a node by id forever —
+  // so from the second job order opened in a session it returned the OLD,
+  // detached #dtReviewList. Reports (and the timeout's Retry) were painted
+  // into an element no longer on screen, and the one admin could see stayed
+  // on "Loading…" indefinitely.
   async function dtRenderReviewSection(rec){
     const sec = $('dtReviewSection');
     if(!sec) return;
@@ -11184,9 +11196,9 @@
     }catch(e){
       // Nothing that goes wrong here may leave the section on "Loading…".
       console.error('review section render failed', e);
-      $('dtReviewList').innerHTML = '<div class="empty-state">Couldn\'t show the reports. '+
+      $live('dtReviewList').innerHTML = '<div class="empty-state">Couldn\'t show the reports. '+
         '<button type="button" class="btn btn-secondary" id="dtReviewRetry" style="margin-left:6px; padding:4px 12px; font-size:12px;">Retry</button></div>';
-      const r = $('dtReviewRetry'); if(r) r.onclick = ()=> dtRenderReviewSection(rec);
+      const r = $live('dtReviewRetry'); if(r) r.onclick = ()=> dtRenderReviewSection(rec);
     }
   }
   let dtReviewRenderToken = 0;
@@ -11236,12 +11248,12 @@
       ? '<div class="u-status" style="margin-bottom:8px;">Couldn\'t load report details. '+
         '<button type="button" class="btn btn-secondary" id="dtReviewRetry" style="margin-left:6px; padding:4px 12px; font-size:12px;">Retry</button></div>'
       : '';
-    $('dtReviewList').innerHTML = retryBar + rows +
+    $live('dtReviewList').innerHTML = retryBar + rows +
       (exceptions>0
         ? '<div class="u-status" style="margin-top:6px;">'+exceptions+' unit(s) flagged. Use the thread below to sort it out with the technician, or close the job order and raise a follow-up for the remaining work.</div>'
         : '');
 
-    const retryBtn = $('dtReviewRetry');
+    const retryBtn = $live('dtReviewRetry');
     if(retryBtn) retryBtn.onclick = ()=> dtRenderReviewSection(rec);
 
     sec.querySelectorAll('.dt-review-open').forEach(btn=>{

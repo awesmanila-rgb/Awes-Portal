@@ -884,7 +884,18 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v121 — admin no longer decides whether a unit's scope was done.
+// Bumped to v122 — the job order review section stuck on "Loading…".
+//
+// Root cause, confirmed by reproducing it: this app's $() caches every
+// element by id forever, and the review section's markup is rebuilt on each
+// render. The first job order opened in a session cached #dtReviewList; from
+// the second onward $() returned that old, DETACHED copy, so the reports —
+// and the v119 timeout's Retry — were painted into an element no longer on
+// screen. Now uses $live(). The same trap was in Record Past Service's
+// technician picker: on a second use in a session, choosing a technician did
+// nothing and the report couldn't proceed. Fixed the same way.
+//
+// Also in v121 — admin no longer decides whether a unit's scope was done.
 //
 // Close Job Order showed a "Scope not completed on this unit" checkbox per
 // unit, even on units with a filed Service Report, and the close rebuilt
@@ -992,7 +1003,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v121';
+const CACHE_NAME = 'awes-sr-v122';
 
 // Split into two lists on purpose.
 //
