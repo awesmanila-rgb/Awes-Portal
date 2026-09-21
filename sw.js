@@ -884,7 +884,39 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v118 — fixes found by rendering the real v117 build: the six
+// Bumped to v121 — admin no longer decides whether a unit's scope was done.
+//
+// Close Job Order showed a "Scope not completed on this unit" checkbox per
+// unit, even on units with a filed Service Report, and the close rebuilt
+// the equipment list from those boxes — so admin could quietly override the
+// technician's own record of the visit. That call belongs to the
+// technician, on site, with "Can't do this one" and a reason. The close
+// section now uses their resolution as-is; if a unit is still unresolved it
+// says so instead of offering a Close that can only refuse. The
+// confirmation also no longer claims the customer's request "stays in
+// progress", which stopped being true in v107.
+//
+// Also in v120 — "Replace an Assigned Technician" was still offered on
+// a Completed job order. By then the assigned technicians are the people
+// who did the work; replacing one would strip their acknowledgement and
+// take them off the record of a job they performed. The section that shows
+// the button and the function that does the swap had separate checks that
+// had drifted (the function also allowed Expired); both now use one rule.
+// Replacing during Work in Progress stays allowed — someone falling ill on
+// site is the case the feature exists for.
+//
+// Also in v119 — the job order review section could sit on "Loading…"
+// forever, and while it did, admin could not close the job order.
+//
+// The overlay awaited the report lookup before drawing anything below it,
+// so the Close Job Order button, the cancel section and the message thread
+// did not exist until it finished — and Supabase requests carry no timeout,
+// so a slow or dropped connection never finished. The lookup now runs
+// alongside the rest of the overlay, gives up after 12 seconds with a
+// Retry, and still lists each SR number (taken from the job order itself)
+// so every report can be opened even when the summary lookup fails.
+//
+// Also in v118 — fixes found by rendering the real v117 build: the six
 // Job Orders stat cards wrapped 5 + 1; Today's Job Orders cut off its
 // Technician column, and on a phone scrolled sideways and hid Status —
 // rows now stack as small cards there; the home calendar went side-by-side
@@ -960,7 +992,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v118';
+const CACHE_NAME = 'awes-sr-v121';
 
 // Split into two lists on purpose.
 //

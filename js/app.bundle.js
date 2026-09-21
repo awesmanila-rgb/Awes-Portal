@@ -10409,6 +10409,24 @@
       return false;
     }
   }
+  // When a technician may still be swapped out. ONE rule, used by both the
+  // section that offers the button and the function that performs the swap
+  // — those were written separately and had drifted: both allowed it on a
+  // Completed job order, and the function also allowed it on an Expired one.
+  //
+  // Completed matters most. By then every unit has a Service Report or a
+  // Not Yet Done reason, and the people assigned are the people who did
+  // the work. Replacing one then would strip their acknowledgement and take
+  // them off the record of a job they actually performed.
+  //
+  // Work in Progress stays allowed on purpose: someone falling ill on site
+  // and a colleague finishing the job is the case this feature exists for.
+  function dtCanReassign(rec){
+    if(!rec) return false;
+    const st = dtEffectiveStatus(rec);
+    return !['completed','closed','cancelled','expired'].includes(st);
+  }
+
   // ---------- Admin: replace an assigned technician ----------
   // The absence problem. A ticket only reaches "En Route" once EVERY
   // assigned technician has acknowledged, so one person calling in sick
@@ -10434,7 +10452,12 @@
     try{
       const rec = await dtGetTicket(ticketId);
       if(!rec){ toast('Job order not found'); return false; }
-      if(rec.status==='closed' || rec.status==='cancelled'){ toast('This job order is already finalized'); return false; }
+      if(!dtCanReassign(rec)){
+        toast(dtEffectiveStatus(rec)==='completed'
+          ? 'The work is finished — technicians can no longer be replaced on this job order'
+          : 'This job order is already finalized');
+        return false;
+      }
 
       const assigned = (rec.assignedWorkerIds||[]).slice();
       const names    = (rec.assignedWorkerNames||[]).slice();
@@ -10596,7 +10619,7 @@
     const sec = $('dtReassignSection');
     if(!sec) return;
     const isAdmin = currentUser && currentUser.role==='admin';
-    const finalized = rec.status==='closed' || rec.status==='cancelled' || dtIsExpired(rec);
+    const finalized = !dtCanReassign(rec);
     if(!isAdmin || finalized){ sec.style.display='none'; sec.innerHTML=''; return; }
 
     const box = $('dtReassignList');
@@ -11108,17 +11131,32 @@
   // which reports belong to it (reportSrNo is written there when the
   // report saves), and a report can be edited or re-filed afterwards
   // without that link changing.
+  // Supabase requests carry no timeout of their own. On a slow or dropped
+  // connection this one simply never settled, and the section sat on
+  // "Loading…" indefinitely. It now gives up after DT_REVIEW_TIMEOUT_MS and
+  // says so, with a way to retry.
+  //
+  // Returns { reports, failed }: failed distinguishes "couldn't reach the
+  // server" from "reached it and nothing matched" — the old version
+  // returned [] for both, so a network fault looked like missing reports.
+  const DT_REVIEW_TIMEOUT_MS = 12000;
   async function dtFetchTicketReports(rec){
     const srNos = (rec.equipmentList||[]).map(it=> it.reportSrNo).filter(Boolean);
-    if(srNos.length===0) return [];
-    if(!(await ensureCloud())) return [];
+    if(srNos.length===0) return { reports: [], failed: false };
+    if(!(await ensureCloud())) return { reports: [], failed: true };
     try{
-      const { data, error } = await db.from('service_reports')
+      const query = db.from('service_reports')
         .select('sr_no, date, technician_name, equip_type, equip_location, trouble_call, completed, findings')
         .in('sr_no', srNos);
+      const timeout = new Promise((_, reject)=>
+        setTimeout(()=> reject(new Error('timed out after '+(DT_REVIEW_TIMEOUT_MS/1000)+'s')), DT_REVIEW_TIMEOUT_MS));
+      const { data, error } = await Promise.race([query, timeout]);
       if(error) throw error;
-      return data || [];
-    }catch(e){ console.error('load ticket reports failed', describeCloudError(e)); return []; }
+      return { reports: data || [], failed: false };
+    }catch(e){
+      console.error('load ticket reports failed', describeCloudError(e));
+      return { reports: [], failed: true };
+    }
   }
 
   async function dtRenderReviewSection(rec){
@@ -11134,7 +11172,26 @@
     sec.style.display = '';
     sec.innerHTML = '<div class="field"><label>Service Reports on this Job Order</label>'+
       '<div id="dtReviewList"><div class="empty-state">Loading…</div></div></div>';
-    const reports = await dtFetchTicketReports(rec);
+    // A render is abandoned if a newer one started or admin moved to a
+    // different job order meanwhile — otherwise a slow response for the
+    // previous ticket could paint its reports into the current one.
+    const token = ++dtReviewRenderToken;
+    const stale = ()=> token !== dtReviewRenderToken || !dtOverlayTicket || dtOverlayTicket.id !== rec.id;
+    const { reports, failed } = await dtFetchTicketReports(rec);
+    if(stale()) return;
+    try{
+      dtPaintReviewList(sec, rec, units, reports, failed);
+    }catch(e){
+      // Nothing that goes wrong here may leave the section on "Loading…".
+      console.error('review section render failed', e);
+      $('dtReviewList').innerHTML = '<div class="empty-state">Couldn\'t show the reports. '+
+        '<button type="button" class="btn btn-secondary" id="dtReviewRetry" style="margin-left:6px; padding:4px 12px; font-size:12px;">Retry</button></div>';
+      const r = $('dtReviewRetry'); if(r) r.onclick = ()=> dtRenderReviewSection(rec);
+    }
+  }
+  let dtReviewRenderToken = 0;
+
+  function dtPaintReviewList(sec, rec, units, reports, failed){
     const byNo = {};
     reports.forEach(rp=> byNo[rp.sr_no] = rp);
 
@@ -11148,7 +11205,8 @@
                 '<b>'+escapeHtml(it.reportSrNo)+'</b> · '+label+
                 '<div class="u-status" style="font-size:11px;">'+
                   (rp ? escapeHtml([rp.technician_name, rp.date ? leaveFmtDate(rp.date) : '', rp.trouble_call || ''].filter(Boolean).join(' · '))
-                      : 'Report details unavailable offline')+
+                      : (failed ? 'Details didn\'t load — tap Open to view the report'
+                                : 'Report not found — it may have been deleted'))+
                 '</div>'+
               '</div>'+
               '<button type="button" class="btn btn-secondary dt-review-open" data-sr="'+escapeHtml(it.reportSrNo)+'" '+
@@ -11171,10 +11229,20 @@
     }).join('');
 
     const exceptions = units.filter(it=> it.notDone).length;
-    $('dtReviewList').innerHTML = rows +
+    // The list still renders on a failed fetch — the SR numbers come from the
+    // job order itself, so admin can open each report even when the summary
+    // lookup didn't come back.
+    const retryBar = failed
+      ? '<div class="u-status" style="margin-bottom:8px;">Couldn\'t load report details. '+
+        '<button type="button" class="btn btn-secondary" id="dtReviewRetry" style="margin-left:6px; padding:4px 12px; font-size:12px;">Retry</button></div>'
+      : '';
+    $('dtReviewList').innerHTML = retryBar + rows +
       (exceptions>0
         ? '<div class="u-status" style="margin-top:6px;">'+exceptions+' unit(s) flagged. Use the thread below to sort it out with the technician, or close the job order and raise a follow-up for the remaining work.</div>'
         : '');
+
+    const retryBtn = $('dtReviewRetry');
+    if(retryBtn) retryBtn.onclick = ()=> dtRenderReviewSection(rec);
 
     sec.querySelectorAll('.dt-review-open').forEach(btn=>{
       btn.onclick = async ()=>{
@@ -11226,20 +11294,32 @@
     }
   }
 
+  // Read-only record of how each unit was resolved.
+  //
+  // This used to be a checklist admin filled in at close time — a "Scope not
+  // completed on this unit" box per unit, even on units that already had a
+  // filed Service Report. But whether a unit's scope was done is decided on
+  // site by the technician, with "Can't do this one" and a reason, before
+  // the job order can even reach Completed. Letting admin re-decide it at
+  // close quietly overrode the technician's own record of the visit. If
+  // admin disagrees, that's a conversation in the thread, not a checkbox.
   function dtRenderCloseChecklist(rec){
     const items = rec.equipmentList || [];
     if(items.length===0) return '<div class="empty-state">No equipment on this ticket.</div>';
-    return items.map((it,i)=>{
-      const reportStatus = it.reportSrNo
-        ? ('Reported ('+escapeHtml(it.reportSrNo)+')')
-        : (it.draftSrNo ? 'Draft saved' : 'Not started');
-      const checked = it.notDone ? 'checked' : '';
-      return '<div class="dt-close-row" data-idx="'+i+'">'+
+    return items.map(it=>{
+      let outcome;
+      if(it.reportSrNo){
+        outcome = '<span style="color:var(--green-dark); font-weight:600;">&#10003; Reported</span> · '+escapeHtml(it.reportSrNo);
+      }else if(it.notDone){
+        outcome = '<span style="color:var(--amber); font-weight:600;">&#9888; Not yet done</span> · '+
+          escapeHtml(it.notDoneReason || 'no reason given')+
+          (it.notDoneBy ? ' <span class="u-status">— '+escapeHtml(it.notDoneBy)+'</span>' : '');
+      }else{
+        outcome = '<span class="u-status">Not yet resolved</span>';
+      }
+      return '<div class="dt-close-row">'+
         '<div style="font-weight:600;">'+escapeHtml(dtEquipSummaryLine(it))+'</div>'+
-        '<div class="u-status" style="margin-bottom:6px;">'+reportStatus+'</div>'+
-        '<label class="chk"><input type="checkbox" class="dt-notdone-chk" '+checked+'><span>Scope not completed on this unit</span></label>'+
-        '<textarea class="dt-notdone-reason" rows="2" placeholder="Reason (e.g. parts needed, access denied, unit not operational)" '+
-          'style="display:'+(it.notDone ? '' : 'none')+';">'+escapeHtml(it.notDoneReason||'')+'</textarea>'+
+        '<div style="font-size:13px; margin-top:2px;">'+outcome+'</div>'+
       '</div>';
     }).join('');
   }
@@ -11317,7 +11397,13 @@
     }
 
     await dtRenderReassignSection(rec);
-    await dtRenderReviewSection(rec);
+    // NOT awaited. The overlay used to wait for the reports before drawing
+    // anything below this point — so while they loaded, the Close Job Order
+    // button, the cancel section and the message thread did not exist, and
+    // a stalled request left admin unable to close the job order at all,
+    // which is the exact task this section serves. It now fills in on its
+    // own while the rest of the overlay is already usable.
+    dtRenderReviewSection(rec).catch(e=> console.error('review section failed', e));
 
     if(isCancelled){
       $('dtCloseSection').innerHTML = '<div class="leave-comment"><b>Cancelled</b>'+
@@ -11342,7 +11428,6 @@
               : '<div class="u-status">'+exceptionItems.length+' unit(s) left unfinished — admin will raise the follow-up job order.</div>');
       }
       $('dtCloseSection').innerHTML = closedNote + continueHtml + '<div style="margin-top:10px;">'+dtRenderCloseChecklist(rec)+'</div>';
-      $$('#dtCloseSection .dt-notdone-chk, #dtCloseSection .dt-close-row textarea', document).forEach(el=> el.disabled = true);
       $('dtCloseSubmitBtn').style.display = 'none';
       const continueBtn = $('dtCloseSection').querySelector('#dtContinueBtn');
       if(continueBtn) continueBtn.onclick = ()=>{ dtCloseTicketOverlay(); dtContinueClosedTicket(rec); };
@@ -11371,11 +11456,25 @@
           '<br><span class="dt-jo-empty-sub">Job orders are closed by admin after review. Use the thread below if something needs sorting out.</span></div>';
         $('dtCloseSubmitBtn').style.display = 'none';
       }else{
-        $('dtCloseSection').innerHTML =
-          '<div id="dtCloseChecklist">'+dtRenderCloseChecklist(rec)+'</div>'+
-          '<div class="field" style="margin-top:8px;"><label>Overall Remarks (optional)</label>'+
-          '<textarea id="dtCloseRemarks" rows="2" placeholder="Anything else worth noting before closing"></textarea></div>';
-        $('dtCloseSubmitBtn').style.display = '';
+        // Every unit must already be settled — reported, or flagged by the
+        // technician with a reason. Admin no longer flags units here, so if
+        // any are still open there is nothing admin can close yet; saying
+        // so beats a Close button that can only refuse.
+        const open = (rec.equipmentList||[]).filter(it=> !it.reportSrNo && !it.notDone).length;
+        if(open > 0){
+          $('dtCloseSection').innerHTML =
+            '<div class="empty-state">'+icon('lock')+' '+open+' unit'+(open===1?' is':'s are')+' still unresolved.'+
+            '<br><span class="dt-jo-empty-sub">The technician files a Service Report for each unit, or marks it '+
+            '"Can\'t do this one" with a reason. Use the thread below if something needs chasing.</span></div>';
+          $('dtCloseSubmitBtn').style.display = 'none';
+        }else{
+          // The units and their outcomes are listed in the review section
+          // above, so they aren't repeated here.
+          $('dtCloseSection').innerHTML =
+            '<div class="field"><label>Overall Remarks (optional)</label>'+
+            '<textarea id="dtCloseRemarks" rows="2" placeholder="Anything else worth noting before closing"></textarea></div>';
+          $('dtCloseSubmitBtn').style.display = '';
+        }
       }
     }else{
       // A replaced technician gets the real reason rather than the generic
@@ -11416,17 +11515,9 @@
   if($('dtReviewReturnBtn')) $('dtReviewReturnBtn').addEventListener('click', dtReviewReturn);
   $('dtTicketOverlay').addEventListener('click', (e)=>{ if(e.target.id==='dtTicketOverlay') dtCloseTicketOverlay(); });
 
-  // Toggle a unit's reason textarea as its "not completed" checkbox changes.
-  $('dtCloseSection').addEventListener('change', (e)=>{
-    if(!e.target.classList.contains('dt-notdone-chk')) return;
-    const row = e.target.closest('.dt-close-row');
-    const ta = row && row.querySelector('.dt-notdone-reason');
-    if(ta) ta.style.display = e.target.checked ? '' : 'none';
-  });
-
   // "Continue Tomorrow" — opens a fresh Create Dispatch Ticket form for the
-  // remaining work on a closed ticket that had one or more units marked
-  // "scope not completed" (see dtRenderCloseChecklist/dtCloseTicket above).
+  // remaining work on a closed ticket where the technician marked one or
+  // more units "Can't do this one" during the visit.
   // Unlike dtPrefillCreateFromServiceRequest (which prefills from a
   // customer's original request), this prefills straight from the CLOSED
   // TICKET itself — customer, site, contact, access requirements are all
@@ -11605,52 +11696,24 @@
   }
   $('dtCloseSubmitBtn').addEventListener('click', async ()=>{
     if(!dtOverlayTicket) return;
-    const rows = $$('#dtCloseChecklist .dt-close-row');
-    const equipmentList = (dtOverlayTicket.equipmentList||[]).slice();
-    for(let i=0; i<rows.length; i++){
-      const chk = rows[i].querySelector('.dt-notdone-chk');
-      const reasonEl = rows[i].querySelector('.dt-notdone-reason');
-      const notDone = chk.checked;
-      const reason = reasonEl.value.trim();
-      if(notDone && !reason){
-        toast('Add a reason for every unit marked "not completed"');
-        reasonEl.focus();
-        return;
-      }
-      const base = Object.assign({}, equipmentList[i]);
-      if(notDone){
-        base.notDone = true;
-        base.notDoneReason = reason;
-        // Preserve who flagged it and when if the technician already did so
-        // during the visit; stamp admin only when this is a new flag.
-        if(!equipmentList[i].notDone){
-          base.notDoneBy = currentUser ? (currentUser.name || 'Admin') : 'Admin';
-          base.notDoneAt = serverNowISO();
-        }
-      }else{
-        // Cleared outright rather than set to false — leaving notDoneBy /
-        // notDoneAt behind on an un-flagged unit meant the review section
-        // and the audit trail still showed a technician as having flagged
-        // a unit that is no longer flagged.
-        delete base.notDone; delete base.notDoneReason;
-        delete base.notDoneBy; delete base.notDoneAt;
-      }
-      equipmentList[i] = base;
-    }
-    // Every unit must end up either REPORTED or FLAGGED. Unchecking a box
-    // here used to leave a unit that has no Service Report and no reason —
-    // closed out in limbo, which is exactly the hole the whole lifecycle
-    // change was meant to shut. Auto-completion enforces this invariant on
-    // the way in; closing has to enforce it on the way out too, because
-    // admin can uncheck a flag a technician set.
+    // The units go through exactly as the technician resolved them. This
+    // used to rebuild the list from per-unit checkboxes admin filled in at
+    // close time, which let admin override a technician's record of the
+    // visit — including on units that already had a filed report.
+    const equipmentList = (dtOverlayTicket.equipmentList||[]).map(it=> Object.assign({}, it));
+    // Safety net only: the form already hides Close while any unit is open,
+    // but a screen left open can go stale.
     const unresolved = equipmentList.filter(it=> !it.reportSrNo && !it.notDone);
     if(unresolved.length > 0){
-      toast(unresolved.length+' unit(s) have no Service Report — tick "Scope not completed" and give a reason, or ask the technician to file the report');
+      toast(unresolved.length+' unit(s) are still unresolved — the technician needs to report them or mark them "Can\'t do this one"');
       return;
     }
     const exceptionCount = equipmentList.filter(it=>it.notDone).length;
     const confirmMsg = exceptionCount>0
-      ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed? The customer\'s service request will stay in progress — you can open the next visit for the remaining unit(s) with Continue Tomorrow once this closes.')
+      // Closing always closes the customer's card too (v107); the remainder
+      // continues as a separate follow-up. The old wording promised the
+      // request would "stay in progress", which stopped being true.
+      ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' not yet done? The customer\'s card will close and they\'ll be told some items still need a visit — use Continue Tomorrow afterwards to schedule the remaining unit(s).')
       : 'Close this Job Order? This marks it — and the customer\'s service request — as fully done.';
     if(!confirm(confirmMsg)) return;
     // Scoped lookup, NOT $(): dtCloseSection's innerHTML is rebuilt every
