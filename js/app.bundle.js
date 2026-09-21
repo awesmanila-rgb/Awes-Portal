@@ -5376,7 +5376,18 @@
     7:'Installation Parameters', 8:'Time & Remarks', 9:'Technician Signature',
     10:'Customer Acknowledgment'
   };
-  const SR_FIRST_SECTION = 2;   // the wizard always starts at Equipment Details
+  // The wizard normally starts at Equipment Details: section 1 (customer
+  // and service date) is inherited from the Job Order and never shown.
+  //
+  // Record Past Service has no job order, so section 1 IS its first step —
+  // it is where the date and technician are entered. Treating 2 as the
+  // first section there meant section 1 got no Back/Next buttons built for
+  // it and the wizard had no way forward from the step it had just landed
+  // on.
+  const SR_FIRST_SECTION = 2;   // default: the wizard starts at Equipment Details
+  function srFirstSection(){
+    return (typeof srIsBackEntry === 'function' && srIsBackEntry()) ? 1 : SR_FIRST_SECTION;
+  }
   const SR_LAST_SECTION = 10;
   let srMaxSection = 1;
   // The ONE section currently on screen (srRevealSections hides the rest).
@@ -5483,8 +5494,9 @@
   }
   function srPrevSection(n){
     let prev = n-1;
-    while(prev>=SR_FIRST_SECTION && srSectionIsSkipped(prev)) prev--;
-    return prev < SR_FIRST_SECTION ? SR_FIRST_SECTION : prev;
+    const first = srFirstSection();
+    while(prev>=first && srSectionIsSkipped(prev)) prev--;
+    return prev < first ? first : prev;
   }
   // Only sections with genuinely required fields block progress. Everything
   // else continues freely — gating optional sections would turn progressive
@@ -5572,6 +5584,11 @@
       }
       const isCurrent = (n===srCurrentSection && !srSectionIsSkipped(n));
       card.style.display = isCurrent ? '' : 'none';
+      // Back is built into every section but must not appear on whichever
+      // one is currently FIRST — that changes with the mode, so it is
+      // decided here rather than when the buttons are created.
+      const backOnThis = card.querySelector('.sr-back-btn');
+      if(backOnThis) backOnThis.style.display = (n <= srFirstSection()) ? 'none' : '';
       // Showing the CARD isn't enough — these are collapsible, and the
       // body starts display:none, so without this the technician had to
       // tap the header open on every single step.
@@ -5625,16 +5642,19 @@
   // Appended once at startup — putting these in the markup would mean
   // eight near-identical blocks kept in sync by hand.
   function srInstallContinueButtons(){
-    for(let n=SR_FIRST_SECTION; n<=SR_LAST_SECTION; n++){
+    // From 1, not SR_FIRST_SECTION: these are built once at startup, and
+    // section 1 needs them whenever Record Past Service is used. In the
+    // normal flow that section is hidden, so the extra pair costs nothing.
+    for(let n=1; n<=SR_LAST_SECTION; n++){
       const body = $('sec'+n+'Body');
       if(!body || body.querySelector('.sr-step-nav')) continue;
       const wrap = document.createElement('div');
       wrap.className = 'sr-continue-wrap sr-step-nav';
       // Back on every step except the first; Next on every step except the
       // last (where the footer's Generate/Save buttons take over).
-      const backBtn = n>SR_FIRST_SECTION
-        ? '<button type="button" class="btn btn-secondary sr-back-btn" data-sr-back="'+n+'">\u2190 Back</button>'
-        : '';
+      // Hidden on whichever section is currently first — set at render
+      // time by srRenderSectionNav, since that changes with the mode.
+      const backBtn = '<button type="button" class="btn btn-secondary sr-back-btn" data-sr-back="'+n+'">\u2190 Back</button>';
       const nextBtn = n<SR_LAST_SECTION
         ? '<button type="button" class="btn btn-primary sr-continue-btn" data-sr-section="'+n+'">Next \u2192</button>'
         : '';
@@ -5677,7 +5697,7 @@
   // step would skip whatever the draft is still missing.)
   function srSetAllSectionsRevealed(){
     srMaxSection = SR_LAST_SECTION;
-    srCurrentSection = SR_FIRST_SECTION;
+    srCurrentSection = srFirstSection();
     srRevealSections();
   }
 
@@ -5781,7 +5801,7 @@
     // Steps that actually exist for this report (Installation Parameters
     // drops out when its toggle is off, so "of N" stays truthful).
     const steps = [];
-    for(let n=SR_FIRST_SECTION; n<=SR_LAST_SECTION; n++){
+    for(let n=srFirstSection(); n<=SR_LAST_SECTION; n++){
       if(!srSectionIsSkipped(n)) steps.push(n);
     }
     const total = steps.length;
@@ -9569,6 +9589,34 @@
     if(!isFinite(dayStart)) return null;
     return { opens: dayStart, expires: dayStart + 24*3600000 + DT_EXPIRE_HOURS*3600000 };
   }
+  // The scheduled instant itself, or null when no time was set. Exposed so
+  // callers ask for it directly rather than reverse-engineering it from the
+  // window (opens + DT_WINDOW_OPEN_HOURS), which would silently go wrong the
+  // day that constant changes.
+  function dtScheduledAtMs(r){
+    if(!r || !r.date || !r.expectedTime) return null;
+    const at = new Date(r.date+'T'+r.expectedTime+':00'+BUSINESS_TZ_OFFSET).getTime();
+    return isFinite(at) ? at : null;
+  }
+  // Minutes past the scheduled time before an unacknowledged job order
+  // counts as Late. Without a grace period, ordinary traffic flags nearly
+  // every job at one minute past and the count stops meaning anything.
+  const DT_LATE_GRACE_MIN = 30;
+
+  // Late is a FLAG, deliberately not a status. The ticket stays 'preparing'
+  // everywhere; only the dashboard and the Late filter look at the clock.
+  // Every new status value added in this app has broken something with a
+  // hardcoded list of statuses — calendar colours, the report picker, the
+  // cancel gate, the dashboard counts — and a late job is simply a
+  // Preparing job whose time has passed, so it doesn't need to be one.
+  function dtIsLate(r, nowMs){
+    if(!r || dtEffectiveStatus(r) !== 'preparing') return false;
+    if((r.acknowledgedBy||[]).length > 0) return false; // someone is on it
+    const at = dtScheduledAtMs(r);
+    if(at === null) return false; // no time set — nothing to be late against
+    const now = (typeof nowMs === 'number') ? nowMs : dtNowMs();
+    return now > at + DT_LATE_GRACE_MIN * 60000;
+  }
   // Past its window with nobody having acknowledged.
   function dtIsPastDue(r){
     const w = dtWindow(r);
@@ -10048,12 +10096,16 @@
     const list = $('dtAdminList');
     list.innerHTML = '<div class="empty-state">Loading…</div>';
     const all = await dtListAll();
-    const items = dtAdminFilter==='all' ? all : all.filter(r=> dtEffectiveStatus(r)===dtAdminFilter);
+    // 'late' is a flag, not a status, so it can't go through the status
+    // comparison below — it would match nothing.
+    const items = dtAdminFilter==='all' ? all
+      : (dtAdminFilter==='late' ? all.filter(r=> dtIsLate(r))
+                                : all.filter(r=> dtEffectiveStatus(r)===dtAdminFilter));
     dtLastTicketsById = {};
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
       // Raw filter keys read badly here — "No in_progress dispatch tickets".
-      const FILTER_LABELS = { preparing:'preparing', acknowledged:'en route', in_progress:'in-progress',
+      const FILTER_LABELS = { late:'late', preparing:'preparing', acknowledged:'en route', in_progress:'in-progress',
         completed:'job orders awaiting review', scheduled:'scheduled', closed:'closed',
         expired:'expired', cancelled:'cancelled' };
       const label = dtAdminFilter==='all' ? 'dispatch tickets'
@@ -15577,6 +15629,284 @@
     await openServiceReportsManagerPage();
   }
 
+
+  // ===================================================================
+  // Admin dashboard panels: Today's Job Orders, Jobs Completed, This
+  // Week's Schedule, and the top-bar search.
+  //
+  // Everything here READS the data renderHomeOverview already fetched —
+  // no extra queries — and every tap goes through a path the app already
+  // uses (dtOpenTicketOverlay, showDispatchView, showCustomersManagerView),
+  // so no flow is new.
+  // ===================================================================
+  let admLastTickets = [];
+  let admLastUsers = [];
+
+  function admTechName(t){
+    const names = t.assignedWorkerNames || [];
+    if(!names.length) return '—';
+    return names[0] + (names.length > 1 ? ' +' + (names.length - 1) : '');
+  }
+  function admInitial(name){ return (String(name||'?').trim()[0] || '?').toUpperCase(); }
+  const ADM_AVATAR = ['#1F6F7A','#B9791F','#2A6FDB','#6B4FA0','#154D34','#C2560C'];
+  function admAvatarColor(name){
+    let h = 0; const s = String(name||'');
+    for(let i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i)) >>> 0;
+    return ADM_AVATAR[h % ADM_AVATAR.length];
+  }
+
+  // One status vocabulary for every new panel, derived from the same
+  // helpers the rest of the app uses — never a new status value.
+  function admStatus(t, nowMs){
+    const st = dtEffectiveStatus(t);
+    if(typeof dtIsLate === 'function' && dtIsLate(t, nowMs)){
+      const at = dtScheduledAtMs(t);
+      const mins = at ? Math.max(0, Math.round((nowMs - at) / 60000)) : 0;
+      const late = mins < 60 ? mins + 'm' : Math.floor(mins/60) + 'h';
+      return { key:'late', rank:0, label:'Late · ' + late, cls:'adm-p-late', color:'#C2410C' };
+    }
+    if(st==='in_progress')  return { key:st, rank:1, label:'Work in Progress', cls:'adm-p-wip',    color:'#2C7BE5' };
+    if(st==='acknowledged') return { key:st, rank:2, label:'En Route',         cls:'adm-p-route',  color:'#1F7A50' };
+    if(st==='completed')    return { key:st, rank:3, label:'For Review',       cls:'adm-p-review', color:'#6D28D9' };
+    if(st==='preparing')    return { key:st, rank:4, label:'Preparing',        cls:'adm-p-prep',   color:'#B9791F' };
+    if(st==='expired')      return { key:st, rank:5, label:'Expired',          cls:'adm-p-exp',    color:'#8A9089' };
+    if(st==='scheduled')    return { key:st, rank:6, label:'Scheduled',        cls:'adm-p-sched',  color:'#8A9089' };
+    if(st==='closed')       return { key:st, rank:7, label:'Closed',           cls:'adm-p-sched',  color:'#8A9089' };
+    return { key:st, rank:8, label:st, cls:'adm-p-sched', color:'#8A9089' };
+  }
+  function admShortDate(iso){
+    if(!iso) return '—';
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const y = iso.slice(0,4), m = +iso.slice(5,7) - 1, d = +iso.slice(8,10);
+    return MON[m] + ' ' + d + (y === todayISO().slice(0,4) ? '' : ', ' + y);
+  }
+  function admSchedKey(t){ return (t.date||'') + ' ' + (t.expectedTime||'99:99'); }
+
+  // ---------- Today's Job Orders ----------
+  // Today's schedule, plus anything still waiting on admin wherever it was
+  // dated: late, on site, awaiting review. Recently expired visits are
+  // included for three days so a missed job is seen rather than lost.
+  function admRenderJobs(tickets){
+    const card = $('admJobsCard'); if(!card) return;
+    card.style.display = '';
+    const table = $('admJobsTable');
+    const now = dtNowMs(), today = todayISO();
+    const threeDaysAgo = new Date(now - 3*86400000).toISOString().slice(0,10);
+    const rows = (tickets||[]).filter(t=>{
+      const st = dtEffectiveStatus(t);
+      if(st==='cancelled' || st==='replaced') return false;
+      if(t.date === today) return true;
+      if(dtIsLate(t, now)) return true;
+      if(st==='in_progress' || st==='completed') return true;
+      if(st==='expired' && (t.date||'') >= threeDaysAgo) return true;
+      return false;
+    }).map(t=> ({ t, s: admStatus(t, now) }))
+      .sort((a,b)=> (a.s.rank - b.s.rank) || admSchedKey(a.t).localeCompare(admSchedKey(b.t)))
+      .slice(0, 8);
+
+    if(!rows.length){
+      table.innerHTML = '<tr><td class="adm-empty">Nothing scheduled today and nothing waiting on you.</td></tr>';
+      return;
+    }
+    table.innerHTML = '<tr><th>Customer</th><th>Job Order</th><th>Schedule</th><th>Status</th><th>Technician</th></tr>' +
+      rows.map(({t,s})=>{
+        const tech = admTechName(t);
+        // Year dropped when it's this year — "Sep 21 · 09:00" rather than
+        // "Sep 21, 2026, 09:00", which pushed the table past its width.
+        const when = admShortDate(t.date) + (t.expectedTime ? ' · ' + t.expectedTime : '');
+        return '<tr class="adm-row" data-jo="'+escapeHtml(t.id)+'">'+
+          '<td>'+escapeHtml(t.custName||'—')+'</td>'+
+          '<td>'+escapeHtml(t.jobOrderNo||t.id)+'</td>'+
+          '<td>'+escapeHtml(when)+'</td>'+
+          '<td><span class="adm-pill '+s.cls+'">'+escapeHtml(s.label)+'</span></td>'+
+          '<td>'+(tech==='—' ? '—' : '<span class="adm-tech"><span class="adm-mini" style="background:'+admAvatarColor(tech)+'">'+escapeHtml(admInitial(tech))+'</span>'+escapeHtml(tech)+'</span>')+'</td>'+
+        '</tr>';
+      }).join('');
+    table.querySelectorAll('tr[data-jo]').forEach(tr=>{
+      tr.onclick = ()=> dtOpenTicketOverlay(tr.dataset.jo);
+    });
+  }
+
+  // ---------- Jobs Completed ----------
+  function admRenderChart(tickets){
+    const card = $('admChartCard'); if(!card) return;
+    card.style.display = '';
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const today = todayISO();
+    let y = +today.slice(0,4), m = +today.slice(5,7) - 1;
+    const months = [];
+    for(let i=5;i>=0;i--){
+      let mm = m - i, yy = y;
+      while(mm < 0){ mm += 12; yy--; }
+      months.push({ key: yy + '-' + String(mm+1).padStart(2,'0'), label: MON[mm], n:0 });
+    }
+    const idx = {}; months.forEach((x,i)=> idx[x.key] = i);
+    (tickets||[]).forEach(t=>{
+      if(t.status !== 'closed') return;
+      const when = String(t.closedAt || t.date || '').slice(0,7);
+      if(idx[when] !== undefined) months[idx[when]].n++;
+    });
+    const cur = months[5].n, prev = months[4].n, diff = cur - prev;
+    $('admChartTotal').innerHTML = '<b>'+cur+'</b><span style="color:'+(diff>=0?'var(--green)':'#C2410C')+';">'+
+      (diff>=0?'+':'')+diff+' vs '+escapeHtml(months[4].label)+'</span>';
+
+    const W = 260, H = 120, pad = 8;
+    const max = Math.max(1, ...months.map(x=> x.n));
+    const pts = months.map((x,i)=> [pad + i*(W-2*pad)/5, H - pad - (x.n/max)*(H-2*pad)]);
+    const line = pts.map((p,i)=> (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    const area = line + ' L'+pts[5][0].toFixed(1)+' '+(H-2)+' L'+pts[0][0].toFixed(1)+' '+(H-2)+' Z';
+    $('admChart').innerHTML =
+      '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+
+        '<defs><linearGradient id="admGf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E9E62" stop-opacity=".28"/><stop offset="1" stop-color="#2E9E62" stop-opacity="0"/></linearGradient></defs>'+
+        '<g stroke="#EEF1EF" stroke-width="1"><line x1="0" y1="'+(H*.25)+'" x2="'+W+'" y2="'+(H*.25)+'"/><line x1="0" y1="'+(H*.5)+'" x2="'+W+'" y2="'+(H*.5)+'"/><line x1="0" y1="'+(H*.75)+'" x2="'+W+'" y2="'+(H*.75)+'"/></g>'+
+        '<path d="'+area+'" fill="url(#admGf)"/>'+
+        '<path d="'+line+'" fill="none" stroke="#2E9E62" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'+
+      '</svg>'+
+      '<div class="adm-chart-legend">'+months.map(x=> '<span>'+x.label+'</span>').join('')+'</div>';
+  }
+
+  // ---------- This Week's Schedule ----------
+  // Monday to Sunday of the current week, bucketed by time of day rather
+  // than fixed hours — job orders are booked at arbitrary times, and hour
+  // rows would be mostly empty.
+  function admRenderWeek(tickets){
+    const card = $('admWeekCard'); if(!card) return;
+    card.style.display = '';
+    const today = todayISO();
+    const base = new Date(today + 'T00:00:00');
+    const dow = (base.getDay() + 6) % 7; // Monday = 0
+    const days = [];
+    for(let i=0;i<7;i++){
+      const d = new Date(base); d.setDate(base.getDate() - dow + i);
+      days.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    }
+    const DN = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    $('admWeekRange').textContent = leaveFmtDate(days[0]) + ' – ' + leaveFmtDate(days[6]);
+    const now = dtNowMs();
+    const slots = [
+      { label:'Morning',   test:(t)=> t && t < '12:00' },
+      { label:'Afternoon', test:(t)=> t && t >= '12:00' && t < '17:00' },
+      { label:'Evening',   test:(t)=> t && t >= '17:00' },
+      { label:'Any time',  test:(t)=> !t }
+    ];
+    const week = (tickets||[]).filter(t=> days.includes(t.date) && !['cancelled','replaced'].includes(dtEffectiveStatus(t)));
+    // Drop the "Any time" row when nothing uses it, rather than showing an
+    // empty strip across the whole week.
+    const useSlots = slots.filter((s,i)=> i < 3 || week.some(t=> s.test(t.expectedTime)));
+    let h = '<div class="wh"></div>' + days.map((d,i)=>
+      '<div class="wh'+(d===today?' today':'')+'">'+DN[i]+' '+(+d.slice(8))+'</div>').join('');
+    useSlots.forEach(slot=>{
+      h += '<div class="wt">'+slot.label+'</div>';
+      days.forEach(d=>{
+        const evs = week.filter(t=> t.date===d && slot.test(t.expectedTime))
+          .sort((a,b)=> (a.expectedTime||'').localeCompare(b.expectedTime||''));
+        h += '<div'+(d===today?' class="today-col"':'')+'>' + evs.map(t=>{
+          const s = admStatus(t, now);
+          return '<button type="button" class="adm-ev" data-jo="'+escapeHtml(t.id)+'" style="background:'+s.color+'">'+
+            escapeHtml((t.expectedTime ? t.expectedTime + ' ' : '') + (t.custName||t.jobOrderNo||''))+
+            '<small>'+escapeHtml(s.label)+'</small></button>';
+        }).join('') + '</div>';
+      });
+    });
+    const grid = $('admWeek'); grid.innerHTML = h;
+    grid.querySelectorAll('[data-jo]').forEach(b=> b.onclick = ()=> dtOpenTicketOverlay(b.dataset.jo));
+  }
+
+  // ---------- Search ----------
+  // Searches what the dashboard already holds — job orders and staff from
+  // the last render, customers from the existing customers cache — so a
+  // keystroke never queries the database.
+  let admSearchReady = false, admSearchHl = -1;
+  function admBuildIndex(){
+    const idx = [];
+    const seenCust = new Set();
+    (typeof customersCache !== 'undefined' ? customersCache : []).forEach(c=>{
+      const n = (c && (c.name || c.custName)) || ''; if(!n || seenCust.has(n)) return;
+      seenCust.add(n); idx.push({ g:'Customers', t:n, m:c.address || '', go:()=> showCustomersManagerView() });
+    });
+    const now = dtNowMs();
+    admLastTickets.forEach(t=>{
+      const n = t.custName || '';
+      if(n && !seenCust.has(n)){ seenCust.add(n); idx.push({ g:'Customers', t:n, m:'', go:()=> showCustomersManagerView() }); }
+      idx.push({ g:'Job Orders', t:(t.jobOrderNo||t.id)+' — '+(t.custName||''), m:admStatus(t, now).label,
+        go:()=> dtOpenTicketOverlay(t.id) });
+    });
+    admLastUsers.filter(u=> u && u.role !== 'admin' && u.role !== 'customer').forEach(u=>{
+      idx.push({ g:'Technicians', t:u.name || '', m:'', go:()=>{
+        const c = $('homeTrackerCard'); if(c) c.scrollIntoView({ behavior:'smooth', block:'start' });
+      }});
+    });
+    return idx;
+  }
+  function admInitSearch(){
+    if(admSearchReady) return;
+    const input = $('admSearchInput'), box = $('admSearchResults');
+    if(!input || !box) return;
+    admSearchReady = true;
+    // Same destination as the Job Orders tab in the sidebar.
+    const allBtn = $('admJobsAllBtn');
+    if(allBtn) allBtn.onclick = ()=>{ if(typeof showDispatchView === 'function') showDispatchView('all'); };
+    let hits = [];
+    const mark = (text, term)=>{
+      const i = text.toLowerCase().indexOf(term.toLowerCase());
+      if(i < 0) return escapeHtml(text);
+      return escapeHtml(text.slice(0,i))+'<mark>'+escapeHtml(text.slice(i,i+term.length))+'</mark>'+escapeHtml(text.slice(i+term.length));
+    };
+    const close = ()=>{ box.classList.remove('open'); admSearchHl = -1; };
+    const render = ()=>{
+      const term = input.value.trim(); admSearchHl = -1;
+      if(!term){ close(); box.innerHTML = ''; return; }
+      const low = term.toLowerCase();
+      hits = admBuildIndex().filter(x=> (x.t+' '+x.m).toLowerCase().includes(low)).slice(0, 12);
+      if(!hits.length){ box.innerHTML = '<div class="adm-rempty">No matches for "'+escapeHtml(term)+'"</div>'; box.classList.add('open'); return; }
+      let html = '', last = '';
+      hits.forEach((x,i)=>{
+        if(x.g !== last){ html += '<div class="adm-rgroup">'+x.g+'</div>'; last = x.g; }
+        html += '<div class="adm-ritem" data-i="'+i+'">'+mark(x.t, term)+(x.m ? '<span class="rmeta">'+escapeHtml(x.m)+'</span>' : '')+'</div>';
+      });
+      box.innerHTML = html; box.classList.add('open');
+      box.querySelectorAll('.adm-ritem').forEach(el=> el.onclick = ()=>{
+        const h = hits[+el.dataset.i]; close(); input.value = ''; input.blur(); if(h) h.go();
+      });
+    };
+    input.addEventListener('input', render);
+    input.addEventListener('focus', ()=>{
+      // Customers may not be loaded yet on a fresh session; loading them
+      // once here is the same call the Customers screen makes.
+      if(typeof loadCustomers === 'function' && typeof customersCache !== 'undefined' && !customersCache.length){
+        loadCustomers().then(render).catch(()=>{});
+      }
+      render();
+    });
+    input.addEventListener('keydown', (e)=>{
+      const items = box.querySelectorAll('.adm-ritem');
+      if(e.key === 'Escape'){ close(); input.blur(); return; }
+      if(!items.length) return;
+      if(e.key === 'ArrowDown'){ e.preventDefault(); admSearchHl = Math.min(admSearchHl+1, items.length-1); }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); admSearchHl = Math.max(admSearchHl-1, 0); }
+      else if(e.key === 'Enter'){ e.preventDefault(); const t = items[Math.max(admSearchHl,0)]; if(t) t.click(); return; }
+      else return;
+      items.forEach((el,i)=> el.classList.toggle('hl', i===admSearchHl));
+      if(items[admSearchHl]) items[admSearchHl].scrollIntoView({ block:'nearest' });
+    });
+    document.addEventListener('click', (e)=>{
+      const wrap = input.closest('.dt-search');
+      if(wrap && !wrap.contains(e.target)) close();
+    });
+  }
+
+  function admRenderDashboard(tickets, users){
+    admLastTickets = tickets || [];
+    admLastUsers = users || [];
+    try{ admRenderJobs(admLastTickets); }catch(e){ console.error('admin jobs panel failed', e); }
+    try{ admRenderChart(admLastTickets); }catch(e){ console.error('admin chart panel failed', e); }
+    try{ admRenderWeek(admLastTickets); }catch(e){ console.error('admin week panel failed', e); }
+    admInitSearch();
+  }
+  function admHideDashboardPanels(){
+    ['admJobsCard','admChartCard','admWeekCard'].forEach(id=>{ const c = $(id); if(c) c.style.display = 'none'; });
+  }
+
   // ---------- Home screen greeting (technicians only) ----------
   async function renderHomeGreeting(){
     const card = $('homeGreetingCard');
@@ -15678,14 +16008,66 @@
     $('ovMyLiqValue').textContent = String(liqCount);
     $('ovMyLiqSub').textContent = liqCount===0 ? 'Nothing to liquidate' : liqCount+' Cash Advance'+(liqCount===1?'':'s')+' to Liquidate';
 
-    // Next Job Order — the soonest-dated open ticket, so a technician sees
-    // what's coming up without opening My Job Order and scanning the list.
-    const nextJo = openTickets.filter(t=>t.date).slice()
-      .sort((a,b)=> a.date.localeCompare(b.date) || (a.expectedTime||'').localeCompare(b.expectedTime||''))[0];
+    // The job order a technician should be thinking about right now.
+    //
+    // This used to be "the soonest-dated open ticket", always titled Next
+    // Job Order. Two things were wrong with that. A job scheduled for 09:00
+    // was still labelled "Next" at 12:25 — it was three hours late, not
+    // upcoming, and the card said nothing about it. And the pick was
+    // schedule-only, so a job the technician was already ON SITE at could
+    // be outranked by one due later.
+    //
+    // Priority, most pressing first:
+    //   1. on site now (Work in Progress)
+    //   2. acknowledged and heading there (En Route)
+    //   3. open for acknowledgement — earliest scheduled first
+    //   4. not open yet (Scheduled) — earliest first
+    // and the card's TITLE says which of those it is.
+    const rankOf = (t)=>{
+      const st = dtEffectiveStatus(t);
+      if(st==='in_progress') return 0;
+      if(st==='acknowledged') return 1;
+      if(st==='preparing') return 2;
+      return 3; // scheduled
+    };
+    const schedKey = (t)=> (t.date||'') + ' ' + (t.expectedTime||'99:99');
+    const nextJo = openTickets.filter(t=> t.date && dtEffectiveStatus(t)!=='completed').slice()
+      .sort((a,b)=> (rankOf(a)-rankOf(b)) || schedKey(a).localeCompare(schedKey(b)))[0];
+
+    const titleEl = $('ovMyNextJoTitle');
     if(nextJo){
+      const st = dtEffectiveStatus(nextJo);
+      const where = (nextJo.custName||'');
+      const when = leaveFmtDate(nextJo.date)+(nextJo.expectedTime ? (' at '+nextJo.expectedTime) : '');
+      let title = 'Next Job Order', sub = where+' — '+when;
+
+      if(st==='in_progress'){
+        title = 'Current Job Order';
+        sub = where+' — on site now';
+      }else if(st==='acknowledged'){
+        title = 'On the Way';
+        sub = where+' — '+when;
+      }else if(st==='preparing'){
+        // Open for acknowledgement. Whether it is overdue depends on the
+        // scheduled time, not the date: a 09:00 job at 12:25 is late even
+        // though it is "today".
+        const at = (typeof dtScheduledAtMs === 'function') ? dtScheduledAtMs(nextJo) : null;
+        const now = (typeof dtNowMs === 'function') ? dtNowMs() : Date.now();
+        if(at && now > at){
+          const mins = Math.round((now - at) / 60000);
+          const late = mins < 60 ? (mins+' min') : (Math.floor(mins/60)+'h'+(mins%60 ? ' '+(mins%60)+'m' : ''));
+          title = 'Due Now — Not Yet Acknowledged';
+          sub = where+' — scheduled '+nextJo.expectedTime+', '+late+' ago';
+        }else{
+          title = 'Today';
+          sub = where+' — '+when;
+        }
+      }
+      if(titleEl) titleEl.textContent = title;
       $('ovMyNextJoValue').textContent = nextJo.jobOrderNo || nextJo.id;
-      $('ovMyNextJoSub').textContent = (nextJo.custName||'')+' — '+leaveFmtDate(nextJo.date)+(nextJo.expectedTime ? (' at '+nextJo.expectedTime) : '');
+      $('ovMyNextJoSub').textContent = sub;
     }else{
+      if(titleEl) titleEl.textContent = 'Next Job Order';
       $('ovMyNextJoValue').textContent = '—';
       $('ovMyNextJoSub').textContent = 'Nothing scheduled';
     }
@@ -15787,8 +16169,11 @@
   // stored just for this panel.
   async function renderHomeOverview(){
     const card = $('homeOverviewCard');
+    const joCard = $('homeJobOrdersCard');
     if(!currentUser || currentUser.role!=='admin'){
       card.style.display = 'none';
+      if(joCard) joCard.style.display = 'none';
+      admHideDashboardPanels();
       const trackerCard = $('homeTrackerCard');
       if(trackerCard) trackerCard.style.display = 'none';
       const techListCard = $('homeTechListCard');
@@ -15800,6 +16185,7 @@
       return;
     }
     card.style.display = '';
+    if(joCard) joCard.style.display = '';
     renderDashboardGreeting();
 
     const [users, dtrToday, tickets, cashAdvances, leaves, reports] = await Promise.all([
@@ -15904,6 +16290,40 @@
     // just below already reflects it on this first render.
     const openServiceRequests = (typeof srAdminInit === 'function') ? (await srAdminInit()) || 0 : 0;
 
+    // Late and Expired: the two ways a scheduled visit gets dropped without
+    // anyone noticing. Both are DERIVED here from data that already exists —
+    // nothing new is stored, and neither is a status.
+    //
+    // Late: nobody has acknowledged, and the scheduled time passed more than
+    // DT_LATE_GRACE_MIN ago, but it is still inside the 8-hour window, so
+    // the visit can still be saved. The grace stops ordinary Metro Manila
+    // traffic flagging every job at one minute past.
+    //
+    // Expired: the window closed with nobody acknowledging. The visit was
+    // missed, and until now this surfaced only if someone happened to open
+    // the customer's portal.
+    const nowMs = (typeof dtNowMs === 'function') ? dtNowMs() : Date.now();
+    const lateTickets = (tickets||[]).filter(t=> typeof dtIsLate === 'function' && dtIsLate(t, nowMs));
+    const expiredTickets = (tickets||[]).filter(t=> dtEffectiveStatus(t) === 'expired');
+    const wireCount = (cardId, valueId, subId, list, noun, filter)=>{
+      const c = $(cardId); if(!c) return;
+      c.style.display = list.length > 0 ? '' : 'none';
+      $(valueId).textContent = String(list.length);
+      $(subId).textContent = list.length+' Job Order'+(list.length===1?'':'s')+' '+noun;
+      // Assigned, not added, so repeated renders never stack handlers.
+      c.onclick = async ()=>{
+        if(typeof showDispatchView === 'function') await showDispatchView('all');
+        if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter(filter);
+      };
+    };
+    wireCount('ovLateCard', 'ovLateValue', 'ovLateSub', lateTickets, 'Not Yet Acknowledged', 'late');
+    wireCount('ovExpiredCard', 'ovExpiredValue', 'ovExpiredSub', expiredTickets, 'Missed', 'expired');
+
+    // New dashboard panels. Isolated in their own try so a failure in one
+    // of them can never stop the counts above, or anything after, from
+    // rendering — the rest of the home screen predates them.
+    try{ admRenderDashboard(tickets, users); }catch(e){ console.error('admin dashboard panels failed', e); }
+
     // Job orders awaiting review — every unit resolved, now sitting on
     // ADMIN to read the reports and close it. This is the only automated
     // reminder in the lifecycle: technicians are not nagged, because they
@@ -15931,7 +16351,7 @@
 
     // Notification bell in the dashboard top bar — total items anywhere in
     // the app that are waiting on an admin decision or sign-off.
-    const notifTotal = pendingCA + pendingLiq + pendingLeave + reportStat + openServiceRequests + awaitingReview;
+    const notifTotal = pendingCA + pendingLiq + pendingLeave + reportStat + openServiceRequests + awaitingReview + lateTickets.length + expiredTickets.length;
     const notifEl = $('notifBadge');
     if(notifEl){
       notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);
@@ -16930,6 +17350,17 @@
     await trackerRefresh();
     if(!trackerPollTimer) trackerPollTimer = setInterval(trackerRefresh, 20000);
     setTimeout(()=>{ if(trackerMap) trackerMap.invalidateSize(); }, 200);
+    // Leaflet measures its container once, at creation. In the admin
+    // dashboard grid the map's cell is sized by its row — and changes when
+    // the window resizes or the layout switches between desktop, tablet and
+    // phone — so without this the map would keep its first size and leave
+    // grey tiles or a cut-off edge. Observing the element covers every one
+    // of those cases, where a window resize listener alone would miss the
+    // row growing because a neighbouring card changed height.
+    if(typeof ResizeObserver === 'function' && !mapEl.dataset.roBound){
+      mapEl.dataset.roBound = '1';
+      new ResizeObserver(()=>{ if(trackerMap) trackerMap.invalidateSize(); }).observe(mapEl);
+    }
   }
 
   // Full teardown — called on logout so a signed-out session doesn't keep an

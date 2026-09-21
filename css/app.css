@@ -2469,3 +2469,248 @@ html.role-tech-root body{ overscroll-behavior-x:none; overscroll-behavior-y:auto
   color:var(--green-dark); background:var(--green-light); border-radius:8px;
   padding:8px 10px; margin:4px 0 10px; text-align:left;
 }
+
+/* =====================================================================
+   Admin dashboard layout
+   ---------------------------------------------------------------------
+   Every existing admin card keeps its markup, id and handlers; this only
+   PLACES them. All rules are scoped to body.role-admin, so the technician
+   home screen is completely unaffected — for them #adminDash is a plain
+   block and nothing below applies.
+
+   Two tracks, roughly 2 : 1. Each row pairs a main panel with a related
+   side panel, and the rows stretch so neighbours end level:
+     the work    Today's Job Orders  |  Recent Activity + Jobs Completed
+     the people  Live Tracker        |  Technicians
+     the plan    This Week           |  Schedule Calendar
+
+   One spacing scale throughout (see --adm-*): gaps and padding are steps
+   on it, never ad-hoc values, so the rhythm stays even.
+   ===================================================================== */
+body.role-admin{
+  --adm-s1:4px; --adm-s2:8px; --adm-s3:12px; --adm-s4:16px;
+  --adm-s5:20px; --adm-s6:24px; --adm-s7:32px;
+  --adm-gap:var(--adm-s6);
+  --adm-pad:var(--adm-s6);
+}
+body.role-admin #adminDash{
+  display:grid;
+  grid-template-columns:minmax(0,2fr) minmax(0,1fr);
+  gap:var(--adm-gap);
+  align-items:stretch;
+  grid-template-areas:
+    "ov    ov"
+    "jo    jo"
+    "qa    qa"
+    "jobs  act"
+    "jobs  chart"
+    "track avail"
+    "week  cal"
+    "ann   ann";
+}
+/* The tracker pair already had a wrapper; let its children join the grid
+   directly instead of moving them out of it. */
+body.role-admin #dashTwoCol{ display:contents; }
+
+body.role-admin #homeOverviewCard{ grid-area:ov; }
+body.role-admin #homeJobOrdersCard{ grid-area:jo; }
+body.role-admin #homeIntroCard{ grid-area:qa; }
+body.role-admin #admJobsCard{ grid-area:jobs; }
+body.role-admin #homeActivityCard{ grid-area:act; }
+body.role-admin #admChartCard{ grid-area:chart; }
+body.role-admin #homeTrackerCard{ grid-area:track; }
+body.role-admin #homeTechListCard{ grid-area:avail; }
+body.role-admin #admWeekCard{ grid-area:week; }
+body.role-admin #homeScheduleCalendarCard{ grid-area:cal; }
+body.role-admin #homeAnnouncementsCard{ grid-area:ann; }
+
+/* Cards carried an inline margin-bottom for the old stacked layout; the
+   grid gap replaces it, and keeping both would double every gap. */
+body.role-admin #adminDash > .card,
+body.role-admin #dashTwoCol > .card{
+  margin:0 !important; min-width:0;
+  display:flex; flex-direction:column;
+  border-radius:16px;
+  box-shadow:0 1px 2px rgba(21,77,52,.04);
+}
+/* Hidden cards stay hidden: JS hides these with an inline display:none,
+   which outranks the display:flex above, so a card is only laid out once
+   its render has cleared that inline style. */
+body.role-admin #adminDash .card-head{ border-radius:16px 16px 0 0; }
+body.role-admin #adminDash .card-body{
+  padding:var(--adm-pad); flex:1; display:flex; flex-direction:column; min-height:0;
+}
+body.role-admin #adminDash .overview-grid{ gap:var(--adm-s4); }
+
+/* Side-column cards stretch to their row, so their content should fill
+   rather than leave a gap at the bottom. */
+body.role-admin #homeActivityCard .card-body > *:last-child,
+body.role-admin #homeTechListCard .card-body > *:last-child{ flex:1; }
+
+/* Live tracker map fills its card so it matches the Technicians list. */
+body.role-admin #homeTrackerCard .tracker-map{ flex:1; min-height:320px; }
+
+/* ---------- New panels ---------- */
+.adm-sub{ margin:0 0 var(--adm-s4,16px); color:var(--text-muted); font-size:12.5px; }
+.adm-head-link{ background:none; border:0; color:#fff; font:inherit; font-size:12px; font-weight:700;
+  cursor:pointer; padding:0; letter-spacing:.3px; }
+.adm-tbl-wrap{ overflow-x:auto; flex:1; }
+.adm-tbl{ width:100%; border-collapse:collapse; }
+.adm-tbl th{ text-align:left; font-size:12px; color:var(--text-muted); font-weight:600;
+  padding:10px var(--adm-s4,16px); background:#F2F8F4; white-space:nowrap; }
+.adm-tbl th:first-child{ border-radius:8px 0 0 8px; } .adm-tbl th:last-child{ border-radius:0 8px 8px 0; }
+.adm-tbl td{ padding:14px var(--adm-s4,16px); border-top:1px solid var(--border); font-size:13px; white-space:nowrap; }
+.adm-tbl tr:nth-child(2) td{ border-top:0; }
+.adm-tbl tr.adm-row{ cursor:pointer; }
+.adm-tbl tr.adm-row:hover td{ background:#F7FBF8; }
+.adm-pill{ display:inline-block; font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:12px; }
+.adm-p-late{ background:#FDEEE6; color:#C2410C; }
+.adm-p-wip{ background:#E6F0FC; color:#2C7BE5; }
+.adm-p-route{ background:var(--green-light); color:var(--green-dark); }
+.adm-p-review{ background:#EDE4FC; color:#6D28D9; }
+.adm-p-prep{ background:#FCF3E3; color:var(--amber); }
+.adm-p-sched,.adm-p-exp{ background:#EEF0EF; color:#4A524B; }
+.adm-tech{ display:inline-flex; align-items:center; gap:var(--adm-s2,8px); }
+.adm-mini{ width:24px; height:24px; border-radius:50%; color:#fff; font-size:10.5px; font-weight:700;
+  display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+.adm-empty{ padding:var(--adm-s6,24px); text-align:center; color:var(--text-muted); font-size:13px; }
+
+.adm-chart-total{ display:flex; align-items:baseline; gap:var(--adm-s2,8px); margin-bottom:var(--adm-s4,16px); }
+.adm-chart-total b{ font-size:24px; }
+.adm-chart-total span{ font-size:12.5px; font-weight:600; }
+.adm-chart{ flex:1; display:flex; flex-direction:column; min-height:150px; }
+.adm-chart svg{ width:100%; flex:1; display:block; }
+.adm-chart-legend{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted);
+  margin-top:var(--adm-s3,12px); }
+
+.adm-week{ display:grid; grid-template-columns:78px repeat(7,minmax(92px,1fr)); border:1px solid var(--border);
+  border-radius:10px; overflow:hidden; min-width:720px; }
+.adm-week > div{ border-top:1px solid var(--border); border-left:1px solid var(--border);
+  padding:var(--adm-s2,8px); min-height:58px; font-size:11.5px; display:flex; flex-direction:column; gap:4px; }
+.adm-week .wh{ background:#F2F8F4; font-weight:600; text-align:center; min-height:auto; border-top:0;
+  padding:10px 4px; display:block; }
+.adm-week .wh.today{ color:var(--green-dark); }
+.adm-week .wt{ color:var(--text-muted); border-left:0; font-size:11px; justify-content:flex-start; }
+.adm-week .today-col{ background:#FAFDFB; }
+.adm-ev{ display:block; border-radius:7px; padding:5px var(--adm-s2,8px); color:#fff; font-weight:600;
+  line-height:1.25; cursor:pointer; border:0; text-align:left; font:inherit; font-size:11.5px; width:100%; }
+.adm-ev small{ display:block; font-weight:400; opacity:.9; }
+
+/* ---------- Search ---------- */
+body.role-admin .dt-search{ position:relative; }
+body.role-admin .dt-search input:focus{ outline:none; }
+.adm-search-results{ position:absolute; top:calc(100% + 6px); left:0; right:0; min-width:300px; background:#fff;
+  border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 30px rgba(21,77,52,.14);
+  z-index:60; display:none; max-height:360px; overflow:auto; text-align:left; }
+.adm-search-results.open{ display:block; }
+.adm-rgroup{ padding:10px 14px 4px; font-size:10.5px; font-weight:700; letter-spacing:.4px;
+  color:var(--text-muted); text-transform:uppercase; }
+.adm-ritem{ display:flex; align-items:center; gap:10px; padding:9px 14px; cursor:pointer; font-size:13px; color:var(--text); }
+.adm-ritem:hover,.adm-ritem.hl{ background:#F2F8F4; }
+.adm-ritem .rmeta{ margin-left:auto; font-size:11.5px; color:var(--text-muted); white-space:nowrap; }
+.adm-ritem mark{ background:#FFF1C9; color:inherit; border-radius:2px; }
+.adm-rempty{ padding:14px; font-size:13px; color:var(--text-muted); text-align:center; }
+
+/* ---------- Tablet: one column, side panels paired ---------- */
+@media (max-width:1100px){
+  body.role-admin{ --adm-gap:var(--adm-s5); --adm-pad:var(--adm-s5); }
+  body.role-admin #adminDash{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:
+      "ov    ov"
+      "jo    jo"
+      "qa    qa"
+      "jobs  jobs"
+      "act   chart"
+      "track track"
+      "avail avail"
+      "week  week"
+      "cal   cal"
+      "ann   ann";
+  }
+}
+/* ---------- Phone: single column, 16px floor on every edge ---------- */
+@media (max-width:640px){
+  body.role-admin{ --adm-gap:var(--adm-s4); --adm-pad:var(--adm-s4); }
+  body.role-admin #adminDash{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"ov" "jo" "qa" "jobs" "act" "chart" "track" "avail" "week" "cal" "ann";
+  }
+  body.role-admin #homeTrackerCard .tracker-map{ min-height:260px; }
+  .adm-tbl td{ padding:12px var(--adm-s3,12px); } .adm-tbl th{ padding:10px var(--adm-s3,12px); }
+  .adm-search-results{ min-width:0; }
+}
+
+/* ---------- Admin dashboard: fixes found by rendering the real build ---------- */
+
+/* Job Orders stat cards. auto-fit wrapped six cards 5 + 1, leaving
+   "Reports to Sign Off" alone on a row. Fixed column counts per width keep
+   rows even; Late / Expired / Review hide at zero, and the remaining cards
+   stretch to fill rather than leaving holes. */
+body.role-admin #homeJobOrdersCard .overview-grid{ grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); }
+@media (max-width:1100px){
+  body.role-admin #homeJobOrdersCard .overview-grid{ grid-template-columns:repeat(3, minmax(0,1fr)); }
+}
+@media (max-width:640px){
+  body.role-admin #homeJobOrdersCard .overview-grid,
+  body.role-admin #homeOverviewCard .overview-grid{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+}
+
+/* Today's Job Orders: five no-wrap columns overflowed the panel and cut
+   off the Technician column. Customer and technician names may wrap;
+   the codes, dates and status pills stay on one line so they scan. */
+.adm-tbl th, .adm-tbl td{ padding-left:var(--adm-s3,12px); padding-right:var(--adm-s3,12px); }
+.adm-tbl td:first-child, .adm-tbl td:last-child{ white-space:normal; }
+.adm-tbl td:first-child{ min-width:140px; }
+.adm-tbl td:last-child .adm-tech{ align-items:flex-start; }
+
+/* The home calendar sits in the narrow side column, but its own CSS goes
+   side-by-side at a 900px SCREEN width — reacting to the screen, not to
+   the space it actually has. Stack it inside the dashboard. Scoped to the
+   home card only, so the full Dispatch calendar keeps its layout. */
+body.role-admin #homeScheduleCalendarCard .cal-body-wrap{ flex-direction:column; gap:0; }
+body.role-admin #homeScheduleCalendarCard .cal-grid-col{ flex:none; max-width:none; width:100%; }
+body.role-admin #homeScheduleCalendarCard .cal-day-detail{
+  margin-top:var(--adm-s4,16px); border-left:0; padding-left:0;
+  border-top:1px solid var(--border); padding-top:var(--adm-s3,12px); min-width:0;
+}
+body.role-admin #homeScheduleCalendarCard .cal-toolbar{ margin-bottom:var(--adm-s3,12px); }
+body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
+
+/* This Week clipped Sunday: narrower minimum columns fit all seven days in
+   the main column on a laptop screen, and it still scrolls on a phone. */
+.adm-week{ grid-template-columns:70px repeat(7,minmax(80px,1fr)); min-width:630px; }
+
+/* ---------- Admin dashboard: phone fixes from the real render ---------- */
+@media (max-width:640px){
+  /* Overview has three cards in a two-column grid, which left the third
+     alone on its own row. Let it span the full width instead. Scoped to
+     Overview only: its three cards are always shown, whereas the Job
+     Orders card hides some at zero, and nth-child would still count those. */
+  body.role-admin #homeOverviewCard .overview-grid > :last-child:nth-child(odd){ grid-column:1 / -1; }
+
+  /* Today's Job Orders: a five-column table scrolls sideways on a phone and
+     hides Status and Technician — the two columns that matter most on the
+     move. Each row becomes a small stacked card instead:
+         Customer ................ Status
+         Job Order ............... Schedule
+         Technician                          */
+  /* Only the job orders wrapper: the week grid shares this class and must
+     keep scrolling sideways, or its seven columns push the page wider
+     than the screen. */
+  #admJobsCard .adm-tbl-wrap{ overflow:visible; }
+  .adm-tbl, .adm-tbl tbody{ display:block; }
+  .adm-tbl tr:first-child:not(.adm-row){ display:none; }
+  .adm-tbl tr.adm-row{
+    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px var(--adm-s3,12px);
+    padding:var(--adm-s3,12px) 0; border-top:1px solid var(--border); align-items:center;
+  }
+  .adm-tbl tr.adm-row:first-of-type, .adm-tbl tr:first-child + tr.adm-row{ border-top:0; }
+  .adm-tbl tr.adm-row td{ padding:0; border:0; white-space:normal; min-width:0; background:none !important; }
+  .adm-tbl tr.adm-row td:nth-child(1){ grid-column:1; grid-row:1; font-weight:600; }
+  .adm-tbl tr.adm-row td:nth-child(4){ grid-column:2; grid-row:1; text-align:right; }
+  .adm-tbl tr.adm-row td:nth-child(2){ grid-column:1; grid-row:2; color:var(--text-muted); font-size:12px; }
+  .adm-tbl tr.adm-row td:nth-child(3){ grid-column:2; grid-row:2; color:var(--text-muted); font-size:12px; text-align:right; white-space:nowrap; }
+  .adm-tbl tr.adm-row td:nth-child(5){ grid-column:1 / -1; grid-row:3; font-size:12.5px; }
+  .adm-tbl td.adm-empty{ display:block; }
+}

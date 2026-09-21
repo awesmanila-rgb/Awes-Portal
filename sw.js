@@ -884,7 +884,53 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v113 — Record Past Service skipped straight past the date.
+// Bumped to v118 — fixes found by rendering the real v117 build: the six
+// Job Orders stat cards wrapped 5 + 1; Today's Job Orders cut off its
+// Technician column, and on a phone scrolled sideways and hid Status —
+// rows now stack as small cards there; the home calendar went side-by-side
+// at a 900px SCREEN width while sitting in a narrow column, so it squeezed
+// and overlapped; This Week clipped Sunday; and Overview's third card sat
+// alone on phones.
+//
+// Also in v117 — admin Home redesigned as a single grid.
+//
+// Every existing admin card is kept exactly as it was — same markup, same
+// id, same handlers — and only PLACED by CSS (body.role-admin #adminDash),
+// so no flow changes. Rows pair related panels: Today's Job Orders beside
+// Recent Activity and Jobs Completed; the Live Tracker beside Technicians;
+// This Week's Schedule beside the Schedule Calendar. New: the Today's Job
+// Orders table, Jobs Completed chart, the week view, and top-bar search
+// (previously disabled). Technicians' home screen is untouched — none of
+// the layout rules apply to their role.
+//
+// Also in v116 — admin dashboard: everything about job orders in one
+// place, in lifecycle order (Service Requests, Dispatch Status, Late,
+// Expired, Review, Reports to Sign Off), separate from the general
+// Overview. Two new cards, both hidden at zero:
+//   Late    — scheduled 30+ minutes ago, nobody acknowledged, still saveable
+//   Expired — the window closed; the visit was missed
+// Missed visits previously surfaced only if someone opened the customer's
+// portal. Late is a derived flag, not a status, so nothing else changes.
+//
+// Also in v115 — the technician's "Next Job Order" card said Next no
+// matter what. A job scheduled for 09:00 still read "Next Job Order" at
+// 12:25, three hours late and unacknowledged, with nothing on the card to
+// say so. The pick was also schedule-only, so a job the technician was
+// already on site at could be outranked by one due later. The card now
+// ranks by stage first (on site, en route, due, scheduled) and its title
+// says which: Current Job Order, On the Way, Due Now, Today, or Next.
+//
+// Also in v114 — Record Past Service had no Next button.
+//
+// The wizard's step buttons are built once at startup for sections
+// 2 to 10, because section 1 (customer and service date) is normally
+// inherited from a Job Order and never shown. Record Past Service lands on
+// section 1, which therefore had no Back or Next built for it and no way
+// forward from the step it had just opened. The buttons are now built for
+// every section, and which one counts as "first" — so hides its Back — is
+// decided per mode rather than fixed at 2.
+//
+// Also in v113 — Record Past Service skipped straight past the date.
 //
 // Section 1 (customer and service date) is normally inherited from a Job
 // Order and never shown, so the wizard marks it skipped unconditionally.
@@ -914,7 +960,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v113';
+const CACHE_NAME = 'awes-sr-v118';
 
 // Split into two lists on purpose.
 //
