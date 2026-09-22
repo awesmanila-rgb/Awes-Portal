@@ -550,6 +550,16 @@
       });
       if(error) throw error;
       input.value = '';
+      // Push to the other side: admin's message reaches the customer's
+      // phones, a customer's message reaches admins. Best-effort.
+      const preview = body.length > 80 ? body.slice(0,80)+'\u2026' : body;
+      if(currentUser.role==='admin'){
+        if(srOverlayRequest.customerId && typeof notifyCustomer === 'function'){
+          notifyCustomer(srOverlayRequest.customerId, 'New message about your service', preview, 'sr-msg-'+srOverlayRequest.id);
+        }
+      }else if(typeof notifyAdmins === 'function'){
+        notifyAdmins('Customer message', (currentUser.name||'A customer')+': '+preview, 'sr-msg-'+srOverlayRequest.id);
+      }
       await srRefreshMessages();
     }catch(e){ console.error('send request message failed', describeCloudError(e)); toast('Could not send — try again'); }
     $('srMsgSendBtn').disabled = false;

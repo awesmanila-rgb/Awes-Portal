@@ -1,3 +1,10 @@
+// Bumped to v125 — tapping a notification while the app was closed opened
+// GitHub's 404 page: the default target was '/', which on GitHub Pages is
+// the bare domain root, not the app's own folder (/Awes-Portal/). Targets
+// are now resolved against this worker's scope, so a tap always opens the
+// app. Ships with new notifications for cash advance, liquidation,
+// reimbursement, leave, announcements and customer/admin request messages.
+//
 // Bumped to v99 — the "Apply to this N equipment then edit later" checkbox
 // never showed its tick. Its own change handler calls srRenderOpUnitTabs(),
 // which rebuilds the unit card via innerHTML — recreating the checkbox
@@ -1024,7 +1031,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v124';
+const CACHE_NAME = 'awes-sr-v125';
 
 // Split into two lists on purpose.
 //
@@ -1196,7 +1203,8 @@ self.addEventListener('push', (event) => {
     // Stays on screen until acted on. Field work means the phone is
     // often in a pocket when this arrives.
     requireInteraction: false,
-    data: { url: data.url || '/' }
+    // Stored relative; resolved against this worker's scope on tap (below).
+    data: { url: data.url || '' }
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -1204,7 +1212,20 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/';
+  // Resolve against the app's own folder (the service worker's scope).
+  // The app lives in a sub-folder on GitHub Pages (…github.io/Awes-Portal/),
+  // and the old default of '/' pointed at the bare domain root instead —
+  // which has nothing on it, so tapping a notification with the app closed
+  // opened GitHub's 404 page. '' or '/' now always means "the app".
+  const scope = self.registration.scope;
+  const raw = (event.notification.data && event.notification.data.url) || '';
+  let target = scope;
+  try{
+    if(raw && raw !== '/'){
+      const u = new URL(raw.replace(/^\/+/, ''), scope);
+      if(u.href.startsWith(scope)) target = u.href; // never leave the app
+    }
+  }catch(e){ target = scope; }
 
   // Focus an already-open tab rather than opening a duplicate — and
   // navigate it to whatever the notification was about.
@@ -1212,7 +1233,7 @@ self.addEventListener('notificationclick', (event) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
-          if ('navigate' in client && target && target !== '/') {
+          if ('navigate' in client && target !== scope && client.url.startsWith(scope)) {
             return client.navigate(target).then((c) => c && c.focus());
           }
           return client.focus();

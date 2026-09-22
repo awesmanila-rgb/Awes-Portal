@@ -44,7 +44,15 @@
   registerOutboxHandler('leave', async (id, payload)=>{
     const { error } = await db.from('leave_requests').upsert(payload);
     if(error) throw error;
+    leaveNotifySubmitted(payload && payload.data);
   });
+  // Technician -> admins once the request actually reaches the server.
+  function leaveNotifySubmitted(d){
+    if(!d || d.status!=='pending' || typeof notifyAdmins !== 'function') return;
+    notifyAdmins('New leave request',
+      (d.userName||'A technician')+' \u2014 '+(d.leaveType||'Leave')+', '+leaveFmtDate(d.dateFrom)+(d.dateTo && d.dateTo!==d.dateFrom ? ' to '+leaveFmtDate(d.dateTo) : ''),
+      'leave-'+d.id);
+  }
 
   // Cloud reads are paginated. The old `.limit(200)` silently truncated the list
   // with no indication, so once the company passed 200 requests the oldest ones
@@ -153,6 +161,7 @@
     const res = await leaveSaveRequest(id, data);
     $('leaveSubmitBtn').disabled = false;
     if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+    if(res===SAVE_CLOUD) leaveNotifySubmitted(data);
     // Be honest about which of the two happened: "submitted" used to be shown
     // even when the request never left the phone.
     toast(res===SAVE_CLOUD
@@ -270,6 +279,12 @@
         toast('This request was already decided — refreshing');
       }else{
         toast('Request '+status);
+        const d = rows.data || {};
+        if(d.userId && typeof notifyUser === 'function'){
+          notifyUser(d.userId, 'Leave '+(status==='approved' ? 'approved' : 'disapproved'),
+            (d.leaveType||'Leave')+', '+leaveFmtDate(d.dateFrom)+(d.dateTo && d.dateTo!==d.dateFrom ? ' to '+leaveFmtDate(d.dateTo) : '')+(comment ? ' \u2014 Admin: '+comment : ''),
+            'leave-'+id);
+        }
       }
     }catch(e){
       console.error('leave decide failed', describeCloudError(e));

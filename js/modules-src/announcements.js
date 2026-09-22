@@ -116,6 +116,9 @@
       if(error) throw error;
       $('annTitleInput').value = ''; $('annBodyInput').value = ''; $('annPinnedInput').checked = false;
       toast('Announcement posted');
+      if(typeof notifyTechnicians === 'function'){
+        notifyTechnicians('New announcement', title+(body ? ' \u2014 '+(body.length>80 ? body.slice(0,80)+'\u2026' : body) : ''), 'ann');
+      }
       annRenderAdminList();
     }catch(e){ console.error('post announcement failed', describeCloudError(e)); toast('Could not post — please try again'); }
     $('annPostBtn').disabled = false;

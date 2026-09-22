@@ -7557,7 +7557,15 @@
   registerOutboxHandler('leave', async (id, payload)=>{
     const { error } = await db.from('leave_requests').upsert(payload);
     if(error) throw error;
+    leaveNotifySubmitted(payload && payload.data);
   });
+  // Technician -> admins once the request actually reaches the server.
+  function leaveNotifySubmitted(d){
+    if(!d || d.status!=='pending' || typeof notifyAdmins !== 'function') return;
+    notifyAdmins('New leave request',
+      (d.userName||'A technician')+' \u2014 '+(d.leaveType||'Leave')+', '+leaveFmtDate(d.dateFrom)+(d.dateTo && d.dateTo!==d.dateFrom ? ' to '+leaveFmtDate(d.dateTo) : ''),
+      'leave-'+d.id);
+  }
 
   // Cloud reads are paginated. The old `.limit(200)` silently truncated the list
   // with no indication, so once the company passed 200 requests the oldest ones
@@ -7666,6 +7674,7 @@
     const res = await leaveSaveRequest(id, data);
     $('leaveSubmitBtn').disabled = false;
     if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+    if(res===SAVE_CLOUD) leaveNotifySubmitted(data);
     // Be honest about which of the two happened: "submitted" used to be shown
     // even when the request never left the phone.
     toast(res===SAVE_CLOUD
@@ -7783,6 +7792,12 @@
         toast('This request was already decided — refreshing');
       }else{
         toast('Request '+status);
+        const d = rows.data || {};
+        if(d.userId && typeof notifyUser === 'function'){
+          notifyUser(d.userId, 'Leave '+(status==='approved' ? 'approved' : 'disapproved'),
+            (d.leaveType||'Leave')+', '+leaveFmtDate(d.dateFrom)+(d.dateTo && d.dateTo!==d.dateFrom ? ' to '+leaveFmtDate(d.dateTo) : '')+(comment ? ' \u2014 Admin: '+comment : ''),
+            'leave-'+id);
+        }
       }
     }catch(e){
       console.error('leave decide failed', describeCloudError(e));
@@ -12175,6 +12190,16 @@
       });
       if(error) throw error;
       input.value = '';
+      // Push to the other side: admin's message reaches the customer's
+      // phones, a customer's message reaches admins. Best-effort.
+      const preview = body.length > 80 ? body.slice(0,80)+'\u2026' : body;
+      if(currentUser.role==='admin'){
+        if(srOverlayRequest.customerId && typeof notifyCustomer === 'function'){
+          notifyCustomer(srOverlayRequest.customerId, 'New message about your service', preview, 'sr-msg-'+srOverlayRequest.id);
+        }
+      }else if(typeof notifyAdmins === 'function'){
+        notifyAdmins('Customer message', (currentUser.name||'A customer')+': '+preview, 'sr-msg-'+srOverlayRequest.id);
+      }
       await srRefreshMessages();
     }catch(e){ console.error('send request message failed', describeCloudError(e)); toast('Could not send — try again'); }
     $('srMsgSendBtn').disabled = false;
@@ -12866,7 +12891,29 @@
   registerOutboxHandler('cash-advance', async (id, payload)=>{
     const { error } = await db.from('cash_advance_requests').upsert(payload);
     if(error) throw error;
+    // Filed offline — admins hear about it now that it has actually arrived.
+    caNotifySubmitted(payload && payload.data);
   });
+  // ---- Push notifications (see push.js). All best-effort, never awaited. ----
+  // Technician -> admins, when a cash advance, liquidation or reimbursement
+  // actually reaches the server (called on a cloud save, or from the outbox
+  // once an offline one uploads). The record's shape says which it was.
+  function caNotifySubmitted(d){
+    if(!d || typeof notifyAdmins !== 'function') return;
+    const who = d.userName || 'A technician';
+    if(d.kind==='reimbursement'){
+      notifyAdmins('New reimbursement request', who+' \u2014 '+caFmtPeso(d.amount), 'ca-reimb-'+d.id);
+    }else if(d.liquidation && d.liquidation.status==='pending'){
+      notifyAdmins('Liquidation submitted', who+' \u2014 '+caFmtPeso(d.liquidation.totalAmount), 'ca-liq-'+d.id);
+    }else if(d.status==='pending'){
+      notifyAdmins('New cash advance request', who+' \u2014 '+caFmtPeso(d.amount)+(d.purpose ? ' for '+d.purpose : ''), 'ca-new-'+d.id);
+    }
+  }
+  // Admin -> the technician the record belongs to.
+  function caNotifyTech(rec, title, message){
+    if(rec && rec.userId && typeof notifyUser === 'function') notifyUser(rec.userId, title, message, 'ca-'+rec.id);
+  }
+  function caKindLabel(rec){ return rec && rec.kind==='reimbursement' ? 'Reimbursement' : 'Cash advance'; }
 
   const CA_PAGE = 200;
   async function caFetchPaged(applyFilter){
@@ -13166,6 +13213,7 @@
     const res = await caSaveRequest(id, data);
     $('caSubmitBtn').disabled = false;
     if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+    if(res===SAVE_CLOUD) caNotifySubmitted(data);
     toast(res===SAVE_CLOUD
       ? 'Cash advance request submitted for approval'
       : 'Saved on this device — it will be submitted once you have a connection');
@@ -14081,6 +14129,7 @@
     try{
       const res = await caSaveRequest(rec.id, updated);
       if(res===SAVE_FAILED){ toast('Could not submit — check your connection'); return; }
+      if(res===SAVE_CLOUD) caNotifySubmitted(updated);
       toast(res===SAVE_CLOUD
         ? 'Liquidation submitted for approval'
         : 'Saved on this device — it will be submitted once you have a connection');
@@ -14448,7 +14497,9 @@
     if(status==='disapproved' && !comment){
       if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
-    await caApplyAdminChange(id, (rec)=>{
+    let liqRec = null;
+    const liqOk = await caApplyAdminChange(id, (rec)=>{
+      liqRec = rec;
       if(!rec.liquidation){ toast('Liquidation not found'); return null; }
       if(rec.liquidation.status===status){ toast('Already '+status); return null; }
       const updatedLiq = Object.assign({}, rec.liquidation, {
@@ -14472,6 +14523,10 @@
       }
       return { data: { liquidation: updatedLiq } };
     }, 'Liquidation '+status);
+    if(liqOk){
+      caNotifyTech(liqRec, status==='approved' ? 'Liquidation approved' : 'Liquidation needs revision',
+        status==='approved' ? 'Your liquidation was approved.' : (comment ? 'Admin: '+comment : 'Open Liquidation to see what needs fixing.'));
+    }
     caRenderAdminList();
   }
 
@@ -14481,7 +14536,9 @@
   // untracked forever.
   async function caMarkSettled(id, method){
     if(!caAdminGuard()) return;
-    await caApplyAdminChange(id, (rec)=>{
+    let setRec = null;
+    const setOk = await caApplyAdminChange(id, (rec)=>{
+      setRec = rec;
       if(!rec.liquidation || !rec.liquidation.settlement){ toast('Nothing to settle'); return null; }
       if(rec.liquidation.settlement.settled){ toast('Already settled'); return null; }
       return { data: { liquidation: Object.assign({}, rec.liquidation, {
@@ -14493,6 +14550,7 @@
         })
       }) } };
     }, 'Marked as settled');
+    if(setOk) caNotifyTech(setRec, 'Liquidation balance settled', 'The remaining balance on your cash advance has been settled.');
     caRenderAdminList();
   }
 
@@ -14501,7 +14559,8 @@
     if(status==='disapproved' && !comment){
       if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
-    await caApplyAdminChange(id, ()=>({
+    let decRec = null;
+    const decOk = await caApplyAdminChange(id, (rec)=>(decRec = rec, {
       status,
       expectStatus: 'pending',
       data: {
@@ -14510,6 +14569,11 @@
         decidedBy: currentUser.name || 'Admin'
       }
     }), 'Request '+status);
+    if(decOk){
+      const label = caKindLabel(decRec);
+      caNotifyTech(decRec, label+(status==='approved' ? ' approved' : ' disapproved'),
+        caFmtPeso(decRec.amount)+(comment ? ' \u2014 Admin: '+comment : ''));
+    }
     caRenderAdminList();
   }
   // Monitoring: records that the requested cash was actually handed over, with
@@ -14518,7 +14582,9 @@
     if(!caAdminGuard()) return;
     if(!dateGiven){ toast('Set the date the cash was given'); return; }
     if(!amountGiven || amountGiven<=0){ toast('Enter a valid amount given'); return; }
-    await caApplyAdminChange(id, (rec)=>{
+    let disRec = null;
+    const disOk = await caApplyAdminChange(id, (rec)=>{
+      disRec = rec;
       if(rec.status!=='approved'){ toast('Approve the request before recording disbursement'); return null; }
       if(rec.disbursed){ toast('Already recorded as disbursed'); return null; }
       return { data: {
@@ -14527,6 +14593,10 @@
         disbursedBy: currentUser.name || 'Admin'
       } };
     }, 'Disbursement recorded');
+    if(disOk){
+      caNotifyTech(disRec, disRec.kind==='reimbursement' ? 'Reimbursement paid' : 'Cash advance released',
+        caFmtPeso(amountGiven)+' given on '+leaveFmtDate(dateGiven)+'.');
+    }
     caRenderAdminList();
   }
 
@@ -14652,6 +14722,7 @@
     const result = await caSaveRequest(id, data);
     $('caReimbSubmitBtn').disabled = false;
     if(result===SAVE_FAILED){ toast('Could not submit — please try again'); return; }
+    if(result===SAVE_CLOUD) caNotifySubmitted(data);
     toast(result===SAVE_QUEUED ? 'Saved on this device — will submit once online' : 'Reimbursement submitted for approval');
     caReimbResetForm();
     caRenderReimbHistory();
@@ -15061,7 +15132,7 @@
     const show = !!currentUser && currentUser.role !== 'admin'
       && pushSupported() && Notification.permission === 'default' && !pushPromptSnoozed();
     const msg = (currentUser && currentUser.role==='customer')
-      ? 'Get alerts when your technician is on the way, arrives, or sends you a message.'
+      ? 'Get alerts when your service is scheduled, when your technician is on the way or arrives, and when the job is done.'
       : 'Get alerts for new job orders and messages, even when the app is closed.';
     ['pushPromptTech','pushPromptCust'].forEach(id=>{
       const el = $(id);
@@ -16819,6 +16890,9 @@
       if(error) throw error;
       $('annTitleInput').value = ''; $('annBodyInput').value = ''; $('annPinnedInput').checked = false;
       toast('Announcement posted');
+      if(typeof notifyTechnicians === 'function'){
+        notifyTechnicians('New announcement', title+(body ? ' \u2014 '+(body.length>80 ? body.slice(0,80)+'\u2026' : body) : ''), 'ann');
+      }
       annRenderAdminList();
     }catch(e){ console.error('post announcement failed', describeCloudError(e)); toast('Could not post — please try again'); }
     $('annPostBtn').disabled = false;
