@@ -1151,6 +1151,36 @@
     const id = map[name];
     if(id && $(id)) $(id).classList.add('active');
   }
+  // Keeps --tech-nav-h / --tech-footer-h equal to the bars' real rendered
+  // heights (the nav's includes the phone's safe-area inset), so overlays
+  // and page padding in app.css line up with the bar on every device.
+  // A hidden bar measures 0, which is exactly what the CSS needs then.
+  (function techTrackBarHeights(){
+    const root = document.documentElement;
+    const track = (el, varName)=>{
+      if(!el) return;
+      const apply = ()=> root.style.setProperty(varName, el.offsetHeight+'px');
+      apply();
+      if(typeof ResizeObserver === 'function') new ResizeObserver(apply).observe(el);
+      // display:none -> '' doesn't always fire a resize on older WebViews.
+      new MutationObserver(apply).observe(el, { attributes:true, attributeFilter:['style','class'] });
+      window.addEventListener('resize', apply);
+    };
+    track($('techNav'), '--tech-nav-h');
+    track($('footerBar'), '--tech-footer-h');
+  })();
+  // Overlays now leave the bar visible and tappable (see app.css), so a tap
+  // on it while one is open must close it — otherwise the new page would
+  // open underneath a sheet that's still showing. Capture phase, so this
+  // runs before the button's own handler (which may open the More sheet).
+  if($('techNav')){
+    $('techNav').addEventListener('click', ()=>{
+      // The Job Order overlay has its own cleanup (message channel etc.).
+      const jo = $('dtTicketOverlay');
+      if(jo && jo.classList.contains('open') && typeof dtCloseTicketOverlay === 'function') dtCloseTicketOverlay();
+      document.querySelectorAll('.overlay.open:not(.login-overlay)').forEach(o=> o.classList.remove('open'));
+    }, true);
+  }
   $('techNavBtnHome').addEventListener('click', ()=>{ techSetNavActive('home'); showHome(); });
   $('techNavBtnJobs').addEventListener('click', ()=>{ techSetNavActive('jobs'); showDispatchView(); });
   $('techNavBtnReport').addEventListener('click', ()=>{ techSetNavActive('report'); showServiceReport(); });

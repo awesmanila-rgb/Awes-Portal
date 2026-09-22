@@ -2229,7 +2229,7 @@ body.role-tech .home-grid{ display:none; }
    instead of underneath/overlapping it — only while that bar is an actual
    bottom bar (mobile); .cp-nav flips to a top bar at 1000px, so no shift
    needed there. */
-body.role-tech .footer-bar{ bottom:calc(60px + env(safe-area-inset-bottom)) !important; }
+body.role-tech .footer-bar{ bottom:var(--tech-nav-h, calc(64px + env(safe-area-inset-bottom))) !important; }
 @media (min-width:1000px){ body.role-tech .footer-bar{ bottom:0 !important; } }
 
 /* ---------- Technician portal: match the customer portal's page frame ----------
@@ -2773,4 +2773,24 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
   .sr-tile-tabs .srt-icon{ width:40px; height:40px; }
   .sr-tile-tabs .srt-icon .ic{ width:24px; height:24px; }
   .sr-tile-tabs .srt-label{ font-size:11.5px; }
+}
+
+/* ---------- Technician bottom nav: same position on EVERY screen ----------
+   The bar sits flush above the phone's own navigation (Android's back/home/
+   recents buttons or gesture bar) on every page. Several technician
+   "pages" are full-screen .overlay sheets (Job Order details, More,
+   Profile, pickers...) that used to cover the whole screen — bar included
+   — so on those screens the page content ran straight down to the Android
+   buttons. Overlays now stop at the top of the bar instead, and page
+   content always reserves room for it (plus the Save/Generate footer when
+   that's showing). --tech-nav-h / --tech-footer-h are the bars' real
+   measured heights (set in home.js), so this holds on any phone. Mobile
+   only: from 1000px the bar is a top bar and none of this applies. */
+@media (max-width:999px){
+  body.role-tech{
+    padding-bottom:calc(var(--tech-nav-h, 64px) + var(--tech-footer-h, 0px) + 16px) !important;
+  }
+  body.role-tech .overlay:not(.login-overlay){ bottom:var(--tech-nav-h, 64px); }
+  body.role-tech .sheet{ max-height:calc(100% - 24px); }
+  body.role-tech .toast{ bottom:calc(var(--tech-nav-h, 64px) + var(--tech-footer-h, 0px) + 16px); }
 }
