@@ -42,6 +42,7 @@
     doc.text('SR No: '+(data.srNo||'—'), pageW-margin, 42, {align:'right'});
     doc.setFont('helvetica','normal'); doc.setFontSize(10);
     doc.text('Date: '+(data.date||'—'), pageW-margin, 55, {align:'right'});
+    doc.text('Category: '+serviceCategoryLabel(reportCategoryOf(data)), pageW-margin, 68, {align:'right'});
     doc.setFont('helvetica','bold'); doc.setFontSize(9);
     doc.text('AW Engineering Services', margin, 64);
     doc.setFont('helvetica','normal'); doc.setFontSize(8);

@@ -2714,3 +2714,20 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
   .adm-tbl tr.adm-row td:nth-child(5){ grid-column:1 / -1; grid-row:3; font-size:12.5px; }
   .adm-tbl td.adm-empty{ display:block; }
 }
+
+/* ---------- Service category (dispatch form + SR entry) ---------- */
+.dt-cat-group{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.dt-cat-btn{
+  border:1px solid var(--border); background:var(--surface); color:var(--text);
+  border-radius:8px; padding:10px 6px; font-size:13px; font-weight:600; cursor:pointer;
+}
+.dt-cat-btn.active{ background:var(--green-dark); border-color:var(--green-dark); color:#fff; }
+.dt-cat-group.invalid .dt-cat-btn{ border-color:var(--danger); }
+.sr-tile-grid-3{ grid-template-columns:repeat(3,1fr); }
+@media (max-width:520px){ .sr-tile-grid-3{ grid-template-columns:1fr; } }
+.sr-cat-pill{ background:var(--teal-light); color:var(--teal); }
+.jo-cat-tag{
+  display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.02em;
+  padding:1px 7px; border-radius:999px; background:var(--teal-light); color:var(--teal); margin-right:4px;
+  vertical-align:1px;
+}

@@ -121,6 +121,7 @@
     resetForm();
     currentSrNo = d.srNo; $('metaSrNo').textContent = d.srNo||'—';
     currentTechnicianId = d.technicianId || (currentUser ? currentUser.id : null);
+    srSetReportCategory(reportCategoryOf(d));
     $('custName').value = d.custName||''; $('svcDate').value = d.date||todayISO();
     $('metaDate').textContent = fmtDate($('svcDate').value);
     $('custAddress').value = d.custAddress||''; $('contactNo').value = d.contactNo||''; $('contactPerson').value = d.contactPerson||'';

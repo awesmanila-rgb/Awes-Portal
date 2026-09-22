@@ -16,6 +16,26 @@
   // Each entry is one equipment item off the ticket's equipmentList.
   let srBatchEquipItems = null;
 
+  // Service category (Aircon / Ventilation / General Scope — see
+  // SERVICE_CATEGORIES in core.js).
+  //   srPickerCategory — what the technician chose on the Select Category
+  //     entry screen; filters the Job Order picker. NOT cleared by
+  //     resetForm(), because srApplyJobOrder calls resetForm() and still
+  //     needs it afterwards.
+  //   srCurrentCategory — the category of the report actually being filed;
+  //     saved as serviceCategory. Cleared by resetForm(), set when a job
+  //     order is applied or a saved report is reopened.
+  let srPickerCategory = null;
+  let srCurrentCategory = null;
+  function srSetReportCategory(key){
+    srCurrentCategory = key || null;
+    const pill = $('metaCategory');
+    if(!pill) return;
+    const label = serviceCategoryLabel(srCurrentCategory);
+    pill.textContent = label;
+    pill.style.display = label ? '' : 'none';
+  }
+
   // Progressive-section state. Declared HERE, at the top of the module,
   // rather than beside the functions that use it further down: resetForm()
   // is called at load and assigns srMaxSection, so a `let` declared after
@@ -85,6 +105,7 @@
     currentSrNo = null;
     currentTechnicianId = null;
     srCurrentTicketId = null;
+    srSetReportCategory(null);
     // Back to an ad-hoc report with no job order, where choosing between an
     // existing unit and a new one genuinely applies again. 'flex', not '',
     // because the bar's layout comes from an inline display:flex.
@@ -335,7 +356,7 @@
   // Session-scoped on purpose: shown once per sign-in, not on every tap.
   // Someone filing six reports in a day should read it once.
   let srGateSeenThisSession = false;
-  const SR_ENTRY_SCREENS = ['srEntryGate','srEntryChoice','srEntryMode'];
+  const SR_ENTRY_SCREENS = ['srEntryGate','srEntryChoice','srEntryCategory','srEntryMode'];
   function srShowEntry(which){
     SR_ENTRY_SCREENS.forEach(id=>{ const el = $(id); if(el) el.style.display = (id===which) ? '' : 'none'; });
     const showingEntry = !!which;
@@ -370,19 +391,37 @@
     }
     srShowEntry('srEntryChoice');
   }
+  // Create New -> Select Category -> job order list (filtered to that
+  // category). A technician can't reach the job order list, and therefore
+  // can't start a report, without picking a category first.
   if($('srTileCreateNew')) $('srTileCreateNew').addEventListener('click', ()=>{
-    srShowEntry(null);
-    if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
-    // The Job Order picker already exists and is titled "Select from Job
-    // Order" — reuse it rather than building a second list.
-    if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
+    srPickerCategory = null;
+    srShowEntry('srEntryCategory');
+  });
+  document.querySelectorAll('[data-sr-cat]').forEach(tile=>{
+    tile.addEventListener('click', ()=>{
+      srPickerCategory = tile.dataset.srCat;
+      srShowEntry(null);
+      if($('srJobOrderCard')) $('srJobOrderCard').style.display = '';
+      // The Job Order picker already exists and is titled "Select from Job
+      // Order" — reuse it rather than building a second list.
+      if(typeof srRenderJobOrderPicker === 'function') srRenderJobOrderPicker();
+    });
+  });
+  if($('srEntryCategoryBack')) $('srEntryCategoryBack').addEventListener('click', ()=>{
+    srPickerCategory = null;
+    srShowEntry('srEntryChoice');
+  });
+  if($('srJobOrderChangeCat')) $('srJobOrderChangeCat').addEventListener('click', ()=>{
+    srPickerCategory = null;
+    srShowEntry('srEntryCategory');
   });
   if($('srTileSavedDraft')) $('srTileSavedDraft').addEventListener('click', ()=>{
     // Hide every entry screen outright rather than going through
     // srShowEntry(null), which also re-reveals a form section on the way
     // out — pointless here and a source of flicker before the panel
     // switches. srShowTab does the rest (panel swap + loads the drafts).
-    ['srEntryGate','srEntryChoice','srEntryMode'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    SR_ENTRY_SCREENS.forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     if($('srJobOrderCard')) $('srJobOrderCard').style.display = 'none';
     // srShowTab — NOT showServiceReportTab, which doesn't exist.
     if(typeof srShowTab === 'function') srShowTab('draft');
@@ -465,6 +504,7 @@
 
     return {
       srNo: currentSrNo,
+      serviceCategory: srCurrentCategory,
       technicianId: currentTechnicianId || (currentUser ? currentUser.id : null),
       date: $('svcDate').value,
       custName: $('custName').value.trim(),

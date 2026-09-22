@@ -382,7 +382,30 @@
   // data were written as empty and permanently lost — invisible on the
   // technician's own phone because the local copy keeps the correct shape.
   // Do not "tidy" these names without changing gatherData/pdf.js to match.
+  // ---------- Service categories (shared by dispatch + service reports) ----------
+  // A Job Order is raised under one category, and a technician picks the
+  // same category before starting a report, so the report inherits it. Keys
+  // are what's stored (dispatch_tickets.data.category and
+  // service_reports.service_category); labels are display-only and can be
+  // renamed here without touching stored data.
+  const SERVICE_CATEGORIES = [
+    { key:'aircon',      label:'Aircon' },
+    { key:'ventilation', label:'Ventilation' },
+    { key:'general',     label:'General Scope' }
+  ];
+  // Every report filed before categories existed was aircon work, so a
+  // report with no category is treated as Aircon everywhere it's read
+  // (reopened, resumed, printed). 20260922_02 backfills the same rule into
+  // the database; this covers copies that only live on a device.
+  const DEFAULT_REPORT_CATEGORY = 'aircon';
+  function reportCategoryOf(d){ return (d && d.serviceCategory) || DEFAULT_REPORT_CATEGORY; }
+  function serviceCategoryLabel(key){
+    const c = SERVICE_CATEGORIES.find(x=> x.key===key);
+    return c ? c.label : '';
+  }
+
   const REPORT_STRING_FIELDS = [
+    ['service_category','serviceCategory'],
     ['sr_no','srNo'], ['technician_id','technicianId'], ['date','date'],
     ['cust_name','custName'], ['cust_address','custAddress'], ['contact_no','contactNo'],
     ['contact_person','contactPerson'], ['cust_email','custEmail'], ['equip_type','equipType'],
@@ -451,6 +474,7 @@
     data.sigTech      = asSignature(row.technician_signature);
     data.completed    = !!row.completed;
     data.equipmentId  = row.equipment_id || null;
+    data.serviceCategory = reportCategoryOf(data);
     return data;
   }
   // Legacy rows may hold {} (or a stray object) where a data-URL string was

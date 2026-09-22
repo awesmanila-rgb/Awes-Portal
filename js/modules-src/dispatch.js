@@ -425,11 +425,19 @@
     // A unit flagged Not Yet Done is resolved, not pending: it has no
     // reportSrNo and would otherwise keep offering itself for a report the
     // technician already said couldn't be done.
+    // Category the technician chose on the previous screen (srPickerCategory,
+    // declared in ui.js). Tickets created before categories existed carry
+    // none, so they're listed under every category rather than vanishing
+    // from the picker — whatever the technician picks becomes the report's.
+    const cat = (typeof srPickerCategory !== 'undefined') ? srPickerCategory : null;
     const openOnes = mine.filter(r=>
       dtEffectiveStatus(r)==='in_progress' &&
+      (!cat || !r.category || r.category===cat) &&
       (r.equipmentList||[]).some(it=> !it.reportSrNo && !it.notDone));
+    if(t && cat) t.innerHTML = t.dataset.originalHtml + ' — ' + escapeHtml(serviceCategoryLabel(cat));
+    if($('srJobOrderChangeCat')) $('srJobOrderChangeCat').style.display = cat ? '' : 'none';
     if(openOnes.length===0){
-      list.innerHTML = '<div class="empty-state">No Job Order tickets with equipment still needing a report.</div>';
+      list.innerHTML = '<div class="empty-state">No '+(cat ? escapeHtml(serviceCategoryLabel(cat))+' ' : '')+'Job Order tickets with equipment still needing a report.</div>';
       return;
     }
     list.innerHTML = '';
@@ -448,7 +456,7 @@
       row.innerHTML = '<div class="user-card-head" style="cursor:pointer;">'+
           '<div>'+
             '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-            '<div class="u-status">'+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+
+            '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+
               (r.siteAddress ? (' · '+escapeHtml(r.siteAddress)) : '')+'</div>'+
             '<div class="u-status">'+resolved+' of '+items.length+' equipment resolved</div>'+
           '</div>'+
@@ -723,6 +731,7 @@
       if(equipItem.scope && equipItem.scope.length) $('troubleCall').value = equipItem.scope.join('; ');
     }
     srCurrentTicketId = ticket.id;
+    srSetReportCategory(ticket.category || srPickerCategory || null);
     srPrefillTimeInFromTicket(ticket);
     srCurrentEquipId = equipItem ? equipItem.id : null;
     // Hidden HERE, not in the wizard's own reveal pass: srCurrentTicketId
@@ -770,6 +779,7 @@
     // fields come from its own item at submit time, not from this form.
     if($('sec2Card')) $('sec2Card').style.display = 'none';
     srCurrentTicketId = ticket.id;
+    srSetReportCategory(ticket.category || srPickerCategory || null);
     srPrefillTimeInFromTicket(ticket);
     srCurrentEquipId = null;
     if($('equipTabBar')) $('equipTabBar').style.display = 'none';
@@ -818,6 +828,9 @@
     }
     await openReport(data);
     srCurrentTicketId = ticket.id;
+    // A draft started before categories existed is an old report, and old
+    // reports are Aircon (see reportCategoryOf in core.js).
+    srSetReportCategory(reportCategoryOf(data));
     srPrefillTimeInFromTicket(ticket);
     srCurrentEquipId = equipItem.id;
     // Same as the two paths above: once a unit is in play, the Job Order
@@ -1211,8 +1224,37 @@
     });
   }
 
+  // ---------- Category (Aircon / Ventilation / General Scope) ----------
+  // Required on every new ticket. Stored as data.category (a key from
+  // SERVICE_CATEGORIES in core.js); technicians then only see this ticket
+  // under the matching category when starting a Service Report.
+  function dtGetCategory(){
+    const on = $('dtCategoryGroup') && $('dtCategoryGroup').querySelector('.dt-cat-btn.active');
+    return on ? on.dataset.cat : null;
+  }
+  function dtSetCategory(key){
+    const g = $('dtCategoryGroup'); if(!g) return;
+    g.classList.remove('invalid');
+    g.querySelectorAll('.dt-cat-btn').forEach(b=>{
+      const on = b.dataset.cat === key;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  }
+  if($('dtCategoryGroup')){
+    $('dtCategoryGroup').querySelectorAll('.dt-cat-btn').forEach(b=>{
+      b.addEventListener('click', ()=> dtSetCategory(b.dataset.cat));
+    });
+  }
+  // Small inline tag for list rows / card heads. Empty for legacy tickets.
+  function dtCategoryTagHtml(r){
+    const label = r && serviceCategoryLabel(r.category);
+    return label ? '<span class="jo-cat-tag">'+escapeHtml(label)+'</span>' : '';
+  }
+
   function dtResetForm(){
     dtSourceServiceRequestId = null;
+    dtSetCategory(null);
     dtContinuedFromTicketId = null;
     $('dtJobOrderNo').value = '—';
     $('dtDate').value = todayISO();
@@ -1330,6 +1372,15 @@
     // service_requests — see 20260916_04_admin_insert_service_requests.sql.
     if(workers.length===0){ toast('Assign at least one worker'); return; }
     if(reporters.length===0){ toast('Select at least one technician who can create the Service Report'); return; }
+    const category = dtGetCategory();
+    if(!category){
+      toast('Select a category — Aircon, Ventilation or General Scope');
+      if($('dtCategoryGroup')){
+        $('dtCategoryGroup').classList.add('invalid');
+        $('dtCategoryGroup').scrollIntoView({behavior:'smooth', block:'center'});
+      }
+      return;
+    }
     if(!custName){ toast('Enter the customer\'s name'); return; }
     if(!$('dtDate').value){ toast('Set the date'); return; }
     if(dtDraftEquipItems.length===0){ toast('Add at least one piece of equipment to the ticket'); return; }
@@ -1352,6 +1403,7 @@
     if(custId) await dtAddCustomerEquipmentBatch(custId, equipmentList);
     const data = {
       id, jobOrderNo: id, status: 'preparing',
+      category,
       date: $('dtDate').value, expectedTime: $('dtExpectedTime').value,
       assignedWorkerIds: workers.map(w=>w.id), assignedWorkerNames: workers.map(w=>w.name),
       reportAllowedWorkerIds: reporters.map(w=>w.id), reportAllowedWorkerNames: reporters.map(w=>w.name),
@@ -1792,7 +1844,7 @@
     return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-          '<div class="u-status">'+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+'</div>'+
+          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+'</div>'+
           // Admin only, and outside jo-card-body on purpose: this has to be
           // readable without expanding the card, otherwise monitoring ten
           // live tickets still means ten taps.
@@ -3182,6 +3234,9 @@
     await showDispatchView('new'); // resets the form via dtResetForm()
     dtSourceServiceRequestId = ticket.sourceServiceRequestId || null;
     dtContinuedFromTicketId = ticket.id;
+    // Same kind of work as the visit it continues. Legacy tickets without
+    // one leave it unset, so admin is still made to pick.
+    dtSetCategory(ticket.category || null);
     $('dtCustName').value = ticket.custName || '';
     if(ticket.custId) $('dtCustName').dataset.customerId = ticket.custId;
     $('dtSiteAddress').value = ticket.siteAddress || '';
