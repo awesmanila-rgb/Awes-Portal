@@ -2794,3 +2794,21 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
   body.role-tech .sheet{ max-height:calc(100% - 24px); }
   body.role-tech .toast{ bottom:calc(var(--tech-nav-h, 64px) + var(--tech-footer-h, 0px) + 16px); }
 }
+
+/* ---------- Home: Today's Attendance strip — balanced 2-column grid ---------- */
+.greet-attend-line{
+  display:flex; flex-direction:column; align-items:stretch; gap:12px; flex-wrap:nowrap;
+  padding:14px 16px;
+}
+.greet-attend-head{ display:flex; align-items:center; gap:8px; }
+.greet-attend-clock{ width:20px; height:20px; }
+.greet-attend-title{ font-size:14px; font-weight:700; color:var(--text); }
+.greet-attend-go{ font-size:14px; }
+.greet-attend-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.greet-attend-cell{
+  display:flex; flex-direction:column; gap:4px; min-width:0;
+  background:var(--bg); border-radius:10px; padding:10px 12px;
+}
+.greet-attend-label{ font-size:12.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.03em; }
+.greet-attend-line .greet-attend-cell b{ font-size:22px; line-height:1.15; white-space:nowrap; }
+@media (max-width:360px){ .greet-attend-line .greet-attend-cell b{ font-size:19px; } }

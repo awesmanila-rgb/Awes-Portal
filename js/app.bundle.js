@@ -15228,16 +15228,28 @@
     // Attendance VALUES are display-only, but the strip itself links to the
     // DTR screen (where Time In/Out is actually recorded) — the clock icon
     // marks it as tappable. See the .greet-attend-line handler below.
+    // Balanced grid: a header row (title + Open DTR), then Time In / Time
+    // Out side by side, and OT In / OT Out as a second row only when there
+    // is overtime. Label on top, big value below, so every cell lines up
+    // regardless of which values are filled in.
+    const cell = (label, iso, missingWhenEmpty)=>
+      '<span class="greet-attend-cell">'+
+        '<span class="greet-attend-label">'+label+'</span>'+
+        '<b'+(!iso && missingWhenEmpty ? ' class="greet-missing"' : '')+'>'+fmt(iso)+'</b>'+
+      '</span>';
+    const hasOt = !!(todayDtr && todayDtr.otTimeIn);
     const attendLine =
       '<button type="button" class="greet-attend-line" id="greetAttendLink">'+
-        '<svg class="greet-attend-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'+
-        '<span class="greet-attend-item">Time In <b'+(alreadyTimedIn?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeIn)+'</b></span>'+
-        '<span class="greet-attend-item">Time Out <b'+(alreadyTimedOut?'':' class="greet-missing"')+'>'+fmt(todayDtr && todayDtr.timeOut)+'</b></span>'+
-        (todayDtr && todayDtr.otTimeIn ?
-          '<span class="greet-attend-item">OT In <b>'+fmt(todayDtr.otTimeIn)+'</b></span>'+
-          '<span class="greet-attend-item">OT Out <b'+(todayDtr.otTimeOut?'':' class="greet-missing"')+'>'+fmt(todayDtr.otTimeOut)+'</b></span>'
-        : '')+
-        '<span class="greet-attend-go">Open DTR ›</span>'+
+        '<span class="greet-attend-head">'+
+          '<svg class="greet-attend-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'+
+          '<span class="greet-attend-title">Today\'s Attendance</span>'+
+          '<span class="greet-attend-go">Open DTR ›</span>'+
+        '</span>'+
+        '<span class="greet-attend-grid">'+
+          cell('Time In', todayDtr && todayDtr.timeIn, true)+
+          cell('Time Out', todayDtr && todayDtr.timeOut, true)+
+          (hasOt ? cell('OT In', todayDtr.otTimeIn, false)+cell('OT Out', todayDtr.otTimeOut, true) : '')+
+        '</span>'+
       '</button>';
     // Orientation note — tells the technician what to actually do next
     // rather than leaving them to guess.
