@@ -2812,3 +2812,9 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .greet-attend-label{ font-size:12.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.03em; }
 .greet-attend-line .greet-attend-cell b{ font-size:22px; line-height:1.15; white-space:nowrap; }
 @media (max-width:360px){ .greet-attend-line .greet-attend-cell b{ font-size:19px; } }
+
+/* ---------- Technician bottom bar: bigger icons (labels keep the shared .cp-nav-btn style) ---------- */
+@media (max-width:999px){
+  #techNav .cp-nav-btn{ gap:2px; padding:3px 2px; }
+  #techNav .cp-nav-btn svg{ width:27px; height:27px; stroke-width:1.9; }
+}
