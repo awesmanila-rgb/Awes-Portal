@@ -2331,18 +2331,18 @@ window.awesCss = {
 
 <main id="serviceReportView" style="display:none;">
 
-  <div class="seg-tabs" id="srSegTabs">
-    <button type="button" class="seg-tab active" id="srTabNewBtn">Create New</button>
+  <div class="seg-tabs sr-tile-tabs" id="srSegTabs">
+    <button type="button" class="seg-tab active" id="srTabNewBtn"><span class="srt-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span><span class="srt-label">Create New</span></button>
     <!-- Admin only. A Service Report carries the technician's name and
          signature, so admin is deliberately barred from authoring a blank
          one (setVis('srTabNewBtn', isTech) in auth.js). This is the honest
          alternative: admin records work a technician already performed —
          picking who did it, and leaving a trail showing the record was
          keyed in afterwards rather than signed on site. -->
-    <button type="button" class="seg-tab" id="srTabBackEntryBtn" style="display:none;">Record Past Service</button>
-    <button type="button" class="seg-tab" id="srTabDraftBtn">Saved Draft</button>
-    <button type="button" class="seg-tab" id="srTabCompletedBtn">Completed</button>
-    <button type="button" class="seg-tab" id="srTabAllBtn">All</button>
+    <button type="button" class="seg-tab" id="srTabBackEntryBtn" style="display:none;"><span class="srt-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></span><span class="srt-label">Record Past Service</span></button>
+    <button type="button" class="seg-tab" id="srTabDraftBtn"><span class="srt-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg></span><span class="srt-label">Saved Draft</span></button>
+    <button type="button" class="seg-tab" id="srTabCompletedBtn"><span class="srt-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg></span><span class="srt-label">Completed</span></button>
+    <button type="button" class="seg-tab" id="srTabAllBtn"><span class="srt-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/></svg></span><span class="srt-label">All</span></button>
   </div>
 
   <div id="srNewPanel">
@@ -2353,14 +2353,11 @@ window.awesCss = {
     </div>
     <div class="card-body" id="srInstructionsBody" style="display:none;">
       <div class="leave-note" style="margin:0;">
-        <b>Single report (one unit)</b> — Tap the Job Order below, then tap the one equipment item you serviced.
-        Fill in Section 1, then tap <b>Continue</b> at the bottom of each section — the next one opens as you go, so you only ever see one at a time. Sign in Section 8 to finish. That's one Service Report.<br><br>
-        <b>Multiple reports, one signing (batch)</b> — If you serviced several units on the same visit for the
-        same customer, open the Job Order and tap <b>"Select multiple to batch sign"</b> instead of a single item.
-        Check every unit you serviced, then tap <b>Continue with Selected</b>. Fill in the shared details once
-        (findings, works done, etc. — the Equipment Details step is skipped, and Operation
-        Parameters are entered per unit) and sign <b>once</b> at the end — the app automatically creates one
-        properly-numbered Service Report per unit you checked, each carrying that same signature.
+        <b>1. Start</b> — Tap <b>Create New</b>, then pick the <b>Category</b> of work: Aircon, Ventilation or General Scope. Only job orders under that category are listed.<br><br>
+        <b>2. Pick the Job Order</b> — Tap the job order you're on. You must have tapped <b>Acknowledge</b> on it in My Job Order first, and someone must have tapped <b>Arrived at Site</b>.<br><br>
+        <b>3. Single or Multiple</b> — <b>Single Report</b>: tap the one unit you serviced. <b>Multiple Reports</b>: check every unit that got the same works done, then tap <b>Continue with Selected</b> — you fill the shared details once (Equipment Details is skipped, Operation Parameters are entered per unit) and the app creates one numbered report per unit.<br><br>
+        <b>4. Fill each step</b> — Tap <b>Continue</b> at the bottom of each step; only one step shows at a time. Use the chips at the top to go back to an earlier step.<br><br>
+        <b>5. Sign</b> — You sign in the Technician Signature step, then the customer signs in Customer Acknowledgment. Tap <b>Confirm Signature</b> on each to lock it in.
       </div>
     </div>
   </div>

@@ -5501,9 +5501,9 @@
   // Each screen is a card; srShowEntry() shows exactly one of them (or
   // none, once the form itself is running).
   // =====================================================================
-  // Session-scoped on purpose: shown once per sign-in, not on every tap.
-  // Someone filing six reports in a day should read it once.
-  let srGateSeenThisSession = false;
+  // Entry point from the Report tab / bottom nav / Create New tab. The
+  // instruction gate is shown EVERY time a new report is started, and
+  // "I Understand" is the only way through to Create New / Saved Draft.
   const SR_ENTRY_SCREENS = ['srEntryGate','srEntryChoice','srEntryCategory','srEntryMode'];
   function srShowEntry(which){
     SR_ENTRY_SCREENS.forEach(id=>{ const el = $(id); if(el) el.style.display = (id===which) ? '' : 'none'; });
@@ -5523,25 +5523,17 @@
     if($('srInstructionsCard')) $('srInstructionsCard').style.display = 'none';
     if(!showingEntry) srRevealSections();
   }
-  // Entry point from the Report tab / bottom nav.
   function srStartReportFlow(){
-    if(!srGateSeenThisSession){
-      const body = $('srEntryGateBody');
-      const howto = $('srInstructionsBody');
-      if(body){
-        body.innerHTML = (howto ? howto.innerHTML : '<p>Fill each step and tap Next. You will sign at the end.</p>')
-          + '<button type="button" class="btn btn-primary" id="srGateOkBtn" style="width:100%; margin-top:14px;">I Understand</button>';
-        const ok = body.querySelector('#srGateOkBtn');
-        if(ok) ok.onclick = ()=>{ srGateSeenThisSession = true; srShowEntry('srEntryChoice'); };
-      }
-      srShowEntry('srEntryGate');
-      return;
+    const body = $('srEntryGateBody');
+    const howto = $('srInstructionsBody');
+    if(body){
+      body.innerHTML = (howto ? howto.innerHTML : '<p>Fill each step and tap Continue. You will sign at the end.</p>')
+        + '<button type="button" class="btn btn-primary" id="srGateOkBtn" style="width:100%; margin-top:14px;">I Understand</button>';
+      const ok = body.querySelector('#srGateOkBtn');
+      if(ok) ok.onclick = ()=> srShowEntry('srEntryChoice');
     }
-    srShowEntry('srEntryChoice');
+    srShowEntry('srEntryGate');
   }
-  // Create New -> Select Category -> job order list (filtered to that
-  // category). A technician can't reach the job order list, and therefore
-  // can't start a report, without picking a category first.
   if($('srTileCreateNew')) $('srTileCreateNew').addEventListener('click', ()=>{
     srPickerCategory = null;
     srShowEntry('srEntryCategory');

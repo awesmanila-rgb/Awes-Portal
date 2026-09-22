@@ -2752,3 +2752,25 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .fh-tile.fh-purple .fh-tile-icon{ background:#EDE4FB; color:#7C4DBD; }
 .fh-tile.fh-orange .fh-tile-icon{ background:#FCEBD9; color:#C2680E; }
 .fh-tile.fh-teal   .fh-tile-icon{ background:#D9F0EC; color:#0D9488; }
+
+/* ---------- Service Report tabs — tile view ---------- */
+.seg-tabs.sr-tile-tabs{ gap:10px; }
+.sr-tile-tabs .seg-tab{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+  padding:14px 6px 12px; border-radius:16px; min-height:96px;
+  background:var(--surface); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.05);
+}
+.sr-tile-tabs .srt-icon{
+  width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+  background:var(--green-light); color:var(--green-dark); flex-shrink:0;
+}
+.sr-tile-tabs .srt-icon .ic{ width:28px; height:28px; }
+.sr-tile-tabs .srt-label{ font-size:12.5px; font-weight:700; line-height:1.25; }
+.sr-tile-tabs .seg-tab.active{ background:var(--green); border-color:var(--green); color:#fff; }
+.sr-tile-tabs .seg-tab.active .srt-icon{ background:rgba(255,255,255,.18); color:#fff; }
+@media (max-width:420px){
+  .sr-tile-tabs .seg-tab{ min-height:84px; padding:12px 4px 10px; }
+  .sr-tile-tabs .srt-icon{ width:40px; height:40px; }
+  .sr-tile-tabs .srt-icon .ic{ width:24px; height:24px; }
+  .sr-tile-tabs .srt-label{ font-size:11.5px; }
+}
