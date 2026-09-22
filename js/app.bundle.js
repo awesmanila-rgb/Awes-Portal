@@ -2954,14 +2954,23 @@
 
     const wrap = document.createElement('div');
     wrap.id = 'srBackEntryTechWrap';
+    wrap.className = 'field';
     wrap.style.marginTop = '8px';
-    wrap.innerHTML = techs.length
+    wrap.innerHTML = '<label>Technician</label>' + (techs.length
       ? '<select id="srBackEntryTechSelect"><option value="">Who performed this service?</option>'+
           techs.map(t=> '<option value="'+escapeHtml(t.id)+'" data-name="'+escapeHtml(t.name)+'">'+escapeHtml(t.name)+'</option>').join('')+
         '</select>'
-      : '<div class="empty-state">No active technicians on file.</div>';
+      : '<div class="empty-state">No active technicians on file.</div>');
     techEl.style.display = 'none';
-    techEl.parentNode.insertBefore(wrap, techEl.nextSibling);
+    // Insert into Section 1 ("Customer's Information"), not next to techEl.
+    // techEl lives in Section 9 ("Technician Signature"), which stays
+    // display:none until Section 1 is passed — and srSectionBlocker(1)/
+    // srValidateBackEntry() won't let Section 1 pass without a technician
+    // chosen here. Putting the picker next to techEl put the only control
+    // that can satisfy that gate inside a card the user can never open.
+    const sec1Body = $('sec1Body');
+    if(sec1Body) sec1Body.insertBefore(wrap, sec1Body.firstChild);
+    else techEl.parentNode.insertBefore(wrap, techEl.nextSibling); // fallback
 
     const sel = $live('srBackEntryTechSelect');
     if(sel) sel.onchange = ()=>{
