@@ -2731,3 +2731,24 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
   padding:1px 7px; border-radius:999px; background:var(--teal-light); color:var(--teal); margin-right:4px;
   vertical-align:1px;
 }
+
+/* ---------- Finance & HR page — tile view ---------- */
+.fh-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+@media (max-width:560px){ .fh-grid{ grid-template-columns:1fr 1fr; } }
+.fh-tile{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px;
+  background:var(--surface); border:1px solid var(--border); border-radius:18px;
+  padding:22px 10px 18px; min-height:150px; cursor:pointer; text-align:center;
+  box-shadow:0 1px 3px rgba(0,0,0,.05);
+}
+.fh-tile:active{ background:var(--green-light); }
+.fh-tile-icon{
+  width:76px; height:76px; border-radius:20px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.fh-tile-icon .ic{ width:42px; height:42px; }
+.fh-tile-label{ font-size:13px; font-weight:700; color:var(--text); line-height:1.3; }
+.fh-tile.fh-blue   .fh-tile-icon{ background:#E1ECFA; color:#2F6FB5; }
+.fh-tile.fh-green  .fh-tile-icon{ background:var(--green-light); color:var(--green-dark); }
+.fh-tile.fh-purple .fh-tile-icon{ background:#EDE4FB; color:#7C4DBD; }
+.fh-tile.fh-orange .fh-tile-icon{ background:#FCEBD9; color:#C2680E; }
+.fh-tile.fh-teal   .fh-tile-icon{ background:#D9F0EC; color:#0D9488; }

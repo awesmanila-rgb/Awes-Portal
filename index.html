@@ -386,7 +386,7 @@ window.awesCss = {
   </div>
   <!-- Quick Actions — technician only. All 4 destinations in one glance, no
        swipe — Finance & HR bundles Attendance/Cash Advance/Leave/
-       Liquidation/Reimbursement behind #techFinanceHrSheet below. -->
+       Liquidation/Reimbursement on the #financeHrView page. -->
   <div class="card" id="techQuickActionsCard" style="display:none; margin-bottom:16px;">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> Quick Actions</span></div>
     <div class="card-body">
@@ -991,41 +991,6 @@ window.awesCss = {
   <button type="button" class="cp-nav-btn" data-screen="Profile" id="cpNavProfile"></button>
   <div class="cp-nav-spacer"></div>
 </nav>
-
-<!-- Finance & HR — opened from the technician Quick Actions tile or the
-     bottom nav's Finance & HR tab. Bundles what used to be five separate
-     sidebar entries into one sheet. See techOpenFinanceHrSheet() /
-     techNavDtr-equivalent handlers in home.js. -->
-<div class="overlay" id="techFinanceHrSheet">
-  <div class="sheet">
-    <div class="sheet-head">
-      <h3>Finance &amp; HR</h3>
-      <button class="sheet-close" id="closeTechFinanceHrSheet">&times;</button>
-    </div>
-    <div class="tech-sheet-list">
-      <button type="button" class="tech-sheet-item" id="techFhAttendance">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-        Attendance (DTR)
-      </button>
-      <button type="button" class="tech-sheet-item" id="techFhCashAdvance">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg>
-        Cash Advance
-      </button>
-      <button type="button" class="tech-sheet-item" id="techFhLeave">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>
-        Leave
-      </button>
-      <button type="button" class="tech-sheet-item" id="techFhLiquidation">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>
-        Liquidation
-      </button>
-      <button type="button" class="tech-sheet-item" id="techFhReimbursement">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg>
-        Reimbursement
-      </button>
-    </div>
-  </div>
-</div>
 
 <!-- More — the bottom nav's overflow tab for what doesn't get its own
      slot: Messages, Documents, account Settings, and Logout. -->
@@ -2288,6 +2253,40 @@ window.awesCss = {
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg> My Documents</span></div>
     <div class="card-body">
       <div id="documentsList"><div class="empty-state">Loading…</div></div>
+    </div>
+  </div>
+</main>
+
+<!-- Finance & HR — technician page opened from the Quick Actions tile or
+     the bottom nav's Finance tab. Tile view of what used to be a bottom
+     sheet list; each tile opens the same screen/tab it always did (see
+     showFinanceHrView() in home.js). -->
+<main id="financeHrView" style="display:none; max-width:700px; margin:0 auto; padding:16px;">
+  <div class="card">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg> Finance &amp; HR</span></div>
+    <div class="card-body">
+      <div class="fh-grid">
+        <button type="button" class="fh-tile fh-blue" id="techFhAttendance">
+          <span class="fh-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+          <span class="fh-tile-label">Attendance (DTR)</span>
+        </button>
+        <button type="button" class="fh-tile fh-green" id="techFhCashAdvance">
+          <span class="fh-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>
+          <span class="fh-tile-label">Cash Advance</span>
+        </button>
+        <button type="button" class="fh-tile fh-purple" id="techFhLeave">
+          <span class="fh-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span>
+          <span class="fh-tile-label">Leave</span>
+        </button>
+        <button type="button" class="fh-tile fh-orange" id="techFhLiquidation">
+          <span class="fh-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></span>
+          <span class="fh-tile-label">Liquidation</span>
+        </button>
+        <button type="button" class="fh-tile fh-teal" id="techFhReimbursement">
+          <span class="fh-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span>
+          <span class="fh-tile-label">Reimbursement</span>
+        </button>
+      </div>
     </div>
   </div>
 </main>

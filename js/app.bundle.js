@@ -11558,6 +11558,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('dispatchView').style.display = '';
@@ -11609,6 +11610,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('leaveView').style.display = '';
@@ -12685,6 +12687,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = '';
     $('footerBar').style.display = 'none';
@@ -14839,6 +14842,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('cashAdvanceView').style.display = '';
@@ -15063,6 +15067,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('dtrView').style.display = '';
@@ -15111,6 +15116,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('footerBar').style.display = 'none';
@@ -15143,6 +15149,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('footerBar').style.display = 'none';
@@ -15171,6 +15178,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -15199,6 +15207,7 @@
     $('serviceReportsManagerView').style.display = '';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('footerBar').style.display = 'none';
@@ -15704,6 +15713,7 @@
     $('customersManagerView').style.display = 'none';
     $('serviceReportsManagerView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('messagesView').style.display = '';
@@ -15766,6 +15776,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = '';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -15803,6 +15814,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('customerHomeScreen').style.display = 'none';
@@ -15894,6 +15906,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('serviceReportView').style.display = '';
@@ -15936,6 +15949,7 @@
     serviceReportsManagerView: {fn: ()=> showServiceReportsManagerView(), roles: ['admin']},
     messagesView: {fn: ()=> showMessagesView(), roles: ['admin','tech']},
     documentsView: {fn: ()=> showDocumentsView(), roles: ['admin','tech']},
+    financeHrView: {fn: ()=> showFinanceHrView(), roles: ['tech']},
     customerHomeScreen: {fn: ()=> showCustomerHome(), roles: ['customer']},
     // Needs a customer record to render — fall back to the list it's reached from.
     customerHistoryView: {fn: ()=> showCustomersManagerView(), roles: ['admin']},
@@ -16069,27 +16083,33 @@
   }
   $('techQaServiceReport').addEventListener('click', showServiceReport);
   $('techQaJobOrder').addEventListener('click', showDispatchView);
-  $('techQaFinanceHr').addEventListener('click', ()=> techOpenFinanceHrSheet());
+  $('techQaFinanceHr').addEventListener('click', ()=> showFinanceHrView());
   $('techQaMaterials').addEventListener('click', ()=> flashComingSoonHeader('Material Request Form', 'Material Request Form — coming soon'));
 
-  // ---------- Finance & HR sheet — bundles what used to be five separate
-  // sidebar entries (Attendance/Cash Advance/Leave/Liquidation/
-  // Reimbursement) into one sheet, reusing the exact same target screens/
-  // tabs the old sidebar links opened. ----------
-  function techOpenFinanceHrSheet(){ $('techFinanceHrSheet').classList.add('open'); }
-  function techCloseFinanceHrSheet(){ $('techFinanceHrSheet').classList.remove('open'); }
-  $('closeTechFinanceHrSheet').addEventListener('click', techCloseFinanceHrSheet);
-  $('techFinanceHrSheet').addEventListener('click', (e)=>{ if(e.target.id==='techFinanceHrSheet') techCloseFinanceHrSheet(); });
-  $('techFhAttendance').addEventListener('click', ()=>{ techCloseFinanceHrSheet(); showDtrView(); });
-  $('techFhCashAdvance').addEventListener('click', ()=>{ techCloseFinanceHrSheet(); showCashAdvanceView(); });
-  $('techFhLeave').addEventListener('click', ()=>{ techCloseFinanceHrSheet(); showLeaveView(); });
+  // ---------- Finance & HR page — tile view of Attendance / Cash Advance /
+  // Leave / Liquidation / Reimbursement. Each tile opens the exact same
+  // screen or tab the old sheet (and before that, the sidebar) opened. ----------
+  function showFinanceHrView(){
+    document.body.classList.remove('dashboard-active');
+    ['homeScreen','serviceReportView','dtrView','leaveView','cashAdvanceView','dispatchView',
+     'equipmentManagerView','customersManagerView','serviceReportsManagerView','messagesView',
+     'documentsView','customerHistoryView','serviceRequestsView'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    $('financeHrView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle('Finance & HR', 'Attendance, cash advance & leave');
+    if(typeof techSetNavActive === 'function') techSetNavActive('finance');
+    window.scrollTo({top:0});
+  }
+  $('techFhAttendance').addEventListener('click', ()=> showDtrView());
+  $('techFhCashAdvance').addEventListener('click', ()=> showCashAdvanceView());
+  $('techFhLeave').addEventListener('click', ()=> showLeaveView());
   $('techFhLiquidation').addEventListener('click', async ()=>{
-    techCloseFinanceHrSheet();
     await showCashAdvanceView();
     if(currentUser && currentUser.role!=='admin') caShowTab('liquidate');
   });
   $('techFhReimbursement').addEventListener('click', async ()=>{
-    techCloseFinanceHrSheet();
     await showCashAdvanceView();
     if(currentUser && currentUser.role!=='admin') caShowTab('reimburse');
   });
@@ -16167,7 +16187,7 @@
   $('techNavBtnHome').addEventListener('click', ()=>{ techSetNavActive('home'); showHome(); });
   $('techNavBtnJobs').addEventListener('click', ()=>{ techSetNavActive('jobs'); showDispatchView(); });
   $('techNavBtnReport').addEventListener('click', ()=>{ techSetNavActive('report'); showServiceReport(); });
-  $('techNavBtnFinance').addEventListener('click', ()=>{ techSetNavActive('finance'); techOpenFinanceHrSheet(); });
+  $('techNavBtnFinance').addEventListener('click', ()=> showFinanceHrView());
   $('techNavBtnMore').addEventListener('click', ()=>{ techSetNavActive('more'); techOpenMoreSheet(); });
 
 
@@ -18793,6 +18813,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('homeScreen').style.display = 'none';

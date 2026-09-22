@@ -348,6 +348,7 @@
     $('serviceReportsManagerView').style.display = 'none';
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
+    if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     $('homeScreen').style.display = 'none';
