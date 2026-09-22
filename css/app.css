@@ -2818,3 +2818,20 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
   #techNav .cp-nav-btn{ gap:2px; padding:3px 2px; }
   #techNav .cp-nav-btn svg{ width:27px; height:27px; stroke-width:1.9; }
 }
+
+/* ---------- "Turn on notifications" home prompt ---------- */
+.push-prompt{
+  display:flex; align-items:center; gap:14px; margin-bottom:16px;
+  background:var(--teal-light); border:1px solid #BFE0DC; border-radius:14px; padding:14px 16px;
+}
+.push-prompt-icon{
+  width:46px; height:46px; border-radius:12px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  background:var(--surface); color:var(--teal);
+}
+.push-prompt-icon svg{ width:26px; height:26px; }
+.push-prompt-body{ flex:1; min-width:0; }
+.push-prompt-title{ font-size:14.5px; font-weight:700; color:var(--text); margin:0 0 2px; }
+.push-prompt-text{ font-size:12.5px; color:var(--text-muted); line-height:1.4; margin:0; }
+.push-prompt-actions{ display:flex; gap:8px; margin-top:10px; }
+.push-prompt-actions .btn{ flex:none; padding:9px 16px; font-size:13px; }
+.push-prompt-actions .push-prompt-later{ background:none; color:var(--text-muted); }

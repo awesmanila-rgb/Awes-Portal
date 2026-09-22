@@ -331,6 +331,9 @@ window.awesCss = {
 
 <!-- Home screen (feature tiles) -->
 <div id="homeScreen" class="home-screen" style="display:none;">
+  <!-- "Turn on notifications" prompt — shown only while this device has
+       notifications off (see pushRenderPrompts in push.js). -->
+  <div class="push-prompt" id="pushPromptTech" style="display:none;"></div>
   <div class="card" id="homeGreetingCard" style="display:none; margin-bottom:16px;">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M14 11V5a1.5 1.5 0 0 1 3 0v8"/><path d="M17 13V8a1.5 1.5 0 0 1 3 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 15a1.4 1.4 0 0 1 2-2l2 1.8"/></svg> Welcome Back</span></div>
     <div class="card-body">
@@ -732,6 +735,7 @@ window.awesCss = {
   </div>
 
   <div class="cp-content">
+    <div class="push-prompt" id="pushPromptCust" style="display:none;"></div>
     <!-- Status card + service callout, side by side on desktop and
          stacked on mobile (see AWES_App_enroute redesign spec's
          "Redesigned desktop layout" / "Responsive mobile design"). -->

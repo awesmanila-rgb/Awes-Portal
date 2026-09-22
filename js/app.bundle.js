@@ -14993,6 +14993,7 @@
   // Re-subscribes a returning user silently when permission is already
   // granted (endpoints rotate, and a row may have been pruned as dead).
   async function pushInit(){
+    pushRenderPrompts();
     if(!pushSupported() || !currentUser) return;
     if(Notification.permission === 'granted') pushSubscribe();
     navigator.serviceWorker.addEventListener('message', (e)=>{
@@ -15041,6 +15042,54 @@
     { status:'pushStatusTech',  btn:'pushEnableTechBtn' },
     { status:'pushStatusCust',  btn:'pushEnableCustBtn' }
   ];
+  // ---------------------------------------------------------------------
+  // Home-screen prompt (technician + customer). Shown only while this
+  // device CAN get notifications but hasn't been allowed yet. The Android
+  // permission pop-up is only ever triggered by the Turn On tap — never on
+  // load — for the reason in pushRequestPermission's comment. "Not now"
+  // hides it on this device for PUSH_PROMPT_SNOOZE_DAYS, then it returns.
+  // ---------------------------------------------------------------------
+  const PUSH_PROMPT_SNOOZE_DAYS = 7;
+  function pushPromptSnoozeKey(){ return 'awes-push-prompt-snooze:'+(currentUser ? currentUser.id : ''); }
+  function pushPromptSnoozed(){
+    try{
+      const until = Number(localStorage.getItem(pushPromptSnoozeKey()) || 0);
+      return until > Date.now();
+    }catch(e){ return false; }
+  }
+  function pushRenderPrompts(){
+    const show = !!currentUser && currentUser.role !== 'admin'
+      && pushSupported() && Notification.permission === 'default' && !pushPromptSnoozed();
+    const msg = (currentUser && currentUser.role==='customer')
+      ? 'Get alerts when your technician is on the way, arrives, or sends you a message.'
+      : 'Get alerts for new job orders and messages, even when the app is closed.';
+    ['pushPromptTech','pushPromptCust'].forEach(id=>{
+      const el = $(id);
+      if(!el) return;
+      if(!show){ el.style.display = 'none'; el.innerHTML = ''; return; }
+      el.innerHTML =
+        '<span class="push-prompt-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg></span>'+
+        '<div class="push-prompt-body">'+
+          '<p class="push-prompt-title">Turn on notifications</p>'+
+          '<p class="push-prompt-text">'+msg+'</p>'+
+          '<div class="push-prompt-actions">'+
+            '<button type="button" class="btn btn-primary" data-push-on>Turn On</button>'+
+            '<button type="button" class="btn push-prompt-later" data-push-later>Not now</button>'+
+          '</div>'+
+        '</div>';
+      el.style.display = '';
+      el.querySelector('[data-push-on]').addEventListener('click', async (e)=>{
+        e.currentTarget.disabled = true;
+        await pushRequestPermission();
+        pushRefreshToggles();
+      });
+      el.querySelector('[data-push-later]').addEventListener('click', ()=>{
+        try{ localStorage.setItem(pushPromptSnoozeKey(), String(Date.now() + PUSH_PROMPT_SNOOZE_DAYS*86400000)); }catch(e){}
+        pushRenderPrompts();
+      });
+    });
+  }
+
   function pushRefreshToggles(){
     let label, showBtn = true;
     if(!pushSupported()){ label = 'Not supported on this device'; showBtn = false; }
@@ -15052,6 +15101,7 @@
       if(s) s.textContent = label;
       if(b) b.style.display = showBtn ? '' : 'none';
     });
+    pushRenderPrompts();
   }
   PUSH_TOGGLES.forEach(t=>{
     const b = $(t.btn);
