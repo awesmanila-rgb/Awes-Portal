@@ -270,8 +270,26 @@
 
     // Next Job Order — the soonest-dated open ticket, so a technician sees
     // what's coming up without opening My Job Order and scanning the list.
+    // A job already in progress (someone tapped Arrived at Site) outranks
+    // everything, since that's where the technician is right now.
     const nextJo = openTickets.filter(t=>t.date).slice()
-      .sort((a,b)=> a.date.localeCompare(b.date) || (a.expectedTime||'').localeCompare(b.expectedTime||''))[0];
+      .sort((a,b)=>{
+        const ip = (t)=> dtEffectiveStatus(t)==='in_progress' ? 0 : 1;
+        return ip(a)-ip(b) || a.date.localeCompare(b.date) || (a.expectedTime||'').localeCompare(b.expectedTime||'');
+      })[0];
+    // The title used to be fixed at "Next Job Order", even for a job dated
+    // today or already under way. It now says which one it is.
+    const titleEl = $('ovMyNextJoTitle');
+    if(titleEl){
+      let title = 'Next Job Order';
+      if(nextJo){
+        const today = todayISO();
+        if(dtEffectiveStatus(nextJo)==='in_progress') title = 'Current Job Order';
+        else if(nextJo.date===today) title = "Today's Job Order";
+        else if(nextJo.date < today) title = 'Pending Job Order';
+      }
+      titleEl.textContent = title;
+    }
     if(nextJo){
       $('ovMyNextJoValue').textContent = nextJo.jobOrderNo || nextJo.id;
       $('ovMyNextJoSub').textContent = (nextJo.custName||'')+' — '+leaveFmtDate(nextJo.date)+(nextJo.expectedTime ? (' at '+nextJo.expectedTime) : '');
