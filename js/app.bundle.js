@@ -14881,7 +14881,7 @@
   // half is meant to ship to clients — it only lets a browser create a
   // subscription addressed to this server. The PRIVATE key never leaves
   // Supabase.
-  const PUSH_PUBLIC_KEY = 'BK4deTS5XrY4poCng9Brtx6XSjqOIhlyfeyDROLHZ_iR02NZe9rGVvSBTIX0ZRLimwiQvKtGAk_YO-FQ5VZ7UGQ';
+  const PUSH_PUBLIC_KEY = 'BDNnVSgi4tWomDM6KYn76Ng907epPyoPe2KZhBiopghXTPvSFW929BLSztbmTTwbLFahih7BIQVLdQz7vLmbEzc';
 
   function pushSupported(){
     return typeof window !== 'undefined'

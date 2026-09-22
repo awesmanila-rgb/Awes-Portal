@@ -16,23 +16,32 @@ It ends with the schema reload, so no separate `NOTIFY` step.
 
 ## 2. Set the VAPID secrets
 
-I generated a keypair for you. These are yours — the private key must never
-leave Supabase.
+Generate a keypair on your own computer — never commit the private key to
+this repo, and never paste it into chat, docs or code:
 
-```
-VAPID_PUBLIC_KEY=BK4deTS5XrY4poCng9Brtx6XSjqOIhlyfeyDROLHZ_iR02NZe9rGVvSBTIX0ZRLimwiQvKtGAk_YO-FQ5VZ7UGQ
-VAPID_PRIVATE_KEY=TgngrL8C4UH9fJlBWrotGW8n2nbqEnnkLgjYxHNGfZQ
+```bash
+npx web-push generate-vapid-keys
 ```
 
-Set them, plus a contact address (push services require one — it just has to
-be a real `mailto:`):
+Store both keys in Supabase only, plus a contact address (push services
+require one — it just has to be a real `mailto:`):
 
 ```bash
 supabase secrets set \
-  VAPID_PUBLIC_KEY=BK4deTS5XrY4poCng9Brtx6XSjqOIhlyfeyDROLHZ_iR02NZe9rGVvSBTIX0ZRLimwiQvKtGAk_YO-FQ5VZ7UGQ \
-  VAPID_PRIVATE_KEY=TgngrL8C4UH9fJlBWrotGW8n2nbqEnnkLgjYxHNGfZQ \
+  VAPID_PUBLIC_KEY=<your public key> \
+  VAPID_PRIVATE_KEY=<your private key> \
   VAPID_SUBJECT=mailto:you@yourdomain.com
+supabase functions deploy send-push
 ```
+
+Then put the PUBLIC key (and only the public key) into `PUSH_PUBLIC_KEY` in
+`js/modules-src/push.js` and rebuild. The public key is safe to ship; the
+private key must never leave Supabase.
+
+**Rotating keys:** repeat the steps above with a new pair. Devices that
+subscribed under the old key re-subscribe automatically the next time the
+app opens (see `pushSubscribe` in push.js), so nobody has to turn
+notifications off and on again.
 
 The **public** key is also hard-coded in `js/modules-src/push.js` as
 `PUSH_PUBLIC_KEY`. That is correct and safe — it only lets a browser create a
