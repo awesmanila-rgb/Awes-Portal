@@ -399,8 +399,14 @@
     // blank signatures is never mistaken for an unfinished one.
     ['back_entered_by','backEnteredBy'], ['back_entered_by_id','backEnteredById'],
     ['back_entered_at','backEnteredAt'],
-    // Admin sign-off. Separate from back-entry above: that records who
-    // keyed a report in, this records who checked it.
+  ];
+  // Admin sign-off. READ with the report so lists can show Reviewed, but
+  // never WRITTEN by a save: reportToRow() writes every field it knows about
+  // as an explicit value, empty ones as null — so while these sat in the list
+  // above, re-saving a report whose local copy lacked the sign-off sent
+  // reviewed_by = null and silently erased admin's review. They are only
+  // ever written by srMarkReportReviewed / srMarkReportsReviewedForSrNos.
+  const REPORT_REVIEW_FIELDS = [
     ['reviewed_by','reviewedBy'], ['reviewed_by_id','reviewedById'],
     ['reviewed_at','reviewedAt']
   ];
@@ -452,6 +458,7 @@
     if(!row) return null;
     const data = {};
     REPORT_STRING_FIELDS.forEach(([col, key])=>{ data[key] = row[col]; });
+    REPORT_REVIEW_FIELDS.forEach(([col, key])=>{ data[key] = row[col]; });
     data.backEntered  = !!row.back_entered;
     data.findings     = row.findings || [];
     data.recs         = row.recommendations || [];
@@ -520,10 +527,18 @@
     const target = (oldName||'').trim().toLowerCase();
     if(!target) return 0;
     try{
-      const { data, error } = await db.from('service_reports').select('sr_no, cust_name');
+      const { data, error } = await db.from('service_reports').select('sr_no, cust_name, completed');
       if(error) throw error;
+      // DRAFTS only. A filed report is the signed record and keeps the
+      // customer name it was filed under — this used to rewrite the name on
+      // every report the customer had ever signed. Filed reports stay
+      // findable after a rename, because the customer portal and equipment
+      // history link reports by customer_id / equipment_id, not by name.
+      // The database refuses edits to filed reports anyway
+      // (guard_service_report_immutable), so including them would also make
+      // the whole rename fail.
       const srNos = (data||[])
-        .filter(r=> (r.cust_name||'').trim().toLowerCase() === target)
+        .filter(r=> !r.completed && (r.cust_name||'').trim().toLowerCase() === target)
         .map(r=> r.sr_no);
       if(srNos.length===0) return 0;
       const { error: updErr } = await db.from('service_reports').update({ cust_name: newName }).in('sr_no', srNos);
@@ -6974,14 +6989,7 @@
         row.querySelector('[data-act="view"]').addEventListener('click', async (e)=>{
           e.stopPropagation();
           try{
-            const doc = await buildPdf(d);
-            // Reuse the pre-signing preview overlay, but relabel it — this is
-            // a completed report being viewed, not a draft on its way to
-            // signatures, so the default "Continue to Signatures" copy doesn't apply.
-            $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
-            $('previewOkBtn').textContent = 'Close';
-            $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
+            await srViewFiledReport(d);
           }catch(err){
             console.error('view report failed', err);
             toast('Could not open this report');
@@ -7004,7 +7012,29 @@
       list.appendChild(row);
     });
   }
+  // Filed reports are read-only for everyone, admin included: they are only
+  // ever shown as the finished PDF. One helper, used by every place that
+  // shows a filed report — Saved Reports' View, the job order's Open, and
+  // the guard in openReport below — so they can't drift apart.
+  async function srViewFiledReport(d, title){
+    const doc = await buildPdf(d);
+    $('previewOverlay').querySelector('h3').textContent = title || (d.custName ? d.custName : 'Report');
+    $('previewOkBtn').textContent = 'Close';
+    $('previewOverlay').classList.add('open');
+    await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
+  }
+
   async function openReport(d){
+    // The editor is for drafts. Every current caller already passes only
+    // drafts, but this is the one function that loads a report into the
+    // form, so it is also the one place to guarantee a filed report never
+    // lands there — whatever calls it in future. The database refuses the
+    // save regardless (guard_service_report_immutable); this stops admin
+    // being shown an editable form that can only fail.
+    if(d && d.completed){
+      await srViewFiledReport(d);
+      return;
+    }
     showServiceReport();
     resetForm();
     currentSrNo = d.srNo; $('metaSrNo').textContent = d.srNo||'—';
@@ -11102,29 +11132,6 @@
     return ok;
   }
 
-  // Set when admin opens a Service Report from a job order's review
-  // section, so the report screen can offer a way back to the job order
-  // they were reviewing. Cleared once used or once they navigate elsewhere.
-  let dtReviewReturnTicketId = null;
-  function dtShowReviewReturnBanner(){
-    const banner = $('dtReviewReturnBanner');
-    if(!banner) return;
-    if(!dtReviewReturnTicketId){ banner.style.display = 'none'; return; }
-    const t = dtLastTicketsById[dtReviewReturnTicketId];
-    $('dtReviewReturnText').innerHTML = icon('clipboard')+' Reviewing '+
-      escapeHtml(t ? t.jobOrderNo : 'a job order')+' — go back when you are done with this report.';
-    banner.style.display = '';
-  }
-  async function dtReviewReturn(){
-    const id = dtReviewReturnTicketId;
-    dtReviewReturnTicketId = null;
-    const banner = $('dtReviewReturnBanner');
-    if(banner) banner.style.display = 'none';
-    if(!id) return;
-    await showDispatchView('all');
-    dtOpenTicketOverlay(id);
-  }
-
   // ---------- Admin review: the reports filed against a job order ----------
   // Closing is admin's review step, and admin cannot review what they
   // cannot see. Before this, the overlay showed which units were reported
@@ -11261,18 +11268,18 @@
         const srNo = btn.dataset.sr;
         btn.disabled = true; btn.textContent = 'Opening…';
         try{
-          // Same path the Report History list uses, so admin lands in the
-          // identical read-only view rather than a second, diverging one.
-          const rec = await cloudGetReport(srNo);
-          if(!rec){ toast('Could not load '+srNo); return; }
-          // openReport switches the whole view, so the overlay has to go.
-          // Remembering which job order we came from lets the report screen
-          // offer a way back — reviewing five reports on one job order
-          // otherwise means finding and reopening that ticket five times.
-          dtReviewReturnTicketId = dtOverlayTicket ? dtOverlayTicket.id : null;
-          $('dtTicketOverlay').classList.remove('open');
-          await openReport(rec);
-          dtShowReviewReturnBanner();
+          const rep = await cloudGetReport(srNo);
+          if(!rep){ toast('Could not load '+srNo); return; }
+          // The finished report, read-only — the same viewer Saved Reports'
+          // "View" uses. This used to call openReport(), which loads a report
+          // into the EDITING form: the screen used to write and resume a
+          // report, which is why reviewing one looked like "Create Service
+          // Report". Admin is here to read the work, not to edit it.
+          //
+          // The job order stays open underneath (the preview sits above it),
+          // so closing the preview lands admin straight back on the job order
+          // — ready to close it — instead of on a different screen.
+          await srViewFiledReport(rep, srNo + (rep.custName ? ' — ' + rep.custName : ''));
         }catch(e){
           console.error('open ticket report failed', describeCloudError(e));
           toast('Could not open '+srNo);
@@ -11524,7 +11531,6 @@
     }
   }
   $('closeDtTicketOverlay').addEventListener('click', dtCloseTicketOverlay);
-  if($('dtReviewReturnBtn')) $('dtReviewReturnBtn').addEventListener('click', dtReviewReturn);
   $('dtTicketOverlay').addEventListener('click', (e)=>{ if(e.target.id==='dtTicketOverlay') dtCloseTicketOverlay(); });
 
   // "Continue Tomorrow" — opens a fresh Create Dispatch Ticket form for the
@@ -16355,6 +16361,16 @@
     const isAdminUser = currentUser && currentUser.role === 'admin';
     const reportStat = isAdminUser ? pendingReview : draftReports;
     $('ovReportsValue').textContent = String(reportStat);
+    // Every other card in this row opens its matching list; this one did
+    // nothing. Admin lands on Saved Reports' Needs Review, technicians on
+    // their drafts — the same thing each count is counting.
+    const repCard = $('ovReportsCard');
+    if(repCard) repCard.onclick = async ()=>{
+      await showServiceReportsManagerView();
+      const want = isAdminUser ? 'needs_review' : 'draft';
+      const b = document.querySelector('#srMgrFilterRow button[data-filter="'+want+'"]');
+      if(b) b.click();
+    };
     $('ovReportsSub').textContent = isAdminUser
       ? pendingReview+' Service Report'+(pendingReview===1?'':'s')+' Awaiting Sign-off'
       : draftReports+' Draft'+(draftReports===1?'':'s')+' To Finish';

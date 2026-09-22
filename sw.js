@@ -884,7 +884,28 @@
 //     silently returned nothing. Names now come from the
 //     service_request_tech_names() RPC, which exposes only the names and
 //     only for a request that customer owns.
-// Bumped to v122 — the job order review section stuck on "Loading…".
+// Bumped to v124 — filed service reports are read-only, for everyone.
+//
+// A filed report is only ever shown as the finished PDF; openReport() now
+// refuses to load one into the editor whatever calls it. Renaming a
+// customer no longer rewrites the name on their filed reports (drafts
+// only). And a bug from v112 is fixed: sign-off columns were written by
+// every save, as null when absent, so re-saving a report could silently
+// erase admin's review. The database enforces all of it — migration
+// 20260919_04 refuses any edit to a filed report or removal of a sign-off.
+//
+// Also in v123 — reviewing a report from a job order opened the report
+// EDITOR. The job order's "Open" button loaded the report into the editing
+// form — the screen used to write and resume reports — so reviewing looked
+// like "Create Service Report", and admin went to Saved Reports instead,
+// where Mark Reviewed signed off the reports but left the job order
+// unclosed. It now opens the finished report read-only (the same viewer
+// Saved Reports' "View" uses), on top of the job order, so closing the
+// preview lands back on the job order ready to close. The "Back to Job
+// Order" banner that round trip needed is removed. Also: the dashboard's
+// "Reports to Sign Off" card now opens Needs Review; it did nothing.
+//
+// Also in v122 — the job order review section stuck on "Loading…".
 //
 // Root cause, confirmed by reproducing it: this app's $() caches every
 // element by id forever, and the review section's markup is rebuilt on each
@@ -1003,7 +1024,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v122';
+const CACHE_NAME = 'awes-sr-v124';
 
 // Split into two lists on purpose.
 //
