@@ -40,6 +40,20 @@
     return out;
   }
 
+  // True when an existing subscription was made with PUSH_PUBLIC_KEY.
+  // Browsers that don't expose options.applicationServerKey are assumed to
+  // match (keeps the old behaviour rather than churning subscriptions).
+  function pushKeyMatches(sub){
+    try{
+      const k = sub && sub.options && sub.options.applicationServerKey;
+      if(!k) return true;
+      const a = new Uint8Array(k), b = urlBase64ToUint8Array(PUSH_PUBLIC_KEY);
+      if(a.length !== b.length) return false;
+      for(let i=0; i<a.length; i++) if(a[i] !== b[i]) return false;
+      return true;
+    }catch(e){ return true; }
+  }
+
   // Subscribes this device and stores the endpoint. Safe to call repeatedly
   // — the browser returns the SAME subscription for a device+origin, and
   // the row upserts on endpoint, so re-running never creates duplicates.
@@ -50,6 +64,16 @@
     try{
       const reg = await navigator.serviceWorker.ready;
       let sub = await reg.pushManager.getSubscription();
+      // A subscription is bound to the VAPID public key it was created
+      // with. After a key rotation, the browser still holds the OLD one,
+      // and every push sent with the new key is rejected — so throw it
+      // away and subscribe again under the current key.
+      if(sub && !pushKeyMatches(sub)){
+        const oldEndpoint = sub.endpoint;
+        try{ await sub.unsubscribe(); }catch(e){}
+        try{ await db.from('push_subscriptions').delete().eq('endpoint', oldEndpoint); }catch(e){}
+        sub = null;
+      }
       if(!sub){
         sub = await reg.pushManager.subscribe({
           userVisibleOnly: true, // required by Chrome; every push must show something
