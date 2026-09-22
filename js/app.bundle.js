@@ -505,13 +505,23 @@
     };
   }
   async function cloudSaveReport(srNo, data){
-    if(!(await ensureCloud())) return false;
+    if(!(await ensureCloud())) { cloudSaveReport.lastError = 'No connection to the server'; return false; }
     try{
       data.srNo = srNo;
       const { error } = await db.from('service_reports').upsert(reportToRow(data), { onConflict: 'sr_no' });
       if(error) throw error;
       return true;
-    }catch(e){ console.error('cloud save report failed', describeCloudError(e)); return false; }
+    }catch(e){
+      // Captured here (not just console.error'd) so callers that only see a
+      // boolean — like the outbox retry handler below — can still surface
+      // the real reason instead of a generic "upload failed" that hides
+      // whatever the server actually objected to (RLS, a bad column value,
+      // a constraint). Field techs have no devtools to read the console.
+      const msg = describeCloudError(e);
+      console.error('cloud save report failed', msg);
+      cloudSaveReport.lastError = msg;
+      return false;
+    }
   }
   // Reports store the customer's name as free text captured at filing time,
   // not a reference to the customers row — so renaming a customer in Manage
@@ -5978,7 +5988,7 @@
     }
     payload.srNo = finalSr;
     const ok = await cloudSaveReport(finalSr, payload);
-    if(!ok) throw new Error('report upload failed');
+    if(!ok) throw new Error(cloudSaveReport.lastError || 'report upload failed');
     if(finalSr !== srNo){
       try{
         await window.storage.set('report:'+finalSr, JSON.stringify(payload), false);
