@@ -2939,3 +2939,15 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .mt-seed-count{ font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap; }
 .mt-seed-row button{ border:1px solid var(--green); background:#fff; color:var(--green-dark); border-radius:6px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0; }
 .mt-seed-row button:disabled{ border-color:var(--border); color:var(--text-muted); cursor:default; }
+
+/* ---------- Purchasing › live updates ---------- */
+.purch-head-right{ display:flex; align-items:center; gap:10px; }
+.purch-live{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; text-transform:none; letter-spacing:0; color:rgba(255,255,255,.78); }
+.purch-live::before{ content:''; width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.45); }
+.purch-live.on::before{ background:#7CE3A1; box-shadow:0 0 0 0 rgba(124,227,161,.6); animation:purchPulse 2.4s ease-out infinite; }
+.purch-live.off{ color:#F7D08A; }
+.purch-live.off::before{ background:#F7D08A; }
+@keyframes purchPulse{ 0%{ box-shadow:0 0 0 0 rgba(124,227,161,.55); } 70%{ box-shadow:0 0 0 6px rgba(124,227,161,0); } 100%{ box-shadow:0 0 0 0 rgba(124,227,161,0); } }
+@media (prefers-reduced-motion:reduce){ .purch-live.on::before{ animation:none; } }
+.purch-stale{ background:#FDF1DC; color:#7A4E0E; border:1px solid #F2D9A6; border-radius:8px; padding:8px 10px; font-size:12.5px; margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.purch-stale button{ margin-left:auto; border:1px solid #C98A12; background:#fff; color:#7A4E0E; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; }

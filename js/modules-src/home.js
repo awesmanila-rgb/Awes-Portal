@@ -1027,11 +1027,6 @@
     }else{
       trackerStopBroadcasting();
     }
-    // Idle-timeout watch (Admin only, 30 min) — see ADMIN_IDLE_MS in
-    // auth.js. startIdleWatch() itself is a no-op for tech/customer, who
-    // only sign out via the explicit Logout button; a page reload/refresh
-    // never signs anyone out either.
-    if(currentUser) startIdleWatch(); else stopIdleWatch();
     // {freshLogin:true} — passed only by the three login forms themselves
     // (renderTechnicianLoginForm / renderAdminLoginForm / the customer
     // form, in auth.js) right after credentials were just typed and

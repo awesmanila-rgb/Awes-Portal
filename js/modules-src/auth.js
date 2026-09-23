@@ -256,53 +256,20 @@
 
   let currentUser = null; // {id, name, role: 'tech'|'admin'}
 
-  // ---------- Idle timeout — Admin only, 30 minutes ----------
-  // A shared/unattended device left signed in is the risk being guarded
-  // against; Admin is the only role with an auto sign-out because of its far
-  // more sensitive surface (Manage Users, approvals, password changes,
-  // dropdown list editing). Technician and customer sessions no longer
-  // auto-expire from inactivity — they only end when the person taps
-  // "Logout". Implemented as "last activity timestamp + periodic check"
-  // rather than clearTimeout/setTimeout on every event — mousemove alone can
-  // fire dozens of times a second, and resetting a real timer that often is
-  // wasted work for no behavioral difference.
+  // ---------- Sign-out policy: manual only ----------
+  // Nobody is ever signed out automatically — not after inactivity, not
+  // when the app/tab is closed, not by a refresh. The ONLY way a session
+  // ends is someone tapping Logout (doLogout) on that device.
   //
-  // This (and the explicit Logout button) are the ONLY things that sign
-  // anyone out. Reloading or refreshing the page never does — see
-  // getVerifiedSession/checkLoginGate below, which restore the saved session
-  // from cache whenever the cloud can't be reached to re-verify it (e.g. a
-  // brief signal drop on a field connection), instead of treating "couldn't
-  // check" as "log them out".
-  const ADMIN_IDLE_MS = 30 * 60 * 1000;
-  const IDLE_CHECK_MS = 15 * 1000;     // how often we check the clock
-  let lastActivity = Date.now();
-  let idleInterval = null;
-
-  function markActivity(){
-    if(currentUser) lastActivity = Date.now();
-  }
-  ['mousemove','mousedown','keydown','touchstart','scroll','wheel'].forEach(evt=>{
-    document.addEventListener(evt, markActivity, {passive:true});
-  });
-
-  function startIdleWatch(){
-    // Only admin sessions are watched — tech/customer sign out on explicit
-    // Logout tap only.
-    if(!currentUser || currentUser.role!=='admin'){ stopIdleWatch(); return; }
-    lastActivity = Date.now();
-    if(idleInterval) clearInterval(idleInterval);
-    idleInterval = setInterval(async ()=>{
-      if(!currentUser || currentUser.role!=='admin'){ stopIdleWatch(); return; }
-      if(Date.now() - lastActivity >= ADMIN_IDLE_MS){
-        stopIdleWatch();
-        await doLogout();
-        toast('Signed out after 30 minutes of inactivity');
-      }
-    }, IDLE_CHECK_MS);
-  }
-  function stopIdleWatch(){
-    if(idleInterval){ clearInterval(idleInterval); idleInterval = null; }
-  }
+  // (There used to be a 30-minute admin idle timeout here, and a "drop the
+  // saved session when the tab was closed" check in history.js; both were
+  // removed on request. Every signOut() in the app also uses
+  // { scope: 'local' } — see doLogout — so logging out on one device, or the
+  // throwaway admin-password check, never ends sessions on OTHER devices.
+  // Supabase's default is 'global', which signs the account out everywhere;
+  // with one shared admin account that silently logged out every other admin
+  // screen, leaving them looking signed in while the database treated their
+  // requests as anonymous.)
 
   function updateUserBadge(){
     const el = $('metaUser');
@@ -682,20 +649,20 @@
       }catch(e){}
       if(!prof || prof.role !== 'customer'){
         submit.disabled = false;
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         showRoleChooser('This account is not set up as a customer portal login.');
         return;
       }
       if(prof.active===false){
         submit.disabled = false;
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         showRoleChooser('This account has been deactivated. Contact your service provider.');
         return;
       }
       const custList = await fetchCustomerLinks(data.user.id);
       if(!custList.length){
         submit.disabled = false;
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         showRoleChooser('This account is not linked to any customer records yet. Contact your service provider.');
         return;
       }
@@ -899,7 +866,7 @@
       const profRow = await cloudGetUser(data.user.id);
       submit.disabled = false;
       if(!profRow){
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         renderTechnicianLoginForm('Could not load your account — try again.', username);
         return;
       }
@@ -1165,10 +1132,10 @@
 
   async function doLogout(){
     if(currentUser && currentUser.role==='admin') exitAdminModeUI();
-    stopIdleWatch();
     trackerStopBroadcasting();
     trackerAdminTeardown();
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
+    if(typeof purchRealtimeTeardown === 'function') purchRealtimeTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
     // Job order ticket stream. Channel names are keyed by user id, so
     // without this an account switch on a shared device would leave the
@@ -1178,7 +1145,9 @@
     // person signs in on keep receiving. Awaited so the row is gone before
     // the auth session ends (deleting it needs that session).
     if(typeof pushUnsubscribeThisDevice === 'function'){
-      try{ await pushUnsubscribeThisDevice(); }catch(e){}
+      // Capped: a slow or hanging network must never stop Logout from
+      // completing. Worst case the stale push row is pruned as dead later.
+      try{ await Promise.race([pushUnsubscribeThisDevice(), new Promise(r=> setTimeout(r, 4000))]); }catch(e){}
     }
     // This used to only clear the app's OWN 'current-user' flag and never told
     // Supabase Auth to end the session. The real session cookie/token was left
@@ -1187,7 +1156,7 @@
     // db.auth.getSession(), finds that still-live session, and logs the same
     // account straight back in, landing on the homepage instead of login.
     // Signing out of Supabase itself is what actually ends the session.
-    if(db){ try{ await db.auth.signOut(); }catch(e){} }
+    if(db){ try{ await db.auth.signOut({ scope: 'local' }); }catch(e){} }
     currentUser = null;
     localStorage.removeItem('current-user');
     try{ localStorage.removeItem('awes-last-screen'); }catch(e){}

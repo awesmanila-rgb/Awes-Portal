@@ -1538,53 +1538,20 @@
 
   let currentUser = null; // {id, name, role: 'tech'|'admin'}
 
-  // ---------- Idle timeout — Admin only, 30 minutes ----------
-  // A shared/unattended device left signed in is the risk being guarded
-  // against; Admin is the only role with an auto sign-out because of its far
-  // more sensitive surface (Manage Users, approvals, password changes,
-  // dropdown list editing). Technician and customer sessions no longer
-  // auto-expire from inactivity — they only end when the person taps
-  // "Logout". Implemented as "last activity timestamp + periodic check"
-  // rather than clearTimeout/setTimeout on every event — mousemove alone can
-  // fire dozens of times a second, and resetting a real timer that often is
-  // wasted work for no behavioral difference.
+  // ---------- Sign-out policy: manual only ----------
+  // Nobody is ever signed out automatically — not after inactivity, not
+  // when the app/tab is closed, not by a refresh. The ONLY way a session
+  // ends is someone tapping Logout (doLogout) on that device.
   //
-  // This (and the explicit Logout button) are the ONLY things that sign
-  // anyone out. Reloading or refreshing the page never does — see
-  // getVerifiedSession/checkLoginGate below, which restore the saved session
-  // from cache whenever the cloud can't be reached to re-verify it (e.g. a
-  // brief signal drop on a field connection), instead of treating "couldn't
-  // check" as "log them out".
-  const ADMIN_IDLE_MS = 30 * 60 * 1000;
-  const IDLE_CHECK_MS = 15 * 1000;     // how often we check the clock
-  let lastActivity = Date.now();
-  let idleInterval = null;
-
-  function markActivity(){
-    if(currentUser) lastActivity = Date.now();
-  }
-  ['mousemove','mousedown','keydown','touchstart','scroll','wheel'].forEach(evt=>{
-    document.addEventListener(evt, markActivity, {passive:true});
-  });
-
-  function startIdleWatch(){
-    // Only admin sessions are watched — tech/customer sign out on explicit
-    // Logout tap only.
-    if(!currentUser || currentUser.role!=='admin'){ stopIdleWatch(); return; }
-    lastActivity = Date.now();
-    if(idleInterval) clearInterval(idleInterval);
-    idleInterval = setInterval(async ()=>{
-      if(!currentUser || currentUser.role!=='admin'){ stopIdleWatch(); return; }
-      if(Date.now() - lastActivity >= ADMIN_IDLE_MS){
-        stopIdleWatch();
-        await doLogout();
-        toast('Signed out after 30 minutes of inactivity');
-      }
-    }, IDLE_CHECK_MS);
-  }
-  function stopIdleWatch(){
-    if(idleInterval){ clearInterval(idleInterval); idleInterval = null; }
-  }
+  // (There used to be a 30-minute admin idle timeout here, and a "drop the
+  // saved session when the tab was closed" check in history.js; both were
+  // removed on request. Every signOut() in the app also uses
+  // { scope: 'local' } — see doLogout — so logging out on one device, or the
+  // throwaway admin-password check, never ends sessions on OTHER devices.
+  // Supabase's default is 'global', which signs the account out everywhere;
+  // with one shared admin account that silently logged out every other admin
+  // screen, leaving them looking signed in while the database treated their
+  // requests as anonymous.)
 
   function updateUserBadge(){
     const el = $('metaUser');
@@ -1964,20 +1931,20 @@
       }catch(e){}
       if(!prof || prof.role !== 'customer'){
         submit.disabled = false;
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         showRoleChooser('This account is not set up as a customer portal login.');
         return;
       }
       if(prof.active===false){
         submit.disabled = false;
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         showRoleChooser('This account has been deactivated. Contact your service provider.');
         return;
       }
       const custList = await fetchCustomerLinks(data.user.id);
       if(!custList.length){
         submit.disabled = false;
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         showRoleChooser('This account is not linked to any customer records yet. Contact your service provider.');
         return;
       }
@@ -2181,7 +2148,7 @@
       const profRow = await cloudGetUser(data.user.id);
       submit.disabled = false;
       if(!profRow){
-        await db.auth.signOut();
+        await db.auth.signOut({ scope: 'local' });
         renderTechnicianLoginForm('Could not load your account — try again.', username);
         return;
       }
@@ -2447,10 +2414,10 @@
 
   async function doLogout(){
     if(currentUser && currentUser.role==='admin') exitAdminModeUI();
-    stopIdleWatch();
     trackerStopBroadcasting();
     trackerAdminTeardown();
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
+    if(typeof purchRealtimeTeardown === 'function') purchRealtimeTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
     // Job order ticket stream. Channel names are keyed by user id, so
     // without this an account switch on a shared device would leave the
@@ -2460,7 +2427,9 @@
     // person signs in on keep receiving. Awaited so the row is gone before
     // the auth session ends (deleting it needs that session).
     if(typeof pushUnsubscribeThisDevice === 'function'){
-      try{ await pushUnsubscribeThisDevice(); }catch(e){}
+      // Capped: a slow or hanging network must never stop Logout from
+      // completing. Worst case the stale push row is pruned as dead later.
+      try{ await Promise.race([pushUnsubscribeThisDevice(), new Promise(r=> setTimeout(r, 4000))]); }catch(e){}
     }
     // This used to only clear the app's OWN 'current-user' flag and never told
     // Supabase Auth to end the session. The real session cookie/token was left
@@ -2469,7 +2438,7 @@
     // db.auth.getSession(), finds that still-live session, and logs the same
     // account straight back in, landing on the homepage instead of login.
     // Signing out of Supabase itself is what actually ends the session.
-    if(db){ try{ await db.auth.signOut(); }catch(e){} }
+    if(db){ try{ await db.auth.signOut({ scope: 'local' }); }catch(e){} }
     currentUser = null;
     localStorage.removeItem('current-user');
     try{ localStorage.removeItem('awes-last-screen'); }catch(e){}
@@ -2876,7 +2845,11 @@
     try{
       const { data, error } = await client.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
       // Always tear the throwaway session down, whatever the outcome.
-      try{ await client.auth.signOut(); }catch(e){}
+      // scope:'local' — end ONLY this throwaway session. The default
+      // ('global') revokes every session of the admin account, which signed
+      // out every admin device (including this one) each time a password
+      // was confirmed.
+      try{ await client.auth.signOut({ scope: 'local' }); }catch(e){}
       return !error && !!(data && data.user);
     }catch(e){ return false; }
   }
@@ -7034,40 +7007,9 @@
   // Technician-facing direct buttons (shown in place of Menu — see applyUserRestrictions)
   $('userLogoutBtn').addEventListener('click', doLogout);
 
-  // ---------- Auto-logout admin/technician when the app is actually closed ----------
-  // A plain refresh and a real tab close both fire 'pagehide' identically, and
-  // event.persisted only tells us about the bfcache case — a normal reload
-  // gets persisted:false too, same as a real close. So this used to clear
-  // 'current-user' on pagehide directly, which meant hitting refresh wiped
-  // the cached session exactly like closing the tab did. Most of the time
-  // that was invisible, because checkLoginGate() re-derives currentUser from
-  // the still-live Supabase session on a reachable connection — but the
-  // moment the cloud was briefly unreachable during that refresh (a signal
-  // drop in the field is exactly when this matters most), checkLoginGate had
-  // no verified session AND no cached 'saved' one left to fall back to, so it
-  // fell through to the login screen. A plain refresh was logging people out.
-  //
-  // sessionStorage fixes this because, unlike localStorage, it survives an
-  // in-tab reload but is wiped the instant the tab/window is actually closed.
-  // So instead of reacting on the way OUT (pagehide), check on the way IN
-  // (this load): if our marker is still there, the tab never really closed —
-  // this is just a refresh, so the session is left alone. If it's missing,
-  // either this is the very first load ever or the tab that held this
-  // session was truly closed; either way there's no live tab to preserve, so
-  // any leftover admin/technician session is dropped. Customers are exempt —
-  // their portal session is meant to persist across closes, same as it
-  // already does via the verified Supabase session path in checkLoginGate.
-  const TAB_ALIVE_KEY = 'awes-tab-alive';
-  let tabSurvivedReload = false;
-  try{ tabSurvivedReload = sessionStorage.getItem(TAB_ALIVE_KEY) === '1'; }
-  catch(e){ tabSurvivedReload = true; } // fail open: never force a logout on refresh just because storage is unavailable
-  try{ sessionStorage.setItem(TAB_ALIVE_KEY, '1'); }catch(e){}
-  if(!tabSurvivedReload){
-    try{
-      const saved = JSON.parse(localStorage.getItem('current-user')||'null');
-      if(saved && (saved.role==='admin' || saved.role==='tech')) localStorage.removeItem('current-user');
-    }catch(e){}
-  }
+  // (Closing the app no longer signs anyone out — see the sign-out policy
+  // note in auth.js. Only the Logout button ends a session.)
+  try{ sessionStorage.removeItem('awes-tab-alive'); }catch(e){}
 
   // ============================================================
   // Online DTR (Daily Time Record) — a fully separate module/page.
@@ -15178,7 +15120,12 @@
   async function pushUnsubscribeThisDevice(){
     if(!pushSupported()) return;
     try{
-      const reg = await navigator.serviceWorker.ready;
+      // getRegistration(), not .ready: .ready never settles when no service
+      // worker is active (private window, blocked SW, first moments after an
+      // update), and Logout awaits this — it made the Logout button do
+      // nothing at all on such devices. No registration = no subscription.
+      const reg = await navigator.serviceWorker.getRegistration();
+      if(!reg || !reg.pushManager) return;
       const sub = await reg.pushManager.getSubscription();
       if(!sub) return;
       const endpoint = sub.endpoint;
@@ -15381,6 +15328,7 @@
   // ---------- entry ----------
   function purchOnShow(key){
     if(!currentUser || currentUser.role !== 'admin') return;
+    purchRealtimeStart();
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
   }
@@ -15390,13 +15338,13 @@
     if(sel.options.length <= 1){
       PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
     }
-    await spLoad();
-    spRenderList();
+    if(await spLoad()) spRenderList();
   }
 
-  async function spLoad(){
+  async function spLoad(opts){
+    const silent = !!(opts && opts.silent);
     const list = $('spList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!silent) list.innerHTML = '<div class="empty-state">Loading…</div>';
     if(!(await ensureCloud())){
       spCache = [];
       list.innerHTML = '<div class="empty-state">Not connected to Shared Cloud — the Supplier Database needs a connection.</div>';
@@ -15411,8 +15359,9 @@
       return true;
     }catch(e){
       console.error('load suppliers failed', describeCloudError(e));
+      if(silent) return false;   // background refresh: keep what's on screen
       spCache = [];
-      const msg = /relation .*suppliers.* does not exist|42P01/.test(describeCloudError(e))
+      const msg = purchIsAuthError(e) ? PURCH_EXPIRED_HTML : /relation .*suppliers.* does not exist|42P01/.test(describeCloudError(e))
         ? 'The suppliers table isn\u2019t in the database yet — run migration 20260923_01_purchasing_suppliers_materials.sql in Supabase first.'
         : 'Couldn\u2019t load suppliers: ' + escapeHtml(describeCloudError(e));
       list.innerHTML = '<div class="empty-state">' + msg + '</div>';
@@ -15440,6 +15389,7 @@
     const active = spCache.filter(s=> s.isActive).length;
     $('spCount').textContent = spCache.length ? (active + ' active' + (spCache.length > active ? ' · ' + (spCache.length - active) + ' inactive' : '')) : '';
     const rows = spFiltered();
+    const openIds = new Set($$('#spList .user-card').filter(c=> c.querySelector('.user-edit-panel.open')).map(c=> c.dataset.id));
     if(rows.length === 0){
       list.innerHTML = '<div class="empty-state">' + (spCache.length === 0
         ? 'No suppliers yet. Tap <b>+ Add Supplier</b>, or import a CSV.'
@@ -15453,13 +15403,14 @@
         (s.isActive ? '' : '<span class="sp-tag danger">Inactive</span>') +
         (s.rating ? '<span class="sp-tag muted">' + '★'.repeat(s.rating) + '</span>' : '');
       const vat = s.vatRegistered === true ? 'VAT-registered' : s.vatRegistered === false ? 'Non-VAT' : 'Unknown';
+      const isOpen = openIds.has(s.id) ? ' open' : '';
       return '<div class="user-card' + (s.isActive ? '' : ' inactive') + '" data-id="' + escapeHtml(s.id) + '">' +
-        '<div class="user-card-head" data-act="toggle" style="cursor:pointer;"><div style="min-width:0;">' +
+        '<div class="user-card-head' + isOpen + '" data-act="toggle" style="cursor:pointer;"><div style="min-width:0;">' +
           '<div class="u-name">' + escapeHtml(spDisplayName(s)) + '</div>' +
           '<div class="u-status">' + escapeHtml(sub) + '</div>' +
           (tags ? '<div class="sp-tags">' + tags + '</div>' : '') +
         '</div><span class="card-caret">▾</span></div>' +
-        '<div class="user-edit-panel">' +
+        '<div class="user-edit-panel' + isOpen + '">' +
           (s.tradeName && s.tradeName !== s.name ? '<div class="cust-detail-row"><b>Registered name:</b> ' + escapeHtml(s.name) + '</div>' : '') +
           '<div class="cust-detail-row"><b>Address:</b> ' + escapeHtml([s.address, s.city].filter(Boolean).join(', ') || '—') + '</div>' +
           '<div class="cust-detail-row"><b>Contact:</b> ' + (pc
@@ -15506,8 +15457,10 @@
     if(act === 'deactivate' || act === 'reactivate'){
       const on = act === 'reactivate';
       if(!on && !confirm('Deactivate ' + spDisplayName(s) + '? It will be hidden from pickers but kept for existing records. You can reactivate it any time.')) return;
+      if(!(await purchEnsureSession())) return;
       btn.disabled = true;
       try{
+        purchMarkOwn(s.id);
         const { error } = await db.from('suppliers').update({ is_active: on }).eq('id', s.id);
         if(error) throw error;
         s.isActive = on;
@@ -15515,7 +15468,7 @@
         spRenderList();
       }catch(err){
         btn.disabled = false;
-        toast('Couldn\u2019t update supplier: ' + describeCloudError(err));
+        purchFail('Couldn\u2019t update supplier: ', err);
       }
     }
   });
@@ -15536,6 +15489,7 @@
 
   function spOpenSheet(s, tab){
     spEditing = s;
+    $('spStaleNote').style.display = 'none';
     $('spSheetTitle').textContent = s ? spDisplayName(s) : 'Add Supplier';
     $('spCodeLine').style.display = s ? '' : 'none';
     $('spCodeLine').textContent = s ? s.code + (s.isActive ? '' : ' · Inactive') : '';
@@ -15589,7 +15543,7 @@
   function spCloseSheet(){
     $('spSheetOverlay').classList.remove('open');
     spEditing = null;
-    spLoad().then(spRenderList);   // contacts/primary may have changed
+    spLoad().then(ok=>{ if(ok) spRenderList(); });   // contacts/primary may have changed
   }
   $('spSheetClose').addEventListener('click', spCloseSheet);
 
@@ -15615,6 +15569,7 @@
       remarks: $('spRemarks').value.trim()
     };
     if(!(await ensureCloud())){ toast('Not connected — can\u2019t save'); return; }
+    if(!(await purchEnsureSession())) return;
     const btn = $('spSaveBtn'); btn.disabled = true;
     try{
       let res;
@@ -15622,6 +15577,7 @@
       else res = await db.from('suppliers').insert(row).select('*, supplier_contacts(id,name,position,mobile,email,is_primary)').single();
       if(res.error) throw res.error;
       const saved = spFromRow(res.data);
+      purchMarkOwn(saved.id);
       const wasNew = !spEditing;
       const i = spCache.findIndex(x=> x.id === saved.id);
       if(i >= 0) spCache[i] = saved; else spCache.push(saved);
@@ -15635,7 +15591,7 @@
       toast(wasNew ? 'Supplier saved as ' + saved.code + ' — add contacts next' : 'Supplier updated');
       if(wasNew) spShowTab('contacts');
     }catch(e){
-      toast('Couldn\u2019t save supplier: ' + describeCloudError(e));
+      purchFail('Couldn\u2019t save supplier: ', e);
     }finally{ btn.disabled = false; }
   });
 
@@ -15647,9 +15603,9 @@
     $('spContactFormTitle').textContent = 'Add a contact';
     $('spContactCancelBtn').style.display = 'none';
   }
-  async function spLoadContacts(){
+  async function spLoadContacts(opts){
     const list = $('spContactsList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(opts && opts.silent)) list.innerHTML = '<div class="empty-state">Loading…</div>';
     try{
       const { data, error } = await db.from('supplier_contacts').select('*')
         .eq('supplier_id', spEditing.id).order('is_primary', { ascending:false }).order('name');
@@ -15702,6 +15658,7 @@
       $('spContactName').focus();
       return;
     }
+    if(!(await purchEnsureSession())) return;
     b.disabled = true;
     try{
       if(act === 'primary'){
@@ -15718,7 +15675,7 @@
       spLoadContacts();
     }catch(err){
       b.disabled = false;
-      toast('Couldn\u2019t update contact: ' + describeCloudError(err));
+      purchFail('Couldn\u2019t update contact: ', err);
     }
   });
   $('spContactCancelBtn').addEventListener('click', spResetContactForm);
@@ -15733,6 +15690,7 @@
       mobile: $('spContactMobile').value.trim(), email: $('spContactEmail').value.trim(),
       is_primary: primary
     };
+    if(!(await purchEnsureSession())) return;
     const btn = $('spContactSaveBtn'); btn.disabled = true;
     try{
       if(primary) await spClearPrimary(id || null);
@@ -15744,7 +15702,7 @@
       spResetContactForm();
       spLoadContacts();
     }catch(e){
-      toast('Couldn\u2019t save contact: ' + describeCloudError(e));
+      purchFail('Couldn\u2019t save contact: ', e);
     }finally{ btn.disabled = false; }
   });
 
@@ -15754,9 +15712,9 @@
     if($('spDocType').options.length) $('spDocType').selectedIndex = 0;
   }
   let spDocsCache = [];
-  async function spLoadDocs(){
+  async function spLoadDocs(opts){
     const list = $('spDocsList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(opts && opts.silent)) list.innerHTML = '<div class="empty-state">Loading…</div>';
     try{
       const { data, error } = await db.from('supplier_documents').select('*')
         .eq('supplier_id', spEditing.id).order('created_at', { ascending:false });
@@ -15802,11 +15760,12 @@
         if(w) w.location.href = data.signedUrl; else window.location.href = data.signedUrl;
       }catch(err){
         if(w) w.close();
-        toast('Couldn\u2019t open document: ' + describeCloudError(err));
+        purchFail('Couldn\u2019t open document: ', err);
       }
       return;
     }
     if(!confirm('Delete "' + (d.title || d.file_name || d.doc_type) + '"? This cannot be undone.')) return;
+    if(!(await purchEnsureSession())) return;
     b.disabled = true;
     try{
       const { error } = await db.from('supplier_documents').delete().eq('id', d.id);
@@ -15816,7 +15775,7 @@
       spLoadDocs();
     }catch(err){
       b.disabled = false;
-      toast('Couldn\u2019t delete document: ' + describeCloudError(err));
+      purchFail('Couldn\u2019t delete document: ', err);
     }
   });
   $('spDocUploadBtn').addEventListener('click', async ()=>{
@@ -15825,6 +15784,7 @@
     if(!file){ toast('Choose a file first'); return; }
     if(file.size > SP_DOC_MAX_BYTES){ toast('File is over 10 MB'); return; }
     if(!/^(application\/pdf|image\/)/.test(file.type || '')){ toast('Only PDF or image files'); return; }
+    if(!(await purchEnsureSession())) return;
     const btn = $('spDocUploadBtn'); btn.disabled = true; btn.textContent = 'Uploading…';
     const safeName = (file.name || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = spEditing.id + '/' + Date.now() + '-' + safeName;
@@ -15845,14 +15805,14 @@
       spResetDocForm();
       spLoadDocs();
     }catch(e){
-      toast('Upload failed: ' + describeCloudError(e));
+      purchFail('Upload failed: ', e);
     }finally{ btn.disabled = false; btn.textContent = 'Upload'; }
   });
 
   // ---------- price list (read-only until the Materials Database is built) ----------
-  async function spLoadPrices(){
+  async function spLoadPrices(opts){
     const list = $('spPricesList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(opts && opts.silent)) list.innerHTML = '<div class="empty-state">Loading…</div>';
     try{
       const { data, error } = await db.from('supplier_materials')
         .select('id, supplier_item_code, price, price_unit, price_updated_at, min_order_qty, lead_time_days, is_preferred, is_active, materials(code, name, unit)')
@@ -15952,6 +15912,7 @@
     const file = $('spImportFile').files && $('spImportFile').files[0];
     if(!file) return;
     if(!(await ensureCloud())){ toast('Not connected — can\u2019t import'); return; }
+    if(!(await purchEnsureSession())) return;
     let rows;
     try{ rows = spParseCsv(await file.text()); }catch(e){ toast('Couldn\u2019t read that file'); return; }
     if(rows.length < 2){ toast('The CSV has no data rows'); return; }
@@ -16030,10 +15991,10 @@
       toast('Imported: ' + okNew + ' new, ' + okUpd + ' updated' + (fails.length ? ' — ' + fails.length + ' failed (see console)' : ''));
       if(fails.length) console.error('supplier import failures', fails);
     }catch(e){
-      toast('Import failed: ' + describeCloudError(e));
+      purchFail('Import failed: ', e);
     }finally{
       btn.disabled = false; btn.textContent = 'Import CSV';
-      await spLoad(); spRenderList();
+      if(await spLoad()) spRenderList();
     }
   });
 
@@ -16096,13 +16057,13 @@
       $('mtCategory').innerHTML = PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
     }
     mtShowLimit = MT_PAGE;
-    await mtLoad();
-    mtRenderList();
+    if(await mtLoad()) mtRenderList();
   }
 
-  async function mtLoad(){
+  async function mtLoad(opts){
+    const silent = !!(opts && opts.silent);
     const list = $('mtList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!silent) list.innerHTML = '<div class="empty-state">Loading…</div>';
     if(!(await ensureCloud())){
       mtCache = [];
       list.innerHTML = '<div class="empty-state">Not connected to Shared Cloud — the Materials Database needs a connection.</div>';
@@ -16116,8 +16077,9 @@
       return true;
     }catch(e){
       console.error('load materials failed', describeCloudError(e));
+      if(silent) return false;
       mtCache = [];
-      const msg = /42P01|42703|does not exist/.test(describeCloudError(e))
+      const msg = purchIsAuthError(e) ? PURCH_EXPIRED_HTML : /42P01|42703|does not exist/.test(describeCloudError(e))
         ? 'The materials table isn\u2019t ready yet — run migration 20260923_01_purchasing_suppliers_materials.sql in Supabase first.'
         : 'Couldn\u2019t load materials: ' + escapeHtml(describeCloudError(e));
       list.innerHTML = '<div class="empty-state">' + msg + '</div>';
@@ -16275,6 +16237,7 @@
   // prefill: optional {name, unit, category, ...} for new items (seed / duplicate)
   function mtOpenSheet(m, tab, prefill){
     mtEditing = m;
+    $('mtStaleNote').style.display = 'none';
     const src = m || prefill || {};
     $('mtSheetTitle').textContent = m ? m.name : (prefill && prefill.duplicateOf ? 'New size of ' + prefill.duplicateOf : 'Add Material');
     $('mtStatusLine').style.display = m ? '' : 'none';
@@ -16324,7 +16287,7 @@
   $('mtSheetClose').addEventListener('click', async ()=>{
     $('mtSheetOverlay').classList.remove('open');
     mtEditing = null;
-    await mtLoad(); mtRenderList();
+    if(await mtLoad()) mtRenderList();
     if($('mtSeedOverlay').classList.contains('open')) mtSeedRender();
   });
 
@@ -16356,6 +16319,7 @@
     const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && (!mtEditing || x.id !== mtEditing.id));
     if(twin && !confirm('"' + twin.name + '" already exists as ' + twin.code + '. Save another item with the same name?')) return;
     if(!(await ensureCloud())){ toast('Not connected — can\u2019t save'); return; }
+    if(!(await purchEnsureSession())) return;
     const btn = $('mtSaveBtn'); btn.disabled = true;
     try{
       const res = mtEditing
@@ -16363,6 +16327,7 @@
         : await db.from('materials').insert(row).select(MT_SELECT).single();
       if(res.error) throw res.error;
       const saved = mtFromRow(res.data);
+      purchMarkOwn(saved.id);
       const wasNew = !mtEditing;
       const i = mtCache.findIndex(x=> x.id === saved.id);
       if(i >= 0) mtCache[i] = saved; else mtCache.push(saved);
@@ -16379,6 +16344,7 @@
       if(wasNew) mtShowTab('prices');
     }catch(e){
       const msg = describeCloudError(e);
+      if(purchIsAuthError(e)){ purchReauth(); return; }
       toast(/23505/.test(msg) ? 'That code is already in use' : 'Couldn\u2019t save material: ' + msg);
     }finally{ btn.disabled = false; }
   });
@@ -16404,8 +16370,10 @@
     if(!m) return;
     const on = !m.isActive;
     if(!on && !confirm('Deactivate ' + m.code + ' ' + m.name + '? Technicians won\u2019t be able to pick it; existing records keep it.')) return;
+    if(!(await purchEnsureSession())) return;
     const btn = $('mtToggleActiveBtn'); btn.disabled = true;
     try{
+      purchMarkOwn(m.id);
       const { error } = await db.from('materials').update({ is_active:on }).eq('id', m.id);
       if(error) throw error;
       m.isActive = on;
@@ -16413,7 +16381,7 @@
       $('mtStatusLine').textContent = m.code + (on ? '' : ' · Inactive');
       mtRenderList();
       toast(m.code + (on ? ' reactivated' : ' deactivated'));
-    }catch(e){ toast('Couldn\u2019t update: ' + describeCloudError(e)); }
+    }catch(e){ purchFail('Couldn\u2019t update: ', e); }
     finally{ btn.disabled = false; }
   });
 
@@ -16449,9 +16417,12 @@
     $('mtPriceFormTitle').textContent = 'Add a supplier price';
     $('mtPriceCancelBtn').style.display = 'none';
   }
-  async function mtLoadPrices(){
+  // opts.silent: no "Loading…" flash. opts.keepForm: a background refresh —
+  // leave whatever the admin is typing in the price form alone.
+  async function mtLoadPrices(opts){
+    const silent = !!(opts && opts.silent), keepForm = !!(opts && opts.keepForm);
     const list = $('mtPricesList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!silent) list.innerHTML = '<div class="empty-state">Loading…</div>';
     try{
       const [pr] = await Promise.all([
         db.from('supplier_materials').select('*, suppliers(id, code, name, trade_name, is_active)').eq('material_id', mtEditing.id),
@@ -16459,8 +16430,17 @@
       ]);
       if(pr.error) throw pr.error;
       mtPricesCache = (pr.data || []).sort((a,b)=> (b.is_active - a.is_active) || (b.is_preferred - a.is_preferred) || (Number(a.price) - Number(b.price)));
-      mtResetPriceForm();
-      mtFillSupplierSelect();
+      if(keepForm){
+        const editingId = $('mtPriceId').value;
+        const chosen = $('mtPriceSupplier').value;
+        const editing = editingId && mtPricesCache.find(p=> p.id === editingId);
+        mtFillSupplierSelect(editing ? editing.supplier_id : undefined);
+        if(editing) $('mtPriceSupplier').disabled = true;
+        else if(chosen && Array.from($('mtPriceSupplier').options).some(o=> o.value === chosen)) $('mtPriceSupplier').value = chosen;
+      }else{
+        mtResetPriceForm();
+        mtFillSupplierSelect();
+      }
       const live = mtPricesCache.filter(p=> p.is_active);
       if(!live.length){
         list.innerHTML = '<div class="empty-state" style="padding:16px;">No supplier prices yet. Add the first one below.</div>';
@@ -16519,6 +16499,7 @@
       $('mtPriceAmount').focus();
       return;
     }
+    if(!(await purchEnsureSession())) return;
     b.disabled = true;
     try{
       if(act === 'pref'){
@@ -16538,7 +16519,7 @@
       mtLoadPrices();
     }catch(err){
       b.disabled = false;
-      toast('Couldn\u2019t update price: ' + describeCloudError(err));
+      purchFail('Couldn\u2019t update price: ', err);
     }
   });
   $('mtPriceCancelBtn').addEventListener('click', ()=>{ mtResetPriceForm(); mtFillSupplierSelect(); });
@@ -16562,6 +16543,7 @@
       supplier_item_code: $('mtPriceItemCode').value.trim(), min_order_qty: moq,
       lead_time_days: lead, is_preferred: preferred, is_active: true
     };
+    if(!(await purchEnsureSession())) return;
     const btn = $('mtPriceSaveBtn'); btn.disabled = true;
     try{
       if(preferred) await mtClearPreferred(id || null);
@@ -16575,14 +16557,14 @@
       toast(id ? 'Price updated' : 'Price added');
       mtLoadPrices();
     }catch(e){
-      toast('Couldn\u2019t save price: ' + describeCloudError(e));
+      purchFail('Couldn\u2019t save price: ', e);
     }finally{ btn.disabled = false; }
   });
 
   // ---------- sheet: price history ----------
-  async function mtLoadHistory(){
+  async function mtLoadHistory(opts){
     const list = $('mtHistoryList');
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(opts && opts.silent)) list.innerHTML = '<div class="empty-state">Loading…</div>';
     try{
       const sm = await db.from('supplier_materials').select('id, suppliers(code, name, trade_name)').eq('material_id', mtEditing.id);
       if(sm.error) throw sm.error;
@@ -16709,6 +16691,7 @@
     const file = $('mtImportFile').files && $('mtImportFile').files[0];
     if(!file) return;
     if(!(await ensureCloud())){ toast('Not connected — can\u2019t import'); return; }
+    if(!(await purchEnsureSession())) return;
     let rows;
     try{ rows = spParseCsv(await file.text()); }catch(e){ toast('Couldn\u2019t read that file'); return; }
     if(rows.length < 2){ toast('The CSV has no data rows'); return; }
@@ -16771,12 +16754,244 @@
       if(fails.length) console.error('material import failures', fails);
     }catch(e){
       const msg = describeCloudError(e);
+      if(purchIsAuthError(e)){ purchReauth(); return; }
       toast(/23505/.test(msg) ? 'Import stopped: a code in the file is already used' : 'Import failed: ' + msg);
     }finally{
       btn.disabled = false; btn.textContent = 'Import CSV';
-      await mtLoad(); mtRenderList();
+      if(await mtLoad()) mtRenderList();
     }
   });
+
+
+  // =====================================================================
+  // Purchasing — live updates (Supabase Realtime)
+  //
+  // One channel for all purchasing tables (published by migration
+  // 20260923_02_purchasing_realtime.sql). Any insert/update/delete —
+  // from this device or another admin's — queues a short-debounced,
+  // silent refresh of just the parts that are on screen:
+  //   * the Supplier / Materials lists (expanded cards stay expanded)
+  //   * an open sheet's Contacts / Documents / Prices / History tab
+  //   * the supplier picker in "Add a supplier price" (without wiping what's
+  //     being typed)
+  // Forms are never overwritten. If the supplier/material open in a sheet is
+  // changed elsewhere, a notice offers to reload it instead.
+  // Missed events (socket dropped, phone asleep) are covered by a refresh
+  // when the app regains focus or the connection comes back.
+  // =====================================================================
+  const PURCH_RT_TABLES = ['suppliers', 'supplier_contacts', 'supplier_documents', 'materials', 'supplier_materials'];
+  let purchChannel = null;
+  let purchPending = new Set();
+  let purchPendingIds = new Set();
+  let purchTimer = null;
+  const purchOwn = new Map();      // id -> time of our own write
+
+  function purchMarkOwn(id){ if(id) purchOwn.set(id, Date.now()); }
+  function purchIsOwn(id){ const t = purchOwn.get(id); return !!t && Date.now() - t < 5000; }
+  function purchVisible(panel){
+    return $('purchasingView').style.display !== 'none' && $('purchPanel_' + panel).style.display !== 'none';
+  }
+  function purchSheetTab(prefix){   // active tab of an open sheet, else null
+    if(!$(prefix + 'SheetOverlay').classList.contains('open')) return null;
+    const b = document.querySelector('#' + prefix + 'Tabs .seg-tab.active');
+    return b ? (b.dataset.spTab || b.dataset.mtTab) : null;
+  }
+  function purchSetLive(state){
+    $$('.purch-live').forEach(el=>{
+      el.className = 'purch-live ' + state;
+      el.textContent = state === 'on' ? 'Live' : state === 'off' ? 'Offline' : 'Connecting…';
+      el.title = state === 'on' ? 'Updates appear automatically'
+        : state === 'off' ? 'Live updates paused — will refresh when the connection is back' : '';
+    });
+  }
+
+  function purchRealtimeStart(){
+    if(purchChannel || !db || typeof db.channel !== 'function') return;
+    purchSetLive('connecting');
+    let ch = db.channel('purchasing-admin-' + (currentUser && currentUser.id || 'x'));
+    PURCH_RT_TABLES.forEach(t=>{
+      ch = ch.on('postgres_changes', { event:'*', schema:'public', table:t }, (payload)=> purchQueue(t, payload));
+    });
+    purchChannel = ch.subscribe((status)=>{
+      if(status === 'SUBSCRIBED'){
+        // (Re)connected: catch up on anything missed while we were down.
+        const wasOff = document.querySelector('.purch-live.off');
+        purchSetLive('on');
+        if(wasOff) purchQueueAll();
+      }else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+        purchSetLive('off');
+      }
+    });
+  }
+  function purchRealtimeTeardown(){
+    clearTimeout(purchTimer); purchTimer = null;
+    purchPending.clear(); purchPendingIds.clear();
+    if(purchChannel && db){ try{ db.removeChannel(purchChannel); }catch(e){} }
+    purchChannel = null;
+  }
+
+  function purchQueue(table, payload){
+    purchPending.add(table);
+    const row = payload && (payload.new && payload.new.id ? payload.new : payload.old);
+    if(row && row.id && (table === 'suppliers' || table === 'materials') && !purchIsOwn(row.id)){
+      purchPendingIds.add(table + ':' + row.id);
+    }
+    clearTimeout(purchTimer);
+    // Debounced: a CSV import fires hundreds of events — refresh once.
+    purchTimer = setTimeout(purchApply, 400);
+  }
+  function purchQueueAll(){ PURCH_RT_TABLES.forEach(t=> purchPending.add(t)); clearTimeout(purchTimer); purchTimer = setTimeout(purchApply, 50); }
+
+  async function purchApply(){
+    const t = purchPending; purchPending = new Set();
+    const ids = purchPendingIds; purchPendingIds = new Set();
+    if(!currentUser || currentUser.role !== 'admin') return;
+    const has = (...names)=> names.some(n=> t.has(n));
+    const jobs = [];
+
+    // Supplier Database
+    if(has('suppliers', 'supplier_contacts') && purchVisible('suppliers')){
+      jobs.push(spLoad({ silent:true }).then(ok=>{ if(ok) spRenderList(); }));
+    }
+    const spTab = purchSheetTab('sp');
+    if(spTab && spEditing){
+      if(spTab === 'contacts' && has('supplier_contacts')) jobs.push(spLoadContacts({ silent:true }));
+      if(spTab === 'docs' && has('supplier_documents')) jobs.push(spLoadDocs({ silent:true }));
+      if(spTab === 'prices' && has('supplier_materials', 'materials')) jobs.push(spLoadPrices({ silent:true }));
+      if(ids.has('suppliers:' + spEditing.id)) $('spStaleNote').style.display = '';
+    }
+
+    // Materials Database (its rows also show supplier names, so supplier
+    // renames/deactivations refresh it too)
+    if(has('materials', 'supplier_materials', 'suppliers') && purchVisible('materials')){
+      jobs.push(mtLoad({ silent:true }).then(ok=>{
+        if(!ok) return;
+        mtRenderList();
+        if($('mtSeedOverlay').classList.contains('open')) mtSeedRender();
+      }));
+    }
+    const mtTab = purchSheetTab('mt');
+    if(mtTab && mtEditing){
+      if(mtTab === 'prices' && has('supplier_materials', 'suppliers')) jobs.push(mtLoadPrices({ silent:true, keepForm:true }));
+      if(mtTab === 'history' && has('supplier_materials')) jobs.push(mtLoadHistory({ silent:true }));
+      if(ids.has('materials:' + mtEditing.id)) $('mtStaleNote').style.display = '';
+    }
+    try{ await Promise.all(jobs); }catch(e){ console.error('purchasing live refresh failed', e); }
+  }
+
+  // Reload the open item from the latest data (after the stale notice).
+  $('spStaleReload').addEventListener('click', ()=>{
+    const cur = spEditing && spCache.find(x=> x.id === spEditing.id);
+    const tab = purchSheetTab('sp') || 'info';
+    if(cur) spOpenSheet(cur, tab);
+  });
+  $('mtStaleReload').addEventListener('click', ()=>{
+    const cur = mtEditing && mtCache.find(x=> x.id === mtEditing.id);
+    const tab = purchSheetTab('mt') || 'info';
+    if(cur) mtOpenSheet(cur, tab);
+  });
+
+  // Catch-up when the tab/app comes back or the network returns.
+  function purchCatchUp(){
+    if(!purchChannel || !currentUser || currentUser.role !== 'admin') return;
+    if($('purchasingView').style.display === 'none') return;
+    purchQueueAll();
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') purchCatchUp(); });
+  window.addEventListener('online', purchCatchUp);
+
+
+  // =====================================================================
+  // Purchasing — expired sign-in handling
+  //
+  // The app restores `currentUser` from localStorage, which can outlive the
+  // real Supabase Auth session (expired refresh token, long-idle tab,
+  // signed out elsewhere, admin password changed). Requests then go out as
+  // `anon`, which every purchasing table refuses (42501 "permission denied
+  // … TO anon"). Instead of that raw error:
+  //   * each write first checks for a live session (purchEnsureSession);
+  //   * if it's gone, a small "Sign in again" box asks for the admin
+  //     password — the sheet and anything typed in it stay as they are —
+  //     and the write then carries on by itself;
+  //   * any request that still fails that way opens the same box.
+  // =====================================================================
+  const PURCH_EXPIRED_HTML = 'Your admin sign-in has expired, so the database can\u2019t be read. ' +
+    '<button type="button" class="btn btn-primary mt-small-btn" data-purch-reauth="1" style="margin-top:10px;">Sign in again</button>';
+  let purchReauthWaiters = [];
+
+  // Reads the raw error fields (the "TO anon" part lives in .hint), so it
+  // doesn't depend on how describeCloudError formats things.
+  function purchErrText(e){
+    if(!e) return '';
+    return [e.code, e.message, e.details, e.hint, e.error_description, e.name].filter(Boolean).join(' | ') || String(e);
+  }
+  function purchIsAuthError(e){
+    const m = purchErrText(e);
+    return (/42501/.test(m) && /\banon\b/i.test(m)) || /PGRST30[123]|JWT expired|invalid JWT|jwt malformed/i.test(m);
+  }
+  // "permission denied" (42501, not an RLS row check) should never happen to
+  // a signed-in admin on these tables — if the hint didn't say so, confirm
+  // by checking whether the session is actually still alive.
+  function purchIsPermissionDenied(e){
+    const m = purchErrText(e);
+    return /42501/.test(m) && /permission denied/i.test(m);
+  }
+  async function purchFail(prefix, e){
+    if(purchIsAuthError(e)){ purchReauth(); return; }
+    if(purchIsPermissionDenied(e) && !(await cloudAuthUid())){ purchReauth(); return; }
+    toast(prefix + describeCloudError(e));
+  }
+  async function purchEnsureSession(){
+    const uid = await cloudAuthUid();
+    if(uid) return true;
+    return purchReauth();
+  }
+  // Resolves true once signed back in, false if the admin backs out.
+  function purchReauth(){
+    return new Promise((resolve)=>{
+      purchReauthWaiters.push(resolve);
+      if($('purchReauthOverlay').classList.contains('open')) return;
+      $('purchReauthPw').value = '';
+      $('purchReauthErr').textContent = '';
+      $('purchReauthBtn').disabled = false;
+      $('purchReauthOverlay').classList.add('open');
+      setTimeout(()=> $('purchReauthPw').focus(), 50);
+    });
+  }
+  function purchReauthDone(ok){
+    $('purchReauthOverlay').classList.remove('open');
+    const w = purchReauthWaiters; purchReauthWaiters = [];
+    w.forEach(r=> r(ok));
+  }
+  async function purchReauthSubmit(){
+    const pw = $('purchReauthPw').value;
+    if(!pw){ $('purchReauthErr').textContent = 'Enter the admin password.'; return; }
+    const btn = $('purchReauthBtn'); btn.disabled = true; btn.textContent = 'Signing in…';
+    try{
+      const { data, error } = await db.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
+      if(error) throw error;
+      if(!data || !data.user || (data.user.email || '').toLowerCase() !== ADMIN_EMAIL.toLowerCase()) throw new Error('Not the admin account');
+      toast('Signed in again');
+      purchReauthDone(true);
+      purchQueueAll();   // re-read everything now that the database will answer
+    }catch(e){
+      const m = describeCloudError(e);
+      $('purchReauthErr').textContent = /invalid login|invalid_credentials|400/i.test(m) ? 'Wrong password — try again.' : 'Couldn\u2019t sign in: ' + m;
+    }finally{ btn.disabled = false; btn.textContent = 'Sign in'; }
+  }
+  $('purchReauthBtn').addEventListener('click', purchReauthSubmit);
+  $('purchReauthPw').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') purchReauthSubmit(); });
+  $('purchReauthClose').addEventListener('click', ()=> purchReauthDone(false));
+  $('purchReauthLogout').addEventListener('click', ()=>{ purchReauthDone(false); doLogout(); });
+  // "Sign in again" button inside a list's error message
+  ['spList', 'mtList'].forEach(id=> $(id).addEventListener('click', (e)=>{
+    if(!e.target.closest('[data-purch-reauth]')) return;
+    e.stopPropagation();
+    purchReauth().then(ok=>{
+      if(!ok) return;
+      if(id === 'spList') spLoad().then(ok=>{ if(ok) spRenderList(); }); else mtLoad().then(ok=>{ if(ok) mtRenderList(); });
+    });
+  }, true));
 
 
 // ---------- Header title (changes per feature page) ----------
@@ -17808,11 +18023,6 @@
     }else{
       trackerStopBroadcasting();
     }
-    // Idle-timeout watch (Admin only, 30 min) — see ADMIN_IDLE_MS in
-    // auth.js. startIdleWatch() itself is a no-op for tech/customer, who
-    // only sign out via the explicit Logout button; a page reload/refresh
-    // never signs anyone out either.
-    if(currentUser) startIdleWatch(); else stopIdleWatch();
     // {freshLogin:true} — passed only by the three login forms themselves
     // (renderTechnicianLoginForm / renderAdminLoginForm / the customer
     // form, in auth.js) right after credentials were just typed and

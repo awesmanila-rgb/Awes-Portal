@@ -120,7 +120,12 @@
   async function pushUnsubscribeThisDevice(){
     if(!pushSupported()) return;
     try{
-      const reg = await navigator.serviceWorker.ready;
+      // getRegistration(), not .ready: .ready never settles when no service
+      // worker is active (private window, blocked SW, first moments after an
+      // update), and Logout awaits this — it made the Logout button do
+      // nothing at all on such devices. No registration = no subscription.
+      const reg = await navigator.serviceWorker.getRegistration();
+      if(!reg || !reg.pushManager) return;
       const sub = await reg.pushManager.getSubscription();
       if(!sub) return;
       const endpoint = sub.endpoint;

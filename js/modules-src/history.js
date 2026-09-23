@@ -279,40 +279,9 @@
   // Technician-facing direct buttons (shown in place of Menu — see applyUserRestrictions)
   $('userLogoutBtn').addEventListener('click', doLogout);
 
-  // ---------- Auto-logout admin/technician when the app is actually closed ----------
-  // A plain refresh and a real tab close both fire 'pagehide' identically, and
-  // event.persisted only tells us about the bfcache case — a normal reload
-  // gets persisted:false too, same as a real close. So this used to clear
-  // 'current-user' on pagehide directly, which meant hitting refresh wiped
-  // the cached session exactly like closing the tab did. Most of the time
-  // that was invisible, because checkLoginGate() re-derives currentUser from
-  // the still-live Supabase session on a reachable connection — but the
-  // moment the cloud was briefly unreachable during that refresh (a signal
-  // drop in the field is exactly when this matters most), checkLoginGate had
-  // no verified session AND no cached 'saved' one left to fall back to, so it
-  // fell through to the login screen. A plain refresh was logging people out.
-  //
-  // sessionStorage fixes this because, unlike localStorage, it survives an
-  // in-tab reload but is wiped the instant the tab/window is actually closed.
-  // So instead of reacting on the way OUT (pagehide), check on the way IN
-  // (this load): if our marker is still there, the tab never really closed —
-  // this is just a refresh, so the session is left alone. If it's missing,
-  // either this is the very first load ever or the tab that held this
-  // session was truly closed; either way there's no live tab to preserve, so
-  // any leftover admin/technician session is dropped. Customers are exempt —
-  // their portal session is meant to persist across closes, same as it
-  // already does via the verified Supabase session path in checkLoginGate.
-  const TAB_ALIVE_KEY = 'awes-tab-alive';
-  let tabSurvivedReload = false;
-  try{ tabSurvivedReload = sessionStorage.getItem(TAB_ALIVE_KEY) === '1'; }
-  catch(e){ tabSurvivedReload = true; } // fail open: never force a logout on refresh just because storage is unavailable
-  try{ sessionStorage.setItem(TAB_ALIVE_KEY, '1'); }catch(e){}
-  if(!tabSurvivedReload){
-    try{
-      const saved = JSON.parse(localStorage.getItem('current-user')||'null');
-      if(saved && (saved.role==='admin' || saved.role==='tech')) localStorage.removeItem('current-user');
-    }catch(e){}
-  }
+  // (Closing the app no longer signs anyone out — see the sign-out policy
+  // note in auth.js. Only the Logout button ends a session.)
+  try{ sessionStorage.removeItem('awes-tab-alive'); }catch(e){}
 
   // ============================================================
   // Online DTR (Daily Time Record) — a fully separate module/page.

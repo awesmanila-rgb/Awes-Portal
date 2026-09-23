@@ -2335,7 +2335,7 @@ window.awesCss = {
      Purchase Order Form). Shown by showPurchasingView(key) in home.js. -->
 <main id="purchasingView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card purch-panel" id="purchPanel_materials" style="display:none;">
-    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg> Materials Database</span><span class="sp-count" id="mtCount"></span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg> Materials Database</span><span class="purch-head-right"><span class="sp-count" id="mtCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
       <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
         Every material and part you buy — one entry per size (3/8" and 1/2" copper are separate items).
@@ -2358,7 +2358,7 @@ window.awesCss = {
     </div>
   </div>
   <div class="card purch-panel" id="purchPanel_suppliers" style="display:none;">
-    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg> Supplier Database</span><span class="sp-count" id="spCount"></span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg> Supplier Database</span><span class="purch-head-right"><span class="sp-count" id="spCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
       <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
         Everyone you buy materials from. Suppliers are never deleted — deactivate one you
@@ -2392,6 +2392,26 @@ window.awesCss = {
   </div>
 </main>
 
+<!-- Purchasing: sign in again after the Supabase session expired. Keeps
+     whatever sheet/form is open underneath. Wired in purchasing.js
+     (purchReauth*). -->
+<div class="overlay" id="purchReauthOverlay" style="z-index:95;">
+  <div class="sheet" style="max-width:440px;">
+    <div class="sheet-head">
+      <h3>Sign in again</h3>
+      <button class="sheet-close" id="purchReauthClose" type="button">&times;</button>
+    </div>
+    <p style="font-size:13.5px; margin-top:0;">
+      Your admin sign-in has expired, so the database didn’t accept that change.
+      Enter the admin password to continue — <b>nothing you typed is lost</b>.
+    </p>
+    <div class="field"><label>Admin Password</label><input type="password" id="purchReauthPw" autocomplete="current-password"></div>
+    <div id="purchReauthErr" style="color:var(--danger); font-size:12.5px; min-height:16px; margin:-4px 0 10px;"></div>
+    <button type="button" class="btn btn-primary" id="purchReauthBtn" style="width:100%;">Sign in</button>
+    <button type="button" class="btn btn-secondary" id="purchReauthLogout" style="width:100%; margin-top:8px;">Log out instead</button>
+  </div>
+</div>
+
 <!-- Material add/edit sheet (admin, Purchasing › Materials Database).
      Tabs: Details / Supplier Prices / Price History. The last two need a
      saved material. Wired in purchasing.js (mt* functions). -->
@@ -2401,6 +2421,7 @@ window.awesCss = {
       <h3 id="mtSheetTitle">Add Material</h3>
       <button class="sheet-close" id="mtSheetClose" type="button">&times;</button>
     </div>
+    <div class="purch-stale" id="mtStaleNote" style="display:none;">This material was just changed on another device. <button type="button" id="mtStaleReload">Load latest</button></div>
     <div class="seg-tabs" id="mtTabs">
       <button type="button" class="seg-tab active" data-mt-tab="info">Details</button>
       <button type="button" class="seg-tab" data-mt-tab="prices">Supplier Prices</button>
@@ -2501,6 +2522,7 @@ window.awesCss = {
       <h3 id="spSheetTitle">Add Supplier</h3>
       <button class="sheet-close" id="spSheetClose" type="button">&times;</button>
     </div>
+    <div class="purch-stale" id="spStaleNote" style="display:none;">This supplier was just changed on another device. <button type="button" id="spStaleReload">Load latest</button></div>
     <div class="seg-tabs" id="spTabs">
       <button type="button" class="seg-tab active" data-sp-tab="info">Info</button>
       <button type="button" class="seg-tab" data-sp-tab="contacts">Contacts</button>

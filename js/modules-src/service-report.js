@@ -294,7 +294,11 @@
     try{
       const { data, error } = await client.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pw });
       // Always tear the throwaway session down, whatever the outcome.
-      try{ await client.auth.signOut(); }catch(e){}
+      // scope:'local' — end ONLY this throwaway session. The default
+      // ('global') revokes every session of the admin account, which signed
+      // out every admin device (including this one) each time a password
+      // was confirmed.
+      try{ await client.auth.signOut({ scope: 'local' }); }catch(e){}
       return !error && !!(data && data.user);
     }catch(e){ return false; }
   }
