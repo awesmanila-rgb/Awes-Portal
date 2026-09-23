@@ -1618,6 +1618,7 @@
     if(!nav) return;
     const FLOOR = 0.55;
     let scale = 1;
+    nav.classList.remove('nav-scroll');
     nav.style.setProperty('--nav-scale', scale);
     // A handful of iterations is enough: each pass measures the real
     // overflow at the current scale and steps down proportionally, so it
@@ -1632,8 +1633,131 @@
       nav.style.setProperty('--nav-scale', scale);
       if(scale <= FLOOR) break;
     }
+    // Still overflowing at the readable floor (short screen and/or a long
+    // menu): let the nav scroll rather than clip. Without this, the last
+    // items (Management › Settings, Dropdown Lists, Change Password) were
+    // hidden under the footer with no way to reach them once the
+    // Purchasing section was added.
+    if(nav.scrollHeight - nav.clientHeight > 1){
+      nav.classList.add('nav-scroll');
+      const active = nav.querySelector('.sidebar-link.active');
+      if(active && active.offsetParent) active.scrollIntoView({ block:'nearest' });
+    }
   }
   window.addEventListener('resize', fitSidebarNav);
+
+  // ---------- Collapsible admin sidebar sections ----------
+  // A section (Operations / Finance / Purchasing / Management) is OPEN when:
+  //   * the mouse pointer is on its title — it then stays open while the
+  //     pointer is anywhere inside that section, closing ~¼s after it leaves;
+  //   * its title was tapped/clicked — that pins it open (remembered on this
+  //     device); tap/click again to close it;
+  //   * it holds the current page (its link is .active) — unless you closed
+  //     it on purpose; navigating into a closed section reopens it.
+  // Hover only reacts to a real mouse (pointerType 'mouse'), so on touch a
+  // tap is a single clean toggle instead of hover-open + click-toggle.
+  const SB_STATE_KEY = 'awesSidebarSections';
+  let sbState = {};
+  try{ sbState = JSON.parse(localStorage.getItem(SB_STATE_KEY) || '{}') || {}; }catch(e){ sbState = {}; }
+  function sbSaveState(){ try{ localStorage.setItem(SB_STATE_KEY, JSON.stringify(sbState)); }catch(e){} }
+  let sbLastActiveId;
+  let sbRefitTimer = null;
+  let sbSyncQueued = false;
+
+  function sbSyncSections(){
+    const group = document.getElementById('sidebarAdminGroup');
+    if(!group) return;
+    const active = group.querySelector('.sidebar-link.active');
+    const activeId = active ? active.id : null;
+    if(activeId !== sbLastActiveId){
+      sbLastActiveId = activeId;
+      const sec = active && active.closest('.sb-section');
+      if(sec && sbState[sec.dataset.sbKey] === 'closed'){ delete sbState[sec.dataset.sbKey]; sbSaveState(); }
+    }
+    group.querySelectorAll('.sb-section').forEach(sec=>{
+      const st = sbState[sec.dataset.sbKey];
+      const hasActive = !!sec.querySelector('.sidebar-link.active');
+      const hover = sec.classList.contains('sb-hover') && !sec.classList.contains('sb-hover-off');
+      const open = hover || st === 'open' || (st !== 'closed' && hasActive);
+      sec.classList.toggle('open', open);
+      sec.classList.toggle('pinned', st === 'open');
+      const t = sec.querySelector('.sb-section-toggle');
+      if(t) t.setAttribute('aria-expanded', open ? 'true' : 'false');
+      const alert = Array.from(sec.querySelectorAll('.sidebar-badge')).some(b=>{
+        const n = b.textContent.trim();
+        return b.style.display !== 'none' && n !== '' && n !== '0';
+      });
+      sec.classList.toggle('has-alert', alert);
+    });
+  }
+  function sbSyncSoon(){
+    if(sbSyncQueued) return;
+    sbSyncQueued = true;
+    requestAnimationFrame(()=>{ sbSyncQueued = false; sbSyncSections(); });
+  }
+  // Re-fit only after a deliberate open/close (not on hover), once the
+  // 0.2s height animation has finished, so the menu doesn't resize under
+  // the pointer.
+  function sbRefitSoon(){ clearTimeout(sbRefitTimer); sbRefitTimer = setTimeout(fitSidebarNav, 240); }
+
+  function initSidebarSections(){
+    const group = document.getElementById('sidebarAdminGroup');
+    if(!group || group.dataset.sbInit) return;
+    group.dataset.sbInit = '1';
+
+    group.addEventListener('click', (e)=>{
+      const t = e.target.closest('.sb-section-toggle');
+      if(!t) return;
+      const sec = t.closest('.sb-section');
+      const key = sec.dataset.sbKey;
+      const hovering = sec.classList.contains('sb-hover') && !sec.classList.contains('sb-hover-off');
+      if(sbState[key] === 'open' || (sec.classList.contains('open') && !hovering)){
+        // pinned, or open only because it holds the current page → close
+        sbState[key] = 'closed';
+        sec.classList.add('sb-hover-off');   // stay closed even though the pointer is still here
+      }else{
+        sbState[key] = 'open';
+        sec.classList.remove('sb-hover-off');
+      }
+      sbSaveState();
+      sbSyncSections();
+      sbRefitSoon();
+    });
+
+    group.querySelectorAll('.sb-section').forEach(sec=>{
+      const t = sec.querySelector('.sb-section-toggle');
+      let leaveTimer = null;
+      t.addEventListener('pointerenter', (e)=>{
+        if(e.pointerType !== 'mouse') return;
+        clearTimeout(leaveTimer);
+        if(sec.classList.contains('sb-hover-off')) return;
+        sec.classList.add('sb-hover');
+        sbSyncSections();
+      });
+      sec.addEventListener('pointerenter', (e)=>{ if(e.pointerType === 'mouse') clearTimeout(leaveTimer); });
+      sec.addEventListener('pointerleave', (e)=>{
+        if(e.pointerType !== 'mouse') return;
+        clearTimeout(leaveTimer);
+        leaveTimer = setTimeout(()=>{
+          sec.classList.remove('sb-hover', 'sb-hover-off');
+          sbSyncSections();
+        }, 250);
+      });
+    });
+
+    // Follow the rest of the app without touching it: setSidebarActive()
+    // flips .active on links, and badge counts are shown/hidden/re-texted
+    // elsewhere (service-requests.js). Watch just those and re-sync.
+    new MutationObserver((muts)=>{
+      for(const m of muts){
+        const el = m.target.nodeType === 3 ? m.target.parentElement : m.target;
+        if(el && el.closest && el.closest('.sidebar-link, .sidebar-badge')){ sbSyncSoon(); return; }
+      }
+    }).observe(group, { subtree:true, attributes:true, attributeFilter:['class', 'style'], childList:true, characterData:true });
+
+    sbSyncSections();
+  }
+  initSidebarSections();
 
   // Applies per-user access restrictions set by the admin. Admins bypass all restrictions.
   function applyUserRestrictions(){

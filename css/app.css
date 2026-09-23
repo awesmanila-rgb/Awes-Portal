@@ -924,14 +924,49 @@
      defaults to 1 (full size) until JS measures and adjusts it; the var()
      fallback of 1 covers the instant before that first measurement runs. */
   .sidebar-nav{
-    display:flex; flex-direction:column; flex:1; min-height:0; overflow-y:hidden;
+    display:flex; flex-direction:column; flex:1; min-height:0;
     --nav-scale:1; gap:calc(var(--nav-scale,1) * 4px);
+    /* Scrolls only if it truly can't fit (e.g. several sections pinned open
+       on a short screen). Thin, low-contrast bar so it doesn't dominate. */
+    overflow-y:auto; overscroll-behavior:contain;
+    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.3) transparent;
   }
+  .sidebar-nav::-webkit-scrollbar{ width:6px; }
+  .sidebar-nav::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.3); border-radius:3px; }
   .sidebar-section-label{
     font-weight:700; text-transform:uppercase; letter-spacing:.6px;
     color:rgba(255,255,255,.55);
     font-size:calc(9px + var(--nav-scale,1) * 3px);
     margin:calc(var(--nav-scale,1) * 16px) 12px calc(var(--nav-scale,1) * 6px);
+  }
+  /* ---------- Collapsible admin sidebar sections ----------
+     Markup: .sb-section > button.sb-section-toggle + .sb-section-body >
+     .sb-section-inner. .open is set by sbSyncSections() in auth.js. The
+     0fr→1fr grid-row trick animates to the content's real height. */
+  .sb-section-toggle{
+    display:flex; align-items:center; gap:6px; width:calc(100% - 24px);
+    background:none; border:none; padding:3px 0; cursor:pointer;
+    font-family:inherit; text-align:left; border-radius:6px;
+    transition:color .15s ease;
+  }
+  .sb-section-toggle:hover, .sb-section.open .sb-section-toggle{ color:rgba(255,255,255,.85); }
+  .sb-section-toggle:focus-visible{ outline:2px solid rgba(255,255,255,.6); outline-offset:3px; }
+  .sb-title{ flex:1; }
+  .sb-caret{ width:13px; height:13px; flex-shrink:0; transition:transform .2s ease; }
+  .sb-section.open .sb-caret{ transform:rotate(90deg); }
+  /* pinned open (tapped/clicked): caret stays solid white as a subtle cue */
+  .sb-section.pinned .sb-caret{ color:#fff; }
+  /* collapsed section hiding a live badge (e.g. new Service Requests) */
+  .sb-dot{ display:none; width:7px; height:7px; border-radius:50%; background:var(--amber, #E0A431); flex-shrink:0; }
+  .sb-section.has-alert:not(.open) .sb-dot{ display:inline-block; }
+  .sb-section-body{ display:grid; grid-template-rows:0fr; transition:grid-template-rows .2s ease; }
+  .sb-section.open .sb-section-body{ grid-template-rows:1fr; }
+  .sb-section-inner{ overflow:hidden; min-height:0; }
+  /* keep collapsed links out of the Tab order / screen readers once closed */
+  .sb-section:not(.open) .sb-section-inner{ visibility:hidden; transition:visibility 0s linear .2s; }
+  .sb-section.open .sb-section-inner{ visibility:visible; }
+  @media (prefers-reduced-motion:reduce){
+    .sb-section-body, .sb-caret, .sb-section:not(.open) .sb-section-inner{ transition:none; }
   }
   .sidebar-link{
     display:flex; align-items:center; width:100%; text-align:left;
