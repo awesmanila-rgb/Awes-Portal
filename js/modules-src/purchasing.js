@@ -1619,10 +1619,10 @@
       if(ids.has('materials:' + mtEditing.id)) $('mtStaleNote').style.display = '';
     }
     // Purchase Orders
-    if(has('purchase_orders', 'purchase_order_items', 'suppliers') && purchVisible('purchaseOrders')){
+    if(typeof poLoadList === 'function' && has('purchase_orders', 'purchase_order_items', 'suppliers') && purchVisible('purchaseOrders')){
       jobs.push(poLoadList({ silent:true }).then(ok=>{ if(ok) poRenderList(); }));
     }
-    if($('poSheetOverlay').classList.contains('open')){
+    if(typeof poEditorVisible === 'function' && poEditorVisible()){
       if(poEditing && ids.has('po:' + poEditing.id)) $('poStaleNote').style.display = '';
       if(has('po_signatories')) jobs.push(poLoadSignatories().then(()=>{ poFillSignatorySelects(); poRenderSigHint(); }).catch(()=>{}));
       if(has('suppliers', 'supplier_contacts')) jobs.push(poLoadSuppliers().then(()=>{

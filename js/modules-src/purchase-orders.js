@@ -16,7 +16,7 @@
 
   const PO_BUCKET = 'purchasing-assets';
   const PO_VAT_RATE = 0.12;
-  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, reference, supplier_id, supplier_snapshot, updated_at, suppliers(name, trade_name), purchase_order_items(count)';
+  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, suppliers(name, trade_name), purchase_order_items(count)';
 
   let poCache = [];
   let poEditing = null;      // header row from the DB, or null for a new unsaved PO
@@ -50,13 +50,21 @@
   function poSupplierName(s){ return s ? (s.trade_name || s.name || '') : ''; }
 
   // Same math as the database (po_compute_totals) — display only.
-  function poCalc(items, vatMode, discount){
+  // EWT is computed on the amount net of VAT (vatable) and deducted:
+  // net payable = total − EWT.
+  function poCalc(items, vatMode, discount, ewtRate){
     const subtotal = poRound2(items.reduce((a, it)=> a + poRound2((Number(it.qty) || 0) * (Number(it.unit_price) || 0)), 0));
     const net = Math.max(poRound2(subtotal - (Number(discount) || 0)), 0);
     let vat = 0, total = net, vatable = net;
     if(vatMode === 'exclusive'){ vat = poRound2(net * PO_VAT_RATE); total = poRound2(net + vat); }
     else if(vatMode === 'inclusive'){ vat = poRound2(net - net / (1 + PO_VAT_RATE)); vatable = poRound2(net - vat); }
-    return { subtotal, discount: Number(discount) || 0, net, vat, vatable, total };
+    const rate = Number(ewtRate) || 0;
+    const ewt = poRound2(vatable * rate);
+    return { subtotal, discount: Number(discount) || 0, net, vat, vatable, total, ewtRate: rate, ewt, netPayable: poRound2(total - ewt) };
+  }
+  function poEwtLabel(rate){
+    const pct = Math.round(Number(rate) * 10000) / 100;
+    return 'Less: EWT ' + pct + '%' + (Number(rate) === 0.01 ? ' (goods)' : Number(rate) === 0.02 ? ' (services)' : '');
   }
 
   // "Six Thousand Three Hundred Twenty-Nine Pesos and 12/100 Only"
@@ -115,6 +123,12 @@
 
   // ---------- list ----------
   async function poShow(){
+    // Sidebar "Purchase Orders" while a PO is open: back to the list,
+    // unless there are unsaved changes the admin wants to keep.
+    if(poEditorVisible()){
+      if(!poConfirmLeave()) return;
+      poShowListView();
+    }
     if(await poLoadList()) poRenderList();
   }
   async function poLoadList(opts){
@@ -169,7 +183,8 @@
         '<div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(r.po_no || '—') + '</span>' +
           escapeHtml(poListSupplier(r)) + ' <span class="po-status ' + escapeHtml(r.status) + '">' + escapeHtml(r.status) + '</span></div>' +
           '<div class="sp-row-sub">' + escapeHtml([poDateLong(r.po_date), n + ' item' + (n === 1 ? '' : 's'), r.reference].filter(Boolean).join(' · ')) + '</div></div>' +
-        '<div class="mt-row-price">₱' + poFmt(r.total) + '</div></button>';
+        '<div class="mt-row-price">₱' + poFmt(Number(r.ewt_amount) > 0 ? r.net_payable : r.total) +
+          (Number(r.ewt_amount) > 0 ? '<div class="sp-row-sub">net of EWT</div>' : '') + '</div></button>';
     }).join('');
   }
   $('poSearch').addEventListener('input', poRenderList);
@@ -183,6 +198,31 @@
     if(row) poOpen(row.dataset.id);
   });
   $('poAddBtn').addEventListener('click', ()=> poOpen(null));
+
+  // ---------- in-page views ----------
+  let poDirty = false;
+  function poEditorVisible(){ return $('poEditorView').style.display !== 'none'; }
+  function poShowEditorView(){
+    $('poListView').style.display = 'none';
+    $('poEditorView').style.display = '';
+    $('purchasingView').classList.add('po-wide');
+    window.scrollTo({ top: 0 });
+  }
+  function poShowListView(){
+    $('poEditorView').style.display = 'none';
+    $('poListView').style.display = '';
+    $('purchasingView').classList.remove('po-wide');
+    poEditing = null; poDirty = false;
+    window.scrollTo({ top: 0 });
+  }
+  // Leaving an edited draft asks first.
+  function poConfirmLeave(){
+    return !poDirty || poReadOnly || confirm('Discard the changes you haven\u2019t saved?');
+  }
+  $('poEditorView').addEventListener('input', (e)=>{ if(!e.target.closest('.po-actions')) poDirty = true; });
+  $('poEditorView').addEventListener('change', (e)=>{ if(!e.target.closest('.po-actions')) poDirty = true; });
+  $('poBackBtn').addEventListener('click', ()=>{ if(poConfirmLeave()) poClose(); });
+  $('poEditTermsBtn').addEventListener('click', ()=> $('poSettingsBtn').click());
 
   // ---------- editor ----------
   async function poOpen(id, prefill){
@@ -215,7 +255,8 @@
       $('poVatMode').value = src.vat_mode || set.vat_mode || 'exclusive';
       $('poDeliverTo').value = src.deliver_to != null && (header || prefill) ? src.deliver_to : (set.deliver_to || '');
       $('poDiscount').value = src.discount ? String(src.discount) : '';
-      $('poNotes').value = src.notes != null && (header || prefill) ? src.notes : (set.terms || '');
+      $('poEwt').value = String(Number(src.ewt_rate) || 0);
+      if(!$('poEwt').value) $('poEwt').value = '0';
       poFillSignatorySelects(src.prepared_by_id, src.approved_by_id);
       $('poPreparedBy').value = src.prepared_by_id || '';
       $('poApprovedBy').value = src.approved_by_id || '';
@@ -226,7 +267,8 @@
       poRenderTotals();
       poRenderSupplierInfo();
       poRenderSigHint();
-      $('poSheetOverlay').classList.add('open');
+      poShowEditorView();
+      poDirty = !!prefill;   // a duplicate isn't saved yet
     }catch(e){
       purchFail('Couldn\u2019t open the PO: ', e);
     }
@@ -251,7 +293,7 @@
         (poEditing.cancel_reason ? ' — Reason: ' + poEditing.cancel_reason : '');
       note.style.display = '';
     }else note.style.display = 'none';
-    $$('#poSheetOverlay input, #poSheetOverlay select, #poSheetOverlay textarea').forEach(el=>{ el.disabled = poReadOnly; });
+    $$('#poEditorView input, #poEditorView select, #poEditorView textarea').forEach(el=>{ el.disabled = poReadOnly; });
     $('poAddItem').style.display = poReadOnly ? 'none' : '';
     poRenderActions();
   }
@@ -350,6 +392,7 @@
       const amt = poRound2((Number(it.qty) || 0) * (Number(it.unit_price) || 0));
       const dis = poReadOnly ? ' disabled' : '';
       return '<div class="po-item" data-key="' + it.key + '">' +
+        '<div class="po-no">' + (i + 1) + '</div>' +
         '<div class="po-item-desc"><input type="text" data-f="description" value="' + escapeHtml(it.description) + '" placeholder="' + (i === 0 ? 'Type an item name or code…' : 'Item') + '" autocomplete="off"' + dis + '>' +
           '<div class="po-item-code">' + (it.material_id ? escapeHtml(it.code) : (it.description ? 'not in catalog' : '')) + '</div></div>' +
         '<input type="text" class="num po-qty" data-f="qty" inputmode="decimal" value="' + escapeHtml(it.qty === '' || it.qty == null ? '' : String(it.qty)) + '" placeholder="Qty"' + dis + '>' +
@@ -452,17 +495,23 @@
   });
 
   function poRenderTotals(){
-    const t = poCalc(poCleanItems(), $('poVatMode').value, poNum($('poDiscount').value) || 0);
-    const row = (l, v, cls)=> '<div class="row' + (cls ? ' ' + cls : '') + '"><span>' + l + '</span><span>' + v + '</span></div>';
-    let html = row('Subtotal', '₱' + poFmt(t.subtotal));
-    if(t.discount) html += row('Less: Discount', '−₱' + poFmt(t.discount));
-    if($('poVatMode').value === 'exclusive') html += row('Add: VAT 12%', '₱' + poFmt(t.vat));
-    else if($('poVatMode').value === 'inclusive') html += row('VATable sales', '₱' + poFmt(t.vatable)) + row('VAT 12% (included)', '₱' + poFmt(t.vat));
-    html += row('TOTAL', '₱' + poFmt(t.total), 'total');
-    $('poTotals').innerHTML = html;
+    const vm = $('poVatMode').value;
+    const t = poCalc(poCleanItems(), vm, poNum($('poDiscount').value) || 0, Number($('poEwt').value) || 0);
+    $('poTotSub').textContent = '₱' + poFmt(t.subtotal);
+    const row = (l, v)=> '<div class="row"><span>' + l + '</span><span>' + v + '</span></div>';
+    $('poTotVatRows').innerHTML = vm === 'exclusive' ? row('Add: VAT 12%', '₱' + poFmt(t.vat))
+      : vm === 'inclusive' ? row('VATable sales', '₱' + poFmt(t.vatable)) + row('VAT 12% (included)', '₱' + poFmt(t.vat))
+      : row('VAT', 'Non-VAT');
+    $('poTotTotal').textContent = '₱' + poFmt(t.total);
+    $('poTotEwtRow').style.display = t.ewt ? '' : 'none';
+    $('poTotEwtLabel').textContent = 'Withheld: ' + (Math.round(t.ewtRate * 10000) / 100) + '% of ₱' + poFmt(t.vatable) + ' (net of VAT)';
+    $('poTotEwt').textContent = '(₱' + poFmt(t.ewt) + ')';
+    $('poTotNetLabel').textContent = t.ewtRate ? 'Net Amount Payable' : 'Total Amount';
+    $('poTotNet').textContent = '₱' + poFmt(t.netPayable);
   }
   $('poVatMode').addEventListener('change', poRenderTotals);
   $('poDiscount').addEventListener('input', poRenderTotals);
+  $('poEwt').addEventListener('change', poRenderTotals);
 
   // Items with anything typed in them (fully blank rows are ignored), with
   // qty/price coerced to numbers — used for totals and saving.
@@ -492,9 +541,9 @@
       deliver_to: $('poDeliverTo').value.trim(),
       payment_terms: $('poTerms').value.trim(),
       reference: $('poReference').value.trim(),
-      notes: $('poNotes').value.trim(),
       vat_mode: $('poVatMode').value,
       discount: poNum($('poDiscount').value) || 0,
+      ewt_rate: Number($('poEwt').value) || 0,
       prepared_by_id: $('poPreparedBy').value || null,
       approved_by_id: $('poApprovedBy').value || null
     };
@@ -541,6 +590,7 @@
       if(h.error) throw h.error;
       poEditing = h.data[0];
       poApplyMode();
+      poDirty = false;
       if(!quiet) toast(poEditing.po_no + ' saved');
       poLoadList({ silent:true }).then(ok=>{ if(ok) poRenderList(); });
       return poEditing;
@@ -573,9 +623,9 @@
     if(!$('poSupplier').value){ toast('Choose a supplier before issuing'); return; }
     if(!poCleanItems().filter(it=> it.description.trim()).length){ toast('Add at least one item before issuing'); return; }
     if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
-    const t = poCalc(poCleanItems(), $('poVatMode').value, poNum($('poDiscount').value) || 0);
+    const t = poCalc(poCleanItems(), $('poVatMode').value, poNum($('poDiscount').value) || 0, Number($('poEwt').value) || 0);
     const s = poCurrentSupplier();
-    if(!confirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
+    if(!confirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
     const saved = await poSave({ quiet:true });
     if(!saved) return;
     try{
@@ -612,6 +662,7 @@
   async function poDeleteDraft(){
     if(!poEditing) return;
     if(!confirm('Delete draft ' + poEditing.po_no + '? This can\u2019t be undone.')) return;
+    poDirty = false;
     if(!(await purchEnsureSession())) return;
     try{
       purchMarkOwn(poEditing.id);
@@ -622,17 +673,16 @@
     }catch(e){ purchFail('Couldn\u2019t delete the draft: ', e); }
   }
   function poDuplicate(){
+    if(!poConfirmLeave()) return;
     const header = poGatherHeader();
     const items = poCleanItems().filter(it=> it.description.trim());
     poEditing = null;
     poOpen(null, { header, items }).then(()=> toast('Copied into a new draft — review and save'));
   }
   function poClose(){
-    $('poSheetOverlay').classList.remove('open');
-    poEditing = null;
+    poShowListView();
     poShow();
   }
-  $('poSheetClose').addEventListener('click', poClose);
   $('poStaleReload').addEventListener('click', ()=>{ if(poEditing) poOpen(poEditing.id); });
 
   // ---------- images from storage (logo / signatures) ----------
@@ -674,6 +724,56 @@
     return (poLogoCache[key] = { dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height });
   }
 
+  // Uploaded logo → how it appears in the header: all-white on the green
+  // band (shape kept via its transparency), original colours on white.
+  const poTintCache = new Map();
+  async function poLogoForStyle(img, style){
+    if(!img || style !== 'green') return img;
+    const key = img.dataUrl.length + ':' + img.dataUrl.slice(-40);
+    if(poTintCache.has(key)) return poTintCache.get(key);
+    const im = new Image(); im.src = img.dataUrl; await im.decode();
+    const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(im, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    const out = { dataUrl: c.toDataURL('image/png'), w: c.width, h: c.height };
+    poTintCache.set(key, out);
+    return out;
+  }
+  // A logo saved as JPG / on a white or coloured box has no transparency, so
+  // turning it white would give a solid white rectangle. Remove a uniform
+  // background (sampled from the corners) and crop to the artwork.
+  function poPrepareLogo(src){
+    const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+    const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0);
+    const img = ctx.getImageData(0, 0, c.width, c.height), px = img.data, W = c.width, H = c.height;
+    const at = (x, y)=> (y * W + x) * 4;
+    const corners = [at(0, 0), at(W - 1, 0), at(0, H - 1), at(W - 1, H - 1)];
+    const opaque = corners.every(i=> px[i + 3] > 245);
+    if(opaque){
+      const bg = [0, 1, 2].map(k=> corners.reduce((a, i)=> a + px[i + k], 0) / 4);
+      const lo = 22, hi = 70;   // colour distance: ≤lo → background, ≥hi → artwork
+      for(let i = 0; i < px.length; i += 4){
+        const d = Math.sqrt((px[i] - bg[0]) ** 2 + (px[i + 1] - bg[1]) ** 2 + (px[i + 2] - bg[2]) ** 2);
+        const a = d <= lo ? 0 : d >= hi ? 255 : Math.round(255 * (d - lo) / (hi - lo));
+        px[i + 3] = Math.min(px[i + 3], a);
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for(let y = 0; y < H; y++) for(let x = 0; x < W; x++){
+      if(px[at(x, y) + 3] > 24){ if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; }
+    }
+    if(x1 < 0) return c;
+    const pad = 4;
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+    const out = document.createElement('canvas'); out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+    out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
+  }
+
   // ---------- PDF ----------
   // What goes on the PDF. Issued/cancelled POs print ONLY their snapshots,
   // so the document the supplier received never changes. Drafts use live
@@ -697,12 +797,13 @@
     }
     const style = company.header_style || 'green';
     const [logo, prepSig, apprSig] = await Promise.all([
-      company.logo_path ? poLoadImage(company.logo_path) : poDefaultLogo(style),
+      company.logo_path ? poLoadImage(company.logo_path).then(img=> poLogoForStyle(img, style)) : poDefaultLogo(style),
       prepared && prepared.signature_path ? poLoadImage(prepared.signature_path) : null,
       approved && approved.signature_path ? poLoadImage(approved.signature_path) : null
     ]);
     return { header, items, company, supplier, prepared, approved, logo: logo || await poDefaultLogo(style), prepSig, apprSig,
-      totals: poCalc(items, header.vat_mode, header.discount), status: header.status || 'draft' };
+      totals: poCalc(items, header.vat_mode, header.discount, header.ewt_rate), status: header.status || 'draft',
+      terms: company.terms || '' };
   }
 
   // ---- PDF typeface ----
@@ -776,7 +877,7 @@
     // details stacked under it on the left, title block on the right ----
     const headH = 118;
     const ink = green ? [255, 255, 255] : INK;
-    const soft = green ? MINT_TXT : SUB;
+    const soft = green ? [255, 255, 255] : SUB;     // on the green band everything is white
     if(green){ doc.setFillColor(...G); doc.rect(0, 0, W, headH, 'F'); }
     else{ doc.setFillColor(...G); doc.rect(0, headH - 4, W, 4, 'F'); }
     const lg = fitImg(d.logo, 150, 44);
@@ -867,27 +968,36 @@
     if(h.vat_mode === 'exclusive') rows.push(['Add: VAT 12%', money(t.vat)]);
     else if(h.vat_mode === 'inclusive'){ rows.push(['VATable Sales', money(t.vatable)]); rows.push(['VAT 12% (included)', money(t.vat)]); }
     else rows.push(['VAT', 'Non-VAT']);
+    if(t.ewt){
+      rows.push(['Total Amount', money(t.total), true]);
+      rows.push([poEwtLabel(t.ewtRate), '(' + money(t.ewt) + ')']);
+    }
+    const bandLabel = t.ewt ? 'NET AMOUNT PAYABLE' : 'TOTAL AMOUNT';
+    const bandValue = t.ewt ? t.netPayable : t.total;
     const tw = 212, tx = W - M - tw;
     if(y + rows.length * 15 + 40 > H - 190){ doc.addPage(); y = 50; }
-    rows.forEach(([l, v], i)=>{
-      reg(8.6); doc.setTextColor(...SUB); doc.text(l, tx + 10, y + 10 + i * 15);
+    rows.forEach(([l, v, strong], i)=>{
+      if(strong){ doc.setDrawColor(...LINE); doc.setLineWidth(0.5); doc.line(tx + 10, y + i * 15, W - M - 10, y + i * 15); }
+      if(strong) semi(8.6); else reg(8.6);
+      doc.setTextColor(...(strong ? INK : SUB)); doc.text(l, tx + 10, y + 10 + i * 15);
       doc.setTextColor(...INK); doc.text(v, W - M - 10, y + 10 + i * 15, { align:'right' });
     });
     const ty = y + rows.length * 15 + 2;
     doc.setFillColor(...G); doc.roundedRect(tx, ty, tw, 26, 3, 3, 'F');
-    semi(9); doc.setTextColor(...MINT_TXT); doc.text('TOTAL AMOUNT', tx + 10, ty + 16.5);
-    bold(12.5); doc.setTextColor(255, 255, 255); doc.text(money(t.total), W - M - 10, ty + 17.5, { align:'right' });
+    semi(t.ewt ? 8 : 9); doc.setTextColor(...MINT_TXT); doc.text(bandLabel, tx + 10, ty + 16.5);
+    bold(12.5); doc.setTextColor(255, 255, 255); doc.text(money(bandValue), W - M - 10, ty + 17.5, { align:'right' });
     caps('Amount in words', M, y + 10, G);
     reg(8.6); doc.setTextColor(...INK);
-    const words = doc.splitTextToSize(poAmountInWords(t.total), tx - M - 16);
+    const words = doc.splitTextToSize(poAmountInWords(bandValue), tx - M - 16);
     doc.text(words, M, y + 24);
     y = Math.max(ty + 26, y + 24 + words.length * 11) + 20;
 
     // ---- terms ----
-    if(h.notes){
+    const termsText = d.terms || '';
+    if(termsText){
       reg(7.8);
       const LH = 10.2, full = W - M * 2;
-      const paras = h.notes.split(/\r?\n/).map(line=>{
+      const paras = termsText.split(/\r?\n/).map(line=>{
         const m = /^\s*(\d+[.)]|[-•*])\s+(.*)$/.exec(line);
         if(!m) return { num: '', lines: line.trim() ? doc.splitTextToSize(line.trim(), full) : [''] };
         const indent = Math.max(14, doc.getTextWidth(m[1]) + 6);
@@ -1004,7 +1114,7 @@
   $('poSettingsClose').addEventListener('click', ()=>{
     $('poSettingsOverlay').classList.remove('open');
     // an open PO editor picks up new signatories / defaults
-    if($('poSheetOverlay').classList.contains('open')){ poFillSignatorySelects(); poRenderSigHint(); }
+    if(poEditorVisible()){ poFillSignatorySelects(); poRenderSigHint(); }
   });
   function poFillSettingsForm(){
     const d = poSettingsData || {};
@@ -1020,7 +1130,7 @@
     const box = $('poLogoPreview');
     const style = $('poHeaderStyle').value || 'green';
     box.classList.toggle('green', style === 'green');
-    const img = d.logo_path ? await poLoadImage(d.logo_path) : await poDefaultLogo(style);
+    const img = d.logo_path ? await poLogoForStyle(await poLoadImage(d.logo_path), style) : await poDefaultLogo(style);
     box.innerHTML = img ? '<img alt="Logo" src="' + img.dataUrl + '">' : '<span style="font-size:12px;color:var(--text-muted);">Logo unavailable</span>';
     $('poLogoResetBtn').style.display = d.logo_path ? '' : 'none';
   }
@@ -1085,7 +1195,7 @@
     if(!(await purchEnsureSession())) return;
     const btn = $('poLogoUploadBtn'); btn.disabled = true; btn.textContent = 'Uploading…';
     try{
-      const canvas = await poImageToPng(file, 900, 320);
+      const canvas = poPrepareLogo(await poImageToPng(file, 900, 320));
       const path = await poUploadPng(canvas, 'logo');
       // The old file is kept on purpose: issued POs still point at it.
       if(await poSaveSettings({ logo_path: path }, 'Logo updated')) poRenderLogoPreview();

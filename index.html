@@ -2387,19 +2387,82 @@ window.awesCss = {
   <div class="card purch-panel" id="purchPanel_purchaseOrders" style="display:none;">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg> Purchase Orders</span><span class="purch-head-right"><span class="sp-count" id="poCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
-      <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
-        Create a PO as a draft, then <b>Issue</b> it to lock it and get the signed PDF.
-        Issued POs can't be edited — only cancelled — so what the supplier received never changes.
-      </p>
-      <div class="sp-toolbar po-toolbar">
-        <input type="text" id="poSearch" placeholder="Search PO no., supplier, reference…">
-        <select id="poFilterStatus"><option value="">All statuses</option><option value="draft">Drafts</option><option value="issued">Issued</option><option value="cancelled">Cancelled</option></select>
+
+      <!-- List -->
+      <div id="poListView">
+        <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+          Create a PO as a draft, then <b>Issue</b> it to lock it and get the signed PDF.
+          Issued POs can't be edited — only cancelled — so what the supplier received never changes.
+        </p>
+        <div class="sp-toolbar po-toolbar">
+          <input type="text" id="poSearch" placeholder="Search PO no., supplier, reference…">
+          <select id="poFilterStatus"><option value="">All statuses</option><option value="draft">Drafts</option><option value="issued">Issued</option><option value="cancelled">Cancelled</option></select>
+        </div>
+        <div class="sp-actions-row">
+          <button type="button" class="btn btn-primary" id="poAddBtn">+ New Purchase Order</button>
+          <button type="button" class="btn btn-secondary" id="poSettingsBtn">PO Settings, Logo, Terms &amp; Signatures</button>
+        </div>
+        <div id="poList"><div class="empty-state">Loading…</div></div>
       </div>
-      <div class="sp-actions-row">
-        <button type="button" class="btn btn-primary" id="poAddBtn">+ New Purchase Order</button>
-        <button type="button" class="btn btn-secondary" id="poSettingsBtn">PO Settings, Logo &amp; Signatures</button>
+
+      <!-- Editor (in the page, not a pop-up). Fixed grid layout; the action
+           bar stays pinned at the bottom of the screen while scrolling. -->
+      <div id="poEditorView" style="display:none;">
+        <div class="po-ed-top">
+          <button type="button" class="po-back" id="poBackBtn">&larr; Purchase Orders</button>
+          <div class="po-ed-title"><span id="poSheetTitle">New Purchase Order</span> <span class="po-status" id="poSheetStatus"></span></div>
+        </div>
+        <div class="purch-stale" id="poStaleNote" style="display:none;">This PO was just changed on another device. <button type="button" id="poStaleReload">Load latest</button></div>
+        <div class="po-locked-note" id="poLockedNote" style="display:none;"></div>
+
+        <section class="po-sec">
+          <div class="po-sec-title">Supplier &amp; Details</div>
+          <div class="po-grid">
+            <div class="field po-c6"><label>Supplier <span class="req">*</span></label><select id="poSupplier"></select>
+              <div class="po-supplier-info" id="poSupplierInfo"></div></div>
+            <div class="field po-c6"><label>Reference <span class="mt-hint">job order, project, requisition</span></label><input type="text" id="poReference" placeholder="e.g. JO-2026-0142 / SM Megamall"></div>
+            <div class="field po-c3"><label>PO Date</label><input type="date" id="poDate"></div>
+            <div class="field po-c3"><label>Delivery Date</label><input type="date" id="poDeliveryDate"></div>
+            <div class="field po-c3"><label>Payment Terms</label><input type="text" id="poTerms" list="spTermsList" placeholder="COD"></div>
+            <div class="field po-c3"><label>VAT</label>
+              <select id="poVatMode"><option value="exclusive">Exclusive — add 12%</option><option value="inclusive">Inclusive — prices include 12%</option><option value="none">No VAT</option></select></div>
+            <div class="field po-c12"><label>Deliver To</label><textarea id="poDeliverTo" rows="2" placeholder="Delivery address / site"></textarea></div>
+          </div>
+        </section>
+
+        <section class="po-sec">
+          <div class="po-sec-title">Items</div>
+          <div class="po-items-head" aria-hidden="true"><span>#</span><span>Item</span><span>Qty</span><span>Unit</span><span>Unit Price (₱)</span><span>Amount</span><span></span></div>
+          <div id="poItems"></div>
+          <button type="button" class="btn btn-secondary mt-small-btn" id="poAddItem">+ Add item</button>
+          <div class="po-hint">Start typing to pick from the Materials Database — the price fills in from this supplier's price list. You can also type any item not in the catalog.</div>
+        </section>
+
+        <section class="po-sec po-sum">
+          <div class="po-sum-left">
+            <div class="po-sec-title">Signatures</div>
+            <div class="field"><label>Prepared By</label><select id="poPreparedBy"></select></div>
+            <div class="field"><label>Approved By <span class="req">*</span> <span class="mt-hint">needed to issue</span></label><select id="poApprovedBy"></select></div>
+            <div class="po-hint" id="poSigHint"></div>
+            <div class="po-terms-note">Terms &amp; Conditions are printed from <b>PO Settings</b>. <button type="button" class="po-link" id="poEditTermsBtn">Edit terms</button></div>
+          </div>
+          <div class="po-sum-right">
+            <div class="po-sec-title">Summary</div>
+            <div class="po-totals-box">
+              <div class="row"><span>Subtotal</span><span id="poTotSub">₱0.00</span></div>
+              <div class="row po-in"><span>Less: Discount (₱)</span><input type="text" id="poDiscount" inputmode="decimal" placeholder="0.00"></div>
+              <div id="poTotVatRows"></div>
+              <div class="row strong"><span>Total Amount</span><span id="poTotTotal">₱0.00</span></div>
+              <div class="row po-in"><span>Less: EWT</span>
+                <select id="poEwt"><option value="0">None</option><option value="0.01">1% — goods</option><option value="0.02">2% — services</option><option value="0.05">5%</option><option value="0.1">10%</option><option value="0.15">15%</option></select></div>
+              <div class="row" id="poTotEwtRow" style="display:none;"><span id="poTotEwtLabel">EWT</span><span id="poTotEwt">(₱0.00)</span></div>
+              <div class="row total"><span id="poTotNetLabel">Total Amount</span><span id="poTotNet">₱0.00</span></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="po-actions" id="poActions"></div>
       </div>
-      <div id="poList"><div class="empty-state">Loading…</div></div>
     </div>
   </div>
 </main>
@@ -2424,55 +2487,6 @@ window.awesCss = {
   </div>
 </div>
 
-<!-- Purchase Order editor (admin, Purchasing › Purchase Orders).
-     Drafts are editable; issued/cancelled POs open read-only. Wired in
-     purchasing.js (po* functions). -->
-<div class="overlay" id="poSheetOverlay" style="z-index:86;">
-  <div class="sheet po-sheet">
-    <div class="sheet-head">
-      <h3><span id="poSheetTitle">New Purchase Order</span> <span class="po-status" id="poSheetStatus"></span></h3>
-      <button class="sheet-close" id="poSheetClose" type="button">&times;</button>
-    </div>
-    <div class="purch-stale" id="poStaleNote" style="display:none;">This PO was just changed on another device. <button type="button" id="poStaleReload">Load latest</button></div>
-    <div class="po-locked-note" id="poLockedNote" style="display:none;"></div>
-
-    <div class="po-section-title">Supplier &amp; Details</div>
-    <div class="sp-grid2">
-      <div class="field"><label>Supplier <span class="req">*</span></label><select id="poSupplier"></select>
-        <div class="po-supplier-info" id="poSupplierInfo"></div></div>
-      <div class="field"><label>Reference <span class="mt-hint">job order, project, requisition</span></label><input type="text" id="poReference" placeholder="e.g. JO-2026-0142 / SM Megamall"></div>
-      <div class="field"><label>PO Date</label><input type="date" id="poDate"></div>
-      <div class="field"><label>Delivery Date</label><input type="date" id="poDeliveryDate"></div>
-      <div class="field"><label>Payment Terms</label><input type="text" id="poTerms" list="spTermsList" placeholder="COD"></div>
-      <div class="field"><label>VAT</label>
-        <select id="poVatMode"><option value="exclusive">VAT exclusive — add 12%</option><option value="inclusive">VAT inclusive — prices include 12%</option><option value="none">No VAT (non-VAT supplier)</option></select></div>
-    </div>
-    <div class="field"><label>Deliver To</label><textarea id="poDeliverTo" placeholder="Delivery address / site"></textarea></div>
-
-    <div class="po-section-title">Items</div>
-    <div class="po-items-head" aria-hidden="true"><span>Item</span><span>Qty</span><span>Unit</span><span>Unit Price (₱)</span><span>Amount</span><span></span></div>
-    <div id="poItems"></div>
-    <button type="button" class="btn btn-secondary mt-small-btn" id="poAddItem">+ Add item</button>
-    <div class="po-hint">Start typing to pick from the Materials Database — the price fills in from this supplier's price list. You can also type any item not in the catalog.</div>
-
-    <div class="po-totals">
-      <div class="field po-discount"><label>Less: Discount (₱)</label><input type="text" id="poDiscount" inputmode="decimal" placeholder="0.00"></div>
-      <div class="po-totals-box" id="poTotals"></div>
-    </div>
-
-    <div class="field"><label>Terms &amp; Conditions / Notes <span class="mt-hint">printed on the PO</span></label><textarea id="poNotes" rows="4"></textarea></div>
-
-    <div class="po-section-title">Signatures</div>
-    <div class="sp-grid2">
-      <div class="field"><label>Prepared By</label><select id="poPreparedBy"></select></div>
-      <div class="field"><label>Approved By <span class="req">*</span> <span class="mt-hint">needed to issue</span></label><select id="poApprovedBy"></select></div>
-    </div>
-    <div class="po-hint" id="poSigHint"></div>
-
-    <div class="po-actions" id="poActions"></div>
-  </div>
-</div>
-
 <!-- PO Settings: company details + logo (printed on every PO) and the
      signatories with their uploaded e-signatures. -->
 <div class="overlay" id="poSettingsOverlay" style="z-index:88;">
@@ -2487,7 +2501,7 @@ window.awesCss = {
     </div>
 
     <div class="sp-pane" id="poSetPaneCompany">
-      <p style="font-size:12.5px; color:var(--text-muted); margin-top:0;">Printed at the top of every purchase order. Changes apply to drafts and new POs — issued POs keep the details they were issued with.</p>
+      <p style="font-size:12.5px; color:var(--text-muted); margin-top:0;">Printed on every purchase order — header, logo and Terms &amp; Conditions. Changes apply to drafts and new POs; issued POs keep what they were issued with.</p>
       <div class="field"><label>Company Logo</label>
         <div class="po-logo-row">
           <div class="po-logo-preview" id="poLogoPreview"></div>
@@ -2500,7 +2514,7 @@ window.awesCss = {
         </div>
       </div>
       <div class="field"><label>Header Style</label>
-        <select id="poHeaderStyle"><option value="green">Green band — white logo (default)</option><option value="white">White background — logo in green</option></select></div>
+        <select id="poHeaderStyle"><option value="green">Green band — logo &amp; text in white (default)</option><option value="white">White background — logo in green</option></select></div>
       <div class="field"><label>Company Name</label><input type="text" id="poCoName"></div>
       <div class="field"><label>Tagline</label><input type="text" id="poCoTagline"></div>
       <div class="field"><label>Address</label><textarea id="poCoAddress"></textarea></div>
@@ -2512,7 +2526,7 @@ window.awesCss = {
           <select id="poCoVat"><option value="exclusive">VAT exclusive</option><option value="inclusive">VAT inclusive</option><option value="none">No VAT</option></select></div>
       </div>
       <div class="field"><label>Default Deliver To</label><textarea id="poCoDeliverTo" placeholder="Usually your office or warehouse address"></textarea></div>
-      <div class="field"><label>Default Terms &amp; Conditions</label><textarea id="poCoTerms" rows="4"></textarea></div>
+      <div class="field"><label>Terms &amp; Conditions <span class="mt-hint">printed on every PO — edit them only here</span></label><textarea id="poCoTerms" rows="7"></textarea></div>
       <button type="button" class="btn btn-primary" id="poSettingsSaveBtn" style="width:100%;">Save Settings</button>
     </div>
 

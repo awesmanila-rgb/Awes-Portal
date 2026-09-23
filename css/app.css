@@ -2951,3 +2951,87 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 @media (prefers-reduced-motion:reduce){ .purch-live.on::before{ animation:none; } }
 .purch-stale{ background:#FDF1DC; color:#7A4E0E; border:1px solid #F2D9A6; border-radius:8px; padding:8px 10px; font-size:12.5px; margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .purch-stale button{ margin-left:auto; border:1px solid #C98A12; background:#fff; color:#7A4E0E; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; }
+
+/* ---------- Purchasing › Purchase Orders ---------- */
+.po-toolbar{ grid-template-columns:1fr 180px; }
+.po-sheet{ max-width:980px; }
+.po-status{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; vertical-align:middle; margin-left:6px; text-transform:uppercase; letter-spacing:.3px; }
+.po-status.draft{ background:#EEF1ED; color:var(--text-muted); }
+.po-status.issued{ background:var(--green-light); color:var(--green-dark); }
+.po-status.cancelled{ background:#FDECEB; color:var(--danger); }
+.po-section-title{ font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:var(--green-dark); margin:18px 0 8px; padding-bottom:6px; border-bottom:2px solid var(--green-light); }
+.po-section-title:first-of-type{ margin-top:4px; }
+.po-supplier-info{ font-size:12px; color:var(--text-muted); margin-top:5px; line-height:1.45; }
+.po-locked-note{ background:var(--green-light); color:var(--green-dark); border-radius:8px; padding:9px 11px; font-size:12.5px; margin-bottom:10px; }
+.po-locked-note.cancelled{ background:#FDECEB; color:var(--danger); }
+.po-items-head, .po-item{ display:grid; grid-template-columns:28px minmax(0,1fr) 84px 80px 120px 116px 34px; gap:6px; align-items:start; }
+.po-items-head{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); padding:0 2px 4px; }
+.po-items-head span:nth-child(3), .po-items-head span:nth-child(5), .po-items-head span:nth-child(6){ text-align:right; }
+.po-items-head span:nth-child(4){ text-align:center; }
+.po-item{ padding:6px 0; border-bottom:1px solid var(--border); }
+.po-item input{ padding:8px 9px; font-size:14px; }
+.po-item .num{ text-align:right; }
+.po-item .po-amt{ text-align:right; font-weight:700; font-size:14px; padding-top:9px; white-space:nowrap; }
+.po-item .po-rm{ border:1px solid var(--border); background:#fff; border-radius:8px; height:37px; cursor:pointer; color:var(--danger); font-size:18px; }
+.po-item-desc{ position:relative; }
+.po-item-code{ font-size:10.5px; font-weight:700; color:var(--green-dark); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; margin:3px 0 0 2px; min-height:12px; }
+.po-suggest{ position:absolute; left:0; right:0; top:39px; z-index:5; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:260px; overflow-y:auto; }
+.po-suggest button{ display:flex; width:100%; justify-content:space-between; gap:10px; padding:8px 10px; border:none; background:#fff; cursor:pointer; text-align:left; font:inherit; font-size:13px; }
+.po-suggest button:hover, .po-suggest button.hl{ background:var(--green-light); }
+.po-suggest .s-price{ color:var(--text-muted); font-size:12px; white-space:nowrap; }
+.po-hint{ font-size:12px; color:var(--text-muted); margin:6px 0 4px; }
+.po-totals{ display:flex; justify-content:space-between; gap:16px; margin:14px 0; align-items:flex-start; flex-wrap:wrap; }
+.po-discount{ width:180px; }
+.po-totals-box{ min-width:280px; margin-left:auto; border:1px solid var(--border); border-radius:10px; padding:10px 14px; background:#FAFBF9; font-size:13px; }
+.po-totals-box .row{ display:flex; justify-content:space-between; gap:20px; padding:3px 0; }
+.po-totals-box .row.total{ border-top:2px solid var(--green); margin-top:4px; padding-top:7px; font-size:16px; font-weight:800; color:var(--green-dark); }
+.po-actions{ display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); position:sticky; bottom:-16px; background:#fff; padding-bottom:12px; }
+.po-actions .btn{ flex:1 1 150px; padding:12px; font-size:13.5px; }
+.po-actions .btn.danger{ background:#fff; color:var(--danger); border:1px solid #F0C4C0; }
+.po-logo-row{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+.po-logo-preview{ width:200px; height:72px; border-radius:8px; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; overflow:hidden; padding:6px; }
+.po-logo-preview.green{ background:#154D34; }
+.po-logo-preview img{ max-width:100%; max-height:100%; object-fit:contain; }
+.po-logo-btns{ display:flex; flex-direction:column; gap:6px; }
+.po-sig-preview{ margin-top:8px; height:92px; border:1px dashed var(--border); border-radius:8px; display:flex; align-items:flex-end; justify-content:center; background:#fff; position:relative; padding:6px 10px 18px; }
+.po-sig-preview::after{ content:''; position:absolute; left:18%; right:18%; bottom:16px; border-bottom:1px solid #333; }
+.po-sig-preview span{ color:var(--text-muted); font-size:12px; align-self:center; }
+.po-sig-preview img{ max-height:68px; max-width:70%; object-fit:contain; position:relative; z-index:1; margin-bottom:-4px; }
+.po-sig-thumb{ height:38px; max-width:120px; object-fit:contain; background:#fff; border-bottom:1px solid #999; }
+@media (max-width:720px){
+  .po-items-head{ display:none; }
+  .po-item{ grid-template-columns:28px 1fr 1fr 1fr 34px; grid-template-areas:"no desc desc desc rm" "no qty unit price price" "no amt amt amt amt"; }
+  .po-item .po-no{ grid-area:no; }
+  .po-item .po-item-desc{ grid-area:desc; } .po-item .po-qty{ grid-area:qty; } .po-item .po-unit{ grid-area:unit; }
+  .po-item .po-price{ grid-area:price; } .po-item .po-amt{ grid-area:amt; padding-top:0; } .po-item .po-rm{ grid-area:rm; }
+  .po-item .po-qty::placeholder, .po-item .po-unit::placeholder, .po-item .po-price::placeholder{ color:#9aa39d; }
+  .po-totals-box{ min-width:0; width:100%; }
+  .po-discount{ width:100%; }
+}
+
+/* ---------- PO editor: in-page, fixed layout ---------- */
+#purchasingView.po-wide{ max-width:1180px !important; }
+.po-ed-top{ display:flex; align-items:center; gap:14px; margin:-4px 0 14px; flex-wrap:wrap; }
+.po-back{ border:1px solid var(--border); background:#fff; color:var(--green-dark); border-radius:8px; padding:7px 12px; font-weight:700; font-size:13px; cursor:pointer; }
+.po-back:hover{ border-color:var(--green); }
+.po-ed-title{ font-size:18px; font-weight:800; color:var(--text); }
+.po-sec{ border:1px solid var(--border); border-radius:12px; padding:14px 16px 10px; margin-bottom:14px; background:#fff; }
+.po-sec-title{ font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--green-dark); margin:0 0 12px; }
+.po-grid{ display:grid; grid-template-columns:repeat(12, minmax(0,1fr)); gap:0 14px; }
+.po-c3{ grid-column:span 3; } .po-c6{ grid-column:span 6; } .po-c12{ grid-column:span 12; }
+.po-item .po-no{ font-size:12px; color:var(--text-muted); font-weight:700; text-align:center; padding-top:10px; }
+.po-sum{ display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:24px; }
+.po-sum-right .po-totals-box{ min-width:0; margin:0; }
+.po-totals-box .row.po-in{ align-items:center; }
+.po-totals-box .row.po-in input, .po-totals-box .row.po-in select{ width:150px; padding:6px 8px; font-size:13.5px; text-align:right; }
+.po-totals-box .row.po-in select{ text-align:left; }
+.po-totals-box .row.strong{ font-weight:700; border-top:1px solid var(--border); margin-top:4px; padding-top:6px; }
+.po-terms-note{ font-size:12px; color:var(--text-muted); margin-top:14px; padding:9px 11px; background:#F6F8F6; border-radius:8px; }
+.po-link{ background:none; border:none; color:var(--green-dark); font-weight:700; text-decoration:underline; cursor:pointer; padding:0; font-size:12px; }
+#poEditorView .po-actions{ position:sticky; bottom:0; z-index:4; margin:4px -16px -16px; padding:12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background:rgba(255,255,255,.97); border-top:1px solid var(--border); box-shadow:0 -6px 16px rgba(0,0,0,.06); border-radius:0 0 12px 12px; }
+@media (max-width:860px){
+  .po-c3{ grid-column:span 6; } .po-c6{ grid-column:span 12; }
+  .po-sum{ grid-template-columns:1fr; gap:10px; }
+}
+@media (max-width:520px){ .po-c3{ grid-column:span 12; } }
