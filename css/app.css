@@ -3035,3 +3035,37 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
   .po-sum{ grid-template-columns:1fr; gap:10px; }
 }
 @media (max-width:520px){ .po-c3{ grid-column:span 12; } }
+
+/* ---------- Purchasing › Material Requisition ---------- */
+.mr-urg{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; vertical-align:middle; text-transform:uppercase; letter-spacing:.3px; }
+.mr-urg.urgent{ background:#FDF1DC; color:#9A6212; }
+.mr-urg.emergency{ background:#FDECEB; color:var(--danger); }
+.po-status.submitted{ background:#E6F1FB; color:#185FA5; }
+.po-status.returned{ background:#FDF1DC; color:#9A6212; }
+.po-status.approved{ background:var(--green-light); color:var(--green-dark); }
+.po-status.fulfilled{ background:#DDEFE4; color:#0F5A34; }
+.po-status.rejected{ background:#FDECEB; color:var(--danger); }
+.mr-info{ display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px 18px; font-size:13px; }
+.mr-info .k{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); margin-bottom:2px; }
+.mr-info .v{ word-break:break-word; }
+.mr-info .wide{ grid-column:1 / -1; }
+.mr-table td, .mr-table th{ vertical-align:middle; }
+.mr-table input.mr-qty{ width:88px; padding:6px 8px; text-align:right; font-size:13.5px; }
+.mr-table .cov{ font-size:12px; font-weight:700; white-space:nowrap; }
+.mr-table .cov.open{ color:#9A6212; } .mr-table .cov.ok{ color:var(--green-dark); }
+.mr-table .cov a{ color:var(--green-dark); cursor:pointer; text-decoration:underline; }
+.mr-table .reduced{ color:#9A6212; font-weight:700; }
+.mr-photo img{ max-width:260px; max-height:200px; border-radius:8px; border:1px solid var(--border); margin-top:8px; display:block; }
+.mr-item{ display:grid; grid-template-columns:22px minmax(0,1fr) 78px 76px 34px; gap:6px; align-items:start; padding:6px 0; border-bottom:1px solid var(--border); }
+.mr-item .po-no{ padding-top:10px; }
+.mr-item input{ padding:8px 9px; font-size:14px; }
+.mr-item .num{ text-align:right; }
+.mr-item .mr-appr{ grid-column:2 / -1; font-size:12px; color:var(--green-dark); font-weight:700; margin-top:-2px; }
+.mr-item .po-rm{ border:1px solid var(--border); background:#fff; border-radius:8px; height:37px; cursor:pointer; color:var(--danger); font-size:18px; }
+.mr-urgency-pick button[data-u="urgent"].on{ background:#C98A12; border-color:#C98A12; }
+.mr-urgency-pick button[data-u="emergency"].on{ background:var(--danger); border-color:var(--danger); }
+@media (max-width:520px){ .mr-item{ grid-template-columns:22px 1fr 1fr 34px; } .mr-item .po-item-desc{ grid-column:2 / 4; } .mr-item .po-rm{ grid-column:4; grid-row:1; } }
+@media (max-width:520px){ .mr-item .mrq{ grid-column:2; grid-row:2; } .mr-item .mru{ grid-column:3; grid-row:2; } .mr-item .mr-appr{ grid-row:3; } }
+/* Technicians have a fixed bottom nav (#techNav); keep the pinned action
+   bar above it instead of hidden behind it while scrolling. */
+body.role-tech #mrtFormView .po-actions{ bottom:var(--tech-nav-h, calc(64px + env(safe-area-inset-bottom))); }

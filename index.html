@@ -438,7 +438,7 @@ window.awesCss = {
         </button>
         <button type="button" class="tech-qa-tile qa-brown" id="techQaMaterials">
           <span class="tech-qa-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
-          <span class="tech-qa-label">Materials Request<span class="home-tile-badge">Coming Soon</span></span>
+          <span class="tech-qa-label">Materials Request</span>
         </button>
       </div>
     </div>
@@ -630,7 +630,7 @@ window.awesCss = {
     </button>
     <button type="button" class="home-tile qa-brown" id="tile_materialRequest">
       <span class="home-tile-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
-      <span class="tile-text"><span class="home-tile-label">Material Request Form <span class="home-tile-badge">Coming Soon</span></span><span class="tile-desc">Request materials and equipment</span></span>
+      <span class="tile-text"><span class="home-tile-label">Material Request Form</span><span class="tile-desc">Request materials and equipment</span></span>
       <span class="tile-chevron">›</span>
     </button>
     <button type="button" class="home-tile" id="tile_changePassword" style="display:none;">
@@ -2379,11 +2379,87 @@ window.awesCss = {
     </div>
   </div>
   <div class="card purch-panel" id="purchPanel_requisitions" style="display:none;">
-    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg> Material Requisition</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg> Material Requisitions</span><span class="purch-head-right"><span class="sp-count" id="mrCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
-      <div class="empty-state">Material requisitions — coming soon. Technician material requests linked to job orders will be reviewed and approved here.</div>
+      <div id="mrListView">
+        <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+          Requests from technicians. Review and approve (you can lower quantities), then fulfil approved items
+          with a <b>Purchase Order</b> or mark them as <b>bought by the technician</b>.
+        </p>
+        <div class="sp-toolbar po-toolbar">
+          <input type="text" id="mrSearch" placeholder="Search MRF no., technician, job order, customer…">
+          <select id="mrFilterStatus">
+            <option value="open">Needs action</option><option value="submitted">To review</option><option value="approved">Approved — to fulfil</option>
+            <option value="fulfilled">Fulfilled</option><option value="returned">Returned to tech</option><option value="rejected">Rejected</option>
+            <option value="cancelled">Cancelled</option><option value="">All</option>
+          </select>
+        </div>
+        <div id="mrList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="mrDetailView" style="display:none;">
+        <div class="po-ed-top">
+          <button type="button" class="po-back" id="mrBackBtn">&larr; Requisitions</button>
+          <div class="po-ed-title"><span id="mrTitle"></span> <span class="po-status" id="mrStatus"></span> <span class="mr-urg" id="mrUrgency"></span></div>
+        </div>
+        <div class="purch-stale" id="mrStaleNote" style="display:none;">This request was just changed on another device. <button type="button" id="mrStaleReload">Load latest</button></div>
+        <section class="po-sec">
+          <div class="po-sec-title">Request</div>
+          <div class="mr-info" id="mrInfo"></div>
+        </section>
+        <section class="po-sec">
+          <div class="po-sec-title">Items</div>
+          <div class="sp-table-wrap"><table class="sp-table mr-table" id="mrItemsTable"></table></div>
+          <div class="po-hint" id="mrItemsHint"></div>
+        </section>
+        <div class="po-actions" id="mrActions"></div>
+      </div>
     </div>
   </div>
+
+  <!-- Technician: My Material Requests (opened from the tech home tiles). -->
+  <div class="card purch-panel" id="purchPanel_myRequests" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg> My Material Requests</span><span class="purch-head-right"><span class="mrt-live purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div id="mrtListView">
+        <button type="button" class="btn btn-primary" id="mrtNewBtn" style="width:100%; margin-bottom:12px;">+ New Material Request</button>
+        <div id="mrtList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="mrtFormView" style="display:none;">
+        <div class="po-ed-top">
+          <button type="button" class="po-back" id="mrtBackBtn">&larr; My Requests</button>
+          <div class="po-ed-title"><span id="mrtTitle">New Request</span> <span class="po-status" id="mrtStatus"></span></div>
+        </div>
+        <div class="po-locked-note" id="mrtNote" style="display:none;"></div>
+        <section class="po-sec">
+          <div class="po-sec-title">Details</div>
+          <div class="po-grid">
+            <div class="field po-c12"><label>Job Order</label><select id="mrtJob"></select><div class="po-supplier-info" id="mrtJobInfo"></div></div>
+            <div class="field po-c6"><label>Needed By</label><input type="date" id="mrtNeeded"></div>
+            <div class="field po-c6"><label>Urgency</label>
+              <div class="sp-pick mr-urgency-pick" id="mrtUrgency">
+                <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="urgent">Urgent</button><button type="button" data-u="emergency">Emergency</button>
+              </div></div>
+            <div class="field po-c12"><label>Deliver To</label>
+              <select id="mrtDeliver"><option value="Job site">Job site</option><option value="Office">Office</option><option value="I'll pick up">I'll pick up</option></select></div>
+            <div class="field po-c12"><label>Purpose / Notes</label><textarea id="mrtPurpose" rows="2" placeholder="What is it for? e.g. replace leaking flare joint, outdoor unit #2"></textarea></div>
+          </div>
+        </section>
+        <section class="po-sec">
+          <div class="po-sec-title">Items</div>
+          <div id="mrtItems"></div>
+          <button type="button" class="btn btn-secondary mt-small-btn" id="mrtAddItem">+ Add item</button>
+          <div class="po-hint">Type to search the materials list. Not listed? Just type what you need.</div>
+        </section>
+        <section class="po-sec">
+          <div class="po-sec-title">Photo <span class="mt-hint">optional — e.g. the part or the nameplate</span></div>
+          <input type="file" id="mrtPhoto" accept="image/*">
+          <div id="mrtPhotoPreview" class="mr-photo"></div>
+        </section>
+        <div class="po-actions" id="mrtActions"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="card purch-panel" id="purchPanel_purchaseOrders" style="display:none;">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg> Purchase Orders</span><span class="purch-head-right"><span class="sp-count" id="poCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">

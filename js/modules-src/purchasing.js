@@ -64,11 +64,13 @@
 
   // ---------- entry ----------
   function purchOnShow(key){
+    if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
     if(!currentUser || currentUser.role !== 'admin') return;
     purchRealtimeStart();
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
     if(key === 'purchaseOrders') poShow();
+    if(key === 'requisitions') mrShow();
   }
 
   async function spShow(){
@@ -1518,7 +1520,8 @@
   // when the app regains focus or the connection comes back.
   // =====================================================================
   const PURCH_RT_TABLES = ['suppliers', 'supplier_contacts', 'supplier_documents', 'materials', 'supplier_materials',
-    'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings'];
+    'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings',
+    'material_requisitions', 'material_requisition_items'];
   let purchChannel = null;
   let purchPending = new Set();
   let purchPendingIds = new Set();
@@ -1578,6 +1581,8 @@
     // A PO changed elsewhere: header events carry the PO id, item events its po_id.
     const poId = row && (table === 'purchase_orders' ? row.id : table === 'purchase_order_items' ? row.po_id : null);
     if(poId && !purchIsOwn(poId)) purchPendingIds.add('po:' + poId);
+    const mrId = row && (table === 'material_requisitions' ? row.id : table === 'material_requisition_items' ? row.mr_id : null);
+    if(mrId && !purchIsOwn(mrId)) purchPendingIds.add('mr:' + mrId);
     clearTimeout(purchTimer);
     // Debounced: a CSV import fires hundreds of events — refresh once.
     purchTimer = setTimeout(purchApply, 400);
@@ -1633,6 +1638,15 @@
     }
     if($('poSettingsOverlay').classList.contains('open')){
       if(has('po_signatories')) jobs.push(poLoadSignatories().then(poRenderSigList).catch(()=>{}));
+    }
+    // Material Requisitions (a PO being issued/cancelled/deleted changes
+    // fulfilment too, so PO events refresh an open request)
+    if(typeof mrLoadList === 'function' && purchVisible('requisitions')){
+      if(has('material_requisitions', 'material_requisition_items')) jobs.push(mrLoadList({ silent:true }).then(ok=>{ if(ok && !mrDetailVisible()) mrRenderList(); }));
+      if(mrDetailVisible() && mrOpenRow){
+        if(ids.has('mr:' + mrOpenRow.id) && mrOpenRow.status === 'submitted') $('mrStaleNote').style.display = '';
+        else if(ids.has('mr:' + mrOpenRow.id) || has('purchase_orders')) jobs.push(mrOpen(mrOpenRow.id));
+      }
     }
     try{ await Promise.all(jobs); }catch(e){ console.error('purchasing live refresh failed', e); }
   }

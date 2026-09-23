@@ -666,7 +666,8 @@
   const PURCH_PAGES = {
     materials:      { nav:'sbNavMaterials',      title:'Materials Database',   sub:'Catalog of materials & parts' },
     suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
-    requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review technician material requests' },
+    requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review & fulfil technician requests' },
+    myRequests:     { nav:'',                    title:'Material Requests',    sub:'Request materials for your jobs' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
   };
   function showPurchasingView(key){
@@ -687,6 +688,10 @@
     purchOnShow(key);   // purchasing.js — loads the page's data
   }
   Object.keys(PURCH_PAGES).forEach(key=>{
+    // Technician pages (myRequests) have no sidebar button — skip them.
+    // Binding to a missing button would throw here and abort the rest of
+    // the app's start-up.
+    if(!PURCH_PAGES[key].nav || !$(PURCH_PAGES[key].nav)) return;
     $(PURCH_PAGES[key].nav).addEventListener('click', async ()=>{
       closeMainMenu();
       if(!(await ensureAdminAuthenticated())) return;
@@ -1072,7 +1077,13 @@
   $('tile_cashAdvance').addEventListener('click', showCashAdvanceView);
   $('tile_dispatch').addEventListener('click', showDispatchView);
   $('tile_leave').addEventListener('click', showLeaveView);
-  $('tile_materialRequest').addEventListener('click', ()=> flashComingSoonHeader('Material Request Form', 'Material Request Form — coming soon'));
+  // Admins land on the review queue; technicians on their own requests.
+  $('tile_materialRequest').addEventListener('click', async ()=>{
+    if(currentUser && currentUser.role === 'admin'){
+      if(!(await ensureAdminAuthenticated())) return;
+      showPurchasingView('requisitions');
+    }else showPurchasingView('myRequests');
+  });
   $('tile_changePassword').addEventListener('click', ()=> showChangePasswordScreen(false));
   $('homeBtn').addEventListener('click', showHome);
 
@@ -1101,7 +1112,7 @@
   $('techQaServiceReport').addEventListener('click', showServiceReport);
   $('techQaJobOrder').addEventListener('click', showDispatchView);
   $('techQaFinanceHr').addEventListener('click', ()=> showFinanceHrView());
-  $('techQaMaterials').addEventListener('click', ()=> flashComingSoonHeader('Material Request Form', 'Material Request Form — coming soon'));
+  $('techQaMaterials').addEventListener('click', ()=> showPurchasingView('myRequests'));
 
   // ---------- Finance & HR page — tile view of Attendance / Cash Advance /
   // Leave / Liquidation / Reimbursement. Each tile opens the exact same
