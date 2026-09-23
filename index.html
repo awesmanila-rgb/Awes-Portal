@@ -2335,9 +2335,26 @@ window.awesCss = {
      Purchase Order Form). Shown by showPurchasingView(key) in home.js. -->
 <main id="purchasingView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card purch-panel" id="purchPanel_materials" style="display:none;">
-    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg> Materials Database</span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg> Materials Database</span><span class="sp-count" id="mtCount"></span></div>
     <div class="card-body">
-      <div class="empty-state">Materials catalog — coming soon. Items, codes, units, categories and supplier prices will be managed here.</div>
+      <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+        Every material and part you buy — one entry per size (3/8" and 1/2" copper are separate items).
+        Tap an item to edit it or manage its supplier prices. Items are never deleted, only deactivated.
+      </p>
+      <div class="sp-toolbar mt-toolbar">
+        <input type="text" id="mtSearch" placeholder="Search code, name, size, brand…">
+        <select id="mtFilterCategory"><option value="">All categories</option></select>
+        <select id="mtFilterScope"><option value="">All scopes</option><option>Aircon</option><option>Ventilation</option><option>General Scope</option></select>
+        <label class="sp-check"><input type="checkbox" id="mtShowInactive"> Show inactive</label>
+      </div>
+      <div class="sp-actions-row">
+        <button type="button" class="btn btn-primary" id="mtAddBtn">+ Add Material</button>
+        <button type="button" class="btn btn-secondary" id="mtSeedBtn">Seed from Service Reports</button>
+        <button type="button" class="btn btn-secondary" id="mtImportBtn">Import CSV</button>
+        <button type="button" class="btn btn-secondary" id="mtExportBtn">Export CSV</button>
+        <input type="file" id="mtImportFile" accept=".csv,text/csv" style="display:none;">
+      </div>
+      <div id="mtList"><div class="empty-state">Loading…</div></div>
     </div>
   </div>
   <div class="card purch-panel" id="purchPanel_suppliers" style="display:none;">
@@ -2374,6 +2391,105 @@ window.awesCss = {
     </div>
   </div>
 </main>
+
+<!-- Material add/edit sheet (admin, Purchasing › Materials Database).
+     Tabs: Details / Supplier Prices / Price History. The last two need a
+     saved material. Wired in purchasing.js (mt* functions). -->
+<div class="overlay" id="mtSheetOverlay" style="z-index:85;">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3 id="mtSheetTitle">Add Material</h3>
+      <button class="sheet-close" id="mtSheetClose" type="button">&times;</button>
+    </div>
+    <div class="seg-tabs" id="mtTabs">
+      <button type="button" class="seg-tab active" data-mt-tab="info">Details</button>
+      <button type="button" class="seg-tab" data-mt-tab="prices">Supplier Prices</button>
+      <button type="button" class="seg-tab" data-mt-tab="history">Price History</button>
+    </div>
+
+    <div class="sp-pane" id="mtPaneInfo">
+      <div class="sp-code" id="mtStatusLine" style="display:none;"></div>
+      <div class="sp-grid2">
+        <div class="field"><label>Category <span class="req">*</span></label><select id="mtCategory"></select></div>
+        <div class="field"><label>Code <span class="req">*</span></label>
+          <div class="mt-code-row"><input type="text" id="mtCode" placeholder="e.g. PIP-001" autocapitalize="characters"><button type="button" class="btn btn-secondary" id="mtSuggestCode" title="Suggest the next free code for this category">Suggest</button></div></div>
+      </div>
+      <div class="field"><label>Item Name <span class="req">*</span></label><input type="text" id="mtName" placeholder='e.g. Copper Tube 3/8" (Soft Drawn)'></div>
+      <div class="sp-grid2">
+        <div class="field"><label>Family <span class="mt-hint">groups sizes together</span></label><input type="text" id="mtFamily" list="mtFamilyList" placeholder="e.g. Copper Tube"><datalist id="mtFamilyList"></datalist></div>
+        <div class="field"><label>Brand</label><input type="text" id="mtBrand" list="mtBrandList" placeholder="Optional"><datalist id="mtBrandList"></datalist></div>
+      </div>
+      <div class="field"><label>Used For</label><div class="sp-pick" id="mtScopePick"></div></div>
+
+      <div class="sp-subhead">Units</div>
+      <div class="sp-grid2">
+        <div class="field"><label>Issue Unit <span class="req">*</span> <span class="mt-hint">how techs request it</span></label><input type="text" id="mtUnit" list="mtUnitList" placeholder="ft, m, kg, pc…"></div>
+        <div class="field"><label>Purchase Unit <span class="mt-hint">optional</span></label><input type="text" id="mtPackUnit" list="mtUnitList" placeholder="roll, box, tank…"></div>
+        <div class="field"><label>Qty per Purchase Unit</label><input type="text" id="mtPackQty" inputmode="decimal" placeholder="e.g. 50"></div>
+        <div class="field"><label>Standard Cost (₱) <span class="mt-hint">per issue unit, for estimates</span></label><input type="text" id="mtStdCost" inputmode="decimal" placeholder="Optional"></div>
+      </div>
+      <datalist id="mtUnitList"><option value="pc"><option value="ft"><option value="m"><option value="kg"><option value="roll"><option value="box"><option value="can"><option value="tank"><option value="set"><option value="pair"><option value="length"><option value="gal"><option value="L"><option value="lot"><option value="pack"></datalist>
+      <div class="mt-pack-preview" id="mtPackPreview"></div>
+
+      <div class="sp-subhead">Specifications <span>(size, gauge, rating, refrigerant…)</span></div>
+      <div id="mtSpecsList"></div>
+      <button type="button" class="btn btn-secondary mt-small-btn" id="mtAddSpec">+ Add spec</button>
+
+      <div class="field" style="margin-top:14px;"><label>Notes</label><textarea id="mtNotes"></textarea></div>
+      <button type="button" class="btn btn-primary" id="mtSaveBtn" style="width:100%;">Save Material</button>
+      <div class="mt-sheet-actions" id="mtSheetActions" style="display:none;">
+        <button type="button" class="btn btn-secondary" id="mtDuplicateBtn">Duplicate as new size</button>
+        <button type="button" class="btn btn-secondary" id="mtToggleActiveBtn">Deactivate</button>
+      </div>
+    </div>
+
+    <div class="sp-pane" id="mtPanePrices" style="display:none;">
+      <div id="mtPricesList"></div>
+<div id="mtPriceForm">
+      <div class="sp-subhead" id="mtPriceFormTitle">Add a supplier price</div>
+      <input type="hidden" id="mtPriceId" value="">
+      <div class="field"><label>Supplier <span class="req">*</span></label><select id="mtPriceSupplier"></select></div>
+      <div class="sp-grid2">
+        <div class="field"><label>Price (₱) <span class="req">*</span></label><input type="text" id="mtPriceAmount" inputmode="decimal"></div>
+        <div class="field"><label>Price is per</label><input type="text" id="mtPriceUnit" list="mtUnitList" placeholder="ft"></div>
+        <div class="field"><label>Price Date</label><input type="date" id="mtPriceDate"></div>
+        <div class="field"><label>Their Item Code</label><input type="text" id="mtPriceItemCode" placeholder="Optional"></div>
+        <div class="field"><label>Min. Order Qty</label><input type="text" id="mtPriceMoq" inputmode="decimal" placeholder="Optional"></div>
+        <div class="field"><label>Lead Time (days)</label><input type="text" id="mtPriceLead" inputmode="numeric" placeholder="Optional"></div>
+      </div>
+      <label class="sp-check" style="margin-bottom:12px;"><input type="checkbox" id="mtPricePreferred"> Preferred supplier for this item</label>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-primary" id="mtPriceSaveBtn" style="flex:1;">Save Price</button>
+        <button type="button" class="btn btn-secondary" id="mtPriceCancelBtn" style="display:none;">Cancel</button>
+      </div>
+      </div>
+      <div class="empty-state" id="mtPriceAllDone" style="display:none; padding:12px;">Every active supplier already has a price for this item. Use <b>Update price</b> above to change one, or add more suppliers in Supplier Database.</div>
+    </div>
+
+    <div class="sp-pane" id="mtPaneHistory" style="display:none;">
+      <div id="mtHistoryList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Seed helper: distinct materials already typed on Service Reports that
+     aren't in the catalog yet, most-used first. "Add" opens the material
+     sheet pre-filled. Wired in purchasing.js (mtSeed*). -->
+<div class="overlay" id="mtSeedOverlay" style="z-index:82;">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3>Seed from Service Reports</h3>
+      <button class="sheet-close" id="mtSeedClose" type="button">&times;</button>
+    </div>
+    <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+      Materials your technicians have already written on Service Reports, most-used first.
+      Items whose name already matches the catalog are hidden. Spelling variants of the same thing
+      ("cu pipe 3/8", "copper 3/8") show separately — add one clean entry and ignore the rest.
+    </p>
+    <input type="text" id="mtSeedSearch" placeholder="Filter…" style="margin-bottom:10px;">
+    <div id="mtSeedList"><div class="empty-state">Loading…</div></div>
+  </div>
+</div>
 
 <!-- Supplier add/edit sheet (admin, Purchasing › Supplier Database).
      Tabs: Info / Contacts / Documents / Price List. The last three need a

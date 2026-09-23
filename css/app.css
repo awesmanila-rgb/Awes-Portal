@@ -2872,7 +2872,7 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .push-prompt-actions .push-prompt-later{ background:none; color:var(--text-muted); }
 
 /* ---------- Purchasing › Supplier Database ---------- */
-.card-head .sp-count{ font-size:12px; font-weight:600; color:var(--text-muted); }
+.card-head .sp-count{ font-size:12px; font-weight:600; color:rgba(255,255,255,.78); text-transform:none; letter-spacing:0; }
 .sp-toolbar{ display:grid; grid-template-columns:1fr 180px auto; gap:8px; align-items:center; margin-bottom:10px; }
 @media (max-width:600px){ .sp-toolbar{ grid-template-columns:1fr 1fr; } .sp-toolbar input[type=text]{ grid-column:1 / -1; } }
 .sp-check{ display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; white-space:nowrap; cursor:pointer; }
@@ -2904,3 +2904,38 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .sp-table th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); padding:6px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
 .sp-table td{ padding:8px; border-bottom:1px solid var(--border); vertical-align:top; }
 .sp-table td.num{ text-align:right; white-space:nowrap; }
+
+/* ---------- Purchasing › Materials Database ---------- */
+.mt-toolbar{ grid-template-columns:1fr 170px 140px auto; }
+@media (max-width:700px){ .mt-toolbar{ grid-template-columns:1fr 1fr; } .mt-toolbar input[type=text]{ grid-column:1 / -1; } }
+.mt-group-head{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--green-dark); margin:14px 2px 6px; display:flex; justify-content:space-between; }
+.mt-group-head:first-child{ margin-top:0; }
+.mt-group-head span{ color:var(--text-muted); font-weight:600; }
+.mt-row{ display:flex; gap:12px; align-items:flex-start; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:6px; background:#fff; cursor:pointer; width:100%; text-align:left; font:inherit; color:inherit; }
+.mt-row:hover{ border-color:var(--green); }
+.mt-row:focus-visible{ outline:2px solid var(--green); outline-offset:1px; }
+.mt-row.inactive{ opacity:.6; background:#F7F7F5; }
+.mt-row-main{ flex:1; min-width:0; }
+.mt-row-title{ font-size:13.5px; font-weight:700; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+.mt-code{ font-size:11px; font-weight:700; color:var(--green-dark); background:var(--green-light); border-radius:5px; padding:1px 6px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mt-row-price{ text-align:right; flex-shrink:0; font-size:13.5px; font-weight:700; white-space:nowrap; }
+.mt-row-price .sp-row-sub{ font-weight:500; }
+.mt-row-price.none{ color:var(--text-muted); font-weight:600; font-size:12px; }
+.mt-more{ width:100%; margin-top:6px; }
+.mt-hint{ text-transform:none; letter-spacing:0; font-weight:500; opacity:.8; }
+.mt-code-row{ display:flex; gap:6px; }
+.mt-code-row input{ flex:1; min-width:0; text-transform:uppercase; }
+.mt-code-row .btn{ flex:0 0 auto; padding:0 12px; font-size:12.5px; }
+.mt-pack-preview{ font-size:12px; color:var(--green-dark); font-weight:600; margin:-4px 0 4px; min-height:0; }
+.mt-spec-row{ display:grid; grid-template-columns:1fr 1.4fr 36px; gap:6px; margin-bottom:6px; }
+.mt-spec-row button{ border:1px solid var(--border); background:#fff; border-radius:8px; cursor:pointer; color:var(--danger); font-size:18px; }
+.mt-small-btn{ flex:0 0 auto; width:auto; padding:8px 14px; font-size:12.5px; }
+.mt-sheet-actions{ display:flex; gap:8px; margin-top:10px; }
+.mt-sheet-actions .btn{ font-size:13px; padding:10px; }
+.mt-star{ color:#C98A12; }
+.mt-seed-row{ display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border); padding:8px 2px; }
+.mt-seed-row:last-child{ border-bottom:none; }
+.mt-seed-main{ flex:1; min-width:0; font-size:13.5px; font-weight:600; word-break:break-word; }
+.mt-seed-count{ font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap; }
+.mt-seed-row button{ border:1px solid var(--green); background:#fff; color:var(--green-dark); border-radius:6px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer; flex-shrink:0; }
+.mt-seed-row button:disabled{ border-color:var(--border); color:var(--text-muted); cursor:default; }

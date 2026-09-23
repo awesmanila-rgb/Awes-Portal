@@ -66,6 +66,7 @@
   function purchOnShow(key){
     if(!currentUser || currentUser.role !== 'admin') return;
     if(key === 'suppliers') spShow();
+    if(key === 'materials') mtShow();
   }
 
   async function spShow(){
@@ -544,7 +545,7 @@
       const rows = (data || []).sort((a,b)=> ((a.materials && a.materials.name) || '').localeCompare((b.materials && b.materials.name) || ''));
       if(!rows.length){
         list.innerHTML = '<div class="empty-state" style="padding:16px;">No items priced for this supplier yet.<br>' +
-          'Prices are linked to items from the <b>Materials Database</b>, which is the next build.</div>';
+          'Add prices from <b>Purchasing › Materials Database</b> — open an item, then its <b>Supplier Prices</b> tab.</div>';
         return;
       }
       list.innerHTML = '<div class="sp-table-wrap"><table class="sp-table"><thead><tr>' +
@@ -576,19 +577,25 @@
     return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
   }
   // RFC 4180-ish parser: quoted fields, escaped quotes, CRLF/LF, embedded newlines.
+  // Like Excel, a quote only opens a quoted field when it's the field's first
+  // character — so hand-typed inch marks (Copper Tube 3/8" Soft) stay literal
+  // instead of swallowing the rest of the row.
   function spParseCsv(text){
-    const rows = []; let row = []; let f = ''; let q = false;
+    const rows = []; let row = []; let f = ''; let q = false; let atStart = true;
     text = text.replace(/^\uFEFF/, '');
     for(let i = 0; i < text.length; i++){
       const ch = text[i];
       if(q){
         if(ch === '"'){ if(text[i+1] === '"'){ f += '"'; i++; } else q = false; }
         else f += ch;
-      }else if(ch === '"') q = true;
-      else if(ch === ','){ row.push(f); f = ''; }
+        continue;
+      }
+      if(ch === '"' && atStart){ q = true; atStart = false; continue; }
+      atStart = false;
+      if(ch === ','){ row.push(f); f = ''; atStart = true; }
       else if(ch === '\n' || ch === '\r'){
         if(ch === '\r' && text[i+1] === '\n') i++;
-        row.push(f); f = '';
+        row.push(f); f = ''; atStart = true;
         if(row.some(c=> c.trim() !== '')) rows.push(row);
         row = [];
       }else f += ch;
@@ -711,5 +718,746 @@
     }finally{
       btn.disabled = false; btn.textContent = 'Import CSV';
       await spLoad(); spRenderList();
+    }
+  });
+
+  // =====================================================================
+  // Purchasing — Materials Database (admin only)
+  //
+  // Tables: materials (catalog), supplier_materials (price list; one row
+  // per supplier+material, at most one is_preferred per material),
+  // supplier_price_history (written by trigger — read-only here).
+  // Materials are never hard-deleted, only deactivated. Removing a
+  // supplier price also only deactivates the row, so its history is kept.
+  // =====================================================================
+
+  const MT_SCOPES = ['Aircon', 'Ventilation', 'General Scope'];
+  const MT_CODE_PREFIX = {
+    'Piping':'PIP', 'Refrigerant':'REF', 'Electrical':'ELE', 'Insulation':'INS',
+    'Consumables':'CON', 'Parts & Components':'PRT', 'Ducting & Ventilation':'DUC',
+    'Plumbing':'PLB', 'Fire Protection':'FPR', 'Hardware':'HDW',
+    'Tools & Equipment':'TLS', 'Others':'OTH'
+  };
+  const MT_PAGE = 150;             // rows rendered before "Show more"
+  const MT_SELECT = '*, supplier_materials(id, price, price_unit, price_updated_at, is_preferred, is_active, suppliers(id, code, name, trade_name, is_active))';
+
+  let mtCache = [];
+  let mtEditing = null;
+  let mtSheetScope = [];
+  let mtSpecs = [];                // [{k, v}] while the sheet is open
+  let mtShowLimit = MT_PAGE;
+  let mtSuppliersLite = [];        // for the supplier picker
+  let mtPricesCache = [];
+
+  function mtFromRow(r){
+    const specs = r.specs && typeof r.specs === 'object' ? r.specs : {};
+    return {
+      id: r.id, code: r.code || '', name: r.name || '', family: r.family || '',
+      category: r.category || 'Others', scope: Array.isArray(r.scope) ? r.scope : [],
+      unit: r.unit || '', packUnit: r.pack_unit || '', packQty: r.pack_qty,
+      brand: r.brand || '', specs, standardCost: r.standard_cost,
+      isActive: r.is_active !== false, notes: r.notes || '',
+      prices: Array.isArray(r.supplier_materials) ? r.supplier_materials : []
+    };
+  }
+  // The price to show on the list: preferred active supplier, else the
+  // cheapest active one. Returns null when nothing is priced.
+  function mtBestPrice(m){
+    const live = m.prices.filter(p=> p.is_active && p.price != null && (!p.suppliers || p.suppliers.is_active !== false));
+    if(!live.length) return null;
+    return live.find(p=> p.is_preferred) || live.slice().sort((a,b)=> Number(a.price) - Number(b.price))[0];
+  }
+  function mtSupplierLabel(s){ return s ? (s.trade_name || s.name || '') : ''; }
+  function mtSpecText(specs){
+    return Object.keys(specs || {}).map(k=> k + ': ' + specs[k]).join(' · ');
+  }
+  function mtNormCode(v){ return String(v || '').trim().toUpperCase().replace(/\s+/g, '-'); }
+
+  async function mtShow(){
+    const cat = $('mtFilterCategory');
+    if(cat.options.length <= 1){
+      PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
+      $('mtCategory').innerHTML = PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    }
+    mtShowLimit = MT_PAGE;
+    await mtLoad();
+    mtRenderList();
+  }
+
+  async function mtLoad(){
+    const list = $('mtList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){
+      mtCache = [];
+      list.innerHTML = '<div class="empty-state">Not connected to Shared Cloud — the Materials Database needs a connection.</div>';
+      return false;
+    }
+    try{
+      const { data, error } = await db.from('materials').select(MT_SELECT).order('code', { ascending:true });
+      if(error) throw error;
+      mtCache = (data || []).map(mtFromRow);
+      mtRefreshDatalists();
+      return true;
+    }catch(e){
+      console.error('load materials failed', describeCloudError(e));
+      mtCache = [];
+      const msg = /42P01|42703|does not exist/.test(describeCloudError(e))
+        ? 'The materials table isn\u2019t ready yet — run migration 20260923_01_purchasing_suppliers_materials.sql in Supabase first.'
+        : 'Couldn\u2019t load materials: ' + escapeHtml(describeCloudError(e));
+      list.innerHTML = '<div class="empty-state">' + msg + '</div>';
+      return false;
+    }
+  }
+  function mtRefreshDatalists(){
+    const uniq = (arr)=> Array.from(new Set(arr.filter(Boolean))).sort((a,b)=> a.localeCompare(b));
+    $('mtFamilyList').innerHTML = uniq(mtCache.map(m=> m.family)).map(f=> '<option value="' + escapeHtml(f) + '">').join('');
+    $('mtBrandList').innerHTML = uniq(mtCache.map(m=> m.brand)).map(f=> '<option value="' + escapeHtml(f) + '">').join('');
+  }
+
+  function mtFiltered(){
+    const q = ($('mtSearch').value || '').trim().toLowerCase();
+    const cat = $('mtFilterCategory').value;
+    const scope = $('mtFilterScope').value;
+    const showInactive = $('mtShowInactive').checked;
+    const words = q.split(/\s+/).filter(Boolean);
+    return mtCache.filter(m=>{
+      if(!showInactive && !m.isActive) return false;
+      if(cat && m.category !== cat) return false;
+      if(scope && !m.scope.includes(scope)) return false;
+      if(!words.length) return true;
+      const hay = [m.code, m.name, m.family, m.brand, m.notes, mtSpecText(m.specs)]
+        .concat(m.prices.map(p=> mtSupplierLabel(p.suppliers))).join(' ').toLowerCase();
+      return words.every(w=> hay.includes(w));   // every word, any order: "3/8 copper" finds "Copper Tube 3/8"
+    });
+  }
+
+  function mtRenderList(){
+    const list = $('mtList');
+    const active = mtCache.filter(m=> m.isActive).length;
+    $('mtCount').textContent = mtCache.length ? (active + ' active' + (mtCache.length > active ? ' · ' + (mtCache.length - active) + ' inactive' : '')) : '';
+    const rows = mtFiltered();
+    if(!rows.length){
+      list.innerHTML = '<div class="empty-state">' + (mtCache.length === 0
+        ? 'No materials yet. Tap <b>+ Add Material</b>, or use <b>Seed from Service Reports</b> to start from what your technicians already use.'
+        : 'No materials match.') + '</div>';
+      return;
+    }
+    // Grouped by category (in the standard category order), then family, then name.
+    const order = new Map(PURCH_CATEGORIES.map((c,i)=> [c, i]));
+    rows.sort((a,b)=> (order.has(a.category) ? order.get(a.category) : 99) - (order.has(b.category) ? order.get(b.category) : 99)
+      || (a.family || a.name).localeCompare(b.family || b.name) || a.name.localeCompare(b.name, undefined, { numeric:true }));
+    const shown = rows.slice(0, mtShowLimit);
+    const counts = rows.reduce((acc, m)=>{ acc[m.category] = (acc[m.category] || 0) + 1; return acc; }, {});
+    let html = '', lastCat = null;
+    shown.forEach(m=>{
+      if(m.category !== lastCat){
+        lastCat = m.category;
+        html += '<div class="mt-group-head">' + escapeHtml(m.category) + '<span>' + counts[m.category] + '</span></div>';
+      }
+      const best = mtBestPrice(m);
+      const sub = [m.family && m.family !== m.name ? m.family : '', m.brand, mtSpecText(m.specs),
+        m.packUnit && m.packQty ? '1 ' + m.packUnit + ' = ' + m.packQty + ' ' + m.unit : ''].filter(Boolean).join(' · ');
+      const tags = m.scope.map(s=> '<span class="sp-tag muted">' + escapeHtml(s) + '</span>').join('') +
+        (m.isActive ? '' : '<span class="sp-tag danger">Inactive</span>');
+      let priceHtml;
+      if(best){
+        const age = spDaysSince(best.price_updated_at);
+        priceHtml = '<div class="mt-row-price">' + spMoney(best.price) +
+          '<div class="sp-row-sub">' + escapeHtml(best.price_unit || 'per ' + m.unit) + '</div>' +
+          '<div class="sp-row-sub">' + (best.is_preferred ? '<span class="mt-star">★</span> ' : '') + escapeHtml(mtSupplierLabel(best.suppliers)) + '</div>' +
+          (age != null && age > SP_PRICE_STALE_DAYS ? '<span class="sp-tag warn">' + age + 'd old</span>' : '') + '</div>';
+      }else if(m.standardCost != null){
+        priceHtml = '<div class="mt-row-price none">~' + spMoney(m.standardCost) + '<div class="sp-row-sub">std. cost / ' + escapeHtml(m.unit) + '</div></div>';
+      }else{
+        priceHtml = '<div class="mt-row-price none">No price</div>';
+      }
+      html += '<button type="button" class="mt-row' + (m.isActive ? '' : ' inactive') + '" data-id="' + escapeHtml(m.id) + '">' +
+        '<div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(m.code) + '</span>' + escapeHtml(m.name) + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml(sub || 'Unit: ' + m.unit) + '</div>' +
+        (tags ? '<div class="sp-tags">' + tags + '</div>' : '') + '</div>' + priceHtml + '</button>';
+    });
+    if(rows.length > shown.length){
+      html += '<button type="button" class="btn btn-secondary mt-more" id="mtShowMore">Show ' + Math.min(MT_PAGE, rows.length - shown.length) + ' more (' + (rows.length - shown.length) + ' hidden)</button>';
+    }
+    list.innerHTML = html;
+  }
+
+  const mtResetAndRender = ()=>{ mtShowLimit = MT_PAGE; mtRenderList(); };
+  $('mtSearch').addEventListener('input', mtResetAndRender);
+  $('mtFilterCategory').addEventListener('change', mtResetAndRender);
+  $('mtFilterScope').addEventListener('change', mtResetAndRender);
+  $('mtShowInactive').addEventListener('change', mtResetAndRender);
+  $('mtAddBtn').addEventListener('click', ()=> mtOpenSheet(null, 'info'));
+  $('mtList').addEventListener('click', (e)=>{
+    if(e.target.closest('#mtShowMore')){ mtShowLimit += MT_PAGE; mtRenderList(); return; }
+    const row = e.target.closest('.mt-row');
+    const m = row && mtCache.find(x=> x.id === row.dataset.id);
+    if(m) mtOpenSheet(m, 'info');
+  });
+
+  // ---------- sheet: details ----------
+  function mtRenderScopePick(){
+    $('mtScopePick').innerHTML = MT_SCOPES.map(s=>
+      '<button type="button" data-scope="' + escapeHtml(s) + '" class="' + (mtSheetScope.includes(s) ? 'on' : '') + '">' + escapeHtml(s) + '</button>').join('');
+  }
+  $('mtScopePick').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-scope]');
+    if(!b) return;
+    const s = b.dataset.scope;
+    mtSheetScope = mtSheetScope.includes(s) ? mtSheetScope.filter(x=> x !== s) : mtSheetScope.concat(s);
+    b.classList.toggle('on');
+  });
+
+  function mtRenderSpecs(){
+    $('mtSpecsList').innerHTML = mtSpecs.map((sp, i)=>
+      '<div class="mt-spec-row" data-i="' + i + '">' +
+        '<input type="text" data-f="k" value="' + escapeHtml(sp.k) + '" placeholder="e.g. Size" list="mtSpecKeyList">' +
+        '<input type="text" data-f="v" value="' + escapeHtml(sp.v) + '" placeholder=\'e.g. 3/8"\'>' +
+        '<button type="button" data-rm="1" title="Remove">&minus;</button></div>').join('') +
+      '<datalist id="mtSpecKeyList"><option value="Size"><option value="Gauge"><option value="Thickness"><option value="Length"><option value="Rating"><option value="Voltage"><option value="Capacity"><option value="Refrigerant"><option value="Material"><option value="Color"></datalist>';
+  }
+  $('mtSpecsList').addEventListener('input', (e)=>{
+    const row = e.target.closest('.mt-spec-row');
+    if(row && e.target.dataset.f) mtSpecs[Number(row.dataset.i)][e.target.dataset.f] = e.target.value;
+  });
+  $('mtSpecsList').addEventListener('click', (e)=>{
+    if(!e.target.closest('[data-rm]')) return;
+    mtSpecs.splice(Number(e.target.closest('.mt-spec-row').dataset.i), 1);
+    mtRenderSpecs();
+  });
+  $('mtAddSpec').addEventListener('click', ()=>{
+    mtSpecs.push({ k:'', v:'' });
+    mtRenderSpecs();
+    const inputs = $('mtSpecsList').querySelectorAll('input[data-f=k]');
+    if(inputs.length) inputs[inputs.length - 1].focus();
+  });
+
+  function mtUpdatePackPreview(){
+    const u = $('mtUnit').value.trim(), pu = $('mtPackUnit').value.trim(), q = $('mtPackQty').value.trim();
+    $('mtPackPreview').textContent = (u && pu && q) ? '1 ' + pu + ' = ' + q + ' ' + u : '';
+  }
+  ['mtUnit','mtPackUnit','mtPackQty'].forEach(id=> $(id).addEventListener('input', mtUpdatePackPreview));
+
+  function mtSuggestCodeFor(category){
+    const prefix = MT_CODE_PREFIX[category] || 'MAT';
+    const re = new RegExp('^' + prefix + '-(\\d+)$');
+    let max = 0;
+    mtCache.forEach(m=>{ const mm = m.code.match(re); if(mm) max = Math.max(max, Number(mm[1])); });
+    return prefix + '-' + String(max + 1).padStart(3, '0');
+  }
+  $('mtSuggestCode').addEventListener('click', ()=>{ $('mtCode').value = mtSuggestCodeFor($('mtCategory').value); });
+  // New item: keep the suggested code in step with the category until the
+  // admin types their own.
+  $('mtCategory').addEventListener('change', ()=>{
+    if(!mtEditing && (!$('mtCode').value || $('mtCode').dataset.auto === '1')){
+      $('mtCode').value = mtSuggestCodeFor($('mtCategory').value);
+      $('mtCode').dataset.auto = '1';
+    }
+  });
+  $('mtCode').addEventListener('input', ()=>{ $('mtCode').dataset.auto = ''; });
+
+  // prefill: optional {name, unit, category, ...} for new items (seed / duplicate)
+  function mtOpenSheet(m, tab, prefill){
+    mtEditing = m;
+    const src = m || prefill || {};
+    $('mtSheetTitle').textContent = m ? m.name : (prefill && prefill.duplicateOf ? 'New size of ' + prefill.duplicateOf : 'Add Material');
+    $('mtStatusLine').style.display = m ? '' : 'none';
+    $('mtStatusLine').textContent = m ? m.code + (m.isActive ? '' : ' · Inactive') : '';
+    $('mtCategory').value = src.category || PURCH_CATEGORIES[0];
+    $('mtCode').value = m ? m.code : mtSuggestCodeFor($('mtCategory').value);
+    $('mtCode').dataset.auto = m ? '' : '1';
+    $('mtName').value = src.name || '';
+    $('mtFamily').value = src.family || '';
+    $('mtBrand').value = src.brand || '';
+    mtSheetScope = (src.scope || []).slice();
+    mtRenderScopePick();
+    $('mtUnit').value = src.unit || '';
+    $('mtPackUnit').value = src.packUnit || '';
+    $('mtPackQty').value = src.packQty != null ? String(src.packQty) : '';
+    $('mtStdCost').value = src.standardCost != null ? String(src.standardCost) : '';
+    mtUpdatePackPreview();
+    mtSpecs = Object.keys(src.specs || {}).map(k=> ({ k, v: String(src.specs[k]) }));
+    mtRenderSpecs();
+    $('mtNotes').value = src.notes || '';
+    $('mtSaveBtn').textContent = m ? 'Save Changes' : 'Save Material';
+    $('mtSaveBtn').disabled = false;
+    $('mtSheetActions').style.display = m ? '' : 'none';
+    if(m) $('mtToggleActiveBtn').textContent = m.isActive ? 'Deactivate' : 'Reactivate';
+    mtResetPriceForm();
+    mtSetTabsEnabled(!!m);
+    mtShowTab(m ? tab : 'info');
+    $('mtSheetOverlay').classList.add('open');
+    if(!m) setTimeout(()=> $(src.name ? 'mtUnit' : 'mtName').focus(), 50);
+  }
+  function mtSetTabsEnabled(on){
+    $$('#mtTabs [data-mt-tab]').forEach(b=>{ if(b.dataset.mtTab !== 'info') b.classList.toggle('sp-seg-disabled', !on); });
+  }
+  function mtShowTab(tab){
+    $$('#mtTabs [data-mt-tab]').forEach(b=> b.classList.toggle('active', b.dataset.mtTab === tab));
+    $('mtPaneInfo').style.display = tab === 'info' ? '' : 'none';
+    $('mtPanePrices').style.display = tab === 'prices' ? '' : 'none';
+    $('mtPaneHistory').style.display = tab === 'history' ? '' : 'none';
+    if(!mtEditing) return;
+    if(tab === 'prices') mtLoadPrices();
+    if(tab === 'history') mtLoadHistory();
+  }
+  $('mtTabs').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-mt-tab]');
+    if(b && !b.classList.contains('sp-seg-disabled')) mtShowTab(b.dataset.mtTab);
+  });
+  $('mtSheetClose').addEventListener('click', async ()=>{
+    $('mtSheetOverlay').classList.remove('open');
+    mtEditing = null;
+    await mtLoad(); mtRenderList();
+    if($('mtSeedOverlay').classList.contains('open')) mtSeedRender();
+  });
+
+  function mtGatherRow(){
+    const num = (id)=> spParseMoney($(id).value);
+    const specs = {};
+    mtSpecs.forEach(sp=>{ const k = sp.k.trim(), v = sp.v.trim(); if(k && v) specs[k] = v; });
+    return {
+      code: mtNormCode($('mtCode').value), name: $('mtName').value.trim(),
+      family: $('mtFamily').value.trim(), category: $('mtCategory').value,
+      scope: mtSheetScope.slice(), unit: $('mtUnit').value.trim(),
+      pack_unit: $('mtPackUnit').value.trim() || null, pack_qty: num('mtPackQty'),
+      brand: $('mtBrand').value.trim(), specs, standard_cost: num('mtStdCost'),
+      notes: $('mtNotes').value.trim()
+    };
+  }
+
+  $('mtSaveBtn').addEventListener('click', async ()=>{
+    const row = mtGatherRow();
+    if(!row.code){ toast('Code is required'); $('mtCode').focus(); return; }
+    if(!/^[A-Z0-9][A-Z0-9._\-/]*$/.test(row.code)){ toast('Code: letters, numbers, - . / only'); $('mtCode').focus(); return; }
+    if(!row.name){ toast('Item name is required'); $('mtName').focus(); return; }
+    if(!row.unit){ toast('Issue unit is required (e.g. ft, pc, kg)'); $('mtUnit').focus(); return; }
+    if(Number.isNaN(row.pack_qty) || row.pack_qty === 0){ toast('Qty per purchase unit must be a positive number'); $('mtPackQty').focus(); return; }
+    if(Number.isNaN(row.standard_cost)){ toast('Standard cost must be a number'); $('mtStdCost').focus(); return; }
+    if(row.pack_qty != null && !row.pack_unit){ toast('Enter the purchase unit for that quantity (e.g. roll)'); $('mtPackUnit').focus(); return; }
+    const clash = mtCache.find(x=> x.code === row.code && (!mtEditing || x.id !== mtEditing.id));
+    if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); $('mtCode').focus(); return; }
+    const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && (!mtEditing || x.id !== mtEditing.id));
+    if(twin && !confirm('"' + twin.name + '" already exists as ' + twin.code + '. Save another item with the same name?')) return;
+    if(!(await ensureCloud())){ toast('Not connected — can\u2019t save'); return; }
+    const btn = $('mtSaveBtn'); btn.disabled = true;
+    try{
+      const res = mtEditing
+        ? await db.from('materials').update(row).eq('id', mtEditing.id).select(MT_SELECT).single()
+        : await db.from('materials').insert(row).select(MT_SELECT).single();
+      if(res.error) throw res.error;
+      const saved = mtFromRow(res.data);
+      const wasNew = !mtEditing;
+      const i = mtCache.findIndex(x=> x.id === saved.id);
+      if(i >= 0) mtCache[i] = saved; else mtCache.push(saved);
+      mtEditing = saved;
+      mtRefreshDatalists();
+      mtRenderList();
+      $('mtSheetTitle').textContent = saved.name;
+      $('mtStatusLine').style.display = ''; $('mtStatusLine').textContent = saved.code + (saved.isActive ? '' : ' · Inactive');
+      btn.textContent = 'Save Changes';
+      $('mtSheetActions').style.display = '';
+      $('mtToggleActiveBtn').textContent = saved.isActive ? 'Deactivate' : 'Reactivate';
+      mtSetTabsEnabled(true);
+      toast(wasNew ? saved.code + ' saved — add supplier prices next' : 'Material updated');
+      if(wasNew) mtShowTab('prices');
+    }catch(e){
+      const msg = describeCloudError(e);
+      toast(/23505/.test(msg) ? 'That code is already in use' : 'Couldn\u2019t save material: ' + msg);
+    }finally{ btn.disabled = false; }
+  });
+
+  $('mtDuplicateBtn').addEventListener('click', ()=>{
+    if(!mtEditing) return;
+    const m = mtEditing;
+    // New size of the same thing: keep category/family/unit/scope/brand, and
+    // the spec *names* (Size, Gauge…) with their values cleared.
+    const specs = {};
+    Object.keys(m.specs || {}).forEach(k=>{ specs[k] = ''; });
+    mtOpenSheet(null, 'info', {
+      duplicateOf: m.name, category: m.category, family: m.family || m.name, brand: m.brand,
+      scope: m.scope, unit: m.unit, packUnit: m.packUnit, packQty: m.packQty, specs, name: m.family || ''
+    });
+    mtSpecs = Object.keys(specs).map(k=> ({ k, v:'' }));
+    mtRenderSpecs();
+    $('mtName').focus();
+  });
+
+  $('mtToggleActiveBtn').addEventListener('click', async ()=>{
+    const m = mtEditing;
+    if(!m) return;
+    const on = !m.isActive;
+    if(!on && !confirm('Deactivate ' + m.code + ' ' + m.name + '? Technicians won\u2019t be able to pick it; existing records keep it.')) return;
+    const btn = $('mtToggleActiveBtn'); btn.disabled = true;
+    try{
+      const { error } = await db.from('materials').update({ is_active:on }).eq('id', m.id);
+      if(error) throw error;
+      m.isActive = on;
+      btn.textContent = on ? 'Deactivate' : 'Reactivate';
+      $('mtStatusLine').textContent = m.code + (on ? '' : ' · Inactive');
+      mtRenderList();
+      toast(m.code + (on ? ' reactivated' : ' deactivated'));
+    }catch(e){ toast('Couldn\u2019t update: ' + describeCloudError(e)); }
+    finally{ btn.disabled = false; }
+  });
+
+  // ---------- sheet: supplier prices ----------
+  async function mtLoadSuppliersLite(){
+    const { data, error } = await db.from('suppliers').select('id, code, name, trade_name, is_active').order('name');
+    if(error) throw error;
+    mtSuppliersLite = data || [];
+  }
+  function mtFillSupplierSelect(keepId){
+    const taken = new Set(mtPricesCache.filter(p=> p.is_active).map(p=> p.supplier_id));
+    const opts = mtSuppliersLite
+      .filter(s=> s.id === keepId || (s.is_active && !taken.has(s.id)))
+      .map(s=> '<option value="' + escapeHtml(s.id) + '">' + escapeHtml(mtSupplierLabel(s)) + ' (' + escapeHtml(s.code) + ')</option>');
+    $('mtPriceSupplier').innerHTML = opts.length
+      ? '<option value="">Choose a supplier…</option>' + opts.join('')
+      : '<option value="">' + (mtSuppliersLite.length ? 'Every active supplier already has a price here' : 'No suppliers yet — add them in Supplier Database') + '</option>';
+    if(keepId) $('mtPriceSupplier').value = keepId;
+    // Nothing left to add (and not editing an existing price): show a note
+    // instead of an empty form.
+    const nothingToAdd = !opts.length && !keepId;
+    $('mtPriceForm').style.display = nothingToAdd ? 'none' : '';
+    $('mtPriceAllDone').style.display = nothingToAdd && mtSuppliersLite.length ? '' : 'none';
+    if(nothingToAdd && !mtSuppliersLite.length) $('mtPriceForm').style.display = '';
+  }
+  function mtResetPriceForm(){
+    $('mtPriceId').value = '';
+    ['mtPriceAmount','mtPriceItemCode','mtPriceMoq','mtPriceLead'].forEach(id=> $(id).value = '');
+    $('mtPriceUnit').value = mtEditing && mtEditing.unit ? mtEditing.unit : '';
+    $('mtPriceDate').value = new Date().toISOString().slice(0,10);
+    $('mtPricePreferred').checked = false;
+    $('mtPriceSupplier').disabled = false;
+    $('mtPriceFormTitle').textContent = 'Add a supplier price';
+    $('mtPriceCancelBtn').style.display = 'none';
+  }
+  async function mtLoadPrices(){
+    const list = $('mtPricesList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    try{
+      const [pr] = await Promise.all([
+        db.from('supplier_materials').select('*, suppliers(id, code, name, trade_name, is_active)').eq('material_id', mtEditing.id),
+        mtLoadSuppliersLite()
+      ]);
+      if(pr.error) throw pr.error;
+      mtPricesCache = (pr.data || []).sort((a,b)=> (b.is_active - a.is_active) || (b.is_preferred - a.is_preferred) || (Number(a.price) - Number(b.price)));
+      mtResetPriceForm();
+      mtFillSupplierSelect();
+      const live = mtPricesCache.filter(p=> p.is_active);
+      if(!live.length){
+        list.innerHTML = '<div class="empty-state" style="padding:16px;">No supplier prices yet. Add the first one below.</div>';
+      }else{
+        const cheapest = Math.min.apply(null, live.filter(p=> p.price != null).map(p=> Number(p.price)));
+        list.innerHTML = live.map(p=>{
+          const age = spDaysSince(p.price_updated_at);
+          const meta = [p.supplier_item_code ? 'Their code ' + escapeHtml(p.supplier_item_code) : '',
+            p.min_order_qty != null ? 'MOQ ' + escapeHtml(String(p.min_order_qty)) : '',
+            p.lead_time_days != null ? escapeHtml(String(p.lead_time_days)) + 'd lead time' : '',
+            p.price_updated_at ? 'priced ' + escapeHtml(p.price_updated_at) : ''].filter(Boolean).join(' · ');
+          return '<div class="sp-row" data-id="' + escapeHtml(p.id) + '"><div class="sp-row-top"><div style="min-width:0;">' +
+              '<div class="sp-row-title">' + (p.is_preferred ? '<span class="mt-star">★</span> ' : '') + escapeHtml(mtSupplierLabel(p.suppliers)) +
+                (p.suppliers && p.suppliers.is_active === false ? ' <span class="sp-tag danger">Supplier inactive</span>' : '') +
+                (live.length > 1 && Number(p.price) === cheapest ? ' <span class="sp-tag">Lowest</span>' : '') +
+                (age != null && age > SP_PRICE_STALE_DAYS ? ' <span class="sp-tag warn">' + age + 'd old</span>' : '') + '</div>' +
+              '<div class="sp-row-sub">' + (meta || '&nbsp;') + '</div></div>' +
+            '<div class="mt-row-price">' + spMoney(p.price) + '<div class="sp-row-sub">' + escapeHtml(p.price_unit || 'per ' + mtEditing.unit) + '</div></div></div>' +
+            '<div class="user-card-actions">' +
+              '<button type="button" data-pact="edit" class="primary">Update price</button>' +
+              (p.is_preferred ? '<button type="button" data-pact="unpref">Unset preferred</button>' : '<button type="button" data-pact="pref">Make preferred</button>') +
+              '<button type="button" data-pact="remove" class="danger">Remove</button>' +
+            '</div></div>';
+        }).join('');
+      }
+    }catch(e){
+      list.innerHTML = '<div class="empty-state">Couldn\u2019t load prices: ' + escapeHtml(describeCloudError(e)) + '</div>';
+    }
+  }
+  // Unique "one preferred per material" index → clear the old one first.
+  async function mtClearPreferred(exceptId){
+    let q = db.from('supplier_materials').update({ is_preferred:false }).eq('material_id', mtEditing.id).eq('is_preferred', true);
+    if(exceptId) q = q.neq('id', exceptId);
+    const { error } = await q;
+    if(error) throw error;
+  }
+  $('mtPricesList').addEventListener('click', async (e)=>{
+    const b = e.target.closest('[data-pact]');
+    if(!b) return;
+    const p = mtPricesCache.find(x=> x.id === b.closest('.sp-row').dataset.id);
+    if(!p) return;
+    const act = b.dataset.pact;
+    if(act === 'edit'){
+      mtFillSupplierSelect(p.supplier_id);
+      $('mtPriceSupplier').disabled = true;
+      $('mtPriceId').value = p.id;
+      $('mtPriceAmount').value = p.price != null ? String(p.price) : '';
+      $('mtPriceUnit').value = p.price_unit || mtEditing.unit;
+      $('mtPriceDate').value = new Date().toISOString().slice(0,10);   // updating = re-quoted today
+      $('mtPriceItemCode').value = p.supplier_item_code || '';
+      $('mtPriceMoq').value = p.min_order_qty != null ? String(p.min_order_qty) : '';
+      $('mtPriceLead').value = p.lead_time_days != null ? String(p.lead_time_days) : '';
+      $('mtPricePreferred').checked = !!p.is_preferred;
+      $('mtPriceFormTitle').textContent = 'Update price — ' + mtSupplierLabel(p.suppliers);
+      $('mtPriceCancelBtn').style.display = '';
+      $('mtPriceAmount').focus();
+      return;
+    }
+    b.disabled = true;
+    try{
+      if(act === 'pref'){
+        await mtClearPreferred(p.id);
+        const { error } = await db.from('supplier_materials').update({ is_preferred:true }).eq('id', p.id);
+        if(error) throw error;
+        toast(mtSupplierLabel(p.suppliers) + ' is now preferred');
+      }else if(act === 'unpref'){
+        const { error } = await db.from('supplier_materials').update({ is_preferred:false }).eq('id', p.id);
+        if(error) throw error;
+      }else if(act === 'remove'){
+        if(!confirm('Remove ' + mtSupplierLabel(p.suppliers) + '\u2019s price for this item? Its price history is kept.')){ b.disabled = false; return; }
+        const { error } = await db.from('supplier_materials').update({ is_active:false, is_preferred:false }).eq('id', p.id);
+        if(error) throw error;
+        toast('Price removed');
+      }
+      mtLoadPrices();
+    }catch(err){
+      b.disabled = false;
+      toast('Couldn\u2019t update price: ' + describeCloudError(err));
+    }
+  });
+  $('mtPriceCancelBtn').addEventListener('click', ()=>{ mtResetPriceForm(); mtFillSupplierSelect(); });
+  $('mtPriceSaveBtn').addEventListener('click', async ()=>{
+    if(!mtEditing) return;
+    const id = $('mtPriceId').value;
+    const supplierId = $('mtPriceSupplier').value;
+    if(!supplierId){ toast('Choose a supplier'); return; }
+    const price = spParseMoney($('mtPriceAmount').value);
+    if(price == null || Number.isNaN(price)){ toast('Enter a valid price'); $('mtPriceAmount').focus(); return; }
+    const moq = spParseMoney($('mtPriceMoq').value);
+    const leadRaw = $('mtPriceLead').value.trim();
+    const lead = leadRaw === '' ? null : parseInt(leadRaw, 10);
+    if(Number.isNaN(moq) || moq === 0){ toast('Min. order qty must be a positive number'); return; }
+    if(leadRaw !== '' && (Number.isNaN(lead) || lead < 0)){ toast('Lead time must be whole days'); return; }
+    const preferred = $('mtPricePreferred').checked;
+    const unitTxt = $('mtPriceUnit').value.trim();
+    const row = {
+      price, price_unit: unitTxt ? (/^per\s/i.test(unitTxt) ? unitTxt : 'per ' + unitTxt) : null,
+      price_updated_at: $('mtPriceDate').value || new Date().toISOString().slice(0,10),
+      supplier_item_code: $('mtPriceItemCode').value.trim(), min_order_qty: moq,
+      lead_time_days: lead, is_preferred: preferred, is_active: true
+    };
+    const btn = $('mtPriceSaveBtn'); btn.disabled = true;
+    try{
+      if(preferred) await mtClearPreferred(id || null);
+      // A supplier removed earlier still has its (inactive) row — the
+      // supplier+material pair is unique — so revive it instead of inserting.
+      const existing = id ? { id } : mtPricesCache.find(p=> p.supplier_id === supplierId);
+      const res = existing
+        ? await db.from('supplier_materials').update(row).eq('id', existing.id)
+        : await db.from('supplier_materials').insert(Object.assign({ supplier_id: supplierId, material_id: mtEditing.id }, row));
+      if(res.error) throw res.error;
+      toast(id ? 'Price updated' : 'Price added');
+      mtLoadPrices();
+    }catch(e){
+      toast('Couldn\u2019t save price: ' + describeCloudError(e));
+    }finally{ btn.disabled = false; }
+  });
+
+  // ---------- sheet: price history ----------
+  async function mtLoadHistory(){
+    const list = $('mtHistoryList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    try{
+      const sm = await db.from('supplier_materials').select('id, suppliers(code, name, trade_name)').eq('material_id', mtEditing.id);
+      if(sm.error) throw sm.error;
+      const ids = (sm.data || []).map(r=> r.id);
+      if(!ids.length){ list.innerHTML = '<div class="empty-state" style="padding:16px;">No price changes recorded yet.</div>'; return; }
+      const names = new Map((sm.data || []).map(r=> [r.id, mtSupplierLabel(r.suppliers)]));
+      const { data, error } = await db.from('supplier_price_history').select('*')
+        .in('supplier_material_id', ids).order('changed_at', { ascending:false }).limit(200);
+      if(error) throw error;
+      const rows = data || [];
+      if(!rows.length){ list.innerHTML = '<div class="empty-state" style="padding:16px;">No price changes recorded yet.</div>'; return; }
+      // change vs. the previous entry for the same supplier
+      const prevBySupplier = {};
+      const withDelta = rows.slice().reverse().map(r=>{
+        const prev = prevBySupplier[r.supplier_material_id];
+        prevBySupplier[r.supplier_material_id] = r;
+        return Object.assign({ delta: prev && prev.price != null && r.price != null ? Number(r.price) - Number(prev.price) : null, first: !prev }, r);
+      }).reverse();
+      list.innerHTML = '<p style="font-size:12px; color:var(--text-muted); margin-top:0;">Every price change is logged automatically. Newest first.</p>' +
+        '<div class="sp-table-wrap"><table class="sp-table"><thead><tr><th>Date</th><th>Supplier</th><th class="num">Price</th><th class="num">Change</th></tr></thead><tbody>' +
+        withDelta.map(r=>{
+          const d = r.delta;
+          const chg = r.first ? '<span class="sp-tag muted">first</span>'
+            : d == null || d === 0 ? '—'
+            : '<span style="color:' + (d > 0 ? 'var(--danger)' : 'var(--green-dark)') + '; font-weight:700;">' + (d > 0 ? '+' : '−') + spMoney(Math.abs(d)).replace('₱', '₱') + '</span>';
+          return '<tr><td>' + escapeHtml(String(r.changed_at || '').slice(0,10)) + '</td><td>' + escapeHtml(names.get(r.supplier_material_id) || '—') + '</td>' +
+            '<td class="num">' + spMoney(r.price) + '<div class="sp-row-sub">' + escapeHtml(r.price_unit || '') + '</div></td><td class="num">' + chg + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }catch(e){
+      list.innerHTML = '<div class="empty-state">Couldn\u2019t load price history: ' + escapeHtml(describeCloudError(e)) + '</div>';
+    }
+  }
+
+  // ---------- seed from Service Reports ----------
+  let mtSeedItems = [];   // [{name, unit, count}]
+  function mtNormName(s){ return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+  $('mtSeedBtn').addEventListener('click', async ()=>{
+    $('mtSeedOverlay').classList.add('open');
+    $('mtSeedSearch').value = '';
+    const list = $('mtSeedList');
+    list.innerHTML = '<div class="empty-state">Reading Service Reports…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const agg = new Map();
+      const PAGE = 1000;
+      for(let from = 0; from < 20000; from += PAGE){
+        const { data, error } = await db.from('service_reports').select('materials').range(from, from + PAGE - 1);
+        if(error) throw error;
+        (data || []).forEach(r=> (Array.isArray(r.materials) ? r.materials : []).forEach(it=>{
+          const raw = String((it && (it.description || it.details)) || '').trim().replace(/\s+/g, ' ');
+          if(!raw) return;
+          const key = raw.toLowerCase();
+          const e = agg.get(key) || { name: raw, units: {}, count: 0 };
+          e.count++;
+          const u = String((it && it.unit) || '').trim();
+          if(u) e.units[u] = (e.units[u] || 0) + 1;
+          agg.set(key, e);
+        }));
+        if(!data || data.length < PAGE) break;
+      }
+      mtSeedItems = Array.from(agg.values()).map(e=>({
+        name: e.name, count: e.count,
+        unit: Object.keys(e.units).sort((a,b)=> e.units[b] - e.units[a])[0] || ''
+      })).sort((a,b)=> b.count - a.count || a.name.localeCompare(b.name));
+      mtSeedRender();
+    }catch(e){
+      list.innerHTML = '<div class="empty-state">Couldn\u2019t read Service Reports: ' + escapeHtml(describeCloudError(e)) + '</div>';
+    }
+  });
+  function mtSeedRender(){
+    const known = new Set(mtCache.map(m=> mtNormName(m.name)));
+    const q = mtNormName($('mtSeedSearch').value);
+    const items = mtSeedItems.filter(it=> !known.has(mtNormName(it.name)) && (!q || mtNormName(it.name).includes(q)));
+    const list = $('mtSeedList');
+    if(!mtSeedItems.length){ list.innerHTML = '<div class="empty-state">No materials found on any Service Report yet.</div>'; return; }
+    if(!items.length){ list.innerHTML = '<div class="empty-state">' + (q ? 'No matches.' : 'Everything from your Service Reports is already in the catalog. 🎉') + '</div>'; return; }
+    list.innerHTML = items.slice(0, 300).map(it=>
+      '<div class="mt-seed-row" data-name="' + escapeHtml(it.name) + '" data-unit="' + escapeHtml(it.unit) + '">' +
+        '<div class="mt-seed-main">' + escapeHtml(it.name) + (it.unit ? ' <span class="sp-tag muted">' + escapeHtml(it.unit) + '</span>' : '') + '</div>' +
+        '<div class="mt-seed-count">used ' + it.count + '×</div>' +
+        '<button type="button">Add</button></div>').join('') +
+      (items.length > 300 ? '<div class="empty-state">Showing the 300 most used — filter to find others.</div>' : '');
+  }
+  $('mtSeedSearch').addEventListener('input', mtSeedRender);
+  $('mtSeedList').addEventListener('click', (e)=>{
+    const b = e.target.closest('button');
+    if(!b) return;
+    const row = b.closest('.mt-seed-row');
+    // Clean up the typed name a little: Title Case words that were typed all
+    // lower-case, keep sizes/codes (3/8", R32, AWG) untouched.
+    const name = row.dataset.name.replace(/\b([a-z])([a-z]{2,})\b/g, (m, a, rest)=> a.toUpperCase() + rest);
+    mtOpenSheet(null, 'info', { name, unit: row.dataset.unit });
+  });
+  $('mtSeedClose').addEventListener('click', ()=> $('mtSeedOverlay').classList.remove('open'));
+
+  // ---------- CSV import / export ----------
+  const MT_CSV_COLS = ['code','name','family','category','scope','unit','pack_unit','pack_qty','brand','specs','standard_cost','notes','is_active'];
+  // specs travel as "Size=3/8""; Gauge=22"
+  function mtSpecsToCsv(specs){ return Object.keys(specs || {}).map(k=> k + '=' + specs[k]).join('; '); }
+  function mtSpecsFromCsv(txt){
+    const o = {};
+    String(txt || '').split(';').forEach(part=>{
+      const i = part.indexOf('=');
+      if(i > 0){ const k = part.slice(0, i).trim(), v = part.slice(i + 1).trim(); if(k && v) o[k] = v; }
+    });
+    return o;
+  }
+  $('mtExportBtn').addEventListener('click', ()=>{
+    const rows = mtFiltered();
+    const lines = [MT_CSV_COLS.join(',')].concat(rows.map(m=> [
+      m.code, m.name, m.family, m.category, m.scope.join('; '), m.unit, m.packUnit, m.packQty == null ? '' : m.packQty,
+      m.brand, mtSpecsToCsv(m.specs), m.standardCost == null ? '' : m.standardCost, m.notes, m.isActive ? 'yes' : 'no'
+    ].map(spCsvCell).join(',')));
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'materials-' + new Date().toISOString().slice(0,10) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
+    toast(rows.length ? 'Exported ' + rows.length + ' item' + (rows.length === 1 ? '' : 's') : 'Exported a blank template');
+  });
+  $('mtImportBtn').addEventListener('click', ()=>{ $('mtImportFile').value = ''; $('mtImportFile').click(); });
+  $('mtImportFile').addEventListener('change', async ()=>{
+    const file = $('mtImportFile').files && $('mtImportFile').files[0];
+    if(!file) return;
+    if(!(await ensureCloud())){ toast('Not connected — can\u2019t import'); return; }
+    let rows;
+    try{ rows = spParseCsv(await file.text()); }catch(e){ toast('Couldn\u2019t read that file'); return; }
+    if(rows.length < 2){ toast('The CSV has no data rows'); return; }
+    const head = rows[0].map(h=> h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+    const missing = ['name','unit'].filter(k=> !head.includes(k));
+    if(missing.length){ toast('CSV needs columns: ' + missing.join(', ')); return; }
+    const col = (r, k)=>{ const i = head.indexOf(k); return i < 0 ? undefined : (r[i] || '').trim(); };
+    const has = (k)=> head.includes(k);
+    const catLookup = new Map(PURCH_CATEGORIES.map(c=> [c.toLowerCase(), c]));
+    const scopeLookup = new Map(MT_SCOPES.map(s=> [s.toLowerCase(), s]));
+    const byCode = new Map(mtCache.map(m=> [m.code, m]));
+    const usedCodes = new Set(mtCache.map(m=> m.code));
+    const nextCode = (cat)=>{   // auto-code rows without one, avoiding clashes within this file too
+      const prefix = MT_CODE_PREFIX[cat] || 'MAT';
+      let n = 1; const re = new RegExp('^' + prefix + '-(\\d+)$');
+      usedCodes.forEach(c=>{ const mm = c.match(re); if(mm) n = Math.max(n, Number(mm[1]) + 1); });
+      const code = prefix + '-' + String(n).padStart(3, '0'); usedCodes.add(code); return code;
+    };
+    const inserts = [], updates = [], skipped = [];
+    rows.slice(1).forEach((r, idx)=>{
+      const line = 'row ' + (idx + 2);
+      const name = col(r, 'name'), unit = col(r, 'unit');
+      if(!name || !unit){ skipped.push(line + ': needs name and unit'); return; }
+      const category = has('category') ? (catLookup.get((col(r, 'category') || '').toLowerCase()) || 'Others') : 'Others';
+      const row = { name, unit, category };
+      ['family','brand','notes'].forEach(k=>{ if(has(k)) row[k] = col(r, k); });
+      if(has('pack_unit')) row.pack_unit = col(r, 'pack_unit') || null;
+      if(has('scope')) row.scope = col(r, 'scope').split(/[;|,]/).map(x=> scopeLookup.get(x.trim().toLowerCase())).filter(Boolean);
+      if(has('specs')) row.specs = mtSpecsFromCsv(col(r, 'specs'));
+      if(has('is_active') && col(r, 'is_active') !== '') row.is_active = spCsvBool(col(r, 'is_active')) !== false;
+      for(const k of ['pack_qty', 'standard_cost']){
+        if(!has(k)) continue;
+        const n = spParseMoney(col(r, k));
+        if(Number.isNaN(n) || (k === 'pack_qty' && n === 0)){ skipped.push(line + ': bad ' + k); return; }
+        row[k] = n;
+      }
+      const code = has('code') ? mtNormCode(col(r, 'code')) : '';
+      if(code && byCode.has(code)) updates.push({ id: byCode.get(code).id, row });
+      else{ row.code = code || nextCode(category); usedCodes.add(row.code); inserts.push(row); }
+    });
+    if(!inserts.length && !updates.length){ toast('Nothing to import' + (skipped.length ? ' — ' + skipped[0] : '')); return; }
+    if(!confirm('Import ' + file.name + '?\n\n' +
+      inserts.length + ' new item' + (inserts.length === 1 ? '' : 's') + ' (rows without a code get one automatically)\n' +
+      updates.length + ' existing item' + (updates.length === 1 ? '' : 's') + ' updated (matched by code)\n' +
+      (skipped.length ? skipped.length + ' row' + (skipped.length === 1 ? '' : 's') + ' skipped — ' + skipped.slice(0, 3).join('; ') + '\n' : '') +
+      '\nSupplier prices aren\u2019t part of this file.')) return;
+    const btn = $('mtImportBtn'); btn.disabled = true; btn.textContent = 'Importing…';
+    let okNew = 0, okUpd = 0; const fails = [];
+    try{
+      for(let i = 0; i < inserts.length; i += 200){
+        const { data, error } = await db.from('materials').insert(inserts.slice(i, i + 200)).select('id');
+        if(error) throw error;
+        okNew += (data || []).length;
+      }
+      for(const u of updates){
+        const { error } = await db.from('materials').update(u.row).eq('id', u.id);
+        if(error) fails.push(u.row.name + ': ' + describeCloudError(error)); else okUpd++;
+      }
+      toast('Imported: ' + okNew + ' new, ' + okUpd + ' updated' + (fails.length ? ' — ' + fails.length + ' failed (see console)' : ''));
+      if(fails.length) console.error('material import failures', fails);
+    }catch(e){
+      const msg = describeCloudError(e);
+      toast(/23505/.test(msg) ? 'Import stopped: a code in the file is already used' : 'Import failed: ' + msg);
+    }finally{
+      btn.disabled = false; btn.textContent = 'Import CSV';
+      await mtLoad(); mtRenderList();
     }
   });
