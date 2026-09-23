@@ -667,7 +667,7 @@
     materials:      { nav:'sbNavMaterials',      title:'Materials Database',   sub:'Catalog of materials & parts' },
     suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
     requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review technician material requests' },
-    purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Order Form',  sub:'Purchase orders to suppliers' }
+    purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
   };
   function showPurchasingView(key){
     const page = PURCH_PAGES[key] || PURCH_PAGES.materials;

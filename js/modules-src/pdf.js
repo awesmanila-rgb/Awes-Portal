@@ -282,14 +282,16 @@
     return doc;
   }
 
-  async function shareOrDownloadPdf(doc, filename){
+  // title: share-sheet title (defaults to the Service Report wording used by
+  // every existing caller). Purchase Orders pass their own.
+  async function shareOrDownloadPdf(doc, filename, title){
     const blob = doc.output('blob');
     if(navigator.canShare && navigator.canShare({files:[new File([blob], filename, {type:'application/pdf'})]})){
       try{
         await navigator.share({
           files:[new File([blob], filename, {type:'application/pdf'})],
-          title:'AWES Service Report',
-          text:'Service report '+filename
+          title: title || 'AWES Service Report',
+          text: (title ? title : 'Service report')+' — '+filename
         });
         return 'shared';
       }catch(e){ /* user cancelled or unsupported — fall through to download */ }
@@ -313,16 +315,19 @@
   // funnel through.
   let previewCurrentDoc = null;
   let previewCurrentFilename = 'Report.pdf';
+  let previewCurrentTitle = '';
   function closePreview(){
     $('previewOverlay').classList.remove('open');
     previewRenderToken++; // invalidate any in-flight render
     const frame = $('previewFrame');
     frame.innerHTML = '<div class="empty-state" style="display:none;">Rendering preview…</div>';
     previewCurrentDoc = null;
+    previewCurrentTitle = '';
   }
-  async function renderPdfPreview(doc, filename){
+  async function renderPdfPreview(doc, filename, title){
     previewCurrentDoc = doc;
     previewCurrentFilename = filename || 'Report.pdf';
+    previewCurrentTitle = title || '';
     const myToken = ++previewRenderToken;
     const frame = $('previewFrame');
     frame.innerHTML = '';
@@ -459,7 +464,7 @@
     const original = btn.textContent;
     btn.disabled = true; btn.textContent = 'Downloading…';
     try{
-      await shareOrDownloadPdf(previewCurrentDoc, previewCurrentFilename);
+      await shareOrDownloadPdf(previewCurrentDoc, previewCurrentFilename, previewCurrentTitle);
     }catch(err){
       console.error('preview download failed', err);
       toast('Could not download this report');

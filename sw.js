@@ -1031,7 +1031,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v133';
+const CACHE_NAME = 'awes-sr-v138';
 
 // Split into two lists on purpose.
 //
@@ -1051,7 +1051,12 @@ const LOCAL_SHELL = [
   './icon-512.png',
   './icon-maskable-512.png',
   './css/app.css',
-  './js/app.bundle.js'
+  './js/app.bundle.js',
+  // Purchase Order PDF typeface (~25 KB each) — precached so POs render
+  // with the proper font and ₱ sign offline too.
+  './fonts/Inter-Regular.ttf',
+  './fonts/Inter-SemiBold.ttf',
+  './fonts/Inter-Bold.ttf'
 ];
 
 const CDN_SHELL = [

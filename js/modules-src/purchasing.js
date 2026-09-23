@@ -68,6 +68,7 @@
     purchRealtimeStart();
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
+    if(key === 'purchaseOrders') poShow();
   }
 
   async function spShow(){
@@ -1516,7 +1517,8 @@
   // Missed events (socket dropped, phone asleep) are covered by a refresh
   // when the app regains focus or the connection comes back.
   // =====================================================================
-  const PURCH_RT_TABLES = ['suppliers', 'supplier_contacts', 'supplier_documents', 'materials', 'supplier_materials'];
+  const PURCH_RT_TABLES = ['suppliers', 'supplier_contacts', 'supplier_documents', 'materials', 'supplier_materials',
+    'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings'];
   let purchChannel = null;
   let purchPending = new Set();
   let purchPendingIds = new Set();
@@ -1573,6 +1575,9 @@
     if(row && row.id && (table === 'suppliers' || table === 'materials') && !purchIsOwn(row.id)){
       purchPendingIds.add(table + ':' + row.id);
     }
+    // A PO changed elsewhere: header events carry the PO id, item events its po_id.
+    const poId = row && (table === 'purchase_orders' ? row.id : table === 'purchase_order_items' ? row.po_id : null);
+    if(poId && !purchIsOwn(poId)) purchPendingIds.add('po:' + poId);
     clearTimeout(purchTimer);
     // Debounced: a CSV import fires hundreds of events — refresh once.
     purchTimer = setTimeout(purchApply, 400);
@@ -1612,6 +1617,22 @@
       if(mtTab === 'prices' && has('supplier_materials', 'suppliers')) jobs.push(mtLoadPrices({ silent:true, keepForm:true }));
       if(mtTab === 'history' && has('supplier_materials')) jobs.push(mtLoadHistory({ silent:true }));
       if(ids.has('materials:' + mtEditing.id)) $('mtStaleNote').style.display = '';
+    }
+    // Purchase Orders
+    if(has('purchase_orders', 'purchase_order_items', 'suppliers') && purchVisible('purchaseOrders')){
+      jobs.push(poLoadList({ silent:true }).then(ok=>{ if(ok) poRenderList(); }));
+    }
+    if($('poSheetOverlay').classList.contains('open')){
+      if(poEditing && ids.has('po:' + poEditing.id)) $('poStaleNote').style.display = '';
+      if(has('po_signatories')) jobs.push(poLoadSignatories().then(()=>{ poFillSignatorySelects(); poRenderSigHint(); }).catch(()=>{}));
+      if(has('suppliers', 'supplier_contacts')) jobs.push(poLoadSuppliers().then(()=>{
+        const cur = $('poSupplier').value; poFillSupplierSelect(cur); $('poSupplier').value = cur; poRenderSupplierInfo();
+        $('poSupplier').disabled = poReadOnly;
+      }).catch(()=>{}));
+      if(has('materials', 'supplier_materials') && !purchVisible('materials')) jobs.push(mtLoad({ silent:true }));
+    }
+    if($('poSettingsOverlay').classList.contains('open')){
+      if(has('po_signatories')) jobs.push(poLoadSignatories().then(poRenderSigList).catch(()=>{}));
     }
     try{ await Promise.all(jobs); }catch(e){ console.error('purchasing live refresh failed', e); }
   }
