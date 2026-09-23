@@ -240,6 +240,15 @@ window.awesCss = {
       <button type="button" class="sidebar-link" id="sbNavCashAdvance"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>Cash Advance</button>
       <button type="button" class="sidebar-link" id="sbNavLiquidation"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></span>Liquidation</button>
       <button type="button" class="sidebar-link" id="sbNavReimbursement"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span>Reimbursement</button>
+      <!-- Purchasing — admin-only (inside #sidebarAdminGroup). All four items
+           open the one #purchasingView and switch its panel; see
+           showPurchasingView() in home.js. Pages are placeholders until the
+           suppliers/materials schema lands. -->
+      <div class="sidebar-section-label">Purchasing</div>
+      <button type="button" class="sidebar-link" id="sbNavMaterials"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></span>Materials Database</button>
+      <button type="button" class="sidebar-link" id="sbNavSuppliers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg></span>Supplier Database</button>
+      <button type="button" class="sidebar-link" id="sbNavRequisitions"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>Material Requisition</button>
+      <button type="button" class="sidebar-link" id="sbNavPurchaseOrders"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg></span>Purchase Order Form</button>
       <div class="sidebar-section-label">Management</div>
       <button type="button" class="sidebar-link" id="menuManageUsers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>Users &amp; Roles</button>
       <button type="button" class="sidebar-link" id="menuManageAnnouncements"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/></svg></span>Announcements</button>
@@ -2300,6 +2309,134 @@ window.awesCss = {
      the sidebar item that opens this is inside #sidebarAdminGroup. Kept
      live via a realtime channel — srAdminInit() in service-requests.js —
      so a new submission appears here without a manual refresh. -->
+<!-- Purchasing — admin-only. One container, one panel per sidebar item
+     (Materials Database / Supplier Database / Material Requisition /
+     Purchase Order Form). Shown by showPurchasingView(key) in home.js. -->
+<main id="purchasingView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
+  <div class="card purch-panel" id="purchPanel_materials" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg> Materials Database</span></div>
+    <div class="card-body">
+      <div class="empty-state">Materials catalog — coming soon. Items, codes, units, categories and supplier prices will be managed here.</div>
+    </div>
+  </div>
+  <div class="card purch-panel" id="purchPanel_suppliers" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg> Supplier Database</span><span class="sp-count" id="spCount"></span></div>
+    <div class="card-body">
+      <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+        Everyone you buy materials from. Suppliers are never deleted — deactivate one you
+        no longer use so old requisitions and purchase orders still point to it.
+      </p>
+      <div class="sp-toolbar">
+        <input type="text" id="spSearch" placeholder="Search name, code, city, contact…">
+        <select id="spFilterCategory"><option value="">All categories</option></select>
+        <label class="sp-check"><input type="checkbox" id="spShowInactive"> Show inactive</label>
+      </div>
+      <div class="sp-actions-row">
+        <button type="button" class="btn btn-primary" id="spAddBtn">+ Add Supplier</button>
+        <button type="button" class="btn btn-secondary" id="spImportBtn">Import CSV</button>
+        <button type="button" class="btn btn-secondary" id="spExportBtn">Export CSV</button>
+        <input type="file" id="spImportFile" accept=".csv,text/csv" style="display:none;">
+      </div>
+      <div id="spList"><div class="empty-state">Loading…</div></div>
+    </div>
+  </div>
+  <div class="card purch-panel" id="purchPanel_requisitions" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg> Material Requisition</span></div>
+    <div class="card-body">
+      <div class="empty-state">Material requisitions — coming soon. Technician material requests linked to job orders will be reviewed and approved here.</div>
+    </div>
+  </div>
+  <div class="card purch-panel" id="purchPanel_purchaseOrders" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg> Purchase Order Form</span></div>
+    <div class="card-body">
+      <div class="empty-state">Purchase orders — coming soon. Approved requisitions will be turned into purchase orders to suppliers here.</div>
+    </div>
+  </div>
+</main>
+
+<!-- Supplier add/edit sheet (admin, Purchasing › Supplier Database).
+     Tabs: Info / Contacts / Documents / Price List. The last three need a
+     saved supplier, so they stay disabled while adding a new one.
+     Wired in purchasing.js (sp* functions). -->
+<div class="overlay" id="spSheetOverlay" style="z-index:80;">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3 id="spSheetTitle">Add Supplier</h3>
+      <button class="sheet-close" id="spSheetClose" type="button">&times;</button>
+    </div>
+    <div class="seg-tabs" id="spTabs">
+      <button type="button" class="seg-tab active" data-sp-tab="info">Info</button>
+      <button type="button" class="seg-tab" data-sp-tab="contacts">Contacts</button>
+      <button type="button" class="seg-tab" data-sp-tab="docs">Documents</button>
+      <button type="button" class="seg-tab" data-sp-tab="prices">Price List</button>
+    </div>
+
+    <div class="sp-pane" id="spPaneInfo">
+      <div class="sp-code" id="spCodeLine" style="display:none;"></div>
+      <div class="field"><label>Registered Business Name <span class="req">*</span></label><input type="text" id="spName" placeholder="e.g. Koppel Trading Inc."></div>
+      <div class="field"><label>Trade Name / What you call them</label><input type="text" id="spTradeName" placeholder="e.g. Koppel Makati"></div>
+      <div class="field"><label>Supplies</label><div class="sp-pick" id="spSuppliesPick"></div></div>
+      <div class="field"><label>Address</label><textarea id="spAddress" placeholder="Street, Barangay, City"></textarea></div>
+      <div class="sp-grid2">
+        <div class="field"><label>City / Municipality</label><input type="text" id="spCity"></div>
+        <div class="field"><label>TIN</label><input type="text" id="spTin" placeholder="000-000-000-000"></div>
+        <div class="field"><label>VAT Status</label>
+          <select id="spVat"><option value="">Unknown</option><option value="true">VAT-registered</option><option value="false">Non-VAT</option></select></div>
+        <div class="field"><label>Payment Terms</label>
+          <input type="text" id="spTerms" list="spTermsList" placeholder="COD">
+          <datalist id="spTermsList"><option value="COD"><option value="7 days"><option value="15 days"><option value="30 days"><option value="60 days"><option value="PDC"></datalist></div>
+        <div class="field"><label>Credit Limit (₱)</label><input type="text" id="spCreditLimit" inputmode="decimal" placeholder="Leave blank if none"></div>
+        <div class="field"><label>Delivery</label>
+          <select id="spDelivers"><option value="false">Pickup only</option><option value="true">Delivers</option></select></div>
+        <div class="field"><label>Rating</label>
+          <select id="spRating"><option value="">Not rated</option><option value="5">5 — Excellent</option><option value="4">4 — Good</option><option value="3">3 — Okay</option><option value="2">2 — Poor</option><option value="1">1 — Avoid</option></select></div>
+      </div>
+      <div class="sp-subhead">Payment Details <span>(admin only — never exported)</span></div>
+      <div class="sp-grid2">
+        <div class="field"><label>Bank</label><input type="text" id="spBank" placeholder="e.g. BDO"></div>
+        <div class="field"><label>Account Name</label><input type="text" id="spAcctName"></div>
+        <div class="field"><label>Account No.</label><input type="text" id="spAcctNo"></div>
+        <div class="field"><label>GCash / Maya</label><input type="text" id="spEwallet" placeholder="09xx xxx xxxx"></div>
+      </div>
+      <div class="field"><label>Remarks</label><textarea id="spRemarks"></textarea></div>
+      <button type="button" class="btn btn-primary" id="spSaveBtn" style="width:100%;">Save Supplier</button>
+    </div>
+
+    <div class="sp-pane" id="spPaneContacts" style="display:none;">
+      <div id="spContactsList"></div>
+      <div class="sp-subhead" id="spContactFormTitle">Add a contact</div>
+      <input type="hidden" id="spContactId" value="">
+      <div class="sp-grid2">
+        <div class="field"><label>Name <span class="req">*</span></label><input type="text" id="spContactName"></div>
+        <div class="field"><label>Position</label><input type="text" id="spContactPosition" placeholder="Sales, Warehouse, Billing…"></div>
+        <div class="field"><label>Mobile</label><input type="text" id="spContactMobile" inputmode="tel" placeholder="09xx xxx xxxx"></div>
+        <div class="field"><label>Email</label><input type="text" id="spContactEmail" inputmode="email"></div>
+      </div>
+      <label class="sp-check" style="margin-bottom:12px;"><input type="checkbox" id="spContactPrimary"> Primary contact</label>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn btn-primary" id="spContactSaveBtn" style="flex:1;">Save Contact</button>
+        <button type="button" class="btn btn-secondary" id="spContactCancelBtn" style="display:none;">Cancel</button>
+      </div>
+    </div>
+
+    <div class="sp-pane" id="spPaneDocs" style="display:none;">
+      <div id="spDocsList"></div>
+      <div class="sp-subhead">Upload a document</div>
+      <div class="sp-grid2">
+        <div class="field"><label>Type</label><select id="spDocType"></select></div>
+        <div class="field"><label>Valid Until (optional)</label><input type="date" id="spDocExpires"></div>
+      </div>
+      <div class="field"><label>Title (optional)</label><input type="text" id="spDocTitle" placeholder="e.g. 2026 Price Quotation"></div>
+      <div class="field"><label>File (PDF or image, max 10 MB)</label><input type="file" id="spDocFile" accept="application/pdf,image/*"></div>
+      <button type="button" class="btn btn-primary" id="spDocUploadBtn" style="width:100%;">Upload</button>
+    </div>
+
+    <div class="sp-pane" id="spPanePrices" style="display:none;">
+      <div id="spPricesList"></div>
+    </div>
+  </div>
+</div>
+
 <main id="serviceRequestsView" style="display:none; max-width:800px; margin:0 auto; padding:16px;">
   <div class="card" style="margin-bottom:16px;">
     <div class="card-head">

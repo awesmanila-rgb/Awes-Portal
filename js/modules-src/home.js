@@ -19,6 +19,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('dtrView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -68,6 +69,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -101,6 +103,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -128,6 +131,8 @@
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = 'none';
     if($('financeHrView')) $('financeHrView').style.display = 'none';
+    $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('customerHistoryView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -159,6 +164,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -653,6 +659,40 @@
     if(!(await ensureAdminAuthenticated())) return;
     showCustomersManagerView();
   });
+  // ---------- Purchasing (admin) ----------
+  // One #purchasingView holds a panel per sidebar item; showPurchasingView
+  // hides every other main view (same list the other show*View functions
+  // use) and reveals just the requested panel.
+  const PURCH_PAGES = {
+    materials:      { nav:'sbNavMaterials',      title:'Materials Database',   sub:'Catalog of materials & parts' },
+    suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
+    requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review technician material requests' },
+    purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Order Form',  sub:'Purchase orders to suppliers' }
+  };
+  function showPurchasingView(key){
+    const page = PURCH_PAGES[key] || PURCH_PAGES.materials;
+    document.body.classList.remove('dashboard-active');
+    ['homeScreen','serviceReportView','leaveView','cashAdvanceView','dispatchView','dtrView',
+     'equipmentManagerView','customersManagerView','serviceReportsManagerView','messagesView',
+     'documentsView','financeHrView','customerHistoryView','serviceRequestsView']
+      .forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    $$('#purchasingView .purch-panel').forEach(el=>{ el.style.display = (el.id === 'purchPanel_'+key) ? '' : 'none'; });
+    $('purchasingView').style.display = '';
+    $('footerBar').style.display = 'none';
+    $('metaBar').style.display = 'none';
+    $('homeBtn').style.display = '';
+    setHeaderTitle(page.title, page.sub);
+    setSidebarActive(page.nav);
+    window.scrollTo({top:0});
+    purchOnShow(key);   // purchasing.js — loads the page's data
+  }
+  Object.keys(PURCH_PAGES).forEach(key=>{
+    $(PURCH_PAGES[key].nav).addEventListener('click', async ()=>{
+      closeMainMenu();
+      if(!(await ensureAdminAuthenticated())) return;
+      showPurchasingView(key);
+    });
+  });
   $('menuManageUsers').addEventListener('click', ()=> setSidebarActive('menuManageUsers'));
   $('menuManageDropdowns').addEventListener('click', ()=> setSidebarActive('menuManageDropdowns'));
 
@@ -695,6 +735,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('messagesView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -796,6 +837,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = 'none';
     // Same belt-and-suspenders as doLogout() in auth.js — the newer
@@ -888,6 +930,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('serviceReportView').style.display = '';
     $('homeBtn').style.display = '';
     setHeaderTitle('Service Report', 'Field digital form');
@@ -1072,7 +1115,7 @@
     document.body.classList.remove('dashboard-active');
     ['homeScreen','serviceReportView','dtrView','leaveView','cashAdvanceView','dispatchView',
      'equipmentManagerView','customersManagerView','serviceReportsManagerView','messagesView',
-     'documentsView','customerHistoryView','serviceRequestsView'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+     'documentsView','customerHistoryView','serviceRequestsView','purchasingView'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     $('financeHrView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';

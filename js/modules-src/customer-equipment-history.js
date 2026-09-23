@@ -351,6 +351,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
+    if($('purchasingView')) $('purchasingView').style.display = 'none';
     $('homeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = 'none';
     $('customerRequestsScreen').style.display = 'none';
