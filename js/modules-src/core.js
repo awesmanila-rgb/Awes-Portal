@@ -475,6 +475,11 @@
     data.completed    = !!row.completed;
     data.equipmentId  = row.equipment_id || null;
     data.serviceCategory = reportCategoryOf(data);
+    // Record Past Service stamp (20260924_02). Read-only: set by the
+    // admin_record_past_service RPC, never written back by reportToRow.
+    data.backEntry     = !!row.back_entry;
+    data.enteredByName = row.entered_by_name || '';
+    data.enteredAt     = row.entered_at || '';
     return data;
   }
   // Legacy rows may hold {} (or a stray object) where a data-URL string was

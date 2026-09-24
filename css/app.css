@@ -3189,3 +3189,14 @@ body:not(.role-tech) .tl-hub-back{ display:none; }
 .mr-link{ margin-top:6px; max-width:320px; position:relative; }
 .mr-link input{ padding:6px 8px; font-size:13px; }
 @media (max-width:620px){ .po-qa{ margin-left:0; } .po-qa-grid{ grid-template-columns:1fr 1fr; } }
+
+/* Record Past Service (admin back-entry) */
+#srBackEntryPanel .be-note{ font-size:13px; line-height:1.45; color:var(--text-muted); background:var(--surface-2, #f4f7f5); border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:12px; }
+#srBackEntryPanel .be-section{ font-size:11.5px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); margin:16px 0 6px; }
+#srBackEntryPanel .be-grid{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 10px; }
+#srBackEntryPanel .be-sub{ font-weight:500; color:var(--text-muted); font-size:11.5px; }
+#srBackEntryPanel .be-hint{ font-size:12px; color:var(--text-muted); margin-top:4px; }
+#srBackEntryPanel textarea{ width:100%; box-sizing:border-box; resize:vertical; }
+#srBackEntryPanel .be-confirm{ display:flex; gap:8px; align-items:flex-start; font-size:13px; line-height:1.4; margin-top:14px; }
+#srBackEntryPanel .be-confirm input{ margin-top:3px; flex-shrink:0; }
+.hist-tag-past{ display:inline-block; margin-left:4px; padding:1px 7px; border-radius:999px; font-size:11px; font-weight:700; background:#fff4d6; color:#8a5a00; }

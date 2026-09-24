@@ -517,6 +517,8 @@
     // directly. Admin and tech both still resolve exactly as before.)
     setVis('newBtn', false);
     setVis('srTabNewBtn', isTech);
+    // Admin's way to file work a technician already did (back-entry.js).
+    setVis('srTabBackEntryBtn', isAdmin);
     // Logout is now a direct, always-visible top-right button for EVERY
     // logged-in role, not just technicians — admin's only path used to be
     // buried inside "☰ Menu", which read as "there's no logout button in

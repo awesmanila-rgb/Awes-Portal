@@ -477,6 +477,11 @@
     data.completed    = !!row.completed;
     data.equipmentId  = row.equipment_id || null;
     data.serviceCategory = reportCategoryOf(data);
+    // Record Past Service stamp (20260924_02). Read-only: set by the
+    // admin_record_past_service RPC, never written back by reportToRow.
+    data.backEntry     = !!row.back_entry;
+    data.enteredByName = row.entered_by_name || '';
+    data.enteredAt     = row.entered_at || '';
     return data;
   }
   // Legacy rows may hold {} (or a stray object) where a data-URL string was
@@ -1799,6 +1804,8 @@
     // directly. Admin and tech both still resolve exactly as before.)
     setVis('newBtn', false);
     setVis('srTabNewBtn', isTech);
+    // Admin's way to file work a technician already did (back-entry.js).
+    setVis('srTabBackEntryBtn', isAdmin);
     // Logout is now a direct, always-visible top-right button for EVERY
     // logged-in role, not just technicians — admin's only path used to be
     // buried inside "☰ Menu", which read as "there's no logout button in
@@ -6398,10 +6405,25 @@
     doc.rect(margin+colW+20, sigY, colW, 80);
     if(data.sigCustomer){ try{ doc.addImage(data.sigCustomer,'PNG', margin+6, sigY+6, colW-12, 55); }catch(e){} }
     if(data.sigTech){ try{ doc.addImage(data.sigTech,'PNG', margin+colW+26, sigY+6, colW-12, 55); }catch(e){} }
+    if(data.backEntry){
+      // Recorded after the fact by admin — say so where signatures would be.
+      doc.setFontSize(8); doc.setTextColor(138,90,0);
+      doc.text('Not signed — recorded after the fact', margin+colW/2, sigY+34, {align:'center'});
+      doc.text('Not signed — recorded after the fact', margin+colW+20+colW/2, sigY+34, {align:'center'});
+      doc.setTextColor(0,0,0);
+    }
     doc.setFontSize(8.5);
     doc.text('Customer — '+(data.custPrintedName||'_______________'), margin+4, sigY+72);
     doc.text('Technician — '+(data.techName||'_______________'), margin+colW+24, sigY+72);
     y = sigY + 96;
+    if(data.backEntry){
+      doc.setFontSize(8); doc.setTextColor(110,110,110);
+      const when = data.enteredAt ? new Date(data.enteredAt).toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'}) : '';
+      const note = doc.splitTextToSize('PAST SERVICE RECORD — entered by '+(data.enteredByName||'admin')+(when ? ' on '+when : '')+
+        ' from the technician\u2019s account of work performed on '+(data.date||'the date above')+'. Not signed on site.', pageW-margin*2);
+      doc.text(note, margin, y); y += note.length*10 + 6;
+      doc.setTextColor(0,0,0);
+    }
 
     doc.setFontSize(8); doc.setTextColor(120,130,124);
     doc.text('Generated on '+new Date().toLocaleString('en-PH'), margin, 815);
@@ -6904,7 +6926,8 @@
       const isDraft = !d.completed;
       row.innerHTML =
         '<div class="hist-info"><b>'+escapeHtml(d.custName||'Untitled')+'</b>'+
-        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+'</span></div>'+
+        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+
+          (d.backEntry ? '<span class="hist-tag-past" title="Recorded after the fact by '+escapeHtml(d.enteredByName||'admin')+'">Past service</span>' : '')+'</span></div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
           : '<div class="hist-actions"><button data-act="view">View</button></div>');
@@ -22320,6 +22343,131 @@
   async function tlShowHub(){ await tlEnter(false); }
 
 
+// ---------- Record Past Service (admin back-entry) ----------
+  // Admin can't author a normal Service Report (it carries the technician's
+  // name and signature — see setVis('srTabNewBtn', isTech) in auth.js). This
+  // is the honest alternative: record work a technician already performed,
+  // filed under that technician, with both signatures left blank and the
+  // record stamped with who keyed it in (admin_record_past_service RPC,
+  // supabase/migrations/20260924_02_report_back_entry.sql). It shows in the
+  // report lists and in that unit's equipment history like any report.
+  let beUnits = [];
+  let beLoaded = false;
+
+  function beLines(id){
+    return String($(id).value || '').split(/\r?\n/).map(x=> x.trim()).filter(Boolean);
+  }
+  function beReset(){
+    ['beTrouble','beServices','beFindings','beRecs','beParts','beRemarks','beCustRep','beTimeIn','beTimeOut'].forEach(id=> $(id).value = '');
+    $('beDate').value = '';
+    $('beConfirm').checked = false;
+  }
+  async function beLoadPickers(){
+    $('beDate').max = todayISO();
+    const catSel = $('beCategory');
+    if(!catSel.options.length){
+      catSel.innerHTML = SERVICE_CATEGORIES.map(c=> '<option value="'+c.key+'">'+escapeHtml(c.label)+'</option>').join('');
+      catSel.value = DEFAULT_REPORT_CATEGORY;
+    }
+    const techs = (await cloudListUsers() || []).filter(u=> u.active !== false)
+      .sort((a, b)=> String(a.name || '').localeCompare(String(b.name || '')));
+    const keepTech = $('beTech').value;
+    $('beTech').innerHTML = '<option value="">Select technician…</option>' +
+      techs.map(t=> '<option value="'+escapeHtml(t.id)+'">'+escapeHtml(t.name || t.username || 'Technician')+'</option>').join('');
+    if(keepTech) $('beTech').value = keepTech;
+    await loadCustomers();
+    const keepCust = $('beCustomer').value;
+    $('beCustomer').innerHTML = '<option value="">Select customer…</option>' +
+      (customersCache || []).map(c=> '<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.name)+'</option>').join('');
+    if(keepCust){ $('beCustomer').value = keepCust; }
+    beLoaded = true;
+  }
+  async function beLoadUnits(){
+    const custId = $('beCustomer').value;
+    const sel = $('beUnit');
+    beUnits = [];
+    $('beUnitHint').textContent = '';
+    if(!custId){ sel.disabled = true; sel.innerHTML = '<option value="">Choose a customer first…</option>'; return; }
+    sel.disabled = true; sel.innerHTML = '<option value="">Loading units…</option>';
+    try{
+      const { data, error } = await db.from('customer_equipment').select('*').eq('customer_id', custId);
+      if(error) throw error;
+      beUnits = (data || []).map(equipRowToObj);
+    }catch(e){ console.error('load units failed', describeCloudError(e)); toast('Could not load this customer\u2019s units'); }
+    if(!beUnits.length){
+      sel.innerHTML = '<option value="">No units on file</option>';
+      $('beUnitHint').textContent = 'Add the unit under Equipment first, then come back to record the visit.';
+      return;
+    }
+    sel.innerHTML = '<option value="">Select unit…</option>' + beUnits.map(u=>{
+      const bits = [equipDisplayName(u), u.equipType, u.brand, u.coolCap].map(x=> String(x || '').trim()).filter(Boolean);
+      return '<option value="'+escapeHtml(u.id)+'">'+escapeHtml(bits.join(' · '))+'</option>';
+    }).join('');
+    sel.disabled = false;
+  }
+  async function beOpen(){
+    if(!beLoaded) beReset();
+    try{ await beLoadPickers(); }
+    catch(e){ console.error('record past service: load failed', e); toast('Could not load technicians/customers'); }
+  }
+  $('beCustomer').addEventListener('change', beLoadUnits);
+
+  $('beSaveBtn').addEventListener('click', async ()=>{
+    const techId = $('beTech').value, custId = $('beCustomer').value, unitId = $('beUnit').value;
+    const date = $('beDate').value, services = beLines('beServices');
+    if(!techId) return toast('Choose the technician who did the work');
+    if(!custId) return toast('Choose the customer');
+    if(!unitId) return toast('Choose the unit that was serviced');
+    if(!date) return toast('Enter the date the work was performed');
+    if(date > todayISO()) return toast('The date can\u2019t be in the future');
+    if(!services.length) return toast('List the work that was done');
+    if(!$('beConfirm').checked) return toast('Tick the confirmation box first');
+    const cust = (customersCache || []).find(c=> c.id === custId) || {};
+    const u = beUnits.find(x=> x.id === unitId) || {};
+    const payload = {
+      technician_id: techId, date,
+      service_category: $('beCategory').value || DEFAULT_REPORT_CATEGORY,
+      customer_id: custId, cust_name: cust.name || '', cust_address: cust.address || '',
+      contact_no: cust.contactNo || '', contact_person: cust.contactPerson || '', cust_email: cust.email || '',
+      equipment_id: unitId,
+      equip_type: u.equipType || '', equip_location: u.equipLocation || '', brand: u.brand || '',
+      mount_type: u.mountType || '', cool_cap: u.coolCap || '', model_cu: u.modelCU || '', serial_cu: u.serialCU || '',
+      model_fcu: u.modelFCU || '', serial_fcu: u.serialFCU || '', refrigerant_type: u.refrigerantType || '',
+      compressor_type: u.compressorType || '',
+      trouble_call: $('beTrouble').value.trim(),
+      time_in: $('beTimeIn').value, time_out: $('beTimeOut').value,
+      services_done: services, findings: beLines('beFindings'), recommendations: beLines('beRecs'),
+      materials: beLines('beParts').map(t=> ({ description: t, qty: '', unit: '' })),
+      remarks: $('beRemarks').value.trim(),
+      customer_printed_name: $('beCustRep').value.trim(),
+      is_install: false
+    };
+    const btn = $('beSaveBtn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try{
+      if(!(await ensureCloud())) throw new Error('offline');
+      const { data: srNo, error } = await db.rpc('admin_record_past_service', { p_report: payload });
+      if(error) throw error;
+      toast('Saved as ' + srNo);
+      beReset();
+      beLoaded = false;
+      // Show the filed report straight away, in the PDF viewer.
+      const d = await cloudGetReport(srNo);
+      if(d){
+        const doc = await buildPdf(d);
+        await openFileInPdfViewer(doc, srNo + '.pdf', d.custName || srNo);
+      }
+    }catch(e){
+      console.error('record past service failed', describeCloudError(e));
+      const msg = (e && e.message) || '';
+      toast(msg === 'offline' ? 'You\u2019re offline — this needs a connection to save'
+        : /P0001|future|Choose|unit|date/i.test(msg) ? msg : 'Could not save — ' + (msg || 'please try again'));
+    }finally{
+      btn.disabled = false; btn.textContent = 'Save Past Service Report';
+    }
+  });
+
+
 // ---------- Header title (changes per feature page) ----------
   function setHeaderTitle(title, sub){
     $('brandName').textContent = title;
@@ -23223,8 +23371,11 @@
     $('srTabDraftBtn').classList.toggle('active', which==='draft');
     $('srTabCompletedBtn').classList.toggle('active', which==='completed');
     $('srTabAllBtn').classList.toggle('active', which==='all');
-    const isHistoryTab = which!=='new';
+    $('srTabBackEntryBtn').classList.toggle('active', which==='backentry');
+    const isHistoryTab = which!=='new' && which!=='backentry';
     $('srNewPanel').style.display = which==='new' ? '' : 'none';
+    $('srBackEntryPanel').style.display = which==='backentry' ? '' : 'none';
+    if(which==='backentry') beOpen();
     $('srHistoryPanel').style.display = isHistoryTab ? '' : 'none';
     // The footer (Save Draft / Generate Report) and the SR-No./status meta
     // bar only make sense while actively filling out a report.
@@ -23265,6 +23416,7 @@
   $('srTabDraftBtn').addEventListener('click', ()=> srShowTab('draft'));
   $('srTabCompletedBtn').addEventListener('click', ()=> srShowTab('completed'));
   $('srTabAllBtn').addEventListener('click', ()=> srShowTab('all'));
+  $('srTabBackEntryBtn').addEventListener('click', ()=> srShowTab('backentry'));
 
   function showServiceReport(){
     document.body.classList.remove('dashboard-active');
@@ -25916,7 +26068,8 @@
           '<div class="cp-visit-head-body">'+
             '<div class="cp-visit-title">'+title+'</div>'+
             '<div class="cp-visit-meta">'+escapeHtml(fmtDate(r.date))+' · '+escapeHtml(r.sr_no||'')+
-              (r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</div>'+
+              (r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+
+              (r.back_entry ? ' · Recorded after the fact' : '')+'</div>'+
           '</div>'+
           '<span class="status-pill '+statusClass+'">'+statusLabel+'</span>'+
           '<span class="cp-visit-chevron">▾</span>'+

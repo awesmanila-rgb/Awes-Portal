@@ -901,8 +901,11 @@
     $('srTabDraftBtn').classList.toggle('active', which==='draft');
     $('srTabCompletedBtn').classList.toggle('active', which==='completed');
     $('srTabAllBtn').classList.toggle('active', which==='all');
-    const isHistoryTab = which!=='new';
+    $('srTabBackEntryBtn').classList.toggle('active', which==='backentry');
+    const isHistoryTab = which!=='new' && which!=='backentry';
     $('srNewPanel').style.display = which==='new' ? '' : 'none';
+    $('srBackEntryPanel').style.display = which==='backentry' ? '' : 'none';
+    if(which==='backentry') beOpen();
     $('srHistoryPanel').style.display = isHistoryTab ? '' : 'none';
     // The footer (Save Draft / Generate Report) and the SR-No./status meta
     // bar only make sense while actively filling out a report.
@@ -943,6 +946,7 @@
   $('srTabDraftBtn').addEventListener('click', ()=> srShowTab('draft'));
   $('srTabCompletedBtn').addEventListener('click', ()=> srShowTab('completed'));
   $('srTabAllBtn').addEventListener('click', ()=> srShowTab('all'));
+  $('srTabBackEntryBtn').addEventListener('click', ()=> srShowTab('backentry'));
 
   function showServiceReport(){
     document.body.classList.remove('dashboard-active');

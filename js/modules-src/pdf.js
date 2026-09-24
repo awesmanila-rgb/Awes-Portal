@@ -271,10 +271,25 @@
     doc.rect(margin+colW+20, sigY, colW, 80);
     if(data.sigCustomer){ try{ doc.addImage(data.sigCustomer,'PNG', margin+6, sigY+6, colW-12, 55); }catch(e){} }
     if(data.sigTech){ try{ doc.addImage(data.sigTech,'PNG', margin+colW+26, sigY+6, colW-12, 55); }catch(e){} }
+    if(data.backEntry){
+      // Recorded after the fact by admin — say so where signatures would be.
+      doc.setFontSize(8); doc.setTextColor(138,90,0);
+      doc.text('Not signed — recorded after the fact', margin+colW/2, sigY+34, {align:'center'});
+      doc.text('Not signed — recorded after the fact', margin+colW+20+colW/2, sigY+34, {align:'center'});
+      doc.setTextColor(0,0,0);
+    }
     doc.setFontSize(8.5);
     doc.text('Customer — '+(data.custPrintedName||'_______________'), margin+4, sigY+72);
     doc.text('Technician — '+(data.techName||'_______________'), margin+colW+24, sigY+72);
     y = sigY + 96;
+    if(data.backEntry){
+      doc.setFontSize(8); doc.setTextColor(110,110,110);
+      const when = data.enteredAt ? new Date(data.enteredAt).toLocaleDateString('en-PH', {year:'numeric', month:'short', day:'numeric'}) : '';
+      const note = doc.splitTextToSize('PAST SERVICE RECORD — entered by '+(data.enteredByName||'admin')+(when ? ' on '+when : '')+
+        ' from the technician\u2019s account of work performed on '+(data.date||'the date above')+'. Not signed on site.', pageW-margin*2);
+      doc.text(note, margin, y); y += note.length*10 + 6;
+      doc.setTextColor(0,0,0);
+    }
 
     doc.setFontSize(8); doc.setTextColor(120,130,124);
     doc.text('Generated on '+new Date().toLocaleString('en-PH'), margin, 815);

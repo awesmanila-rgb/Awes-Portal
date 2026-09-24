@@ -44,7 +44,8 @@
           '<div class="cp-visit-head-body">'+
             '<div class="cp-visit-title">'+title+'</div>'+
             '<div class="cp-visit-meta">'+escapeHtml(fmtDate(r.date))+' · '+escapeHtml(r.sr_no||'')+
-              (r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</div>'+
+              (r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+
+              (r.back_entry ? ' · Recorded after the fact' : '')+'</div>'+
           '</div>'+
           '<span class="status-pill '+statusClass+'">'+statusLabel+'</span>'+
           '<span class="cp-visit-chevron">▾</span>'+

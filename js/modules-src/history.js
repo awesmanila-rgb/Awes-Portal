@@ -44,7 +44,8 @@
       const isDraft = !d.completed;
       row.innerHTML =
         '<div class="hist-info"><b>'+escapeHtml(d.custName||'Untitled')+'</b>'+
-        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+'</span></div>'+
+        '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+
+          (d.backEntry ? '<span class="hist-tag-past" title="Recorded after the fact by '+escapeHtml(d.enteredByName||'admin')+'">Past service</span>' : '')+'</span></div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
           : '<div class="hist-actions"><button data-act="view">View</button></div>');

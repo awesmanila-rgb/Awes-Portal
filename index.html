@@ -3923,6 +3923,46 @@ window.awesCss = {
 
   </div>
 
+  <!-- Record Past Service (admin only) — see back-entry.js and
+       supabase/migrations/20260924_02_report_back_entry.sql. Files a
+       completed report under the technician who did the work, with no
+       signatures, stamped "recorded after the fact" by this admin. -->
+  <div class="card" id="srBackEntryPanel" style="display:none;">
+    <div class="card-head"><span>Record Past Service</span></div>
+    <div class="card-body">
+      <div class="be-note">For work a technician already performed that has no report yet — an older visit, or work that wasn't dispatched through a Job Order. The report is filed under the technician, <b>signatures stay blank</b>, and it's marked as recorded by you after the fact. Once saved it can't be edited.</div>
+
+      <div class="be-section">Who &amp; where</div>
+      <div class="field"><label>Technician who did the work <span class="req">*</span></label>
+        <select id="beTech"><option value="">Loading…</option></select></div>
+      <div class="field"><label>Customer <span class="req">*</span></label>
+        <select id="beCustomer"><option value="">Loading…</option></select></div>
+      <div class="field"><label>Unit <span class="req">*</span></label>
+        <select id="beUnit" disabled><option value="">Choose a customer first…</option></select>
+        <div class="be-hint" id="beUnitHint"></div></div>
+
+      <div class="be-section">When</div>
+      <div class="be-grid">
+        <div class="field"><label>Date performed <span class="req">*</span></label><input type="date" id="beDate"></div>
+        <div class="field"><label>Category</label><select id="beCategory"></select></div>
+        <div class="field"><label>Time in</label><input type="time" id="beTimeIn"></div>
+        <div class="field"><label>Time out</label><input type="time" id="beTimeOut"></div>
+      </div>
+
+      <div class="be-section">Work</div>
+      <div class="field"><label>Complaint / reason for visit</label><input type="text" id="beTrouble" placeholder="e.g. Not cooling, PMS, leak at FCU"></div>
+      <div class="field"><label>Work done <span class="req">*</span> <span class="be-sub">one per line</span></label><textarea id="beServices" rows="4" placeholder="Cleaned filters and coils&#10;Checked refrigerant pressure"></textarea></div>
+      <div class="field"><label>Findings <span class="be-sub">one per line</span></label><textarea id="beFindings" rows="3"></textarea></div>
+      <div class="field"><label>Recommendations <span class="be-sub">one per line</span></label><textarea id="beRecs" rows="3"></textarea></div>
+      <div class="field"><label>Parts needed to replace <span class="be-sub">one per line</span></label><textarea id="beParts" rows="2"></textarea></div>
+      <div class="field"><label>Remarks</label><textarea id="beRemarks" rows="2"></textarea></div>
+      <div class="field"><label>Customer's representative (name only)</label><input type="text" id="beCustRep" placeholder="Optional"></div>
+
+      <label class="be-confirm"><input type="checkbox" id="beConfirm"> I confirm this work was actually performed by the technician above. The report will show no signatures and will say it was recorded by me.</label>
+      <button type="button" class="btn btn-primary" id="beSaveBtn" style="width:100%; margin-top:10px;">Save Past Service Report</button>
+    </div>
+  </div>
+
   <!-- View History (inline, mirrors the "Saved Reports" overlay list) -->
   <div class="card" id="srHistoryPanel" style="display:none;">
     <div class="card-head"><span id="srHistoryPanelTitle">Saved Reports</span></div>
