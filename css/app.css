@@ -3249,7 +3249,7 @@ body:not(.role-tech) .tl-hub-back{ display:none; }
 .prio-pill{ padding:3px 9px; border-radius:999px; font-size:12px; font-weight:700; white-space:nowrap; background:#e3e8e5; color:#3d4f44; }
 .prio-pill-late{ background:#fde4d6; color:#9a3412; } .prio-pill-onsite{ background:#d9f0e2; color:#146c3f; }
 .prio-pill-enroute{ background:#dbe8fb; color:#1d4ed8; } .prio-pill-idle{ background:#fdf0c8; color:#854d0e; }
-.prio-pill-next{ background:#eef2ef; color:#33443a; } .prio-pill-notin, .prio-pill-off{ background:#f1f4f2; color:#6b7a71; }
+.prio-pill-next{ background:#eef2ef; color:#33443a; } .prio-pill-out{ background:#e3e8e5; color:#3d4f44; } .prio-pill-notin, .prio-pill-off{ background:#f1f4f2; color:#6b7a71; }
 @media (max-width:640px){
   .prio-item{ flex-wrap:wrap; align-items:flex-start; }
   .prio-dot{ margin-top:5px; }

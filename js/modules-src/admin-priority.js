@@ -195,7 +195,7 @@
     const dtr = {}; (base.dtrToday || []).forEach(d=>{ if(d) dtr[d.technicianId] = d; });
     const tickets = (base.tickets || []).filter(t=> t.date === today || t.status === 'in_progress' || t.status === 'acknowledged');
     const onLeave = new Set((base.leaves || []).filter(l=> l.status === 'approved' && today >= l.dateFrom && today <= (l.dateTo || l.dateFrom)).map(l=> l.userId));
-    const rank = { late:0, onsite:1, enroute:2, idle:3, next:4, notin:5, done:6, off:7 };
+    const rank = { late:0, onsite:1, enroute:2, idle:3, next:4, notin:5, done:6, out:7, off:8 };
     return users.map(u=>{
       const mine = tickets.filter(t=> (t.assignedWorkerIds || []).includes(u.id));
       const live = mine.filter(t=> !dtIsTerminal(t) || t.status === 'in_progress');
@@ -211,8 +211,9 @@
       else if(live.length){ const n = live.slice().sort((a, b)=> String(a.dispatchTime || '').localeCompare(String(b.dispatchTime || '')))[0];
         key = 'next'; label = 'Next'; sub = (n.jobOrderNo || '') + (n.dispatchTime ? ' · dispatch ' + prioFmtTime(n.dispatchTime) : ''); }
       else if(mine.length){ key = 'done'; label = 'Done'; sub = mine.length + ' job' + (mine.length === 1 ? '' : 's') + ' today'; }
+      else if(d && d.otTimeIn && !d.otTimeOut){ key = 'idle'; label = 'Overtime'; sub = 'OT since ' + prioFmtTime(d.otTimeIn) + ' · no job order'; }
       else if(d && d.timeIn && !d.timeOut){ key = 'idle'; label = 'Idle'; sub = 'Timed in ' + prioFmtTime(d.timeIn) + ' · no job order'; }
-      else if(d && d.timeOut){ key = 'done'; label = 'Timed out'; sub = 'Out ' + prioFmtTime(d.timeOut); }
+      else if(d && d.timeOut){ key = 'out'; label = 'Timed out'; sub = 'In ' + prioFmtTime(d.timeIn) + ' · out ' + prioFmtTime(d.otTimeOut || d.timeOut); }
       else { key = 'notin'; label = 'Not timed in'; sub = 'No job order today'; }
       return { id: u.id, name: u.name || u.username || 'Technician', key, label, sub, r: rank[key] };
     }).sort((a, b)=> a.r - b.r || a.name.localeCompare(b.name));
@@ -255,7 +256,7 @@
   }
   function prioRenderTechs(rows){
     const n = k=> rows.filter(r=> k.includes(r.key)).length;
-    const bits = [n(['onsite','enroute']) + ' on a job', n(['late']) ? n(['late']) + ' late' : '', n(['idle']) ? n(['idle']) + ' free' : '', n(['off']) ? n(['off']) + ' off' : ''].filter(Boolean);
+    const bits = [n(['onsite','enroute']) + ' on a job', n(['late']) ? n(['late']) + ' late' : '', n(['idle']) ? n(['idle']) + ' free' : '', n(['out']) ? n(['out']) + ' timed out' : '', n(['off']) ? n(['off']) + ' off' : ''].filter(Boolean);
     $('prioTechSub').textContent = bits.join(' · ');
     $('prioTechList').innerHTML = rows.length ? rows.map(r=>
       '<div class="prio-tech"><b>' + escapeHtml(r.name) + '</b><span class="prio-tech-sub">' + escapeHtml(r.sub) + '</span>' +
@@ -274,6 +275,7 @@
   async function prioRender(base){
     if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; return; }
     $('prioCard').style.display = ''; $('prioTechCard').style.display = '';
+    prioStartLive();
     try{
       const extra = await prioLoadExtras();
       prioLastItems = prioBuild(base, Object.assign({ custNames: {} }, extra));
@@ -290,11 +292,46 @@
   // "Late" is time-based, so re-check every 2 minutes while the admin is
   // looking at the homepage — a job order turns red at its dispatch time
   // without anyone having to refresh.
-  setInterval(()=>{
-    if(!prioLastBase || !currentUser || currentUser.role !== 'admin') return;
-    if(document.hidden || $('homeScreen').style.display === 'none') return;
-    prioRender(prioLastBase);
-  }, 120000);
+  //
+  // Time-ins/outs and job-order moves must show up without leaving the
+  // homepage, so a refresh re-reads today's DTR and the job orders (the
+  // two things "Technicians today" and the late rule depend on) instead of
+  // re-drawing the data from when the page opened. Triggered by: realtime
+  // changes on dtr_records / dispatch_tickets (when those tables publish),
+  // a 60-second poll as the safety net, and returning to the app.
+  let prioRefreshing = false, prioRefreshTimer = null, prioRt = null;
+  function prioHomeVisible(){
+    return !!prioLastBase && currentUser && currentUser.role === 'admin' && !document.hidden && $('homeScreen').style.display !== 'none';
+  }
+  async function prioRefreshLive(){
+    if(!prioHomeVisible() || prioRefreshing) return;
+    prioRefreshing = true;
+    try{
+      const [dtrToday, tickets] = await Promise.all([
+        dtrListAllForDate(todayISO()).catch(()=> null),
+        dtListAll().catch(()=> null)
+      ]);
+      const base = Object.assign({}, prioLastBase);
+      if(dtrToday) base.dtrToday = dtrToday;
+      if(tickets) base.tickets = tickets;
+      await prioRender(base);
+    }finally{ prioRefreshing = false; }
+  }
+  function prioRefreshSoon(){
+    clearTimeout(prioRefreshTimer);
+    prioRefreshTimer = setTimeout(prioRefreshLive, 1500);   // bursts of changes → one refresh
+  }
+  function prioStartLive(){
+    if(prioRt || !db || !db.channel) return;
+    try{
+      prioRt = db.channel('admin-priority-live')
+        .on('postgres_changes', { event:'*', schema:'public', table:'dtr_records' }, prioRefreshSoon)
+        .on('postgres_changes', { event:'*', schema:'public', table:'dispatch_tickets' }, prioRefreshSoon)
+        .subscribe();
+    }catch(e){ prioRt = null; }
+  }
+  setInterval(prioRefreshLive, 60000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) prioRefreshSoon(); });
 
   $('prioList').addEventListener('click', async (e)=>{
     if(e.target.closest('#prioMoreBtn')){ prioExpanded = true; prioRenderList(); return; }
