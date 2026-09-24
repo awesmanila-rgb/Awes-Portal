@@ -501,6 +501,19 @@ window.awesCss = {
        flow changes. For technicians the grid rules do not apply at all and
        this wrapper is a plain block, so their home screen is untouched. -->
   <div id="adminDash">
+  <!-- Admin homepage priority list + technicians today (admin-priority.js).
+       Ranked by urgency, then oldest first; quick approve for leave and
+       as-requested material requisitions only. -->
+  <div class="card" id="prioCard" style="display:none;">
+    <div class="card-head"><span>Needs you now</span>
+      <span class="prio-counts"><span class="prio-count urgent" id="prioCountUrgent">0 urgent</span><span class="prio-count today" id="prioCountToday">0 for today</span><span class="prio-count watch" id="prioCountWatch">0 to watch</span></span>
+    </div>
+    <div class="card-body prio-body"><div id="prioList"><div class="empty-state">Loading…</div></div></div>
+  </div>
+  <div class="card" id="prioTechCard" style="display:none;">
+    <div class="card-head"><span>Technicians today</span><span class="prio-tech-count" id="prioTechSub"></span></div>
+    <div class="card-body"><div id="prioTechList"><div class="empty-state">Loading…</div></div></div>
+  </div>
   <div class="card" id="homeAnnouncementsCard" style="display:none; margin-bottom:16px;">
     <div class="card-head">
       <span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/></svg> Announcements</span>
@@ -1493,6 +1506,17 @@ window.awesCss = {
 
 <!-- Liquidation attachment viewer — shows a receipt image, or the trip
      table for a transportation liquidation item. -->
+<div class="overlay prio-qa-overlay" id="prioQaOverlay">
+  <div class="sheet prio-qa-sheet" role="dialog" aria-modal="true" aria-labelledby="prioQaTitle">
+    <div class="prio-qa-kicker">Quick approve</div>
+    <h3 id="prioQaTitle">Approve?</h3>
+    <div id="prioQaBody" class="prio-qa-body"></div>
+    <div class="prio-qa-actions">
+      <button type="button" class="btn btn-secondary" id="prioQaCancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="prioQaApprove">Approve</button>
+    </div>
+  </div>
+</div>
 <div class="overlay" id="liqAttachmentOverlay">
   <div class="sheet">
     <div class="sheet-head">
@@ -2092,7 +2116,13 @@ window.awesCss = {
             <button type="button" class="dt-cat-btn" data-cat="general" role="radio" aria-checked="false">General Scope</button>
           </div>
         </div>
-        <div class="field"><label>Expected Time at Site</label><input type="time" id="dtExpectedTime"></div>
+        <!-- Dispatch Time = when the crew should be on the way. It is what
+             "late" is measured against on the admin homepage and in the
+             urgent push (admin-alerts). Expected Time at Site stays the
+             client's time and is informational only. -->
+        <div class="field"><label>Dispatch Time <span class="req">*</span></label><input type="time" id="dtDispatchTime">
+          <div class="field-hint" style="font-size:12px; color:var(--text-muted); margin-top:4px;">When the crew should leave / be en route. The job order turns <b>Late</b> if no one is en route by this time.</div></div>
+        <div class="field"><label>Expected Time at Site <span style="font-weight:500; color:var(--text-muted); font-size:12px;">(client's time)</span></label><input type="time" id="dtExpectedTime"></div>
 
         <div class="field">
           <label>Assigned Workers <span class="req">*</span></label>
@@ -3937,9 +3967,12 @@ window.awesCss = {
         <select id="beTech"><option value="">Loading…</option></select></div>
       <div class="field"><label>Customer <span class="req">*</span></label>
         <select id="beCustomer"><option value="">Loading…</option></select></div>
-      <div class="field"><label>Unit <span class="req">*</span></label>
-        <select id="beUnit" disabled><option value="">Choose a customer first…</option></select>
-        <div class="be-hint" id="beUnitHint"></div></div>
+      <div class="field"><label>Report type</label>
+        <div class="seg-tabs be-mode" id="beModeTabs">
+          <button type="button" class="seg-tab active" id="beModeSingle">Single unit</button>
+          <button type="button" class="seg-tab" id="beModeMulti">Multiple units</button>
+        </div>
+        <div class="be-hint">Multiple units files one report per unit (each gets its own SR number and its own readings); the work details below are shared.</div></div>
 
       <div class="be-section">When</div>
       <div class="be-grid">
@@ -3949,7 +3982,12 @@ window.awesCss = {
         <div class="field"><label>Time out</label><input type="time" id="beTimeOut"></div>
       </div>
 
-      <div class="be-section">Work</div>
+      <div class="be-section">Unit &amp; operation parameters</div>
+      <div class="be-hint" id="beUnitHint"></div>
+      <div id="beUnitList"></div>
+      <button type="button" class="btn btn-secondary" id="beAddUnitBtn" style="width:100%; display:none;">+ Add another unit</button>
+
+      <div class="be-section">Work <span class="be-sub" id="beWorkSub"></span></div>
       <div class="field"><label>Complaint / reason for visit</label><input type="text" id="beTrouble" placeholder="e.g. Not cooling, PMS, leak at FCU"></div>
       <div class="field"><label>Work done <span class="req">*</span> <span class="be-sub">one per line</span></label><textarea id="beServices" rows="4" placeholder="Cleaned filters and coils&#10;Checked refrigerant pressure"></textarea></div>
       <div class="field"><label>Findings <span class="be-sub">one per line</span></label><textarea id="beFindings" rows="3"></textarea></div>

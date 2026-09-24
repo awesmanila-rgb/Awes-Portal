@@ -8481,7 +8481,7 @@
       row.innerHTML = '<div class="user-card-head" style="cursor:pointer;">'+
           '<div>'+
             '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-            '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+
+            '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.dispatchTime ? (' · dispatch '+r.dispatchTime) : '')+(r.expectedTime ? (' · at site '+r.expectedTime) : '')+
               (r.siteAddress ? (' · '+escapeHtml(r.siteAddress)) : '')+'</div>'+
             '<div class="u-status">'+resolved+' of '+items.length+' equipment resolved</div>'+
           '</div>'+
@@ -9284,6 +9284,7 @@
     $('dtJobOrderNo').value = '—';
     $('dtDate').value = todayISO();
     $('dtExpectedTime').value = '';
+    $('dtDispatchTime').value = '';
     $('dtCustName').value = ''; delete $('dtCustName').dataset.customerId;
     $('dtSiteAddress').value = '';
     $('dtContactName').value = ''; $('dtContactNo').value = '';
@@ -9408,6 +9409,7 @@
     }
     if(!custName){ toast('Enter the customer\'s name'); return; }
     if(!$('dtDate').value){ toast('Set the date'); return; }
+    if(!$('dtDispatchTime').value){ toast('Set the dispatch time — it\u2019s what "late" is measured against'); return; }
     if(dtDraftEquipItems.length===0){ toast('Add at least one piece of equipment to the ticket'); return; }
     $('dtCreateBtn').disabled = true; $('dtCreateBtn').textContent = 'Creating…';
     const jobOrderNo = await dtNextJobOrderNo();
@@ -9430,6 +9432,7 @@
       id, jobOrderNo: id, status: 'preparing',
       category,
       date: $('dtDate').value, expectedTime: $('dtExpectedTime').value,
+      dispatchTime: $('dtDispatchTime').value,
       assignedWorkerIds: workers.map(w=>w.id), assignedWorkerNames: workers.map(w=>w.name),
       reportAllowedWorkerIds: reporters.map(w=>w.id), reportAllowedWorkerNames: reporters.map(w=>w.name),
       custName, siteAddress: $('dtSiteAddress').value.trim(),
@@ -9620,6 +9623,23 @@
     return day+' at '+time;
   }
   function dtHasAnyAck(r){ return ((r.acknowledgedBy||[]).length > 0); }
+  // Late = its Dispatch Time has passed and nobody is en route yet
+  // (acknowledged) or on site. Measured against dispatchTime only — the
+  // client's Expected Time at Site never decides lateness. Tickets saved
+  // before Dispatch Time existed have none and are never flagged late.
+  // Same rule the admin-alerts Edge Function uses for the urgent push.
+  function dtDispatchMs(r){
+    if(!r || !r.date || !r.dispatchTime) return null;
+    const at = new Date(r.date+'T'+r.dispatchTime+':00'+BUSINESS_TZ_OFFSET).getTime();
+    return isFinite(at) ? at : null;
+  }
+  function dtIsLateDispatch(r){
+    const at = dtDispatchMs(r);
+    if(at == null || dtNowMs() < at) return false;
+    if(dtHasAnyAck(r) || r.arrivedAt) return false;
+    const st = r.status;
+    return !(st==='acknowledged' || st==='in_progress' || st==='completed' || st==='closed' || st==='cancelled');
+  }
   // Expiry is TERMINAL: a job order whose scheduled day passed with no
   // acknowledgement means the visit never happened, and there's no
   // attendance record for that day to back it up. Letting it be
@@ -9869,7 +9889,7 @@
     return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+'</div>'+
+          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.dispatchTime ? (' · dispatch '+r.dispatchTime) : '')+(r.expectedTime ? (' · at site '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+(dtIsLateDispatch(r) ? ' <span class="status-pill" style="background:#FDE4D6; color:#9A3412;">Late</span>' : '')+'</div>'+
           // Admin only, and outside jo-card-body on purpose: this has to be
           // readable without expanding the card, otherwise monitoring ten
           // live tickets still means ten taps.
@@ -22348,11 +22368,27 @@
   // name and signature — see setVis('srTabNewBtn', isTech) in auth.js). This
   // is the honest alternative: record work a technician already performed,
   // filed under that technician, with both signatures left blank and the
-  // record stamped with who keyed it in (admin_record_past_service RPC,
-  // supabase/migrations/20260924_02_report_back_entry.sql). It shows in the
-  // report lists and in that unit's equipment history like any report.
-  let beUnits = [];
+  // record stamped with who keyed it in (admin_record_past_service[s] RPC,
+  // supabase/migrations/20260924_02 and _03). It shows in the report lists
+  // and in each unit's equipment history like any report.
+  //
+  // Single / Multiple mirrors the technician's own wizard: the work
+  // details are shared, and each unit gets its own report, SR number and
+  // operation parameters (readings differ per unit).
+  let beUnits = [];        // customer_equipment rows for the chosen customer
+  let beCards = [];        // [{key}] one per unit being reported
+  let beCardSeq = 0;
+  let beMulti = false;
   let beLoaded = false;
+
+  const BE_OP = [
+    // [row label, [field, placeholder, phase3-only]...]
+    ['Amperage',                    [['amp1','Amps'],['amp2','A\u2082',1],['amp3','A\u2083',1]]],
+    ['Voltage',                     [['volt1','Volts'],['volt2','V\u2082',1],['volt3','V\u2083',1]]],
+    ['Pressure (Suction/Discharge)',[['psuc','Suction'],['pdis','Discharge']]],
+    ['Supply Air Temp (\u00b0C)',   [['temp','Supply air temp (\u00b0C)']]],
+    ['Air Volume Flow Rate (cfm)',  [['air','Air volume flow (cfm)']]]
+  ];
 
   function beLines(id){
     return String($(id).value || '').split(/\r?\n/).map(x=> x.trim()).filter(Boolean);
@@ -22361,7 +22397,98 @@
     ['beTrouble','beServices','beFindings','beRecs','beParts','beRemarks','beCustRep','beTimeIn','beTimeOut'].forEach(id=> $(id).value = '');
     $('beDate').value = '';
     $('beConfirm').checked = false;
+    beSetMode(false);
   }
+
+  // ---- unit cards ----
+  function beOpTableHtml(key){
+    const cell = (side, fields)=> '<td><div class="opdata-cell-inputs">' + fields.map(([f, ph, p3])=>
+      '<input type="text" inputmode="decimal" data-op="'+side+'_'+f+'" placeholder="'+ph+'"'+(p3 ? ' class="be-p3" style="display:none;"' : '')+'>').join('') + '</div></td>';
+    return '<div class="opdata-table-wrap"><table class="opdata-table"><thead><tr><th></th><th>Before Servicing</th><th>After Servicing</th></tr></thead><tbody>' +
+      BE_OP.map(([label, fields])=> '<tr><td class="opdata-row-label">'+label+'</td>'+cell('b', fields)+cell('a', fields)+'</tr>').join('') +
+      '</tbody></table></div>';
+  }
+  function beUnitOptions(selected){
+    const taken = beCards.map(c=> beCardEl(c.key)).filter(Boolean).map(el=> el.querySelector('[data-be="unit"]').value);
+    return '<option value="">Select unit…</option>' + beUnits.map(u=>{
+      const bits = [equipDisplayName(u), u.equipType, u.brand, u.coolCap].map(x=> String(x || '').trim()).filter(Boolean);
+      const dis = u.id !== selected && taken.includes(u.id);
+      return '<option value="'+escapeHtml(u.id)+'"'+(u.id === selected ? ' selected' : '')+(dis ? ' disabled' : '')+'>'+escapeHtml(bits.join(' · ') + (dis ? ' (already added)' : ''))+'</option>';
+    }).join('');
+  }
+  function beCardEl(key){ return $('beUnitList').querySelector('[data-card="'+key+'"]'); }
+  function beRefreshUnitSelects(){
+    beCards.forEach((c, i)=>{
+      const el = beCardEl(c.key); if(!el) return;
+      const sel = el.querySelector('[data-be="unit"]');
+      const v = sel.value;
+      sel.innerHTML = beUnits.length ? beUnitOptions(v) : '<option value="">'+($('beCustomer').value ? 'No units on file' : 'Choose a customer first…')+'</option>';
+      sel.disabled = !beUnits.length;
+      el.querySelector('.be-unit-head b').textContent = beMulti ? 'Unit ' + (i + 1) : 'Unit';
+      el.querySelector('.be-unit-remove').style.display = (beMulti && beCards.length > 1) ? '' : 'none';
+      el.querySelector('.be-copy').style.display = (beMulti && i > 0) ? '' : 'none';
+    });
+    $('beAddUnitBtn').style.display = beMulti ? '' : 'none';
+    $('beAddUnitBtn').disabled = !beUnits.length || beCards.length >= beUnits.length;
+    $('beWorkSub').textContent = beMulti ? 'shared by every unit' : '';
+    $('beSaveBtn').textContent = beMulti ? 'Save ' + beCards.length + ' Past Service Report' + (beCards.length === 1 ? '' : 's') : 'Save Past Service Report';
+  }
+  function beAddCard(){
+    const key = ++beCardSeq;
+    beCards.push({ key });
+    const el = document.createElement('div');
+    el.className = 'be-unit'; el.dataset.card = key;
+    el.innerHTML =
+      '<div class="be-unit-head"><b>Unit</b><button type="button" class="be-unit-remove">Remove</button></div>' +
+      '<div class="field"><label>Unit serviced <span class="req">*</span></label><select data-be="unit"></select></div>' +
+      '<label class="sr-phase-toggle"><input type="checkbox" data-be="p3"><span>This unit is 3-phase (L1/L2/L3)</span></label>' +
+      beOpTableHtml(key) +
+      '<button type="button" class="be-copy">Copy readings from the unit above</button>';
+    $('beUnitList').appendChild(el);
+    el.querySelector('[data-be="unit"]').addEventListener('change', beRefreshUnitSelects);
+    el.querySelector('[data-be="p3"]').addEventListener('change', (e)=> beApplyPhase(el, e.target.checked));
+    el.querySelector('.be-unit-remove').addEventListener('click', ()=>{
+      beCards = beCards.filter(c=> c.key !== key); el.remove(); beRefreshUnitSelects();
+    });
+    el.querySelector('.be-copy').addEventListener('click', ()=>{
+      const idx = beCards.findIndex(c=> c.key === key);
+      const prev = idx > 0 ? beCardEl(beCards[idx - 1].key) : null;
+      if(!prev) return;
+      const p3 = prev.querySelector('[data-be="p3"]').checked;
+      el.querySelector('[data-be="p3"]').checked = p3; beApplyPhase(el, p3);
+      prev.querySelectorAll('[data-op]').forEach(inp=>{ el.querySelector('[data-op="'+inp.dataset.op+'"]').value = inp.value; });
+      toast('Readings copied — adjust what differs');
+    });
+    beRefreshUnitSelects();
+  }
+  function beApplyPhase(el, on){
+    el.querySelectorAll('.be-p3').forEach(inp=>{ inp.style.display = on ? '' : 'none'; if(!on) inp.value = ''; });
+  }
+  function beSetMode(multi){
+    beMulti = !!multi;
+    $('beModeSingle').classList.toggle('active', !beMulti);
+    $('beModeMulti').classList.toggle('active', beMulti);
+    if(!beMulti){
+      // back to one card: keep the first, drop the rest
+      beCards.slice(1).forEach(c=>{ const el = beCardEl(c.key); if(el) el.remove(); });
+      beCards = beCards.slice(0, 1);
+    }
+    if(!beCards.length) beAddCard();
+    else if(beMulti && beCards.length < 2 && beUnits.length > 1) beAddCard();
+    beRefreshUnitSelects();
+  }
+  $('beModeSingle').addEventListener('click', ()=> beSetMode(false));
+  $('beModeMulti').addEventListener('click', ()=> beSetMode(true));
+  $('beAddUnitBtn').addEventListener('click', ()=> beAddCard());
+
+  // Same shape the normal report stores (before_data / after_data).
+  function beReadOp(el, side){
+    const v = f=>{ const i = el.querySelector('[data-op="'+side+'_'+f+'"]'); return i ? i.value.trim() : ''; };
+    return { amp:[v('amp1'), v('amp2'), v('amp3')], volt:[v('volt1'), v('volt2'), v('volt3')],
+             pressure:[v('psuc'), v('pdis')], temp:v('temp'), airflow:v('air') };
+  }
+
+  // ---- pickers ----
   async function beLoadPickers(){
     $('beDate').max = todayISO();
     const catSel = $('beCategory');
@@ -22379,61 +22506,55 @@
     const keepCust = $('beCustomer').value;
     $('beCustomer').innerHTML = '<option value="">Select customer…</option>' +
       (customersCache || []).map(c=> '<option value="'+escapeHtml(c.id)+'">'+escapeHtml(c.name)+'</option>').join('');
-    if(keepCust){ $('beCustomer').value = keepCust; }
+    if(keepCust) $('beCustomer').value = keepCust;
     beLoaded = true;
   }
   async function beLoadUnits(){
     const custId = $('beCustomer').value;
-    const sel = $('beUnit');
     beUnits = [];
     $('beUnitHint').textContent = '';
-    if(!custId){ sel.disabled = true; sel.innerHTML = '<option value="">Choose a customer first…</option>'; return; }
-    sel.disabled = true; sel.innerHTML = '<option value="">Loading units…</option>';
-    try{
-      const { data, error } = await db.from('customer_equipment').select('*').eq('customer_id', custId);
-      if(error) throw error;
-      beUnits = (data || []).map(equipRowToObj);
-    }catch(e){ console.error('load units failed', describeCloudError(e)); toast('Could not load this customer\u2019s units'); }
-    if(!beUnits.length){
-      sel.innerHTML = '<option value="">No units on file</option>';
-      $('beUnitHint').textContent = 'Add the unit under Equipment first, then come back to record the visit.';
-      return;
+    // a new customer means none of the old unit picks are valid
+    beCards.forEach(c=>{ const el = beCardEl(c.key); if(el) el.querySelector('[data-be="unit"]').value = ''; });
+    if(custId){
+      try{
+        const { data, error } = await db.from('customer_equipment').select('*').eq('customer_id', custId);
+        if(error) throw error;
+        beUnits = (data || []).map(equipRowToObj);
+      }catch(e){ console.error('load units failed', describeCloudError(e)); toast('Could not load this customer\u2019s units'); }
+      if(!beUnits.length) $('beUnitHint').textContent = 'This customer has no units on file. Add the unit under Equipment first, then come back to record the visit.';
     }
-    sel.innerHTML = '<option value="">Select unit…</option>' + beUnits.map(u=>{
-      const bits = [equipDisplayName(u), u.equipType, u.brand, u.coolCap].map(x=> String(x || '').trim()).filter(Boolean);
-      return '<option value="'+escapeHtml(u.id)+'">'+escapeHtml(bits.join(' · '))+'</option>';
-    }).join('');
-    sel.disabled = false;
+    beRefreshUnitSelects();
   }
   async function beOpen(){
     if(!beLoaded) beReset();
     try{ await beLoadPickers(); }
     catch(e){ console.error('record past service: load failed', e); toast('Could not load technicians/customers'); }
+    beRefreshUnitSelects();
   }
   $('beCustomer').addEventListener('change', beLoadUnits);
 
+  // ---- save ----
   $('beSaveBtn').addEventListener('click', async ()=>{
-    const techId = $('beTech').value, custId = $('beCustomer').value, unitId = $('beUnit').value;
+    const techId = $('beTech').value, custId = $('beCustomer').value;
     const date = $('beDate').value, services = beLines('beServices');
     if(!techId) return toast('Choose the technician who did the work');
     if(!custId) return toast('Choose the customer');
-    if(!unitId) return toast('Choose the unit that was serviced');
+    const cards = beCards.map(c=> beCardEl(c.key)).filter(Boolean);
+    const unitIds = cards.map(el=> el.querySelector('[data-be="unit"]').value);
+    const missing = unitIds.findIndex(v=> !v);
+    if(missing >= 0) return toast(beMulti ? 'Choose the unit for Unit ' + (missing + 1) : 'Choose the unit that was serviced');
+    if(new Set(unitIds).size !== unitIds.length) return toast('The same unit was added twice');
     if(!date) return toast('Enter the date the work was performed');
     if(date > todayISO()) return toast('The date can\u2019t be in the future');
     if(!services.length) return toast('List the work that was done');
     if(!$('beConfirm').checked) return toast('Tick the confirmation box first');
+
     const cust = (customersCache || []).find(c=> c.id === custId) || {};
-    const u = beUnits.find(x=> x.id === unitId) || {};
-    const payload = {
+    const shared = {
       technician_id: techId, date,
       service_category: $('beCategory').value || DEFAULT_REPORT_CATEGORY,
       customer_id: custId, cust_name: cust.name || '', cust_address: cust.address || '',
       contact_no: cust.contactNo || '', contact_person: cust.contactPerson || '', cust_email: cust.email || '',
-      equipment_id: unitId,
-      equip_type: u.equipType || '', equip_location: u.equipLocation || '', brand: u.brand || '',
-      mount_type: u.mountType || '', cool_cap: u.coolCap || '', model_cu: u.modelCU || '', serial_cu: u.serialCU || '',
-      model_fcu: u.modelFCU || '', serial_fcu: u.serialFCU || '', refrigerant_type: u.refrigerantType || '',
-      compressor_type: u.compressorType || '',
       trouble_call: $('beTrouble').value.trim(),
       time_in: $('beTimeIn').value, time_out: $('beTimeOut').value,
       services_done: services, findings: beLines('beFindings'), recommendations: beLines('beRecs'),
@@ -22442,29 +22563,415 @@
       customer_printed_name: $('beCustRep').value.trim(),
       is_install: false
     };
+    const reports = cards.map((el, i)=>{
+      const u = beUnits.find(x=> x.id === unitIds[i]) || {};
+      return Object.assign({}, shared, {
+        equipment_id: u.id,
+        equip_type: u.equipType || '', equip_location: u.equipLocation || '', brand: u.brand || '',
+        mount_type: u.mountType || '', cool_cap: u.coolCap || '', model_cu: u.modelCU || '', serial_cu: u.serialCU || '',
+        model_fcu: u.modelFCU || '', serial_fcu: u.serialFCU || '', refrigerant_type: u.refrigerantType || '',
+        compressor_type: u.compressorType || '',
+        before_data: beReadOp(el, 'b'), after_data: beReadOp(el, 'a')
+      });
+    });
+
     const btn = $('beSaveBtn');
+    const label = btn.textContent;
     btn.disabled = true; btn.textContent = 'Saving…';
     try{
       if(!(await ensureCloud())) throw new Error('offline');
-      const { data: srNo, error } = await db.rpc('admin_record_past_service', { p_report: payload });
+      // One transaction for every unit: all saved, or none.
+      const { data: srNos, error } = await db.rpc('admin_record_past_services', { p_reports: reports });
       if(error) throw error;
-      toast('Saved as ' + srNo);
-      beReset();
-      beLoaded = false;
-      // Show the filed report straight away, in the PDF viewer.
-      const d = await cloudGetReport(srNo);
-      if(d){
-        const doc = await buildPdf(d);
-        await openFileInPdfViewer(doc, srNo + '.pdf', d.custName || srNo);
+      toast(srNos.length === 1 ? 'Saved as ' + srNos[0] : srNos.length + ' reports saved (' + srNos[0] + ' – ' + srNos[srNos.length - 1] + ')');
+      // Clear the form, keep technician/customer (often recording several visits in a row).
+      ['beTrouble','beServices','beFindings','beRecs','beParts','beRemarks','beCustRep','beTimeIn','beTimeOut','beDate'].forEach(id=> $(id).value = '');
+      $('beConfirm').checked = false;
+      $('beUnitList').innerHTML = ''; beCards = [];
+      beSetMode(beMulti);
+      // Show what was filed, in the PDF viewer (Download / Share there).
+      const rows = (await Promise.all(srNos.map(sr=> cloudGetReport(sr)))).filter(Boolean);
+      if(rows.length === 1){
+        await openFileInPdfViewer(await buildPdf(rows[0]), rows[0].srNo + '.pdf', rows[0].custName || rows[0].srNo);
+      }else if(rows.length > 1){
+        const docs = [];
+        for(const d of rows) docs.push({ doc: await buildPdf(d), label: d.srNo + ' · ' + (d.equipLocation || d.equipType || ''), filename: d.srNo + '.pdf' });
+        $('previewOverlay').querySelector('h3').textContent = (rows[0].custName || 'Reports') + ' — ' + rows.length + ' units';
+        $('previewOkBtn').textContent = 'Close';
+        $('previewOverlay').style.zIndex = '99';
+        $('previewOverlay').classList.add('open');
+        setPreviewZoom(1);
+        await renderPdfPreviewMulti(docs);
       }
     }catch(e){
       console.error('record past service failed', describeCloudError(e));
       const msg = (e && e.message) || '';
       toast(msg === 'offline' ? 'You\u2019re offline — this needs a connection to save'
-        : /P0001|future|Choose|unit|date/i.test(msg) ? msg : 'Could not save — ' + (msg || 'please try again'));
+        : /future|Choose|unit|date|twice|at most/i.test(msg) ? msg : 'Could not save — ' + (msg || 'please try again'));
     }finally{
-      btn.disabled = false; btn.textContent = 'Save Past Service Report';
+      btn.disabled = false;
+      if(btn.textContent === 'Saving…') btn.textContent = label;
+      beRefreshUnitSelects();
     }
+  });
+
+
+// ---------- Admin homepage: "Needs you now" + "Technicians today" ----------
+  // One ranked list of what's waiting on admin, instead of equal-weight
+  // counters. Tiers: urgent (red) → today (amber) → watch (grey); within a
+  // tier, oldest first. Built from the same data renderHomeOverview()
+  // already fetched, plus a few small reads of its own (service requests,
+  // material requisitions, POs, PM dates, reorder). The server-side twin is
+  // supabase/functions/admin-alerts (urgent push + 7:00 AM digest) — keep
+  // the "late" rule in step with dtIsLateDispatch() in dispatch.js.
+  //
+  // Quick approve: only where the whole decision fits on one line —
+  // leave requests, and material requisitions approved exactly as
+  // requested. Cash advance, liquidation, JO review and report sign-off
+  // always open the full screen.
+  const PRIO_TODAY_SHOWN = 6;
+  let prioExpanded = false;
+  let prioLastItems = [];
+
+  function prioAge(ms){
+    if(!(ms > 0)) return '';
+    const m = Math.round(ms / 60000);
+    if(m < 60) return m + 'm';
+    const h = Math.round(m / 60);
+    if(h < 24) return h + 'h';
+    const d = Math.round(h / 24);
+    return d + (d === 1 ? ' day' : ' days');
+  }
+  function prioSince(iso){ const t = iso ? new Date(iso).getTime() : NaN; return isFinite(t) ? Date.now() - t : 0; }
+  function prioFmtTime(hhmm){
+    if(!hhmm) return '';
+    const [h, m] = hhmm.split(':').map(Number);
+    return ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + (h < 12 ? ' AM' : ' PM');
+  }
+  function prioDateRange(a, b){ return leaveFmtDate(a) + (b && b !== a ? ' – ' + leaveFmtDate(b) : ''); }
+  function prioOverlaps(a1, a2, b1, b2){ return a1 <= (b2 || b1) && b1 <= (a2 || a1); }
+
+  async function prioSafe(fn, fallback){ try{ return await fn(); }catch(e){ console.warn('priority: partial data', e); return fallback; } }
+
+  // ---- extra reads (each best-effort; a failure just drops that row type) ----
+  async function prioLoadExtras(){
+    if(!(await ensureCloud())) return {};
+    const today = todayISO();
+    const in7 = new Date(new Date(today + 'T00:00:00+08:00').getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
+    const [srNew, mrs, pos, pms, reorder] = await Promise.all([
+      prioSafe(async ()=>{ const { data, error } = await db.from('service_requests').select('id, created_at, description, urgency, customer_id').eq('status', 'new').order('created_at'); if(error) throw error; return data || []; }, []),
+      prioSafe(async ()=>{ const { data, error } = await db.from('material_requisitions').select('id, mrf_no, requester_name, requested_by, submitted_at, created_at').eq('status', 'submitted').order('submitted_at'); if(error) throw error; return data || []; }, []),
+      prioSafe(async ()=>{ const { data, error } = await db.from('purchase_orders').select('id, po_no, updated_at').eq('status', 'draft').lt('updated_at', twoDaysAgo).order('updated_at'); if(error) throw error; return data || []; }, []),
+      prioSafe(async ()=>{ const { data, error } = await db.from('customer_equipment').select('id').gte('next_pm_date', today).lte('next_pm_date', in7); if(error) throw error; return data || []; }, []),
+      prioSafe(async ()=>{ const { data, error } = await db.rpc('inv_rpt_reorder', { p_days: 90 }); if(error) throw error; return (data || []).filter(r=> r.reorder); }, [])
+    ]);
+    // First few lines of each requisition, for the one-line summary.
+    let mrItems = {};
+    if(mrs.length){
+      await prioSafe(async ()=>{
+        const { data, error } = await db.from('material_requisition_items').select('mr_id, description, qty_requested, unit').in('mr_id', mrs.map(m=> m.id));
+        if(error) throw error;
+        (data || []).forEach(it=>{ (mrItems[it.mr_id] = mrItems[it.mr_id] || []).push(it); });
+      }, null);
+    }
+    const custNames = {};
+    (customersCache || []).forEach(c=>{ custNames[c.id] = c.name; });
+    return { srNew, mrs, mrItems, pos, pms, reorder, custNames };
+  }
+
+  // ---- build the ranked list ----
+  function prioBuild(base, extra){
+    const items = [];
+    const today = todayISO();
+    const tickets = base.tickets || [];
+    const add = (tier, o)=> items.push(Object.assign({ tier, age: 0, actions: [] }, o));
+    const openTicket = id=> ()=> dtOpenTicketOverlay(id);
+
+    // URGENT — late job orders (dispatch time passed, nobody en route)
+    tickets.filter(t=> t.date === today && dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').forEach(t=>{
+      const lateBy = Date.now() - dtDispatchMs(t);
+      add('urgent', {
+        key: 'late:' + t.id, age: lateBy,
+        title: (t.jobOrderNo || t.id) + ' is ' + prioAge(lateBy) + ' late — not en route',
+        sub: (t.custName || 'Customer') + ' · Dispatch ' + prioFmtTime(t.dispatchTime) + ' · ' + ((t.assignedWorkerNames || []).join(', ') || 'no crew'),
+        actions: [{ label: 'Open job order', primary: true, run: openTicket(t.id) }]
+      });
+    });
+    // URGENT — expired today (window passed, nobody acknowledged)
+    tickets.filter(t=> t.date === today && dtEffectiveStatus(t) === 'expired').forEach(t=>{
+      add('urgent', {
+        key: 'exp:' + t.id, age: 1,
+        title: (t.jobOrderNo || t.id) + ' expired — no one acknowledged',
+        sub: (t.custName || 'Customer') + ' · raise a new job order if the visit is still needed',
+        actions: [{ label: 'Open', primary: false, run: openTicket(t.id) }]
+      });
+    });
+    // URGENT — customer service requests nobody has acknowledged for 60+ min
+    (extra.srNew || []).forEach(r=>{
+      const age = prioSince(r.created_at);
+      if(age < 60 * 60000) return;
+      add('urgent', {
+        key: 'sr:' + r.id, age,
+        title: 'Service request unanswered for ' + prioAge(age) + (r.urgency === 'urgent' ? ' (marked urgent)' : ''),
+        sub: (extra.custNames[r.customer_id] || 'Customer') + ' · ' + String(r.description || '').slice(0, 80),
+        actions: [{ label: 'Open requests', primary: true, run: ()=> showServiceRequestsView() }]
+      });
+    });
+
+    // TODAY — leave (quick approve)
+    (base.leaves || []).filter(r=> r.status === 'pending').forEach(r=>{
+      const others = (base.leaves || []).filter(o=> o.status === 'approved' && o.userId !== r.userId && prioOverlaps(r.dateFrom, r.dateTo, o.dateFrom, o.dateTo));
+      const jos = tickets.filter(t=> !dtIsTerminal(t) && (t.assignedWorkerIds || []).includes(r.userId) && t.date >= r.dateFrom && t.date <= (r.dateTo || r.dateFrom));
+      const conflict = [others.length ? others.map(o=> o.userName).join(', ') + ' also off' : 'No one else off',
+                        jos.length ? jos.length + ' job order' + (jos.length === 1 ? '' : 's') + ' assigned those days' : ''].filter(Boolean).join(' · ');
+      add('today', {
+        key: 'leave:' + r.id, age: prioSince(r.submittedAt), kind: 'leave', rec: r, others, jos,
+        title: 'Leave — ' + (r.userName || 'Technician') + ', ' + prioDateRange(r.dateFrom, r.dateTo) + ' (' + (r.leaveType || 'Leave') + ')',
+        sub: conflict + ' · waiting ' + prioAge(prioSince(r.submittedAt)),
+        actions: [{ label: 'Open', run: ()=> showLeaveView() }, { label: 'Quick approve', primary: true, run: ()=> prioQuickApprove('leave:' + r.id) }]
+      });
+    });
+    // TODAY — material requisitions (quick approve = exactly as requested)
+    (extra.mrs || []).forEach(m=>{
+      const lines = (extra.mrItems[m.id] || []);
+      const summary = lines.slice(0, 2).map(it=> it.description + ' ×' + mrQty(it.qty_requested) + (it.unit ? ' ' + it.unit : '')).join(', ') + (lines.length > 2 ? ' …' : '');
+      const age = prioSince(m.submitted_at || m.created_at);
+      add('today', {
+        key: 'mr:' + m.id, age, kind: 'mr', rec: m, lines,
+        title: 'Material requisition ' + m.mrf_no + ' — ' + lines.length + ' item' + (lines.length === 1 ? '' : 's'),
+        sub: (m.requester_name || 'Technician') + (summary ? ' · ' + summary : '') + ' · waiting ' + prioAge(age),
+        actions: [{ label: 'Open', run: async ()=>{ showPurchasingView('requisitions'); await mrOpen(m.id); } },
+                  { label: 'Quick approve', primary: true, run: ()=> prioQuickApprove('mr:' + m.id) }]
+      });
+    });
+    // TODAY — cash advance (full review only)
+    (base.cashAdvances || []).filter(r=> r.status === 'pending').forEach(r=>{
+      add('today', {
+        key: 'ca:' + r.id, age: prioSince(r.submittedAt),
+        title: 'Cash advance ' + caFmtPeso(Number(r.amount) || 0) + ' — ' + (r.userName || 'Technician'),
+        sub: (r.purpose ? String(r.purpose).slice(0, 70) + ' · ' : '') + 'waiting ' + prioAge(prioSince(r.submittedAt)),
+        actions: [{ label: 'Review', run: ()=>{ setSidebarActive('sbNavCashAdvance'); showCashAdvanceView(); } }]
+      });
+    });
+    // TODAY — liquidation (full review only)
+    (base.cashAdvances || []).filter(r=> r.liquidation && r.liquidation.status === 'pending').forEach(r=>{
+      const at = r.liquidation.submittedAt || r.submittedAt;
+      add('today', {
+        key: 'liq:' + r.id, age: prioSince(at),
+        title: 'Liquidation to check — ' + (r.userName || 'Technician'),
+        sub: 'Receipts for ' + caFmtPeso(Number(r.amountGiven || r.amount) || 0) + ' · waiting ' + prioAge(prioSince(at)),
+        actions: [{ label: 'Review', run: async ()=>{ setSidebarActive('sbNavLiquidation'); await showCashAdvanceView(); caShowTab('liquidate'); } }]
+      });
+    });
+    // TODAY — grouped: JO review, reports to sign off, balances to settle
+    const toReview = tickets.filter(t=> t.status === 'completed');
+    if(toReview.length){
+      const oldest = Math.max(...toReview.map(t=> prioSince(t.completedAt)));
+      add('today', {
+        key: 'jorev', age: oldest,
+        title: toReview.length + ' job order' + (toReview.length === 1 ? '' : 's') + ' to review and close',
+        sub: 'Oldest ' + (toReview[0].jobOrderNo || '') + (oldest ? ' · ' + prioAge(oldest) : ''),
+        actions: [{ label: 'Review', run: async ()=>{ await showDispatchView('all'); dtSetAdminFilter('completed'); } }]
+      });
+    }
+    const drafts = (base.reports || []).filter(r=> !r.completed);
+    if(drafts.length){
+      add('today', {
+        key: 'srsign', age: 1,
+        title: drafts.length + ' service report' + (drafts.length === 1 ? '' : 's') + ' pending sign-off',
+        sub: 'Oldest ' + (drafts.map(r=> r.srNo).filter(Boolean).sort()[0] || ''),
+        actions: [{ label: 'Review', run: ()=>{ showServiceReport(); srShowTab('draft'); } }]
+      });
+    }
+    const unsettled = (base.cashAdvances || []).filter(r=> r.liquidation && r.liquidation.status === 'approved' && r.liquidation.settlement && !r.liquidation.settlement.settled);
+    if(unsettled.length){
+      add('today', {
+        key: 'settle', age: 1,
+        title: unsettled.length + ' balance' + (unsettled.length === 1 ? '' : 's') + ' to settle',
+        sub: 'Approved liquidations with money to collect or reimburse',
+        actions: [{ label: 'Open', run: async ()=>{ setSidebarActive('sbNavReimbursement'); await showCashAdvanceView(); caShowAdminSection('reimb'); } }]
+      });
+    }
+
+    // WATCH — chips
+    if((extra.reorder || []).length) add('watch', { key: 'reorder', title: extra.reorder.length + ' item' + (extra.reorder.length === 1 ? '' : 's') + ' below reorder level', actions: [{ label: 'Reorder report', run: ()=> showPurchasingView('invReports') }] });
+    if((extra.pms || []).length) add('watch', { key: 'pm', title: extra.pms.length + ' PM' + (extra.pms.length === 1 ? '' : 's') + ' due this week', actions: [{ label: 'Calendar', run: ()=> showDispatchView('calendar') }] });
+    (extra.pos || []).slice(0, 3).forEach(p=> add('watch', { key: 'po:' + p.id, title: (p.po_no || 'PO') + ' still a draft (' + prioAge(prioSince(p.updated_at)) + ')', actions: [{ label: 'Open', run: ()=> showPurchasingView('purchaseOrders') }] }));
+    const noDispatch = tickets.filter(t=> t.date === today && !t.dispatchTime && !dtIsTerminal(t));
+    if(noDispatch.length) add('watch', { key: 'nodisp', title: noDispatch.length + ' JO' + (noDispatch.length === 1 ? '' : 's') + ' today without a dispatch time', actions: [{ label: 'Dispatch', run: ()=> showDispatchView('all') }] });
+
+    const rank = { urgent: 0, today: 1, watch: 2 };
+    items.sort((a, b)=> rank[a.tier] - rank[b.tier] || b.age - a.age);
+    return items;
+  }
+
+  // ---- technicians today ----
+  function prioTechStatus(base){
+    const today = todayISO();
+    const users = (base.users || []).filter(u=> u.active !== false).sort((a, b)=> String(a.name).localeCompare(String(b.name)));
+    const dtr = {}; (base.dtrToday || []).forEach(d=>{ if(d) dtr[d.technicianId] = d; });
+    const tickets = (base.tickets || []).filter(t=> t.date === today || t.status === 'in_progress' || t.status === 'acknowledged');
+    const onLeave = new Set((base.leaves || []).filter(l=> l.status === 'approved' && today >= l.dateFrom && today <= (l.dateTo || l.dateFrom)).map(l=> l.userId));
+    const rank = { late:0, onsite:1, enroute:2, idle:3, next:4, notin:5, done:6, off:7 };
+    return users.map(u=>{
+      const mine = tickets.filter(t=> (t.assignedWorkerIds || []).includes(u.id));
+      const live = mine.filter(t=> !dtIsTerminal(t) || t.status === 'in_progress');
+      const d = dtr[u.id];
+      let key, label, sub;
+      const late = live.find(t=> dtIsLateDispatch(t));
+      const onsite = live.find(t=> t.status === 'in_progress');
+      const enroute = live.find(t=> t.status === 'acknowledged');
+      if(onLeave.has(u.id)){ key = 'off'; label = 'Off'; sub = 'On leave'; }
+      else if(late){ key = 'late'; label = 'Late'; sub = (late.jobOrderNo || '') + ' · dispatch ' + prioFmtTime(late.dispatchTime); }
+      else if(onsite){ key = 'onsite'; label = 'On site'; sub = (onsite.jobOrderNo || '') + ' · ' + (onsite.custName || ''); }
+      else if(enroute){ key = 'enroute'; label = 'En route'; sub = (enroute.jobOrderNo || '') + ' · ' + (enroute.custName || ''); }
+      else if(live.length){ const n = live.slice().sort((a, b)=> String(a.dispatchTime || '').localeCompare(String(b.dispatchTime || '')))[0];
+        key = 'next'; label = 'Next'; sub = (n.jobOrderNo || '') + (n.dispatchTime ? ' · dispatch ' + prioFmtTime(n.dispatchTime) : ''); }
+      else if(mine.length){ key = 'done'; label = 'Done'; sub = mine.length + ' job' + (mine.length === 1 ? '' : 's') + ' today'; }
+      else if(d && d.timeIn && !d.timeOut){ key = 'idle'; label = 'Idle'; sub = 'Timed in ' + prioFmtTime(d.timeIn) + ' · no job order'; }
+      else if(d && d.timeOut){ key = 'done'; label = 'Timed out'; sub = 'Out ' + prioFmtTime(d.timeOut); }
+      else { key = 'notin'; label = 'Not timed in'; sub = 'No job order today'; }
+      return { id: u.id, name: u.name || u.username || 'Technician', key, label, sub, r: rank[key] };
+    }).sort((a, b)=> a.r - b.r || a.name.localeCompare(b.name));
+  }
+
+  // ---- render ----
+  function prioItemHtml(it, idx){
+    return '<div class="prio-item prio-' + it.tier + '">' +
+      '<span class="prio-dot" aria-hidden="true"></span>' +
+      '<div class="prio-text"><div class="prio-title">' + escapeHtml(it.title) + '</div>' +
+        (it.sub ? '<div class="prio-sub">' + escapeHtml(it.sub) + '</div>' : '') + '</div>' +
+      '<div class="prio-actions">' + it.actions.map((a, j)=>
+        '<button type="button" class="prio-btn' + (a.primary ? ' primary' : '') + '" data-prio="' + idx + ':' + j + '">' + escapeHtml(a.label) + '</button>').join('') +
+      '</div></div>';
+  }
+  function prioRenderList(){
+    const items = prioLastItems;
+    const urgent = items.filter(i=> i.tier === 'urgent'), today = items.filter(i=> i.tier === 'today'), watch = items.filter(i=> i.tier === 'watch');
+    $('prioCountUrgent').textContent = urgent.length + ' urgent';
+    $('prioCountToday').textContent = today.length + ' for today';
+    $('prioCountWatch').textContent = watch.length + ' to watch';
+    $('prioCountUrgent').classList.toggle('zero', !urgent.length);
+    $('prioCountToday').classList.toggle('zero', !today.length);
+    $('prioCountWatch').classList.toggle('zero', !watch.length);
+    if(!items.length){
+      $('prioList').innerHTML = '<div class="prio-clear"><b>All clear ✓</b><span>Nothing is waiting on you right now.</span></div>';
+      return;
+    }
+    const idx = it=> items.indexOf(it);
+    let html = '';
+    if(urgent.length) html += '<div class="prio-tier prio-tier-urgent">Urgent</div>' + urgent.map(it=> prioItemHtml(it, idx(it))).join('');
+    if(today.length){
+      const shown = prioExpanded ? today : today.slice(0, PRIO_TODAY_SHOWN);
+      html += '<div class="prio-tier prio-tier-today">For today</div>' + shown.map(it=> prioItemHtml(it, idx(it))).join('');
+      if(today.length > shown.length) html += '<button type="button" class="prio-more" id="prioMoreBtn">+ ' + (today.length - shown.length) + ' more for today</button>';
+    }
+    if(watch.length) html += '<div class="prio-tier prio-tier-watch">Watch</div><div class="prio-watch">' + watch.map(it=>
+      '<button type="button" class="prio-chip" data-prio="' + idx(it) + ':0">' + escapeHtml(it.title) + '</button>').join('') + '</div>';
+    $('prioList').innerHTML = html;
+  }
+  function prioRenderTechs(rows){
+    const n = k=> rows.filter(r=> k.includes(r.key)).length;
+    const bits = [n(['onsite','enroute']) + ' on a job', n(['late']) ? n(['late']) + ' late' : '', n(['idle']) ? n(['idle']) + ' free' : '', n(['off']) ? n(['off']) + ' off' : ''].filter(Boolean);
+    $('prioTechSub').textContent = bits.join(' · ');
+    $('prioTechList').innerHTML = rows.length ? rows.map(r=>
+      '<div class="prio-tech"><b>' + escapeHtml(r.name) + '</b><span class="prio-tech-sub">' + escapeHtml(r.sub) + '</span>' +
+      '<span class="prio-pill prio-pill-' + r.key + '">' + escapeHtml(r.label) + '</span></div>').join('')
+      : '<div class="empty-state">No active technicians.</div>';
+  }
+  // App-icon badge (installed PWA): urgent + today. Also refreshed by the
+  // push handler in sw.js whenever an alert arrives with the app closed.
+  function prioSetBadge(n){
+    try{
+      if(n > 0 && navigator.setAppBadge) navigator.setAppBadge(n);
+      else if(navigator.clearAppBadge) navigator.clearAppBadge();
+    }catch(e){ /* unsupported — ignore */ }
+  }
+
+  async function prioRender(base){
+    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; return; }
+    $('prioCard').style.display = ''; $('prioTechCard').style.display = '';
+    try{
+      const extra = await prioLoadExtras();
+      prioLastItems = prioBuild(base, Object.assign({ custNames: {} }, extra));
+      prioLastBase = base;
+      prioRenderList();
+      prioRenderTechs(prioTechStatus(base));
+      prioSetBadge(prioLastItems.filter(i=> i.tier !== 'watch').length);
+    }catch(e){
+      console.error('priority render failed', e);
+      $('prioList').innerHTML = '<div class="empty-state">Couldn\u2019t load the priority list — pull to refresh.</div>';
+    }
+  }
+  let prioLastBase = null;
+  // "Late" is time-based, so re-check every 2 minutes while the admin is
+  // looking at the homepage — a job order turns red at its dispatch time
+  // without anyone having to refresh.
+  setInterval(()=>{
+    if(!prioLastBase || !currentUser || currentUser.role !== 'admin') return;
+    if(document.hidden || $('homeScreen').style.display === 'none') return;
+    prioRender(prioLastBase);
+  }, 120000);
+
+  $('prioList').addEventListener('click', async (e)=>{
+    if(e.target.closest('#prioMoreBtn')){ prioExpanded = true; prioRenderList(); return; }
+    const b = e.target.closest('[data-prio]'); if(!b) return;
+    const [i, j] = b.dataset.prio.split(':').map(Number);
+    const it = prioLastItems[i]; const act = it && it.actions[j];
+    if(!act) return;
+    try{ closeMainMenu && closeMainMenu(); }catch(err){}
+    try{ await act.run(); }catch(err){ console.error('priority action failed', err); toast('Could not open that'); }
+  });
+
+  // ---- quick approve (leave, MR as requested) ----
+  let prioQaItem = null;
+  function prioQaClose(){ $('prioQaOverlay').classList.remove('open'); prioQaItem = null; }
+  function prioQuickApprove(key){
+    const it = prioLastItems.find(x=> x.key === key); if(!it) return;
+    prioQaItem = it;
+    let title, body;
+    if(it.kind === 'leave'){
+      const r = it.rec;
+      title = 'Approve leave for ' + (r.userName || 'this technician') + '?';
+      body = '<div>' + escapeHtml((r.leaveType || 'Leave') + ' · ' + prioDateRange(r.dateFrom, r.dateTo) + ' (' + (r.days || 1) + (Number(r.days) === 1 ? ' day' : ' days') + ')') + '</div>' +
+        '<div>' + escapeHtml(it.others.length ? 'Also off those days: ' + it.others.map(o=> o.userName).join(', ') : 'No other technician is off those days.') + '</div>' +
+        '<div' + (it.jos.length ? ' class="prio-qa-warn"' : '') + '>' + escapeHtml(it.jos.length ? it.jos.length + ' job order' + (it.jos.length === 1 ? ' is' : 's are') + ' assigned to them on those dates: ' + it.jos.map(t=> t.jobOrderNo).join(', ') : 'No job orders assigned to them on those dates.') + '</div>' +
+        (r.reason ? '<div class="prio-qa-muted">Reason: ' + escapeHtml(r.reason) + '</div>' : '');
+    }else{
+      const m = it.rec;
+      title = 'Approve ' + m.mrf_no + ' as requested?';
+      body = '<div>' + escapeHtml((m.requester_name || 'Technician') + ' · ' + it.lines.length + ' item' + (it.lines.length === 1 ? '' : 's')) + '</div>' +
+        '<ul class="prio-qa-lines">' + it.lines.map(l=> '<li>' + escapeHtml(l.description + ' — ' + mrQty(l.qty_requested) + (l.unit ? ' ' + l.unit : '')) + '</li>').join('') + '</ul>' +
+        '<div class="prio-qa-muted">To change a quantity, use Open instead.</div>';
+    }
+    $('prioQaTitle').textContent = title;
+    $('prioQaBody').innerHTML = body + '<div class="prio-qa-muted">Recorded as approved by ' + escapeHtml((currentUser && currentUser.name) || 'you') + '. The technician is notified.</div>';
+    $('prioQaOverlay').classList.add('open');
+  }
+  $('prioQaCancel').addEventListener('click', prioQaClose);
+  $('prioQaApprove').addEventListener('click', async ()=>{
+    const it = prioQaItem; if(!it) return;
+    const btn = $('prioQaApprove'); btn.disabled = true; btn.textContent = 'Approving…';
+    try{
+      if(it.kind === 'leave'){
+        await leaveDecide(it.rec.id, 'approved', '');
+      }else{
+        const m = it.rec;
+        const { data, error } = await db.from('material_requisitions').update({ status: 'approved' }).eq('id', m.id).eq('status', 'submitted').select('id');
+        if(error) throw error;
+        if(!data || !data.length){ toast(m.mrf_no + ' was already decided'); }
+        else{
+          toast(m.mrf_no + ' approved');
+          notifyUser(m.requested_by, 'Material request approved', m.mrf_no + ' was approved.', 'mrf-' + m.id);
+        }
+      }
+      prioQaClose();
+      if(typeof renderHomeOverview === 'function') renderHomeOverview();
+    }catch(e){
+      console.error('quick approve failed', describeCloudError(e));
+      toast('Could not approve — ' + ((e && e.message) || 'try again'));
+    }finally{ btn.disabled = false; btn.textContent = 'Approve'; }
   });
 
 
@@ -22922,6 +23429,11 @@
       })()
     ]);
 
+    // "Needs you now" + "Technicians today" (admin-priority.js) reuse this
+    // same data; not awaited so the counters below never wait on its extra
+    // reads.
+    prioRender({ users, dtrToday, tickets, cashAdvances, leaves, reports });
+
     // Active Technicians — how many of today's active roster have clocked in.
     const activeUsers = (users||[]).filter(u=> u.active!==false);
     const checkedInIds = new Set((dtrToday||[]).filter(d=> d && d.timeIn).map(d=> d.technicianId));
@@ -23022,6 +23534,12 @@
       notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);
       notifEl.style.display = notifTotal > 0 ? '' : 'none';
     }
+
+    // A counter at zero steps back so the ones that need attention stand out.
+    $$('#homeOverviewCard .overview-stat').forEach(el=>{
+      const v = el.querySelector('.overview-stat-value');
+      el.classList.toggle('ov-zero', !!v && v.textContent.trim() === '0');
+    });
 
     // Live map of every technician currently sharing a location — see tracker.js.
     trackerAdminInit();

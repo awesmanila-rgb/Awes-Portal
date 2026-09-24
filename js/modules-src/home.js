@@ -452,6 +452,11 @@
       })()
     ]);
 
+    // "Needs you now" + "Technicians today" (admin-priority.js) reuse this
+    // same data; not awaited so the counters below never wait on its extra
+    // reads.
+    prioRender({ users, dtrToday, tickets, cashAdvances, leaves, reports });
+
     // Active Technicians — how many of today's active roster have clocked in.
     const activeUsers = (users||[]).filter(u=> u.active!==false);
     const checkedInIds = new Set((dtrToday||[]).filter(d=> d && d.timeIn).map(d=> d.technicianId));
@@ -552,6 +557,12 @@
       notifEl.textContent = notifTotal > 99 ? '99+' : String(notifTotal);
       notifEl.style.display = notifTotal > 0 ? '' : 'none';
     }
+
+    // A counter at zero steps back so the ones that need attention stand out.
+    $$('#homeOverviewCard .overview-stat').forEach(el=>{
+      const v = el.querySelector('.overview-stat-value');
+      el.classList.toggle('ov-zero', !!v && v.textContent.trim() === '0');
+    });
 
     // Live map of every technician currently sharing a location — see tracker.js.
     trackerAdminInit();

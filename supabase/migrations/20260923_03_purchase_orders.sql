@@ -17,6 +17,8 @@
 --       vat_mode 'exclusive': VAT 12% added on top of (subtotal − discount)
 --       vat_mode 'inclusive': prices already include VAT; VAT is extracted
 --       vat_mode 'none'     : no VAT (e.g. non-VAT supplier)
+--     EWT (expanded withholding tax, 0–15%) is computed on the amount net
+--     of VAT and deducted from the total: net_payable = total − ewt_amount.
 --   * status: draft → issued → cancelled.  Only DRAFTS can be edited or
 --     deleted. An issued PO can only be cancelled (with a reason). Items of
 --     a non-draft PO can't be touched.
@@ -116,6 +118,10 @@ create table if not exists public.purchase_orders (
   subtotal                numeric(14,2) not null default 0,  -- kept by trigger
   vat_amount              numeric(14,2) not null default 0,  -- kept by trigger
   total                   numeric(14,2) not null default 0,  -- kept by trigger
+  ewt_rate                numeric(6,4) not null default 0
+                            check (ewt_rate >= 0 and ewt_rate <= 0.15), -- 0.01 = 1% (goods), 0.02 = 2% (services)
+  ewt_amount              numeric(14,2) not null default 0,  -- kept by trigger
+  net_payable             numeric(14,2) not null default 0,  -- kept by trigger
   prepared_by_id          uuid references public.po_signatories(id) on delete restrict,
   approved_by_id          uuid references public.po_signatories(id) on delete restrict,
   -- frozen at issue:
@@ -130,6 +136,15 @@ create table if not exists public.purchase_orders (
   created_at              timestamptz not null default now(),
   updated_at              timestamptz not null default now()
 );
+-- upgrade path when this file was already run before EWT existed
+alter table public.purchase_orders add column if not exists ewt_rate numeric(6,4) not null default 0;
+alter table public.purchase_orders add column if not exists ewt_amount numeric(14,2) not null default 0;
+alter table public.purchase_orders add column if not exists net_payable numeric(14,2) not null default 0;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'purchase_orders_ewt_rate_check') then
+    alter table public.purchase_orders add constraint purchase_orders_ewt_rate_check check (ewt_rate >= 0 and ewt_rate <= 0.15);
+  end if;
+end $$;
 create index if not exists purchase_orders_status_date_idx on public.purchase_orders (status, po_date desc);
 create index if not exists purchase_orders_supplier_idx on public.purchase_orders (supplier_id);
 
@@ -176,27 +191,35 @@ create trigger purchase_orders_assign_number
   for each row execute function public.po_assign_number();
 
 -- ---------- totals ----------
-create or replace function public.po_compute_totals(p_po uuid, p_vat_mode text, p_discount numeric,
-                                                    out o_subtotal numeric, out o_vat numeric, out o_total numeric)
+drop function if exists public.po_compute_totals(uuid, text, numeric);   -- pre-EWT signature
+create or replace function public.po_compute_totals(p_po uuid, p_vat_mode text, p_discount numeric, p_ewt_rate numeric,
+                                                    out o_subtotal numeric, out o_vat numeric, out o_total numeric,
+                                                    out o_ewt numeric, out o_net numeric)
 language plpgsql
 stable
 set search_path = public, pg_temp
 as $$
 declare
   net numeric;
+  base numeric;   -- amount net of VAT: what EWT is computed on
 begin
   select coalesce(sum(amount), 0) into o_subtotal from public.purchase_order_items where po_id = p_po;
   net := greatest(o_subtotal - coalesce(p_discount, 0), 0);
   if p_vat_mode = 'exclusive' then
     o_vat := round(net * 0.12, 2);
     o_total := net + o_vat;
+    base := net;
   elsif p_vat_mode = 'inclusive' then
     o_vat := round(net - net / 1.12, 2);
     o_total := net;
+    base := net - o_vat;
   else
     o_vat := 0;
     o_total := net;
+    base := net;
   end if;
+  o_ewt := round(base * coalesce(p_ewt_rate, 0), 2);
+  o_net := o_total - o_ewt;
 end;
 $$;
 
@@ -234,8 +257,9 @@ begin
     raise exception 'Drafts are deleted, not cancelled.' using errcode = 'P0001';
   end if;
 
-  select * into t from public.po_compute_totals(new.id, new.vat_mode, new.discount);
+  select * into t from public.po_compute_totals(new.id, new.vat_mode, new.discount, new.ewt_rate);
   new.subtotal := t.o_subtotal; new.vat_amount := t.o_vat; new.total := t.o_total;
+  new.ewt_amount := t.o_ewt; new.net_payable := t.o_net;
 
   if new.status = 'issued' then
     if new.supplier_id is null then

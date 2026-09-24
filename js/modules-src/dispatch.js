@@ -456,7 +456,7 @@
       row.innerHTML = '<div class="user-card-head" style="cursor:pointer;">'+
           '<div>'+
             '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-            '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+
+            '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.dispatchTime ? (' · dispatch '+r.dispatchTime) : '')+(r.expectedTime ? (' · at site '+r.expectedTime) : '')+
               (r.siteAddress ? (' · '+escapeHtml(r.siteAddress)) : '')+'</div>'+
             '<div class="u-status">'+resolved+' of '+items.length+' equipment resolved</div>'+
           '</div>'+
@@ -1259,6 +1259,7 @@
     $('dtJobOrderNo').value = '—';
     $('dtDate').value = todayISO();
     $('dtExpectedTime').value = '';
+    $('dtDispatchTime').value = '';
     $('dtCustName').value = ''; delete $('dtCustName').dataset.customerId;
     $('dtSiteAddress').value = '';
     $('dtContactName').value = ''; $('dtContactNo').value = '';
@@ -1383,6 +1384,7 @@
     }
     if(!custName){ toast('Enter the customer\'s name'); return; }
     if(!$('dtDate').value){ toast('Set the date'); return; }
+    if(!$('dtDispatchTime').value){ toast('Set the dispatch time — it\u2019s what "late" is measured against'); return; }
     if(dtDraftEquipItems.length===0){ toast('Add at least one piece of equipment to the ticket'); return; }
     $('dtCreateBtn').disabled = true; $('dtCreateBtn').textContent = 'Creating…';
     const jobOrderNo = await dtNextJobOrderNo();
@@ -1405,6 +1407,7 @@
       id, jobOrderNo: id, status: 'preparing',
       category,
       date: $('dtDate').value, expectedTime: $('dtExpectedTime').value,
+      dispatchTime: $('dtDispatchTime').value,
       assignedWorkerIds: workers.map(w=>w.id), assignedWorkerNames: workers.map(w=>w.name),
       reportAllowedWorkerIds: reporters.map(w=>w.id), reportAllowedWorkerNames: reporters.map(w=>w.name),
       custName, siteAddress: $('dtSiteAddress').value.trim(),
@@ -1595,6 +1598,23 @@
     return day+' at '+time;
   }
   function dtHasAnyAck(r){ return ((r.acknowledgedBy||[]).length > 0); }
+  // Late = its Dispatch Time has passed and nobody is en route yet
+  // (acknowledged) or on site. Measured against dispatchTime only — the
+  // client's Expected Time at Site never decides lateness. Tickets saved
+  // before Dispatch Time existed have none and are never flagged late.
+  // Same rule the admin-alerts Edge Function uses for the urgent push.
+  function dtDispatchMs(r){
+    if(!r || !r.date || !r.dispatchTime) return null;
+    const at = new Date(r.date+'T'+r.dispatchTime+':00'+BUSINESS_TZ_OFFSET).getTime();
+    return isFinite(at) ? at : null;
+  }
+  function dtIsLateDispatch(r){
+    const at = dtDispatchMs(r);
+    if(at == null || dtNowMs() < at) return false;
+    if(dtHasAnyAck(r) || r.arrivedAt) return false;
+    const st = r.status;
+    return !(st==='acknowledged' || st==='in_progress' || st==='completed' || st==='closed' || st==='cancelled');
+  }
   // Expiry is TERMINAL: a job order whose scheduled day passed with no
   // acknowledgement means the visit never happened, and there's no
   // attendance record for that day to back it up. Letting it be
@@ -1844,7 +1864,7 @@
     return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.expectedTime ? (' at '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+'</div>'+
+          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.dispatchTime ? (' · dispatch '+r.dispatchTime) : '')+(r.expectedTime ? (' · at site '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+(dtIsLateDispatch(r) ? ' <span class="status-pill" style="background:#FDE4D6; color:#9A3412;">Late</span>' : '')+'</div>'+
           // Admin only, and outside jo-card-body on purpose: this has to be
           // readable without expanding the card, otherwise monitoring ten
           // live tickets still means ten taps.

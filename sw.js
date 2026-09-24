@@ -1031,7 +1031,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v147';
+const CACHE_NAME = 'awes-sr-v148';
 
 // Split into two lists on purpose.
 //
@@ -1212,7 +1212,14 @@ self.addEventListener('push', (event) => {
     data: { url: data.url || '' }
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  // App-icon badge (admin-alerts sends urgent + today as `badge`). Set
+  // here so the number on the home-screen icon is right even while the
+  // app is closed; the homepage refreshes it when opened.
+  const badgeWork = (typeof data.badge === 'number' && self.navigator && self.navigator.setAppBadge)
+    ? (data.badge > 0 ? self.navigator.setAppBadge(data.badge) : self.navigator.clearAppBadge()).catch(() => {})
+    : Promise.resolve();
+
+  event.waitUntil(Promise.all([self.registration.showNotification(title, options), badgeWork]));
 });
 
 self.addEventListener('notificationclick', (event) => {
