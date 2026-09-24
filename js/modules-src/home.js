@@ -174,72 +174,122 @@
   }
 
   // ---------- Home screen greeting (technicians only) ----------
-  async function renderHomeGreeting(){
+  // Big, plain greeting plus today's attendance. The attendance strip opens
+  // the DTR screen, where Time In/Out is actually recorded. The old fixed
+  // "how to use Job Orders" paragraph is gone — Need to do now below tells
+  // the technician what to do, based on where they actually are.
+  let thLastDtr = null;
+  function thFmtClock(iso){
+    return iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'numeric', minute:'2-digit'}) : null;
+  }
+  function thRenderGreeting(todayDtr){
     const card = $('homeGreetingCard');
+    if(!card) return;
     if(!currentUser || currentUser.role==='admin'){ card.style.display = 'none'; return; }
     card.style.display = '';
-    $('homeGreetingText').innerHTML = '<div class="empty-state">Loading…</div>';
-
     const now = new Date();
-    const dateStr = now.toLocaleDateString('en-PH', {weekday:'short', month:'short', day:'numeric'});
-    const timeStr = now.toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'});
-    const todayDtr = await dtrGetDay(currentUser.id, todayISO()).catch(()=>null);
-    const alreadyTimedIn = !!(todayDtr && todayDtr.timeIn);
-    const alreadyTimedOut = !!(todayDtr && todayDtr.timeOut);
-    const fmt = (iso)=> iso ? new Date(iso).toLocaleTimeString('en-PH', {hour:'2-digit', minute:'2-digit'}) : '—';
-
-    // Attendance VALUES are display-only, but the strip itself links to the
-    // DTR screen (where Time In/Out is actually recorded) — the clock icon
-    // marks it as tappable. See the .greet-attend-line handler below.
-    // Balanced grid: a header row (title + Open DTR), then Time In / Time
-    // Out side by side, and OT In / OT Out as a second row only when there
-    // is overtime. Label on top, big value below, so every cell lines up
-    // regardless of which values are filled in.
-    const cell = (label, iso, missingWhenEmpty)=>
-      '<span class="greet-attend-cell">'+
-        '<span class="greet-attend-label">'+label+'</span>'+
-        '<b'+(!iso && missingWhenEmpty ? ' class="greet-missing"' : '')+'>'+fmt(iso)+'</b>'+
-      '</span>';
-    const hasOt = !!(todayDtr && todayDtr.otTimeIn);
-    const attendLine =
-      '<button type="button" class="greet-attend-line" id="greetAttendLink">'+
-        '<span class="greet-attend-head">'+
-          '<svg class="greet-attend-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'+
-          '<span class="greet-attend-title">Today\'s Attendance</span>'+
-          '<span class="greet-attend-go">Open DTR ›</span>'+
-        '</span>'+
-        '<span class="greet-attend-grid">'+
-          cell('Time In', todayDtr && todayDtr.timeIn, true)+
-          cell('Time Out', todayDtr && todayDtr.timeOut, true)+
-          (hasOt ? cell('OT In', todayDtr.otTimeIn, false)+cell('OT Out', todayDtr.otTimeOut, true) : '')+
-        '</span>'+
-      '</button>';
-    // Orientation note — tells the technician what to actually do next
-    // rather than leaving them to guess.
-    const note = '<p class="greet-note">Use <b>Job Orders</b> below to see your assigned work. <b>Acknowledge</b> it on the day of the schedule, tap <b>Arrived at Site</b> when you get there, then file a Service Report for each unit.</p>';
-
+    const h = now.getHours();
+    const part = h < 12 ? 'Good morning' : (h < 18 ? 'Good afternoon' : 'Good evening');
+    const first = String(currentUser.name||'').trim().split(/\s+/)[0] || '';
+    const dateStr = now.toLocaleDateString('en-PH', {weekday:'long', month:'short', day:'numeric'});
+    const tIn = todayDtr && todayDtr.timeIn, tOut = todayDtr && todayDtr.timeOut;
+    const loading = todayDtr === undefined;
+    const val = (iso, missing)=> iso
+      ? '<b>'+thFmtClock(iso)+'</b>'
+      : '<b class="'+(missing ? 'th-missing' : 'th-dim')+'">'+(loading ? '…' : (missing ? 'Not yet' : '—'))+'</b>';
     $('homeGreetingText').innerHTML =
-      '<div class="greet-compact">'+
-        '<div class="greet-row1">'+
-          '<span class="greet-name">Good day, <b>'+escapeHtml(currentUser.name)+'</b>!</span>'+
-          '<span class="greet-datetime">'+dateStr+' · '+timeStr+'</span>'+
-        '</div>'+
-        attendLine+
-        note+
-      '</div>';
+      '<div class="th-greet">'+
+        '<h1 class="th-greet-name">'+part+(first ? ', '+escapeHtml(first) : '')+'</h1>'+
+        '<p class="th-greet-date">'+escapeHtml(dateStr)+'</p>'+
+      '</div>'+
+      '<button type="button" class="th-attend'+(!loading && !tIn ? ' th-attend-warn' : '')+'" id="greetAttendLink">'+
+        '<span class="th-attend-ic">'+icon('clock')+'</span>'+
+        '<span class="th-attend-body">'+
+          '<span class="th-attend-label">Attendance today</span>'+
+          '<span class="th-attend-vals"><span>Time in: '+val(tIn, true)+'</span><span>Time out: '+val(tOut, !!tIn)+'</span></span>'+
+        '</span>'+
+        '<span class="th-attend-go">Open ›</span>'+
+      '</button>';
+  }
+  async function renderHomeGreeting(){
+    if(!currentUser || currentUser.role==='admin'){ const c=$('homeGreetingCard'); if(c) c.style.display='none'; return; }
+    // Draw straight away (cached attendance, or "…"), then the full
+    // homepage render below refreshes it with today's real record.
+    thRenderGreeting(thLastDtr && thLastDtr.date===todayISO() ? thLastDtr.rec : undefined);
   }
 
-  // ---------- Home screen overview (technician only) ----------
-  // Same visual language as the admin Overview below, scoped to just this
-  // technician's own numbers. Job Order's subtitle lists whichever teammates
-  // share at least one of this technician's own open tickets — pulled from
-  // assignedWorkerNames on those tickets, not a separate lookup.
-  // Live refresh. This card used to load only when the homepage opened,
-  // and job-order realtime (dtSubscribeTickets) only starts once My Job
-  // Order is opened — so a new assignment, or a job order moving along,
-  // never reached the homepage. Now: realtime on this technician's job
-  // orders (RLS limits the feed to their own), a 60-second poll as the
-  // safety net, and a refresh on returning to the app.
+  // ---------- Need to do now (technician only) ----------
+  // Replaces the old 5-slide Overview carousel. Built for technicians who
+  // are not used to apps: every action waiting on them is its own card with
+  // a big title, one plain sentence, and one full-width button, ranked so
+  // the first card is always the thing to do first.
+  //
+  // Ranking (lower = first):
+  //   10 Time in            20 Finish service reports   30 Arrived at site
+  //   35 Acknowledge (late) 40 Acknowledge              45 Waiting on crew (info)
+  //   50 Report drafts      55 Material request to fix  60 Sign tool slip
+  //   61 Sign material slip 62 Return overdue tools     70 Liquidate
+  //   80 Unread messages    90 Time out
+  // Things waiting on ADMIN are listed separately under "Waiting for
+  // approval" — they are not the technician's job, so they never appear as
+  // a numbered step.
+  function thFmtHm(hm){
+    if(!hm) return '';
+    const m = /^(\d{1,2}):(\d{2})/.exec(hm);
+    if(!m) return hm;
+    let hh = Number(m[1]); const ap = hh>=12 ? 'PM' : 'AM';
+    hh = hh%12 || 12;
+    return hh+':'+m[2]+' '+ap;
+  }
+  function thDayWord(iso){
+    const t = todayISO();
+    if(iso===t) return 'Today';
+    const d = new Date(t+'T00:00:00'); d.setDate(d.getDate()+1);
+    const tom = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    if(iso===tom) return 'Tomorrow';
+    return new Date(iso+'T00:00:00').toLocaleDateString('en-PH', {weekday:'short', month:'short', day:'numeric'});
+  }
+  function thMates(r){
+    const n = (r.assignedWorkerNames||[]).filter(x=> x && x!==currentUser.name);
+    return n.length ? 'With '+n.join(', ') : '';
+  }
+  function thJoWhere(r){
+    return [r.custName, r.siteAddress].filter(Boolean).join(' · ');
+  }
+  // 3-step job tracker: Accept → Arrive at site → Report.
+  function thStepperHtml(cur, tone){
+    const labels = ['Accept', 'Arrive at site', 'Report'];
+    let html = '<div class="th-steps">';
+    labels.forEach((_, i)=>{
+      const n = i+1;
+      const cls = n < cur ? 'done' : (n===cur ? 'cur th-'+tone : '');
+      if(i>0) html += '<span class="th-step-line'+(n<=cur ? ' done' : '')+'"></span>';
+      html += '<span class="th-step-dot '+cls+'">'+(n<cur ? icon('check') : n)+'</span>';
+    });
+    html += '</div><div class="th-step-labels">'+labels.map(l=> '<span>'+l+'</span>').join('')+'</div>';
+    return html;
+  }
+  // Cheap reads for the slip / tool / requisition tasks. Each one is
+  // optional — a missing table (feature not set up yet) just contributes
+  // nothing rather than breaking the homepage.
+  async function thLoadExtras(){
+    const out = { toolSlips:0, overdueTools:0, matSlips:0, reqs:[] };
+    if(!db || !(await ensureCloud().catch(()=>false))) return out;
+    const safe = (p)=> p.then(r=> (r && !r.error) ? (r.data||[]) : []).catch(()=> []);
+    const [tools, slips, iss, reqs] = await Promise.all([
+      safe(db.from('tools_view').select('status, due_back').eq('holder_id', currentUser.id)),
+      safe(db.from('tool_slips').select('type, to_worker_id, from_worker_id').eq('status', 'pending_signature')),
+      safe(db.from('issue_slips').select('id').eq('worker_id', currentUser.id).eq('status', 'issued')),
+      safe(db.from('material_requisitions').select('id, mrf_no, status, job_order, created_at, reviewed_at')
+        .eq('requested_by', currentUser.id).order('created_at', { ascending:false }).limit(30))
+    ]);
+    out.toolSlips = slips.filter(x=> (x.type==='issue' && x.to_worker_id===currentUser.id) || (x.type==='return' && x.from_worker_id===currentUser.id)).length;
+    out.overdueTools = tools.filter(t=> t.status==='issued' && t.due_back && t.due_back < todayISO()).length;
+    out.matSlips = iss.length;
+    out.reqs = reqs;
+    return out;
+  }
+
   let techOvChannel = null, techOvTimer = null, techOvBusy = false;
   function techOvVisible(){
     return !!currentUser && currentUser.role !== 'admin' && currentUser.role !== 'customer' &&
@@ -272,92 +322,156 @@
     card.style.display = '';
     techOvStartLive();
 
-    const [tickets, reports, cashAdvances, leaves, unreadCount] = await Promise.all([
+    const [tickets, reporterTickets, reports, cashAdvances, leaves, unreadCount, todayDtr, extras] = await Promise.all([
       dtListForWorker(currentUser.id).catch(()=>[]),
+      dtListForReporter(currentUser.id).catch(()=>[]),
       cloudListReports().catch(()=>null),
       caListForUser(currentUser.id).catch(()=>[]),
       leaveListForUser(currentUser.id).catch(()=>[]),
-      dtCountUnreadMessages().catch(()=>0)
+      dtCountUnreadMessages().catch(()=>0),
+      dtrGetDay(currentUser.id, todayISO()).catch(()=>null),
+      thLoadExtras().catch(()=> ({ toolSlips:0, overdueTools:0, matSlips:0, reqs:[] }))
     ]);
+    thLastDtr = { date: todayISO(), rec: todayDtr };
+    thRenderGreeting(todayDtr);
 
-    // Job Order — open tickets, plus whichever teammates are on those same
-    // tickets with me. 'expired' and 'cancelled' matter as much as
-    // completed/closed here: dtEffectiveStatus() returns 'expired' for any
-    // past-dated ticket that was never acknowledged, and leaving those two
-    // out of this list is what left a permanent phantom count on the home
-    // screen after everything had actually been dealt with.
-    // 'replaced' belongs here for the same reason as the other four, and is
-    // the same phantom-count bug in a new form: after admin swaps a
-    // technician off a job order, dtEffectiveStatus returns 'replaced' for
-    // THAT technician, and leaving it out left the job order counted on
-    // their home screen — and picked as their "Next Job Order" — for work
-    // that is no longer theirs.
-    const openTickets = (tickets||[]).filter(t=> !dtIsTerminal(t));
-    const mateNames = new Set();
-    openTickets.forEach(t=> (t.assignedWorkerNames||[]).forEach(n=>{
-      if(n && n!==currentUser.name) mateNames.add(n);
-    }));
-    $('ovMyJoValue').textContent = String(openTickets.length);
-    $('ovMyJoSub').textContent = openTickets.length===0
-      ? 'No open job orders'
-      : (mateNames.size>0 ? ('With '+Array.from(mateNames).join(', ')) : 'Solo assignment');
+    const tasks = [];
+    const add = (t)=> tasks.push(t);
+    const today = todayISO();
+    const timedIn = !!(todayDtr && todayDtr.timeIn);
+    const timedOut = !!(todayDtr && todayDtr.timeOut);
+    const reporterIds = new Set((reporterTickets||[]).map(t=> t.id));
 
-    // Pending Service Reports — my own drafts not yet completed.
-    const draftReportCount = reports===null ? 0 : reports.filter(r=> r.technicianId===currentUser.id && !r.completed).length;
-    $('ovMyReportsValue').textContent = String(draftReportCount);
-    $('ovMyReportsSub').textContent = draftReportCount+' Saved Report'+(draftReportCount===1?'':'s')+' to Complete';
+    // What this technician should see of each ticket (a replaced tech sees
+    // their frozen copy — and dtIsTerminal drops it, so it never shows).
+    // Seeding dtLastTicketsById is what lets Acknowledge / Arrived from the
+    // homepage send the same customer + admin notifications as from My Job
+    // Order, since those read the ticket from this cache.
+    const mine = (tickets||[]).map(t=>{ const v = dtViewFor(t, currentUser.id); dtLastTicketsById[v.id] = v; return v; });
+    const live = mine.filter(t=> !dtIsTerminal(t));
+    const sortKey = (r)=> (r.date||'')+' '+(r.dispatchTime||r.expectedTime||'');
 
-    // Pending Requisitions — my own Cash Advance / Leave requests still
-    // awaiting an admin decision (separate from Liquidation below).
-    const pendingCA = (cashAdvances||[]).filter(r=> r.status==='pending').length;
-    const pendingLeave = (leaves||[]).filter(r=> r.status==='pending').length;
-    $('ovMyReqValue').textContent = String(pendingCA+pendingLeave);
-    $('ovMyReqSub').textContent = pendingCA+' Cash Advance'+(pendingCA===1?'':'s')+' · '+pendingLeave+' Leave Form'+(pendingLeave===1?'':'s');
+    if(!timedIn){
+      add({ rank:10, tone:'green', ic:'clock', title:'Time in for today',
+        sub:'Record your attendance before you start work.', btn:'Time in now', act:'dtr' });
+    }
 
-    // Pending Liquidation — my own approved Cash Advances still needing one.
-    const liqCount = (cashAdvances||[]).filter(caNeedsLiquidation).length;
-    $('ovMyLiqValue').textContent = String(liqCount);
-    $('ovMyLiqSub').textContent = liqCount===0 ? 'Nothing to liquidate' : liqCount+' Cash Advance'+(liqCount===1?'':'s')+' to Liquidate';
-
-    // Next Job Order — the soonest-dated open ticket, so a technician sees
-    // what's coming up without opening My Job Order and scanning the list.
-    // A job already in progress (someone tapped Arrived at Site) outranks
-    // everything, since that's where the technician is right now.
-    const nextJo = openTickets.filter(t=>t.date).slice()
-      .sort((a,b)=>{
-        const ip = (t)=> dtEffectiveStatus(t)==='in_progress' ? 0 : 1;
-        return ip(a)-ip(b) || a.date.localeCompare(b.date) || (a.dispatchTime||a.expectedTime||'').localeCompare(b.dispatchTime||b.expectedTime||'');
-      })[0];
-    // The title used to be fixed at "Next Job Order", even for a job dated
-    // today or already under way. It now says which one it is.
-    const titleEl = $('ovMyNextJoTitle');
-    if(titleEl){
-      let title = 'Next Job Order';
-      if(nextJo){
-        const today = todayISO();
-        if(dtEffectiveStatus(nextJo)==='in_progress') title = 'Current Job Order';
-        else if(nextJo.date===today) title = "Today's Job Order";
-        else if(nextJo.date < today) title = 'Pending Job Order';
+    live.forEach(r=>{
+      const stage = dtEffectiveStatus(r);
+      const ackd = (r.acknowledgedBy||[]).includes(currentUser.id);
+      const jo = escapeHtml(r.jobOrderNo || r.id);
+      const where = escapeHtml(thJoWhere(r));
+      const mates = thMates(r);
+      const mateLine = mates ? '<br>'+escapeHtml(mates) : '';
+      if(stage==='in_progress'){
+        const items = r.equipmentList||[];
+        const pending = items.filter(it=> !it.reportSrNo && !it.notDone).length;
+        const done = items.length - pending;
+        if(pending===0) return;
+        if(reporterIds.has(r.id)){
+          add({ rank:20, key:sortKey(r), tone:'amber', ic:'file',
+            title:'Finish '+pending+' service report'+(pending===1?'':'s'),
+            sub: jo+(where ? ' · '+where : '')+'<br>'+done+' of '+items.length+' units done',
+            steps:3, btn:'Open reports', act:'report', id:r.id });
+        }else{
+          add({ rank:46, key:sortKey(r), tone:'gray', ic:'people', info:true,
+            title:'Work in progress · '+jo,
+            sub:(where ? where+'<br>' : '')+'Your teammate files the service reports for this job.' });
+        }
+      }else if(stage==='acknowledged'){
+        if(r.arrivedAt) return;
+        add({ rank:30, key:sortKey(r), tone:'amber', ic:'pin',
+          title:'Tap when you reach the site',
+          sub: jo+(where ? ' · '+where : '')+(r.expectedTime ? '<br>Expected at site '+thFmtHm(r.expectedTime) : '')+mateLine,
+          steps:2, btn:'Arrived at Site', act:'arrived', id:r.id, jo:r.jobOrderNo });
+      }else if(stage==='preparing'){
+        if(ackd){
+          const assigned = (r.assignedWorkerIds||[]).length;
+          const acked = (r.acknowledgedBy||[]).filter(id=> (r.assignedWorkerIds||[]).includes(id)).length;
+          add({ rank:45, key:sortKey(r), tone:'gray', ic:'people', info:true,
+            title:'Waiting for your teammates · '+jo,
+            sub: acked+' of '+assigned+' have accepted. You can tap Arrived at Site once everyone accepts.', steps:1 });
+          return;
+        }
+        const late = dtIsLateDispatch(r);
+        add({ rank: late ? 35 : 40, key:sortKey(r), tone: late ? 'red' : 'green', ic:'truck',
+          tag: late ? 'Late' : null,
+          title:'Accept job order '+jo,
+          sub: (where ? where+'<br>' : '')+thDayWord(r.date)+(r.dispatchTime ? ' · leave by '+thFmtHm(r.dispatchTime) : (r.expectedTime ? ' · at site '+thFmtHm(r.expectedTime) : ''))+mateLine,
+          steps:1, btn:'Acknowledge', act:'ack', id:r.id, jo:r.jobOrderNo });
       }
-      titleEl.textContent = title;
+    });
+
+    const drafts = reports===null ? [] : reports.filter(r=> r.technicianId===currentUser.id && !r.completed);
+    if(drafts.length){
+      add({ rank:50, tone:'amber', ic:'edit',
+        title:'Finish '+drafts.length+' saved report draft'+(drafts.length===1?'':'s'),
+        sub:'You started '+(drafts.length===1 ? 'this report' : 'these reports')+' but did not submit yet.',
+        btn:'Open drafts', act:'drafts' });
     }
-    if(nextJo){
-      $('ovMyNextJoValue').textContent = nextJo.jobOrderNo || nextJo.id;
-      $('ovMyNextJoSub').textContent = (nextJo.custName||'')+' — '+leaveFmtDate(nextJo.date)+
-        (nextJo.dispatchTime ? (' · dispatch '+nextJo.dispatchTime) : '')+(nextJo.expectedTime ? (' · at site '+nextJo.expectedTime) : '');
-    }else{
-      $('ovMyNextJoValue').textContent = '—';
-      $('ovMyNextJoSub').textContent = 'Nothing scheduled';
+    const reqFix = (extras.reqs||[]).filter(q=> q.status==='returned' || q.status==='draft');
+    if(reqFix.length){
+      const returned = reqFix.filter(q=> q.status==='returned').length;
+      add({ rank:55, tone: returned ? 'red' : 'blue', ic:'package',
+        title: returned ? 'Fix your material request' : 'Submit your material request',
+        sub: returned ? 'Admin sent '+(returned===1 ? 'a request' : returned+' requests')+' back. Open it to see what to change.'
+                      : (reqFix.length===1 ? 'A request' : reqFix.length+' requests')+' is saved but not sent to admin yet.',
+        btn:'Open requests', act:'requests' });
+    }
+    if(extras.toolSlips){
+      add({ rank:60, tone:'blue', ic:'edit', title:'Sign for tools',
+        sub:extras.toolSlips+' tool slip'+(extras.toolSlips===1?'':'s')+' waiting for your signature.',
+        btn:'Sign slip', act:'tools' });
+    }
+    if(extras.matSlips){
+      add({ rank:61, tone:'blue', ic:'edit', title:'Sign for materials',
+        sub:extras.matSlips+' material slip'+(extras.matSlips===1?'':'s')+' waiting for your signature.',
+        btn:'Sign slip', act:'materials' });
+    }
+    if(extras.overdueTools){
+      add({ rank:62, tone:'red', ic:'tools', tag:'Overdue',
+        title:'Return '+extras.overdueTools+' tool'+(extras.overdueTools===1?'':'s'),
+        sub:'Past the return date. Bring '+(extras.overdueTools===1 ? 'it' : 'them')+' back to the warehouse.',
+        btn:'See my tools', act:'tools' });
+    }
+    const liq = (cashAdvances||[]).filter(r=> r.kind!=='reimbursement').filter(caNeedsLiquidation);
+    if(liq.length){
+      const fix = liq.filter(r=> r.liquidation && r.liquidation.status==='disapproved').length;
+      const waiting = liq.filter(r=> r.liquidation && r.liquidation.status==='pending').length;
+      const todo = liq.length - waiting;
+      if(todo>0){
+        const one = liq.find(r=> !(r.liquidation && r.liquidation.status==='pending'));
+        add({ rank:70, tone: fix ? 'red' : 'blue', ic:'receipt',
+          title: fix ? 'Fix your liquidation' : 'Liquidate cash advance',
+          sub: fix ? 'Admin sent it back. Open it to see what to correct.'
+                   : (todo===1 && one ? caFmtPeso(one.amount)+(one.purpose ? ' · '+escapeHtml(one.purpose) : '') : todo+' cash advances')+'<br>Submit your receipts for the money you received.',
+          btn:'Liquidate', act:'liquidate' });
+      }
+    }
+    if(unreadCount>0){
+      add({ rank:80, tone:'teal', ic:'chat',
+        title:'Read '+unreadCount+' new message'+(unreadCount===1?'':'s'),
+        sub:'Job order chat from admin or your teammates.', btn:'Open messages', act:'messages' });
+    }
+    if(timedIn && !timedOut){
+      const busyToday = live.some(r=>{
+        const st = dtEffectiveStatus(r);
+        return st==='in_progress' || st==='acknowledged' || (st==='preparing' && r.date===today);
+      });
+      if(!busyToday || new Date().getHours() >= 17){
+        add({ rank:90, tone:'green', ic:'logOut', title:'Time out',
+          sub:'Record your time out before you go home.', btn:'Time out', act:'dtr' });
+      }
     }
 
-    // Job Order Messages unread count still drives the notification bell
-    // and sidebar badge below even though its own overview tile was
-    // removed — see dtCountUnreadMessages in dispatch.js.
+    tasks.sort((a,b)=> a.rank-b.rank || String(a.key||'').localeCompare(String(b.key||'')));
+    thRenderTasks(tasks);
+    thRenderWaiting(cashAdvances, leaves, extras.reqs);
+    thRenderUpcoming(live);
 
-    // The dashboard top bar's greeting + notification bell are shared with
-    // admin (see renderDashboardGreeting/renderHomeOverview) — technicians
-    // get the same greeting, and their bell reflects their own unread Job
-    // Order messages instead of admin's pending-approvals count.
+    // Tile badges + the shared bell / nav badges.
+    const msgB = $('techQaMsgBadge');
+    if(msgB){ msgB.textContent = unreadCount ? unreadCount+' new' : ''; msgB.style.display = unreadCount ? '' : 'none'; }
     renderDashboardGreeting();
     const notifEl = $('notifBadge');
     if(notifEl){
@@ -368,57 +482,125 @@
     if(sidebarBadgeEl){ sidebarBadgeEl.style.display = unreadCount>0 ? '' : 'none'; sidebarBadgeEl.textContent = String(unreadCount); }
     const techMoreBadgeEl = $('techMoreMsgBadge');
     if(techMoreBadgeEl){ techMoreBadgeEl.style.display = unreadCount>0 ? '' : 'none'; techMoreBadgeEl.textContent = String(unreadCount); }
-    techInitOverviewCarousel();
   }
 
-  // Swipeable Overview carousel (technician home) — the 5 .overview-stat
-  // slides themselves are static in index.html and already populated
-  // above by textContent; this only builds/wires the dot indicators.
-  // Idempotent — safe to call on every render (rebuilds the dots row each
-  // time rather than accumulating duplicates).
-  let techCarouselWired = false;
-  function techInitOverviewCarousel(){
-    const track = $('homeTechOverviewCarousel');
-    const dotsEl = $('homeTechOverviewDots');
-    if(!track || !dotsEl) return;
-    const slides = track.querySelectorAll('.overview-stat');
-    const prevBtn = $('homeTechOverviewPrev');
-    const nextBtn = $('homeTechOverviewNext');
-    dotsEl.innerHTML = '';
-    slides.forEach((_, i)=>{
-      const dot = document.createElement('button');
-      dot.type = 'button';
-      dot.className = 'overview-dot'+(i===0?' active':'');
-      dot.setAttribute('aria-label', 'Go to stat '+(i+1));
-      dot.addEventListener('click', ()=> track.scrollTo({left: i*track.clientWidth, behavior:'smooth'}));
-      dotsEl.appendChild(dot);
-    });
-    // Current slide index, derived from scroll position rather than
-    // tracked separately — so it stays correct no matter which of the
-    // three inputs (swipe, dot, arrow) actually moved the track.
-    const currentIndex = ()=> track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : 0;
-    function syncControls(){
-      const active = currentIndex();
-      $$('.overview-dot', dotsEl).forEach((d,i)=> d.classList.toggle('active', i===active));
-      if(prevBtn) prevBtn.disabled = active <= 0;
-      if(nextBtn) nextBtn.disabled = active >= slides.length-1;
+  function thRenderTasks(tasks){
+    const list = $('thTodoList');
+    const actionable = tasks.filter(t=> !t.info);
+    const late = tasks.filter(t=> t.tag==='Late' || t.tag==='Overdue').length;
+    $('thTodoCount').innerHTML = actionable.length
+      ? actionable.length+' task'+(actionable.length===1?'':'s')+(late ? ' · <span class="th-red-txt">'+late+' late</span>' : '')
+      : '';
+    if(!tasks.length){
+      list.innerHTML =
+        '<div class="th-card th-allclear">'+
+          '<span class="th-ic th-green">'+icon('checkCircle')+'</span>'+
+          '<div><h3 class="th-title">You are all caught up</h3>'+
+          '<p class="th-sub">Nothing needs you right now. New job orders will show up here.</p></div>'+
+        '</div>';
+      return;
     }
-    syncControls();
-    if(techCarouselWired) return; // listeners only need binding once — these elements are never recreated
-    techCarouselWired = true;
-    if(prevBtn) prevBtn.addEventListener('click', ()=>{
-      track.scrollTo({left: Math.max(0, currentIndex()-1)*track.clientWidth, behavior:'smooth'});
-    });
-    if(nextBtn) nextBtn.addEventListener('click', ()=>{
-      const last = track.querySelectorAll('.overview-stat').length - 1;
-      track.scrollTo({left: Math.min(last, currentIndex()+1)*track.clientWidth, behavior:'smooth'});
-    });
-    let scrollRaf = null;
-    track.addEventListener('scroll', ()=>{
-      if(scrollRaf) return;
-      scrollRaf = requestAnimationFrame(()=>{ scrollRaf = null; syncControls(); });
-    });
+    let step = 0, firstDone = false;
+    list.innerHTML = tasks.map(t=>{
+      let tag = '';
+      let hero = false;
+      if(t.info){
+        tag = '<span class="th-tag th-gray">Waiting</span>';
+      }else{
+        step++;
+        hero = !firstDone; firstDone = true;
+        const label = 'Step '+step+(hero ? ' · Do this first' : '')+(t.tag ? ' · '+t.tag : '');
+        tag = '<span class="th-tag th-'+(t.tag ? 'red' : (hero ? 'green' : 'gray'))+'">'+label+'</span>';
+      }
+      const stepCur = t.steps ? t.steps : 0;
+      return '<div class="th-card'+(hero ? ' th-hero' : '')+(t.info ? ' th-info' : '')+'">'+
+          tag+
+          '<div class="th-top">'+
+            '<span class="th-ic th-'+t.tone+'">'+icon(t.ic)+'</span>'+
+            '<div class="th-text"><h3 class="th-title">'+t.title+'</h3><p class="th-sub">'+t.sub+'</p></div>'+
+          '</div>'+
+          (stepCur ? thStepperHtml(stepCur, t.tone==='gray' ? 'green' : t.tone) : '')+
+          (t.btn ? '<button type="button" class="th-btn'+(hero ? ' th-btn-primary' : '')+'" data-th-act="'+t.act+'"'+
+            (t.id ? ' data-id="'+escapeHtml(t.id)+'"' : '')+(t.jo ? ' data-jo="'+escapeHtml(t.jo)+'"' : '')+'>'+t.btn+'</button>' : '')+
+        '</div>';
+    }).join('');
   }
+
+  function thRenderWaiting(cashAdvances, leaves, reqs){
+    const rows = [];
+    const row = (label, status, tone, act)=> rows.push(
+      '<button type="button" class="th-wait-row" data-th-act="'+act+'"><span class="th-wait-label">'+label+'</span>'+
+      '<span class="th-wait-st th-'+tone+'-txt">'+status+'</span></button>');
+    (cashAdvances||[]).forEach(r=>{
+      const what = r.kind==='reimbursement' ? 'Reimbursement' : 'Cash advance';
+      const act = r.kind==='reimbursement' ? 'reimburse' : 'cashadvance';
+      if(r.status==='pending') row(what+' · '+caFmtPeso(r.amount), 'Pending', 'amber', act);
+      else if(r.status==='approved' && r.kind!=='reimbursement' && !r.disbursed) row(what+' · '+caFmtPeso(r.amount), 'Approved, not yet released', 'green', act);
+      if(r.liquidation && r.liquidation.status==='pending') row('Liquidation · '+caFmtPeso(r.amount), 'Pending', 'amber', 'liquidate');
+    });
+    (leaves||[]).filter(l=> l.status==='pending').forEach(l=>{
+      row(escapeHtml(l.leaveType||'Leave')+' · '+leaveFmtDate(l.dateFrom), 'Pending', 'amber', 'leave');
+    });
+    const weekAgo = new Date(Date.now() - 7*864e5).toISOString();
+    (reqs||[]).forEach(q=>{
+      const lbl = 'Material request '+escapeHtml(q.mrf_no || '');
+      if(q.status==='submitted') row(lbl, 'Pending', 'amber', 'requests');
+      else if(q.status==='approved' && String(q.reviewed_at||q.created_at||'') >= weekAgo) row(lbl, 'Approved', 'green', 'requests');
+    });
+    $('thWaitWrap').style.display = rows.length ? '' : 'none';
+    $('thWaitList').innerHTML = rows.join('');
+  }
+
+  function thRenderUpcoming(live){
+    const up = live.filter(r=> dtEffectiveStatus(r)==='scheduled' && r.date)
+      .sort((a,b)=> a.date.localeCompare(b.date) || (a.dispatchTime||a.expectedTime||'').localeCompare(b.dispatchTime||b.expectedTime||''))
+      .slice(0, 3);
+    $('thUpcomingWrap').style.display = up.length ? '' : 'none';
+    $('thUpcomingList').innerHTML = up.map(r=>{
+      const t = r.dispatchTime ? 'leave by '+thFmtHm(r.dispatchTime) : (r.expectedTime ? 'at site '+thFmtHm(r.expectedTime) : '');
+      return '<button type="button" class="th-card th-up" data-th-act="ticket" data-id="'+escapeHtml(r.id)+'">'+
+          '<span class="th-ic th-gray">'+icon('calendar')+'</span>'+
+          '<span class="th-text"><span class="th-title">'+escapeHtml(r.jobOrderNo||r.id)+(r.custName ? ' · '+escapeHtml(r.custName) : '')+'</span>'+
+          '<span class="th-sub">'+thDayWord(r.date)+(t ? ' · '+t : '')+'<br>You can accept it from '+escapeHtml(dtWindowOpensText(r))+'</span></span>'+
+          '<span class="th-chev">›</span>'+
+        '</button>';
+    }).join('');
+  }
+
+  // One delegated handler for every button on the technician homepage.
+  // Acknowledge and Arrived at Site run right here (after a confirm), using
+  // the exact same functions as My Job Order; everything else opens its own
+  // screen.
+  async function thHandleAct(e){
+    const el = e.target.closest('[data-th-act]');
+    if(!el) return;
+    const act = el.dataset.thAct, id = el.dataset.id, jo = el.dataset.jo || 'this job order';
+    if(act==='ack'){
+      if(!confirm('Accept '+jo+'?\n\nThis tells admin you are taking this job.')) return;
+      el.disabled = true; el.textContent = 'Saving…';
+      try{ await dtAcknowledge(id); } finally { await renderHomeTechOverview().catch(()=>{}); }
+      return;
+    }
+    if(act==='arrived'){
+      if(!confirm('Record that you arrived at the site for '+jo+'?\n\nThe customer will be told work has started.')) return;
+      try{ await dtMarkArrived(id, el); } finally { await renderHomeTechOverview().catch(()=>{}); }
+      return;
+    }
+    if(act==='dtr') return showDtrView();
+    if(act==='report') return showServiceReport();
+    if(act==='drafts'){ showServiceReport(); srShowTab('draft'); return; }
+    if(act==='requests') return showPurchasingView('myRequests');
+    if(act==='tools') return showPurchasingView('myTools');
+    if(act==='materials') return showPurchasingView('myMaterials');
+    if(act==='messages') return showMessagesView();
+    if(act==='leave') return showLeaveView();
+    if(act==='ticket') return dtOpenTicketOverlay(id);
+    if(act==='liquidate' || act==='cashadvance' || act==='reimburse'){
+      await showCashAdvanceView();
+      if(currentUser && currentUser.role!=='admin') caShowTab(act==='liquidate' ? 'liquidate' : act==='reimburse' ? 'reimburse' : 'history');
+    }
+  }
+  $('homeTechOverviewCard').addEventListener('click', thHandleAct);
 
   // Lightweight badge refresh — called right after a message thread is
   // marked read (see dtRefreshMessages/dtOpenTicketOverlay in dispatch.js)
@@ -1170,7 +1352,7 @@
   $('homeGreetingText').addEventListener('click', function(e){
     // Attendance strip → the DTR screen, where Time In/Out is actually
     // recorded (the values shown in the strip are display-only).
-    if(e.target.closest('.greet-attend-line')) showDtrView();
+    if(e.target.closest('.th-attend')) showDtrView();
   });
 
   // ---------- Technician Quick Actions (single card, 4 tiles — replaces
@@ -1183,9 +1365,19 @@
     card.style.display = (currentUser && currentUser.role==='tech') ? '' : 'none';
   }
   $('techQaServiceReport').addEventListener('click', showServiceReport);
-  $('techQaJobOrder').addEventListener('click', showDispatchView);
-  $('techQaFinanceHr').addEventListener('click', ()=> showFinanceHrView());
+  $('techQaJobOrder').addEventListener('click', ()=> showDispatchView());
   $('techQaMaterials').addEventListener('click', ()=> showPurchasingView('myRequests'));
+  $('techQaAttendance').addEventListener('click', ()=> showDtrView());
+  $('techQaMessages').addEventListener('click', ()=> showMessagesView());
+  $('techQaLeave').addEventListener('click', ()=> showLeaveView());
+  $('techQaCashAdvance').addEventListener('click', async ()=>{
+    await showCashAdvanceView();
+    if(currentUser && currentUser.role!=='admin') caShowTab('new');
+  });
+  $('techQaReimburse').addEventListener('click', async ()=>{
+    await showCashAdvanceView();
+    if(currentUser && currentUser.role!=='admin') caShowTab('reimburse');
+  });
 
   // ---------- Finance & HR page — tile view of Attendance / Cash Advance /
   // Leave / Liquidation / Reimbursement. Each tile opens the exact same

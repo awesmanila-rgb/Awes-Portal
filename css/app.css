@@ -3272,3 +3272,153 @@ body:not(.role-tech) .tl-hub-back{ display:none; }
 .prio-qa-actions .btn{ flex:1; min-height:48px; }
 /* At a glance: a counter at zero steps back so the ones that need you stand out */
 .overview-stat.ov-zero{ opacity:.5; }
+
+/* ============================================================
+   Technician homepage — "Need to do now" redesign
+   Large, high-contrast type for technicians who are new to apps; one
+   card layout for every task (step tag, icon, big title, one plain
+   sentence, full-width button); one centered column so every section
+   shares the same left edge. Rendered by renderHomeTechOverview() /
+   thRenderGreeting() in home.js. Technician-only: nothing here touches
+   the admin dashboard.
+   ============================================================ */
+body.role-tech #homeScreen{ max-width:760px; }
+.th-wrap{ margin-bottom:8px; }
+
+/* Greeting + attendance */
+.th-greet-card{ margin:4px 0 14px; }
+.th-greet{ margin:0 2px 12px; }
+.th-greet-name{ font-size:26px; line-height:1.2; font-weight:700; color:var(--text); margin:0; letter-spacing:-.01em; }
+.th-greet-date{ font-size:15px; color:var(--text-muted); margin:4px 0 0; }
+.th-attend{
+  width:100%; display:flex; align-items:center; gap:12px; text-align:left;
+  background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:12px 14px; cursor:pointer; font:inherit; color:var(--text);
+}
+.th-attend:active{ background:var(--green-light); }
+.th-attend-warn{ border-color:#E9C98F; background:#FFF9EE; }
+.th-attend-ic{ width:40px; height:40px; border-radius:12px; flex:none; display:flex; align-items:center; justify-content:center; background:var(--green-light); color:var(--green-dark); }
+.th-attend-warn .th-attend-ic{ background:#FBF0DC; color:var(--amber); }
+.th-attend-ic .ic{ width:22px; height:22px; }
+.th-attend-body{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.th-attend-label{ font-size:13px; color:var(--text-muted); }
+.th-attend-vals{ display:flex; flex-wrap:wrap; gap:4px 16px; font-size:16px; }
+.th-attend-vals b{ font-weight:700; color:var(--green-dark); font-variant-numeric:tabular-nums; }
+.th-attend-vals b.th-missing{ color:var(--amber); }
+.th-attend-vals b.th-dim{ color:var(--text-muted); }
+.th-attend-go{ font-size:14px; font-weight:700; color:var(--teal); white-space:nowrap; }
+
+/* Section headings */
+.th-sec{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:22px 2px 10px; }
+.th-sec-title{ font-size:21px; font-weight:700; color:var(--text); margin:0; line-height:1.25; }
+.th-sec-count{ font-size:14px; color:var(--text-muted); white-space:nowrap; }
+.th-red-txt{ color:var(--danger); font-weight:700; }
+.th-amber-txt{ color:var(--amber); font-weight:700; }
+.th-green-txt{ color:var(--green); font-weight:700; }
+.th-empty{ padding:18px; text-align:center; color:var(--text-muted); font-size:15px; }
+
+/* Task cards */
+.th-card{
+  display:block; width:100%; text-align:left; font:inherit; color:var(--text);
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:16px; margin-bottom:12px;
+}
+.th-hero{ border:2px solid var(--green); }
+.th-info{ background:#F7F9F7; }
+.th-top{ display:flex; gap:14px; align-items:flex-start; }
+.th-text{ flex:1; min-width:0; display:flex; flex-direction:column; }
+.th-title{ font-size:18px; font-weight:700; line-height:1.3; margin:0; color:var(--text); }
+.th-hero .th-title{ font-size:20px; }
+.th-sub{ font-size:15px; line-height:1.45; color:var(--text-muted); margin:4px 0 0; }
+.th-ic{ width:46px; height:46px; border-radius:13px; flex:none; display:flex; align-items:center; justify-content:center; }
+.th-ic .ic{ width:24px; height:24px; }
+.th-tag{ display:inline-block; font-size:13px; font-weight:700; padding:4px 11px; border-radius:999px; margin-bottom:10px; }
+
+/* One meaning per color, used everywhere on this page:
+   green = do this first / done, red = late, amber = in progress,
+   blue = paperwork, teal = messages, gray = waiting / info. */
+.th-green{ background:var(--green-light); color:var(--green-dark); }
+.th-red{ background:#FBE3DF; color:var(--danger); }
+.th-amber{ background:#FBF0DC; color:#9A6212; }
+.th-blue{ background:#E3EDF8; color:#1E5A96; }
+.th-teal{ background:var(--teal-light); color:var(--teal); }
+.th-gray{ background:#ECEFEC; color:#4A524B; }
+
+.th-btn{
+  display:block; width:100%; height:50px; margin-top:14px; border-radius:12px;
+  font:inherit; font-size:16px; font-weight:700; cursor:pointer;
+  background:var(--surface); color:var(--green-dark); border:1.5px solid var(--green);
+}
+.th-btn:active{ background:var(--green-light); }
+.th-btn-primary{ background:var(--green); color:#fff; border-color:var(--green); }
+.th-btn-primary:active{ background:var(--green-dark); }
+.th-btn:disabled{ opacity:.7; }
+
+/* 3-step job tracker */
+.th-steps{ display:flex; align-items:center; margin-top:14px; padding:0 4px; }
+.th-step-dot{ width:30px; height:30px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; background:#ECEFEC; color:#6B746D; }
+.th-step-dot .ic{ width:16px; height:16px; }
+.th-step-dot.done{ background:var(--green); color:#fff; }
+.th-step-dot.cur.th-green{ background:var(--green); color:#fff; }
+.th-step-dot.cur.th-red{ background:var(--danger); color:#fff; }
+.th-step-dot.cur.th-amber{ background:var(--amber); color:#fff; }
+.th-step-dot.cur.th-blue{ background:#1E5A96; color:#fff; }
+.th-step-line{ flex:1; height:4px; border-radius:2px; background:#E1E6E2; margin:0 4px; }
+.th-step-line.done{ background:var(--green); }
+.th-step-labels{ display:flex; justify-content:space-between; font-size:13px; color:var(--text-muted); margin-top:6px; }
+.th-step-labels span:nth-child(2){ text-align:center; }
+.th-step-labels span:last-child{ text-align:right; }
+
+/* All clear */
+.th-allclear{ display:flex; gap:14px; align-items:center; border:2px solid var(--green); }
+
+/* Waiting for approval */
+.th-box{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:2px 16px; }
+.th-wait-row{
+  width:100%; display:flex; justify-content:space-between; align-items:center; gap:12px;
+  background:none; border:none; border-bottom:1px solid var(--border); padding:13px 0;
+  font:inherit; text-align:left; cursor:pointer; color:var(--text);
+}
+.th-wait-row:last-child{ border-bottom:none; }
+.th-wait-label{ font-size:16px; }
+.th-wait-st{ font-size:14px; white-space:nowrap; }
+
+/* Coming up */
+.th-up{ display:flex; gap:14px; align-items:center; cursor:pointer; }
+.th-up .th-title{ font-size:17px; }
+.th-chev{ font-size:24px; color:var(--text-muted); }
+
+/* Request or check — even 2-column tiles */
+.th-grid{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; }
+@media (min-width:640px){ .th-grid{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
+.th-tile{
+  position:relative; display:flex; flex-direction:column; align-items:flex-start; gap:6px;
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:14px; min-height:128px; text-align:left; font:inherit; cursor:pointer; color:var(--text);
+}
+.th-tile:active{ background:var(--green-light); }
+.th-tile-ic{ width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; margin-bottom:4px; }
+.th-tile-ic .ic{ width:23px; height:23px; }
+.th-tile-label{ font-size:16px; font-weight:700; line-height:1.25; }
+.th-tile-desc{ font-size:13px; color:var(--text-muted); line-height:1.35; }
+.th-tile-badge{ position:absolute; top:12px; right:12px; font-size:12px; font-weight:700; padding:3px 9px; border-radius:999px; background:#FBE3DF; color:var(--danger); }
+.th-tile.th-orange .th-tile-ic{ background:#FCEBD9; color:#C2680E; }
+.th-tile.th-purple .th-tile-ic{ background:#EDE4FB; color:#7C4DBD; }
+.th-tile.th-green .th-tile-ic{ background:var(--green-light); color:var(--green-dark); }
+.th-tile.th-teal .th-tile-ic{ background:var(--teal-light); color:var(--teal); }
+.th-tile.th-brown .th-tile-ic{ background:#F1E4D6; color:#8A5A2B; }
+.th-tile.th-violet .th-tile-ic{ background:#EAE6FA; color:#5B4BB0; }
+.th-tile.th-blue .th-tile-ic{ background:#E3EDF8; color:#1E5A96; }
+/* the tile classes above set a tint on the tile itself only via the icon */
+.th-tile.th-orange, .th-tile.th-purple, .th-tile.th-green, .th-tile.th-teal,
+.th-tile.th-brown, .th-tile.th-violet, .th-tile.th-blue{ background:var(--surface); color:var(--text); }
+
+/* Announcements — same section style as the rest of the page for technicians */
+body.role-tech #homeAnnouncementsCard{ margin-top:22px; background:transparent; border:none; box-shadow:none; }
+body.role-tech #homeAnnouncementsCard .card-head{
+  background:transparent; color:var(--text); padding:0 2px 10px; border-radius:0;
+  font-size:21px; font-weight:700; letter-spacing:0; text-transform:none;
+}
+body.role-tech #homeAnnouncementsCard .card-head .ic{ display:none; }
+body.role-tech #homeAnnouncementsCard #homeAnnViewAllBtn{ color:var(--teal) !important; font-size:14px !important; }
+body.role-tech #homeAnnouncementsCard .card-body{ background:var(--surface); border:1px solid var(--border); border-radius:16px; }
