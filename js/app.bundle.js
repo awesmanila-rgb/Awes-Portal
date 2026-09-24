@@ -1588,23 +1588,11 @@
   function fitSidebarNav(){
     const nav = document.querySelector('.sidebar-nav');
     if(!nav) return;
-    const FLOOR = 0.55;
-    let scale = 1;
+    // Sizes are FIXED now (see .sidebar-nav in app.css) — rescaling the
+    // text on every section open/close made the fonts keep changing. This
+    // only decides whether the nav needs to scroll.
     nav.classList.remove('nav-scroll');
-    nav.style.setProperty('--nav-scale', scale);
-    // A handful of iterations is enough: each pass measures the real
-    // overflow at the current scale and steps down proportionally, so it
-    // converges in 2-3 passes rather than needing a fine-grained loop.
-    for(let i=0; i<6; i++){
-      const overflow = nav.scrollHeight - nav.clientHeight;
-      if(overflow <= 1) break;
-      // Scale down by roughly the fraction we're overflowing by, with a
-      // minimum step so tiny remaining overflows still make progress.
-      const ratio = nav.clientHeight / nav.scrollHeight;
-      scale = Math.max(FLOOR, scale * Math.min(ratio, 0.97));
-      nav.style.setProperty('--nav-scale', scale);
-      if(scale <= FLOOR) break;
-    }
+    nav.style.removeProperty('--nav-scale');
     // Still overflowing at the readable floor (short screen and/or a long
     // menu): let the nav scroll rather than clip. Without this, the last
     // items (Management › Settings, Dropdown Lists, Change Password) were
