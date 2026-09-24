@@ -1031,7 +1031,7 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v150';
+const CACHE_NAME = 'awes-sr-v151';
 
 // Split into two lists on purpose.
 //

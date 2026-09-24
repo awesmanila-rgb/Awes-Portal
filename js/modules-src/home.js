@@ -234,10 +234,43 @@
   // technician's own numbers. Job Order's subtitle lists whichever teammates
   // share at least one of this technician's own open tickets — pulled from
   // assignedWorkerNames on those tickets, not a separate lookup.
+  // Live refresh. This card used to load only when the homepage opened,
+  // and job-order realtime (dtSubscribeTickets) only starts once My Job
+  // Order is opened — so a new assignment, or a job order moving along,
+  // never reached the homepage. Now: realtime on this technician's job
+  // orders (RLS limits the feed to their own), a 60-second poll as the
+  // safety net, and a refresh on returning to the app.
+  let techOvChannel = null, techOvTimer = null, techOvBusy = false;
+  function techOvVisible(){
+    return !!currentUser && currentUser.role !== 'admin' && currentUser.role !== 'customer' &&
+      !document.hidden && $('homeScreen') && $('homeScreen').style.display !== 'none';
+  }
+  async function techOvRefresh(){
+    if(!techOvVisible() || techOvBusy) return;
+    techOvBusy = true;
+    try{ await renderHomeTechOverview(); }finally{ techOvBusy = false; }
+  }
+  function techOvRefreshSoon(){ clearTimeout(techOvTimer); techOvTimer = setTimeout(techOvRefresh, 1500); }
+  function techOvStartLive(){
+    if(techOvChannel || !db || !db.channel || !currentUser) return;
+    try{
+      techOvChannel = db.channel('tech-home-'+currentUser.id)
+        .on('postgres_changes', { event:'*', schema:'public', table:'dispatch_tickets' }, techOvRefreshSoon)
+        .subscribe();
+    }catch(e){ techOvChannel = null; }
+  }
+  function techOvStopLive(){
+    if(techOvChannel && db){ try{ db.removeChannel(techOvChannel); }catch(e){} }
+    techOvChannel = null;
+  }
+  setInterval(techOvRefresh, 60000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) techOvRefreshSoon(); });
+
   async function renderHomeTechOverview(){
     const card = $('homeTechOverviewCard');
-    if(!currentUser || currentUser.role==='admin'){ card.style.display = 'none'; return; }
+    if(!currentUser || currentUser.role==='admin'){ card.style.display = 'none'; techOvStopLive(); return; }
     card.style.display = '';
+    techOvStartLive();
 
     const [tickets, reports, cashAdvances, leaves, unreadCount] = await Promise.all([
       dtListForWorker(currentUser.id).catch(()=>[]),
@@ -293,7 +326,7 @@
     const nextJo = openTickets.filter(t=>t.date).slice()
       .sort((a,b)=>{
         const ip = (t)=> dtEffectiveStatus(t)==='in_progress' ? 0 : 1;
-        return ip(a)-ip(b) || a.date.localeCompare(b.date) || (a.expectedTime||'').localeCompare(b.expectedTime||'');
+        return ip(a)-ip(b) || a.date.localeCompare(b.date) || (a.dispatchTime||a.expectedTime||'').localeCompare(b.dispatchTime||b.expectedTime||'');
       })[0];
     // The title used to be fixed at "Next Job Order", even for a job dated
     // today or already under way. It now says which one it is.
@@ -310,7 +343,8 @@
     }
     if(nextJo){
       $('ovMyNextJoValue').textContent = nextJo.jobOrderNo || nextJo.id;
-      $('ovMyNextJoSub').textContent = (nextJo.custName||'')+' — '+leaveFmtDate(nextJo.date)+(nextJo.expectedTime ? (' at '+nextJo.expectedTime) : '');
+      $('ovMyNextJoSub').textContent = (nextJo.custName||'')+' — '+leaveFmtDate(nextJo.date)+
+        (nextJo.dispatchTime ? (' · dispatch '+nextJo.dispatchTime) : '')+(nextJo.expectedTime ? (' · at site '+nextJo.expectedTime) : '');
     }else{
       $('ovMyNextJoValue').textContent = '—';
       $('ovMyNextJoSub').textContent = 'Nothing scheduled';

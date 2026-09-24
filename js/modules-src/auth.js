@@ -1132,6 +1132,7 @@
     // without this an account switch on a shared device would leave the
     // previous person's subscription open alongside the new one.
     if(typeof dtUnsubscribeTickets === 'function') dtUnsubscribeTickets();
+    if(typeof techOvStopLive === 'function') techOvStopLive();
     // Drop only THIS device's push subscription — other devices the same
     // person signs in on keep receiving. Awaited so the row is gone before
     // the auth session ends (deleting it needs that session).
