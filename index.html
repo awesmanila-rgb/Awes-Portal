@@ -762,7 +762,7 @@ window.awesCss = {
 </div>
 
 <!-- Customer Portal — shown instead of #homeScreen when currentUser.role === 'customer'. -->
-<div id="customerHomeScreen" class="home-screen cp-screen cph" style="display:none;">
+<div id="customerHomeScreen" class="home-screen cp-screen cph cph-loading" style="display:none;">
 
   <!-- Customer homepage (redesign). Header: company mark + bell/profile
        menu, then the greeting and the account chip (which replaces the old
@@ -773,7 +773,7 @@ window.awesCss = {
   <div class="cp-header cp-header-soft">
     <div class="cp-header-inner">
       <div>
-        <div class="cph-brand"><img src="logo.png" alt=""><span>AWES Service</span></div>
+        <div class="cph-brand"><img src="logo.png" alt=""><span>AWES Customer Portal</span></div>
       </div>
       <div class="cp-header-actions">
         <!-- Notification bell doubles as the global chat entry point — see
@@ -818,8 +818,26 @@ window.awesCss = {
 
   <div class="cp-content cph-body">
     <div class="push-prompt" id="pushPromptCust" style="display:none;"></div>
+
     <div class="cph-grid">
       <div class="cph-col">
+        <!-- Marketing banner — auto-sliding. Slides come from CP_BANNERS in
+             customer-portal.js (image + where a tap goes); images live in
+             img/banners/. The frame keeps a fixed 12:5 shape so nothing below
+             it moves while images load or slides change. -->
+        <section class="cph-banner" id="cpBanner" aria-roledescription="carousel" aria-label="AWES services">
+          <div class="cph-banner-track" id="cpBannerTrack"></div>
+          <div class="cph-banner-dots" id="cpBannerDots" role="tablist" aria-label="Choose slide"></div>
+        </section>
+
+        <!-- Shown only on the first load of an account, instead of empty
+             sections that fill in one by one. -->
+        <div class="cph-skel" aria-hidden="true">
+          <div class="cph-skel-line" style="width:38%"></div><div class="cph-skel-card"></div>
+          <div class="cph-skel-row"><div class="cph-skel-card"></div><div class="cph-skel-card"></div><div class="cph-skel-card"></div></div>
+          <div class="cph-skel-line" style="width:30%"></div><div class="cph-skel-card cph-skel-tall"></div>
+        </div>
+
         <section id="cpActionWrap" style="display:none;">
           <div class="cph-sec"><h2>Action needed</h2><span class="cph-sec-note cph-danger-txt" id="cpActionCount"></span></div>
           <div id="cpActionList"></div>
@@ -1044,8 +1062,8 @@ window.awesCss = {
   <div class="cp-nav-brand"><img src="logo.png" alt=""><span>AWES Portal</span></div>
   <button type="button" class="cp-nav-btn active" data-screen="Home" id="cpNavHome"></button>
   <button type="button" class="cp-nav-btn" data-screen="Units" id="cpNavUnits"></button>
-  <button type="button" class="cp-nav-btn" data-screen="History" id="cpNavHistory"></button>
   <button type="button" class="cp-nav-btn" data-screen="Requests" id="cpNavRequests"></button>
+  <button type="button" class="cp-nav-btn" data-screen="History" id="cpNavHistory"></button>
   <button type="button" class="cp-nav-btn" data-screen="Profile" id="cpNavProfile"></button>
   <div class="cp-nav-spacer"></div>
 </nav>

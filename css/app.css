@@ -3594,3 +3594,102 @@ body.role-tech #homeAnnouncementsCard .card-body{ background:var(--surface); bor
   .cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:calc(50% - 576px); padding-right:calc(50% - 576px); }
 }
 .cph{ background:var(--bg); }
+
+/* ============================================================
+   Customer portal — mobile margins, stable layout, banner
+   ============================================================ */
+/* Every customer screen had margin:-16px, written for a padded parent it
+   doesn't have — so each screen was 32px wider than the phone and pushed
+   16px past both edges (content touching or cut off at the sides). */
+body.role-customer .cp-screen{ margin:0; }
+
+/* One gutter for the whole portal on phones: 20px from the screen edge. */
+.cph .cph-body{ padding:0 20px 32px; }
+.cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:20px; padding-right:20px; }
+@media (max-width:768px){ .cp-page-content{ padding-left:20px; padding-right:20px; } }
+@media (min-width:769px){
+  .cph .cph-body{ padding:0 24px 32px; }
+  .cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:24px; padding-right:24px; }
+}
+@media (min-width:1248px){
+  .cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:calc(50% - 576px); padding-right:calc(50% - 576px); }
+}
+.cph .cph-greet{ font-size:23px; }
+.cph .cph-hello{ padding-bottom:16px; }
+.cph-brand span{ white-space:nowrap; }
+
+/* Balanced spacing: every section starts the same distance below the one
+   above, and the first section sits a fixed gap under the banner. */
+.cph .cph-sec{ margin:24px 2px 10px; }
+.cph .cph-card{ margin-bottom:12px; }
+.cph-actions{ margin-top:16px; }
+.cph-okline-muted{ color:var(--text-muted); }
+
+/* Unit summary: four chips don't fit one row on a phone — 2 × 2 instead
+   of squeezed, wrapping labels. */
+@media (max-width:520px){ .cph-sum.cph-sum-4{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+.cph-sum-item{ min-height:62px; justify-content:center; }
+
+/* Marketing banner — fixed shape (no layout shift while images load or
+   slides change); swipe or wait for it to slide. */
+.cph-banner{ position:relative; margin:20px 0 4px; border-radius:16px; overflow:hidden; background:#154D34; }
+.cph-banner-track{
+  display:flex; overflow-x:auto; scroll-snap-type:x mandatory; scroll-behavior:smooth;
+  scrollbar-width:none; -webkit-overflow-scrolling:touch; aspect-ratio:2 / 1;
+}
+.cph-banner-track::-webkit-scrollbar{ display:none; }
+@media (min-width:640px){ .cph-banner-track{ aspect-ratio:auto; height:260px; } }
+.cph-slide{ position:relative; flex:0 0 100%; scroll-snap-align:start; scroll-snap-stop:always; cursor:pointer; overflow:hidden; }
+.cph-slide img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:right center; display:block; }
+.cph-slide-copy{
+  position:absolute; left:0; top:0; bottom:0; width:62%; box-sizing:border-box;
+  padding:18px 0 28px 18px; display:flex; flex-direction:column; justify-content:center; gap:6px; color:#fff;
+}
+@media (min-width:640px){ .cph-slide-copy{ width:52%; padding:28px 0 36px 32px; gap:10px; } }
+.cph-slide-title{ margin:0; font-size:17px; line-height:1.25; font-weight:700; letter-spacing:-.01em; text-wrap:balance; }
+.cph-slide-text{ margin:0; font-size:12.5px; line-height:1.4; color:rgba(255,255,255,.86); }
+.cph-slide-cta{
+  align-self:flex-start; margin-top:4px; background:#fff; color:#154D34;
+  font-size:12.5px; font-weight:700; padding:6px 12px; border-radius:999px; white-space:nowrap;
+}
+@media (min-width:640px){
+  .cph-slide-title{ font-size:24px; }
+  .cph-slide-text{ font-size:14.5px; max-width:420px; }
+  .cph-slide-cta{ font-size:14px; padding:8px 16px; }
+}
+@media (max-width:360px){ .cph-slide-text{ display:none; } }
+.cph-banner-dots{ position:absolute; left:0; right:0; bottom:9px; display:flex; justify-content:center; gap:6px; pointer-events:none; }
+.cph-dot{ pointer-events:auto; width:7px; height:7px; border-radius:999px; border:none; padding:0; background:rgba(255,255,255,.5); cursor:pointer; transition:width .25s ease, background .25s ease; }
+.cph-dot.on{ width:20px; background:#fff; }
+/* bigger invisible tap target around each dot */
+.cph-dot{ position:relative; }
+.cph-dot::after{ content:''; position:absolute; inset:-10px -4px; }
+
+/* First-load placeholder */
+.cph-skel{ display:none; }
+.cph-loading .cph-skel{ display:block; margin-top:24px; }
+.cph-loading .cph-grid{ display:none; }
+.cph-skel-line{ height:16px; border-radius:8px; background:#E4E9E5; margin:0 0 12px; }
+.cph-skel-card{ height:110px; border-radius:14px; background:#EBEFEC; margin:0 0 16px; }
+.cph-skel-tall{ height:170px; }
+.cph-skel-row{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+.cph-skel-row .cph-skel-card{ height:76px; }
+.cph-skel-line, .cph-skel-card{ animation:cphPulse 1.4s ease-in-out infinite; }
+@keyframes cphPulse{ 50%{ opacity:.55; } }
+@media (prefers-reduced-motion: reduce){ .cph-skel-line, .cph-skel-card{ animation:none; } .cph-banner-track{ scroll-behavior:auto; } }
+/* Phones: headline + button only, kept clear of the illustration. The
+   supporting line returns on wider screens. */
+.cph-slide-copy{ width:56%; }
+@media (max-width:479px){ .cph-slide-text{ display:none; } .cph-slide-title{ font-size:18px; } .cph-slide-copy{ gap:10px; } }
+/* Unit details wrap to a second line instead of being cut off. */
+.cph-unit .cph-sub{ white-space:normal; overflow:visible; text-overflow:clip; }
+/* Banner sits at the top of the left column: full width on phones, and
+   beside Upcoming maintenance / reports on desktop, so both columns start
+   level. Tablet and up use a slightly wider shape than phones. */
+@media (min-width:640px){ .cph-banner-track{ height:auto; aspect-ratio:13 / 5; } }
+.cph-loading .cph-grid{ display:grid; }
+.cph-loading .cph-col > :not(.cph-banner):not(.cph-skel){ display:none !important; }
+.cph-loading .cph-col + .cph-col{ display:none; }
+.cph-banner{ margin-top:24px; }
+/* Account screen list: same 20px phone gutter as the rest of the portal. */
+.cp-profile-list{ padding:16px 20px; }

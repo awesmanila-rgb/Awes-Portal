@@ -40,22 +40,33 @@
                               // Requests segment so none of them re-fetch it
                               // separately on every render.
 
+  // Loads into local variables and swaps them in at the end, in one step.
+  // It used to clear cpEquipment/cpReports first and then await the
+  // network — and the 30-second refresh (plus the request-badge refresh
+  // that runs alongside it) could render in that gap, so sections briefly
+  // showed "no units", lost their overdue items, or swapped text. Only a
+  // switch to a different account clears first, so one account's data is
+  // never shown under another.
+  let cpLoadedCustomerId = null;
+  let cpLoadSeq = 0;
   async function loadCustomerPortalData(customerId){
-    cpCustomer = null; cpEquipment = []; cpReports = [];
+    if(customerId !== cpLoadedCustomerId){ cpCustomer = null; cpEquipment = []; cpReports = []; }
     if(!customerId) return;
     if(!(await ensureCloud())) return;
+    const seq = ++cpLoadSeq;
+    let nCustomer = null, nEquipment = [], nReports = [], failed = false;
     try{
       const { data: custRow, error: custErr } = await db.from('customers')
         .select('*').eq('id', customerId).maybeSingle();
       if(custErr) throw custErr;
-      cpCustomer = custRow || null;
-    }catch(e){ console.error('load customer record failed', describeCloudError(e)); }
+      nCustomer = custRow || null;
+    }catch(e){ failed = true; console.error('load customer record failed', describeCloudError(e)); }
 
     try{
       const { data, error } = await db.from('customer_equipment')
         .select('*').eq('customer_id', customerId).order('id');
       if(error) throw error;
-      cpEquipment = (data||[]).map(row => ({
+      nEquipment = (data||[]).map(row => ({
         id: row.id, equipType: row.equip_type, equipLocation: row.equip_location,
         brand: row.brand, mountType: row.mount_type, coolCap: row.cool_cap,
         modelCU: row.model_cu, serialCU: row.serial_cu, modelFCU: row.model_fcu, serialFCU: row.serial_fcu,
@@ -70,10 +81,10 @@
       // actual thumbnails only load in the per-unit detail screen (see
       // renderCustomerEquipmentPhotos, customer-equipment-history.js).
       const photoCounts = await cloudGetEquipmentPhotoCounts(customerId);
-      cpEquipment.forEach(eq=> eq.photoCount = photoCounts[eq.id] || 0);
-    }catch(e){ console.error('load customer equipment failed', describeCloudError(e)); }
+      nEquipment.forEach(eq=> eq.photoCount = photoCounts[eq.id] || 0);
+    }catch(e){ failed = true; console.error('load customer equipment failed', describeCloudError(e)); }
 
-    if(cpCustomer){
+    if(nCustomer){
       try{
         // Matched by service_reports.customer_id, not cust_name — see
         // schema note #2 above. That column now exists, is set on every
@@ -92,11 +103,11 @@
         // without a second round-trip per unit.
         const { data, error } = await db.from('service_reports')
           .select('id, sr_no, date, cust_name, equipment_id, service_category, equip_type, equip_location, model_cu, serial_cu, model_fcu, serial_fcu, trouble_call, remarks, completed, technician_name, findings, recommendations, materials, services_done')
-          .eq('customer_id', cpCustomer.id)
+          .eq('customer_id', nCustomer.id)
           .order('date', { ascending:false });
         if(error) throw error;
-        cpReports = data || [];
-      }catch(e){ console.error('load customer reports failed', describeCloudError(e)); }
+        nReports = data || [];
+      }catch(e){ failed = true; console.error('load customer reports failed', describeCloudError(e)); }
     }
 
     // Attach each equipment's full matching report history, for the
@@ -105,11 +116,18 @@
     // computeEquipmentStatus below). Matching logic lives in
     // matchReportHistoryForEquipment() (core.js) — shared with the admin
     // equipment detail overlay's own history section.
-    cpEquipment.forEach(eq => {
-      eq.reportHistory = matchReportHistoryForEquipment(cpReports, eq);
+    nEquipment.forEach(eq => {
+      eq.reportHistory = matchReportHistoryForEquipment(nReports, eq);
       eq.lastReport = eq.reportHistory[0] || null;
       eq.status = computeEquipmentStatus(eq);
     });
+    // A newer load started while this one was running — let that one win.
+    if(seq !== cpLoadSeq) return;
+    // A failed refresh (weak signal, offline) keeps what is already on
+    // screen instead of blanking it; a first load still shows what it got.
+    if(failed && customerId === cpLoadedCustomerId) return;
+    cpCustomer = nCustomer; cpEquipment = nEquipment; cpReports = nReports;
+    cpLoadedCustomerId = customerId;
   }
 
   // ---------- PM (preventive maintenance) due status ----------
@@ -289,6 +307,18 @@
     hours: 'Monday to Saturday, 8:00 AM to 6:00 PM'
   };
 
+  // Writes a section only when its markup actually changed. The home page
+  // re-renders on every 30-second refresh and on every request update; an
+  // unconditional innerHTML swap rebuilt every card and reloaded every
+  // photo each time, which is what showed as cards blinking.
+  function cpSetHtml(el, html){
+    if(!el) return false;
+    if(el._cpHtml === html) return false;
+    el.innerHTML = html;
+    el._cpHtml = html;
+    return true;
+  }
+  function cpShow(el, on){ if(el){ const v = on ? '' : 'none'; if(el.style.display !== v) el.style.display = v; } }
   function cpEquipLabel(eq){ return eq ? escapeHtml(equipDisplayName(eq)) : 'your unit'; }
   function cpFindEquip(id){ return cpEquipment.find(e=> String(e.id)===String(id)); }
   function cpIsActiveStatus(status){
@@ -370,14 +400,14 @@
   function cpRenderActions(rows){
     const items = cpActionItems(rows);
     const need = items.filter(i=> i.tone!=='info').length;
-    $('cpActionWrap').style.display = items.length ? '' : 'none';
+    cpShow($('cpActionWrap'), items.length);
     $('cpActionCount').textContent = need ? need+' item'+(need===1?'':'s') : '';
-    $('cpActionList').innerHTML = items.map((it, i)=>
+    cpSetHtml($('cpActionList'), items.map((it, i)=>
       '<div class="cph-card cph-action cph-t-'+it.tone+'">'+
         '<div class="cph-row-top"><span class="cph-ic cph-ic-'+it.tone+'">'+CP_ICON[it.ic]+'</span>'+
         '<div class="cph-text"><p class="cph-title">'+it.title+'</p><p class="cph-sub">'+it.sub+'</p></div></div>'+
         '<button type="button" class="cph-btn'+(it.secondary ? '' : ' cph-btn-primary')+'" data-act-idx="'+i+'">'+it.btn+'</button>'+
-      '</div>').join('');
+      '</div>').join(''));
     $('cpActionList').onclick = (e)=>{
       const b = e.target.closest('[data-act-idx]'); if(!b) return;
       const it = items[Number(b.dataset.actIdx)]; if(!it) return;
@@ -413,9 +443,11 @@
     const d = r.proposedScheduleDate || r.requestedDate;
     return d ? cpRelDay(d)+(r.proposedScheduleTime ? ' · '+escapeHtml(r.proposedScheduleTime) : '') : 'Date to be confirmed';
   }
+  let cpHeroSeq = 0;
   async function renderCustomerHero(rows){
     const hero = $('cpHero');
     if(!hero) return;
+    const seq = ++cpHeroSeq;
     rows = rows || [];
     cpRenderActions(rows);
 
@@ -426,24 +458,27 @@
     const others = live.length + upcoming.length - (subject ? 1 : 0);
     $('cpVisitTitle').textContent = subject && live.length ? 'Current visit' : 'Next visit';
     const more = $('cpVisitMore');
-    more.style.display = others>0 ? '' : 'none';
+    cpShow(more, others>0);
     more.textContent = others>0 ? '+'+others+' more' : '';
     more.onclick = ()=> cpShowScreen('Requests');
 
     if(!subject){
       const next = cpEquipment.filter(eq=> eq.nextPmDate && daysUntil(eq.nextPmDate)>=0)
         .sort((a,b)=> a.nextPmDate.localeCompare(b.nextPmDate))[0];
-      hero.innerHTML =
+      // No second "Book a service" button here — the main one sits right
+      // below this card.
+      cpSetHtml(hero,
         '<div class="cph-row-top"><span class="cph-ic cph-ic-muted">'+CP_ICON.calendar+'</span>'+
         '<div class="cph-text"><p class="cph-title">No visit booked</p>'+
-        '<p class="cph-sub">'+(next ? 'Next maintenance is due '+escapeHtml(cpRelDay(next.nextPmDate))+' for '+cpEquipLabel(next)+'.' : 'Book a visit whenever you need service.')+'</p></div></div>'+
-        '<button type="button" class="cph-btn" data-hero="book">Book a service</button>';
-      hero.onclick = (e)=>{ if(e.target.closest('[data-hero="book"]')) cpOpenNewRequest(); };
+        '<p class="cph-sub">'+(next ? 'Next maintenance is due '+escapeHtml(cpRelDay(next.nextPmDate))+' for '+cpEquipLabel(next)+'.' : 'When you book a service, the date and your technician will show here.')+'</p></div></div>');
+      hero.onclick = null;
       return;
     }
     const eq = cpFindEquip(subject.equipmentId);
     const techNames = (subject.linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function' && subject.status!=='schedule_confirmed')
       ? await dtFetchTicketTechNames(subject.linkedDispatchTicketId).catch(()=>[]) : [];
+    // A newer render started while the names were loading — it owns the card.
+    if(seq !== cpHeroSeq) return;
     const doneNote = subject.status==='completed' ? '<p class="cph-note">Work is finished. Your service report will appear below once it\u2019s signed off.</p>' : '';
     const techHtml = techNames && techNames.length
       ? '<div class="cph-tech"><span class="cph-avatar" style="background:'+cpAvatarColor(techNames[0])+'">'+escapeHtml(cpInitials(techNames[0]))+'</span>'+
@@ -453,11 +488,11 @@
       : '<div class="cph-tech"><span class="cph-avatar cph-avatar-muted">'+CP_ICON.person+'</span>'+
           '<div class="cph-text"><p class="cph-tech-name">Technician to be assigned</p><p class="cph-sub">You\u2019ll see who\u2019s coming once the crew confirms</p></div>'+
           '<button type="button" class="cph-icon-btn" data-hero="msg" aria-label="Message">'+CP_ICON.chat+'</button></div>';
-    hero.innerHTML =
+    cpSetHtml(hero,
       '<p class="cph-title">'+cpVisitWhen(subject)+'</p>'+
       '<p class="cph-sub">'+cpEquipLabel(eq)+(subject.description ? ' · '+escapeHtml(String(subject.description).slice(0,90)) : '')+'</p>'+
       techHtml+cpTrackHtml(subject.status)+doneNote+
-      '<button type="button" class="cph-link-btn" data-hero="open">View request</button>';
+      '<button type="button" class="cph-link-btn" data-hero="open">View request</button>');
     hero.onclick = (e)=>{
       const a = e.target.closest('[data-hero]'); if(!a) return;
       if(typeof srOpenDetail==='function') srOpenDetail(subject);
@@ -487,10 +522,10 @@
     $('cpUnitsViewAllLink').textContent = total ? 'See all '+total : '';
     const chip = (key, n, label, tone)=> '<button type="button" class="cph-sum-item cph-sum-'+tone+'" data-filter="'+key+'"'+(n ? '' : ' disabled')+'>'+
       '<b>'+n+'</b><span>'+label+'</span></button>';
-    $('cpUnitSummary').innerHTML = total
+    cpSetHtml($('cpUnitSummary'), total
       ? chip('overdue', c.overdue, 'PM overdue', 'danger') + chip('due-soon', c['due-soon'], 'Due in 30 days', 'warn') +
         chip('scheduled', c.scheduled, 'Up to date', 'ok') + (c.none ? chip('none', c.none, 'No PM date', 'muted') : '')
-      : '';
+      : '');
     $('cpUnitSummary').classList.toggle('cph-sum-4', !!c.none);
     $('cpUnitSummary').onclick = (e)=>{
       const b = e.target.closest('[data-filter]'); if(!b || b.disabled) return;
@@ -500,11 +535,15 @@
       .sort((a,b)=> (a.status.key==='overdue' ? 0 : 1) - (b.status.key==='overdue' ? 0 : 1) || String(a.nextPmDate).localeCompare(String(b.nextPmDate)));
     const shown = (attention.length ? attention : cpEquipment).slice(0, 3);
     $('cpUnitsSectionTitle').textContent = attention.length ? 'Units needing maintenance' : 'Your units';
+    // The status line says only what's true: "nothing overdue" is only
+    // claimed when every unit actually has a PM date.
+    const statusLine = attention.length ? ''
+      : c.none === total ? '<p class="cph-okline cph-okline-muted">'+CP_ICON.calendar+' No maintenance schedule set yet. Book maintenance and we\u2019ll set one up.</p>'
+      : '<p class="cph-okline">'+CP_ICON.check+' No unit is overdue or due in the next 30 days.</p>';
     const paint = (photoMap)=>{
-      $('cpUnitScroll').innerHTML = !total
+      cpSetHtml($('cpUnitScroll'), !total
         ? '<p class="cph-empty">No units are enrolled on this account yet. Your service provider adds them after the first visit.</p>'
-        : (attention.length ? '' : '<p class="cph-okline">'+CP_ICON.check+' No unit is overdue or due in the next 30 days.</p>') +
-          shown.map(eq=> cpHomeUnitRowHtml(eq, photoMap)).join('');
+        : statusLine + shown.map(eq=> cpHomeUnitRowHtml(eq, photoMap)).join(''));
     };
     const ids = shown.map(eq=> eq.id);
     paint(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(ids) : {});
@@ -528,8 +567,8 @@
       groups.get(eq.nextPmDate).push(eq);
     });
     const dates = Array.from(groups.keys()).sort().slice(0, 4);
-    $('cpPmWrap').style.display = dates.length ? '' : 'none';
-    $('cpPmList').innerHTML = dates.map(d=>{
+    cpShow($('cpPmWrap'), dates.length);
+    cpSetHtml($('cpPmList'), dates.map(d=>{
       const list = groups.get(d);
       const dt = new Date(d+'T00:00:00');
       const places = Array.from(new Set(list.map(eq=> (eq.equipLocation||'').trim()).filter(Boolean)));
@@ -538,7 +577,7 @@
         '<span class="cph-text"><span class="cph-li-title">'+(list.length===1 ? cpEquipLabel(list[0]) : list.length+' units')+'</span>'+
         '<span class="cph-sub">Preventive maintenance'+(list.length>1 && places.length ? ' · '+escapeHtml(places.slice(0,2).join(', '))+(places.length>2 ? '…' : '') : '')+'</span></span>'+
         '<button type="button" class="cph-link-btn" data-pm="'+escapeHtml(d)+'">Book</button></div>';
-    }).join('');
+    }).join(''));
     $('cpPmList').onclick = (e)=>{
       const b = e.target.closest('[data-pm]'); if(b) cpBookPm(groups.get(b.dataset.pm) || []);
     };
@@ -547,7 +586,7 @@
   // ---- Recent service reports ----
   function cpRenderReports(){
     const done = cpReports.filter(r=> r.completed !== false).slice(0, 3);
-    $('cpRecentActivity').innerHTML = done.length ? done.map(r=>{
+    cpSetHtml($('cpRecentActivity'), done.length ? done.map(r=>{
       const cat = r.service_category && typeof serviceCategoryLabel==='function' ? serviceCategoryLabel(r.service_category) : '';
       const eq = r.equipment_id ? cpFindEquip(r.equipment_id) : null;
       const unit = eq ? equipDisplayName(eq) : (r.equip_location || r.equip_type || 'Service visit');
@@ -557,7 +596,7 @@
         '<span class="cph-text" data-open="1"><span class="cph-li-title">'+escapeHtml(title)+'</span>'+
         '<span class="cph-sub">'+escapeHtml(cpFmtShort(r.date))+(r.sr_no ? ' · '+escapeHtml(r.sr_no) : '')+(r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</span></span>'+
         '<button type="button" class="cph-icon-btn" data-dl="1" aria-label="Download PDF" title="Download PDF">'+CP_ICON.download+'</button></div>';
-    }).join('') : '<p class="cph-empty">Reports from completed visits will appear here.</p>';
+    }).join('') : '<p class="cph-empty">Reports from completed visits will appear here.</p>');
     $('cpRecentActivity').onclick = (e)=>{
       const row = e.target.closest('[data-report-id]'); if(!row) return;
       if(e.target.closest('[data-dl]')) cpDownloadReport(row.dataset.srNo, row.dataset.reportId);
@@ -583,12 +622,12 @@
   // ---- Support ----
   function cpRenderSupport(){
     const phone = String(CP_SUPPORT.phone||'').trim();
-    $('cpSupportCard').innerHTML =
+    cpSetHtml($('cpSupportCard'),
       '<span class="cph-ic cph-ic-ok">'+CP_ICON.chat+'</span>'+
       '<span class="cph-text"><span class="cph-li-title">Need help?</span>'+
       '<span class="cph-sub">'+escapeHtml(CP_SUPPORT.hours)+(phone ? ' · '+escapeHtml(phone) : '')+'</span></span>'+
       (phone ? '<a class="cph-btn cph-btn-sm" href="tel:'+escapeHtml(phone.replace(/[^\d+]/g,''))+'">Call</a>'
-             : '<button type="button" class="cph-btn cph-btn-sm" data-support="msg">Message us</button>');
+             : '<button type="button" class="cph-btn cph-btn-sm" data-support="msg">Message us</button>'));
     $('cpSupportCard').onclick = (e)=>{ if(e.target.closest('[data-support]')) cpOpenCentralChat(); };
   }
 
@@ -626,6 +665,7 @@
     $('cpActProblemIc').innerHTML = CP_ICON.alert;
     $('cpActMsgIc').innerHTML = CP_ICON.chat;
 
+    $('customerHomeScreen').classList.remove('cph-loading');
     renderCustomerHero(cpMyRequestsCache);
     cpRenderUnitsSection();
     cpRenderPm();
@@ -635,6 +675,99 @@
 
     if(cpCustomer && cpCustomer.id) cpRefreshRequestsBadge(cpCustomer.id);
   }
+
+  // ---------- Marketing banner (auto-sliding) ----------
+  // Edit this list to change the slides. `img` is any image in the app
+  // folder (a designed JPG/PNG works too — for an image that already has
+  // its own text baked in, leave title/text/cta empty). A tap anywhere on
+  // the slide runs `action`: it opens the request form with `request`
+  // prefilled, so the office gets a ready-to-answer inquiry.
+  const CP_BANNERS = [
+    { img:'img/banners/pm-plan.svg', alt:'Split aircon unit with a maintenance calendar',
+      title:'Keep every unit running at its best',
+      text:'Preventive maintenance: cleaning, checks and a service report every visit.',
+      cta:'Book maintenance', request:'Preventive maintenance' },
+    { img:'img/banners/installation.svg', alt:'Outdoor aircon unit connected to an indoor unit',
+      title:'New aircon? We supply and install it.',
+      text:'Split, floor-mounted and ducted systems, sized for your space.',
+      cta:'Request a quote', request:'Quotation request: aircon supply and installation' },
+    { img:'img/banners/fire-protection.svg', alt:'Fire sprinkler, smoke detector and alarm bell',
+      title:'Fire protection you can rely on',
+      text:'Sprinkler (AFSS) and fire alarm (FDAS) installation, testing and maintenance.',
+      cta:'Ask about fire protection', request:'Inquiry: fire protection (AFSS / FDAS) service' }
+  ];
+  const CP_BANNER_MS = 5500;       // time on each slide
+  const CP_BANNER_RESUME_MS = 9000; // pause after the customer swipes or taps
+  let cpBannerIdx = 0, cpBannerTimer = null, cpBannerPausedUntil = 0;
+
+  function cpBannerInit(){
+    const track = $('cpBannerTrack'), dots = $('cpBannerDots');
+    if(!track || !dots) return;
+    if(!CP_BANNERS.length){ $('cpBanner').style.display = 'none'; return; }
+    track.innerHTML = CP_BANNERS.map((b, i)=>
+      '<div class="cph-slide" role="group" aria-roledescription="slide" aria-label="'+(i+1)+' of '+CP_BANNERS.length+'" data-slide="'+i+'">'+
+        '<img src="'+escapeHtml(b.img)+'" alt="'+escapeHtml(b.alt||'')+'" '+(i===0 ? '' : 'loading="lazy" ')+'decoding="async">'+
+        (b.title ? '<div class="cph-slide-copy">'+
+          '<p class="cph-slide-title">'+escapeHtml(b.title)+'</p>'+
+          (b.text ? '<p class="cph-slide-text">'+escapeHtml(b.text)+'</p>' : '')+
+          (b.cta ? '<span class="cph-slide-cta">'+escapeHtml(b.cta)+' ›</span>' : '')+
+        '</div>' : '')+
+      '</div>').join('');
+    dots.innerHTML = CP_BANNERS.length > 1 ? CP_BANNERS.map((_, i)=>
+      '<button type="button" class="cph-dot'+(i===0 ? ' on' : '')+'" role="tab" aria-label="Slide '+(i+1)+'" data-dot="'+i+'"></button>').join('') : '';
+
+    // Keep the dots in step with manual swipes.
+    let raf = 0;
+    track.addEventListener('scroll', ()=>{
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(()=>{
+        const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+        if(i !== cpBannerIdx){ cpBannerIdx = i; cpBannerMarkDot(); }
+      });
+    }, { passive:true });
+    const pause = ()=>{ cpBannerPausedUntil = Date.now() + CP_BANNER_RESUME_MS; };
+    track.addEventListener('pointerdown', pause, { passive:true });
+    track.addEventListener('touchstart', pause, { passive:true });
+    track.addEventListener('click', (e)=>{
+      const s = e.target.closest('[data-slide]'); if(!s) return;
+      const b = CP_BANNERS[Number(s.dataset.slide)];
+      if(b && b.request != null) cpOpenNewRequest({ description:b.request });
+      else if(b) cpOpenNewRequest();
+    });
+    dots.addEventListener('click', (e)=>{
+      const d = e.target.closest('[data-dot]'); if(!d) return;
+      pause(); cpBannerGo(Number(d.dataset.dot));
+    });
+    // Rotating the phone or resizing the window changes the slide width;
+    // snap back to the current slide so image and dots stay in step.
+    window.addEventListener('resize', ()=>{
+      track.scrollTo({ left: cpBannerIdx * track.clientWidth, behavior:'auto' });
+    }, { passive:true });
+    cpBannerStart();
+  }
+  function cpBannerMarkDot(){
+    $$('#cpBannerDots .cph-dot').forEach((d, i)=> d.classList.toggle('on', i===cpBannerIdx));
+  }
+  function cpBannerGo(i){
+    const track = $('cpBannerTrack'); if(!track) return;
+    cpBannerIdx = (i + CP_BANNERS.length) % CP_BANNERS.length;
+    track.scrollTo({ left: cpBannerIdx * track.clientWidth, behavior:'smooth' });
+    cpBannerMarkDot();
+  }
+  // Auto-advance only while Home is on screen, the app is in front, the
+  // customer isn't touching it, and the phone isn't set to reduce motion.
+  function cpBannerStart(){
+    if(cpBannerTimer || CP_BANNERS.length < 2) return;
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(reduce) return;
+    cpBannerTimer = setInterval(()=>{
+      const home = $('customerHomeScreen');
+      if(document.hidden || !home || home.style.display === 'none') return;
+      if(Date.now() < cpBannerPausedUntil) return;
+      cpBannerGo(cpBannerIdx + 1);
+    }, CP_BANNER_MS);
+  }
+  cpBannerInit();
 
   function cpRenderSwitcher(){
     const field = $('cpSwitcherField');
@@ -751,6 +884,10 @@
     if(!currentUser || currentUser.role !== 'customer' || !currentUser.customerId) return;
     cpSetGreetingName();
     cpRenderSwitcher();
+    // First load of this account: show the placeholder instead of empty
+    // sections filling in one by one. A refresh of the same account keeps
+    // what is on screen until the new data is ready.
+    if(currentUser.customerId !== cpLoadedCustomerId) $('customerHomeScreen').classList.add('cph-loading');
     await loadCustomerPortalData(currentUser.customerId);
     renderCustomerHome();
     cpInitRealtime(currentUser.customerId);

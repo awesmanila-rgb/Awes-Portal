@@ -37,12 +37,18 @@
   // Synchronous — whatever's already cached and still fresh, no network.
   // Used for the FIRST paint on every re-render so an already-loaded
   // photo never has to fall back to the icon while a refetch is pending.
+  // How long a signed cover URL may still be SHOWN. Signed URLs live 1 hour
+  // (equipPhotoSignedUrls default); the 10-minute TTL above only decides
+  // when to re-check which photo is the cover. Keeping the last good URL
+  // on screen until then stops the thumbnail blinking to the placeholder
+  // icon and back every 10 minutes.
+  const EQUIP_COVER_URL_SHOW_MS = 50 * 60 * 1000;
   function cpCachedCoverPhotoMap(equipmentIds){
     const map = {};
     const now = Date.now();
     (equipmentIds||[]).forEach(id=>{
       const hit = equipCoverUrlCache[id];
-      if(hit && (now - hit.at) < EQUIP_COVER_URL_TTL_MS && hit.url) map[id] = hit.url;
+      if(hit && hit.url && (now - (hit.signedAt || hit.at)) < EQUIP_COVER_URL_SHOW_MS) map[id] = hit.url;
     });
     return map;
   }
@@ -262,14 +268,32 @@
     });
     if(stale.length===0 || !(await ensureCloud())) return result;
     try{
+      // Nothing in the schema stops a unit from having more than one row
+      // marked is_cover, and without an ORDER BY the database may return
+      // them in any order — so the "cover" used to switch between photos
+      // from one refresh to the next. Newest cover wins, every time.
       const { data, error } = await db.from('equipment_photos')
-        .select('equipment_id, storage_path').eq('is_cover', true).in('equipment_id', stale);
+        .select('equipment_id, storage_path, created_at').eq('is_cover', true).in('equipment_id', stale)
+        .order('created_at', { ascending:false });
       if(error) throw error;
-      const rows = data || [];
-      const urls = await equipPhotoSignedUrls(rows.map(r=>r.storage_path));
+      const rows = [];
+      const seen = new Set();
+      (data || []).forEach(r=>{ if(!seen.has(r.equipment_id)){ seen.add(r.equipment_id); rows.push(r); } });
+      // Same cover as last time and its signed URL is still good → keep the
+      // exact same URL, so the <img> doesn't reload.
+      const need = rows.filter(r=>{
+        const hit = equipCoverUrlCache[r.equipment_id];
+        return !(hit && hit.path===r.storage_path && hit.url && (now - (hit.signedAt||0)) < EQUIP_COVER_URL_SHOW_MS);
+      });
+      const urls = need.length ? await equipPhotoSignedUrls(need.map(r=>r.storage_path)) : {};
       rows.forEach(r=>{
-        const u = urls[r.storage_path];
-        if(u){ equipCoverUrlCache[r.equipment_id] = { url:u, at: now }; result[r.equipment_id] = u; }
+        const hit = equipCoverUrlCache[r.equipment_id];
+        const reuse = hit && hit.path===r.storage_path && hit.url && (now - (hit.signedAt||0)) < EQUIP_COVER_URL_SHOW_MS;
+        const u = reuse ? hit.url : urls[r.storage_path];
+        if(u){
+          equipCoverUrlCache[r.equipment_id] = { url:u, at: now, path:r.storage_path, signedAt: reuse ? hit.signedAt : now };
+          result[r.equipment_id] = u;
+        }
       });
       // Anything in `stale` that came back with no cover photo at all
       // still gets cached (as null) for the same TTL, so a unit with no
