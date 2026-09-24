@@ -10665,8 +10665,18 @@
       if(typeof srMarkEnRouteByTicket === 'function') srMarkEnRouteByTicket(id).catch(()=>{});
       const t = dtLastTicketsById[id];
       if(t && t.custId && typeof notifyCustomer === 'function'){
-        notifyCustomer(t.custId, 'Your technician is on the way',
-          'Your service team has confirmed and is heading to your site.', 'jo-enroute');
+        // Names + expected arrival, so the customer knows who to let in and
+        // roughly when (expectedTime is the admin-set time at site).
+        const names = (t.assignedWorkerNames||[]).filter(Boolean);
+        const who = names.length===0 ? 'Your service team'
+          : names.length===1 ? names[0]
+          : names.length===2 ? names[0]+' and '+names[1]
+          : names[0]+' and '+(names.length-1)+' others';
+        let eta = '';
+        const m = /^(\d{1,2}):(\d{2})/.exec(t.expectedTime||'');
+        if(m){ const h = Number(m[1]); eta = ' Expected at your site around '+((h%12)||12)+':'+m[2]+' '+(h<12 ? 'AM' : 'PM')+'.'; }
+        notifyCustomer(t.custId, names.length>1 ? 'Your technicians are on the way' : 'Your technician is on the way',
+          who+(names.length>1 ? ' are' : ' is')+' heading to your site'+(t.jobOrderNo ? ' for '+t.jobOrderNo : '')+'.'+eta, 'jo-enroute');
       }
       if(typeof notifyAdmins === 'function'){
         notifyAdmins('Job order acknowledged', (t ? t.jobOrderNo : id)+' — crew is en route.', 'jo-ack');
@@ -25174,7 +25184,7 @@
         // findings/recommendations/materials/services done per visit
         // without a second round-trip per unit.
         const { data, error } = await db.from('service_reports')
-          .select('id, sr_no, date, cust_name, equipment_id, equip_type, equip_location, model_cu, serial_cu, model_fcu, serial_fcu, trouble_call, remarks, completed, technician_name, findings, recommendations, materials, services_done')
+          .select('id, sr_no, date, cust_name, equipment_id, service_category, equip_type, equip_location, model_cu, serial_cu, model_fcu, serial_fcu, trouble_call, remarks, completed, technician_name, findings, recommendations, materials, services_done')
           .eq('customer_id', cpCustomer.id)
           .order('date', { ascending:false });
         if(error) throw error;
@@ -25290,6 +25300,7 @@
     // Booking/"no active service" icon — a card-like tile with a horizontal
     // band, matching the reference mock's rounded booking icon.
     card:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg>',
+    download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>',
     plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
     // Swap/exchange arrows — cpQuickAccounts tile (switching between this
     // login's linked customer accounts).
@@ -25321,13 +25332,17 @@
   function cpUnitCardHtml(eq, photoMap){
     const stateClass = cpUnitStateClass(eq);
     const name = escapeHtml(equipDisplayName(eq));
-    const cornerLabel = eq.status.key==='overdue' ? 'NEEDS ATTENTION' : eq.status.key==='due-soon' ? 'DUE SOON' : eq.status.key==='scheduled' ? 'SCHEDULED' : 'OPERATING WELL';
-    const footLabel = eq.status.key==='overdue' ? 'Needs attention' : eq.status.key==='due-soon' ? 'Filter check needed' : eq.status.key==='scheduled' ? 'Visit scheduled' : 'Good health';
+    // Status words describe the PM date only — the app has no live reading
+    // of the unit's condition, so it never says "operating well".
+    const cornerLabel = eq.status.key==='overdue' ? 'PM overdue' : eq.status.key==='due-soon' ? 'PM due soon' : eq.status.key==='scheduled' ? 'Up to date' : 'No PM date';
+    const footLabel = eq.status.key==='overdue' ? 'PM was due '+escapeHtml(fmtDate(eq.nextPmDate))
+      : eq.status.key==='due-soon' ? 'PM due '+escapeHtml(fmtDate(eq.nextPmDate))
+      : eq.status.key==='scheduled' ? 'Next PM '+escapeHtml(fmtDate(eq.nextPmDate)) : 'No maintenance date set';
     const specLine = [eq.brand, eq.equipType, eq.coolCap].filter(Boolean).map(escapeHtml).join(' · ') || escapeHtml(eq.equipLocation||'—');
     const lastLine = eq.lastReport ? 'Last service '+escapeHtml(fmtDate(eq.lastReport.date)) : 'No service on record yet';
     const photoUrl = photoMap && photoMap[eq.id];
     return (
-      '<div class="cp-unit-card '+stateClass+'" data-equip-id="'+eq.id+'">'+
+      '<div class="cp-unit-card '+stateClass+'" data-equip-id="'+eq.id+'" data-status="'+eq.status.key+'">'+
         '<span class="cp-unit-badge-corner '+stateClass+'">'+cornerLabel+'</span>'+
         '<div class="top">'+
           '<div class="img-wrap">'+
@@ -25348,249 +25363,30 @@
     );
   }
 
-  // ---------- Home hero (state engine) ----------
-  // One hero card, one of six looks depending on what's true right now,
-  // in this priority order (highest first): a technician-flagged issue
-  // (D2/D3) > an overdue unit with no request open yet (D1) > active
-  // on-site work (C) > a confirmed upcoming visit (B) > nothing pending (A).
-  // Many units + many flagged issues collapses to a summary card instead of
-  // picking just one. `rows` is this customer's service_requests (may be
-  // empty on the very first paint, before cpRefreshRequestsBadge's fetch
-  // resolves — the hero just reflects equipment status alone until then,
-  // then re-renders with the fuller picture a moment later).
-  function cpEquipLabel(eq){ return eq ? escapeHtml(equipDisplayName(eq)) : 'your unit'; }
+  // ---------- Home (redesign) ----------
+  // Layout, top to bottom: Action needed (only when something waits on the
+  // customer) → Next visit (always the same card) → three main actions →
+  // Your units (status summary + the units that need attention) →
+  // Upcoming maintenance → Recent service reports → Support.
+  //
+  // Wording rule for this page: say only what the app actually knows. Unit
+  // status comes from the admin-set next PM date, nothing else — nobody is
+  // monitoring the equipment remotely, so the page never claims a unit is
+  // "operating well" or "being monitored".
 
-  function cpHeroAllClear(){
-    // Matches the reference mock: icon + heading + subtext + the primary
-    // CTA all live inside this one card now, instead of the CTA sitting in
-    // a separate "Need service for another unit?" banner below — see
-    // renderCustomerHero()'s cpBookingBanner toggle, which hides that
-    // separate banner specifically for this state so the CTA isn't
-    // duplicated on screen.
-    return (
-      '<div class="cp-hero-allclear">'+
-        '<div class="ic">'+CP_ICON.card+'</div>'+
-        '<p class="cp-hero-name">No active service right now</p>'+
-        '<p class="cp-hero-sub">Your AC units are being monitored. When you need help, you can book a service in just a few taps.</p>'+
-        '<button type="button" class="cp-hero-btn primary" data-action="requestService">'+CP_ICON.plus+' Book a service</button>'+
-      '</div>'
-    );
-  }
-  // Deterministic small color per technician so the same person's avatar
-  // is always the same color across renders (not random each time).
-  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
-  function cpAvatarColor(name){
-    let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
-    return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
-  }
-  function cpTechAvatarsHtml(names){
-    if(!names || !names.length) return '';
-    const shown = names.slice(0,2);
-    const extra = names.length - shown.length;
-    return '<div class="cp-hero-techs">' +
-      shown.map(n=> '<div class="cp-hero-tech-avatar" style="background:'+cpAvatarColor(n)+'" title="'+escapeHtml(n)+'">'+escapeHtml((n||'?').trim().charAt(0).toUpperCase())+'</div>').join('') +
-      (extra>0 ? '<div class="cp-hero-tech-avatar" style="background:var(--text-muted)">+'+extra+'</div>' : '') +
-      '</div>';
-  }
-  // Three-stage dot/segment tracker for the Active hero — Received / En
-  // route / In progress (this is what .cp-hero-track/.cp-hero-labels in
-  // app.css are actually styled for). Completed ends the active-service
-  // hero entirely (renderCustomerHero stops treating the request as
-  // "active" once status is completed), so this never needs a 4th stage.
-  // The plain bar tracker in service-requests.js's srProgressStepsHtml is
-  // a separate, simpler version used in the admin/customer detail
-  // overlay, which isn't built to this visual theme.
-  // A service the crew is actively working through, in the order the
-  // customer sees it. 'dispatched' is the pre-lifecycle name for
-  // 'preparing' and is accepted on every READ path so rows written before
-  // the migration still register as active; nothing writes it any more.
-  // 'completed' is NOT here — the work is done, it is waiting on admin's
-  // close, and the card should stop presenting it as in-flight.
+  // Support card. Fill these in with the office's real details — the card
+  // shows a Call button only when `phone` is set, otherwise it offers
+  // Message us instead.
+  const CP_SUPPORT = {
+    phone: '',                                   // e.g. '(02) 8123 4567' — shown and dialled as typed
+    hours: 'Monday to Saturday, 8:00 AM to 6:00 PM'
+  };
+
+  function cpEquipLabel(eq){ return eq ? escapeHtml(equipDisplayName(eq)) : 'your unit'; }
+  function cpFindEquip(id){ return cpEquipment.find(e=> String(e.id)===String(id)); }
   function cpIsActiveStatus(status){
     return ['preparing','dispatched','en_route','in_progress'].includes(status);
   }
-
-  function cpHeroTrackHtml(status){
-    // Five stages now, matching the technician's tracker and the job order
-    // help card word for word — a customer on the phone to the crew hears
-    // the same status they can see.
-    const steps = ['preparing','en_route','in_progress','completed','closed'];
-    const labels = ['Preparing','En route','Work in progress','Completed','Closed'];
-    // Legacy rows carry the pre-lifecycle name for the first stage.
-    if(status==='dispatched') status = 'preparing';
-    // A confirmed schedule shows the same track with nothing lit yet: the
-    // visit is booked but the day hasn't come. -1 leaves every dot dim.
-    const idx = status==='schedule_confirmed' ? -1 : steps.indexOf(status);
-    if(idx < -1 || (idx===-1 && status!=='schedule_confirmed')) return '';
-    let dots = '';
-    steps.forEach((s,i)=>{
-      dots += '<i class="pt'+(i<idx?' on':i===idx?' now':'')+'"></i>';
-      if(i<steps.length-1) dots += '<i class="seg'+(i<idx?' on':'')+'"></i>';
-    });
-    const labelsHtml = labels.map((l,i)=> '<span'+(i===idx?' class="cur"':'')+'>'+l+'</span>').join('');
-    return '<div class="cp-hero-track">'+dots+'</div><div class="cp-hero-labels">'+labelsHtml+'</div>';
-  }
-  // ONE card for the whole life of a service, rather than a separate
-  // "Scheduled" card that vanished and was replaced by a different card on
-  // the day. A confirmed-but-not-yet-started visit renders here too, with
-  // the tracker sitting before step 1 — so the customer watches a single
-  // card fill in rather than cards swapping underneath them.
-  function cpHeroActive(req, eq, techNames){
-    const notStarted = req.status === 'schedule_confirmed';
-    const finished = req.status === 'completed';
-    const label = notStarted ? 'Scheduled' : srStatusLabel(req.status);
-    // 'on the way' is wrong in both directions — before the day, and after
-    // the work is done and only admin's sign-off is outstanding.
-    const techLine = notStarted
-      ? 'Your technician will be assigned on the day'
-      : (finished
-          ? 'Work finished — being reviewed before sign-off'
-          : (techNames && techNames.length
-              ? (techNames.length===1 ? techNames[0]+' is on the way' : techNames.length+' technicians assigned')
-              : 'A technician is on the way'));
-    // Scheduled date/time this visit was actually dispatched for — the
-    // confirmed proposed schedule normally, falling back to the original
-    // requested date on the off chance a request reached 'dispatched'
-    // without one ever being proposed.
-    const schedDate = req.proposedScheduleDate || req.requestedDate;
-    const scheduleLine = schedDate
-      ? fmtDate(schedDate) + (req.proposedScheduleTime ? ' · '+escapeHtml(req.proposedScheduleTime) : '')
-      : '';
-    return (
-      '<div data-req-id="'+req.id+'">'+
-        '<div class="cp-hero-head">'+
-          '<div>'+
-            '<p class="cp-hero-eyebrow '+(notStarted?'teal':(finished?'teal':'amber'))+'">'+
-              (notStarted?'Upcoming service':(finished?'Service complete':'Active service'))+' · '+escapeHtml(label)+'</p>'+
-            '<p class="cp-hero-name">'+cpEquipLabel(eq)+'</p>'+
-            '<p class="cp-hero-sub">'+escapeHtml(req.description||'Technician assigned')+'</p>'+
-            (scheduleLine ? '<p class="cp-hero-sub cp-hero-schedule">'+CP_ICON.calendar+' '+scheduleLine+'</p>' : '')+
-          '</div>'+
-        '</div>'+
-        (!notStarted && techNames && techNames.length ? cpTechAvatarsHtml(techNames) : '')+
-        cpHeroTrackHtml(req.status)+
-        '<div class="cp-hero-foot">'+
-          '<span class="loc">'+CP_ICON.pin+' '+escapeHtml(techLine)+'</span>'+
-          '<a data-action="message">'+CP_ICON.chat+' Message</a>'+
-        '</div>'+
-      '</div>'
-    );
-  }
-  function cpHeroDanger(kind, req, eq){
-    // kind: 'overdue' (D1, no request open yet) | 'pending' (D2) | 'ready' (D3)
-    const cfg = {
-      overdue:{ title:'Overdue for service', sub:cpEquipLabel(eq)+' — overdue for preventive maintenance.', cta:'Book service now' },
-      pending:{ title:'Issue flagged during last visit', sub:(req&&req.flaggedIssueSummary) || (req&&req.description) || 'A technician noted an issue on '+cpEquipLabel(eq)+'.', cta:null },
-      ready:{ title:'Quotation ready for review', sub:'A quote is ready for '+cpEquipLabel(eq)+'.', cta:'Review quotation' }
-    }[kind];
-    return (
-      '<div data-req-id="'+(req?req.id:'')+'" data-equip-id="'+(eq?eq.id:'')+'" data-kind="'+kind+'">'+
-        '<div class="cp-hero-danger-body">'+
-          '<div class="ic">'+CP_ICON.alert+'</div>'+
-          '<div><p class="cp-hero-eyebrow danger">Needs attention</p><p class="cp-hero-name">'+cfg.title+'</p>'+
-          '<p class="cp-hero-sub">'+escapeHtml(cfg.sub)+'</p></div>'+
-        '</div>'+
-        (cfg.cta
-          ? '<div class="cp-hero-danger-cta"><button type="button" class="cp-hero-btn danger" data-action="'+kind+'">'+cfg.cta+'</button></div>'
-          : '<div class="cp-hero-muted-note">We\'ll notify you as soon as a quotation is ready.</div>')+
-      '</div>'
-    );
-  }
-  function cpHeroSummary(count, kind){
-    // Many units flagged at once (property-management scale case) — link
-    // out to Units (filtered mentally by the person, no separate filtered
-    // view built yet) rather than trying to pick just one to feature.
-    const label = kind==='danger' ? count+' units need attention' : count+' units in service today';
-    const eyebrowClass = kind==='danger' ? 'danger' : 'amber';
-    return (
-      '<div data-action="viewUnits">'+
-        '<div class="cp-hero-danger-body">'+
-          '<div class="ic">'+CP_ICON.alert+'</div>'+
-          '<div><p class="cp-hero-eyebrow '+eyebrowClass+'">Across your units</p><p class="cp-hero-name">'+label+'</p>'+
-          '<p class="cp-hero-sub">Tap to see which units and what\'s needed.</p></div>'+
-        '</div>'+
-      '</div>'
-    );
-  }
-
-  function cpFindEquip(id){ return cpEquipment.find(e=> String(e.id)===String(id)); }
-
-  async function renderCustomerHero(rows){
-    const hero = $('cpHero');
-    if(!hero) return;
-    rows = rows || [];
-
-    const flagged = rows.filter(r=> r.origin==='technician_flag' && !['completed','closed','cancelled','preparing','dispatched','en_route','in_progress'].includes(r.status));
-    // Includes 'completed' deliberately, which cpIsActiveStatus does NOT:
-    // work is finished but admin hasn't closed the job order yet, and the
-    // card disappearing in that gap told the customer their service had
-    // stopped existing. cpIsActiveStatus still means "crew is working on
-    // it" for cancellation and the list badge, which is a different
-    // question — a finished service can't be cancelled.
-    const active = rows.filter(r=> cpIsActiveStatus(r.status) || r.status==='completed');
-    const overdueNoRequest = cpEquipment.filter(eq=>{
-      if(eq.status.key!=='overdue') return false;
-      return !rows.some(r=> String(r.equipmentId)===String(eq.id) && r.status!=='completed' && r.status!=='cancelled');
-    });
-    const scheduled = rows.filter(r=> r.status==='schedule_confirmed');
-
-    let html, danger = false, isAllClear = false;
-    if(flagged.length > 1 || overdueNoRequest.length + flagged.length > 1){
-      // More than one thing needs attention at once — summarize rather
-      // than arbitrarily feature one unit over another.
-      html = cpHeroSummary(flagged.length + overdueNoRequest.length, 'danger'); danger = true;
-    } else if(flagged.length === 1){
-      const req = flagged[0];
-      const ready = req.feeStatus === 'proposed';
-      html = cpHeroDanger(ready ? 'ready' : 'pending', req, cpFindEquip(req.equipmentId)); danger = true;
-    } else if(overdueNoRequest.length === 1){
-      html = cpHeroDanger('overdue', null, overdueNoRequest[0]); danger = true;
-    } else if(active.length > 0 || scheduled.length > 0){
-      // Scheduled and in-flight share ONE card. An in-flight service wins
-      // if somehow both exist, since it's the one actually happening.
-      const subject = active.length > 0 ? active[0] : scheduled[0];
-      // Technician names live on the linked dispatch ticket, not the
-      // request row itself — a separate fetch, so the hero shows without
-      // them for a moment on first paint, then fills in.
-      const techNames = (subject.linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function')
-        ? await dtFetchTicketTechNames(subject.linkedDispatchTicketId) : [];
-      html = cpHeroActive(subject, cpFindEquip(subject.equipmentId), techNames);
-    } else {
-      html = cpHeroAllClear(); isAllClear = true;
-    }
-
-    hero.className = 'cp-hero' + (danger ? ' cp-hero-danger' : '');
-    hero.innerHTML = html;
-    // The all-clear card now carries its own "Book a service" CTA (see
-    // cpHeroAllClear()), so the separate banner would just be a duplicate
-    // button sitting right underneath it — hide it for this state only.
-    if($('cpBookingBanner')) $('cpBookingBanner').style.display = isAllClear ? 'none' : '';
-    hero.onclick = (e)=>{
-      const actionEl = e.target.closest('[data-action]');
-      const action = actionEl ? actionEl.dataset.action : null;
-      if(action==='requestService'){ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); return; }
-      if(action==='overdue'){ const eq = overdueNoRequest[0]; if(eq) cpRequestServiceForEquip(eq); return; }
-      if(action==='ready'){ if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]); return; }
-      // Both actions now resolve against whichever request the single card
-      // is showing — active if there is one, otherwise the scheduled one.
-      const heroSubject = active[0] || scheduled[0];
-      if(action==='message' || action==='reschedule'){
-        if(heroSubject && typeof srOpenDetail==='function') srOpenDetail(heroSubject);
-        return;
-      }
-      if(action==='viewUnits'){ cpShowScreen('Units'); return; }
-      // Tap anywhere else on the card: open whichever single job it
-      // represents, if any (all-clear has nothing to open).
-      if(active[0] && typeof srOpenDetail==='function') srOpenDetail(active[0]);
-      else if(scheduled[0] && typeof srOpenDetail==='function') srOpenDetail(scheduled[0]);
-      else if(flagged[0] && typeof srOpenDetail==='function') srOpenDetail(flagged[0]);
-    };
-  }
-
-  // Time-of-day greeting for the home header — see AWES_App_enroute
-  // redesign spec's "Welcome section" ("Good afternoon, Ms. Jhen").
-  // Local device time; no timezone handling needed since this is a
-  // customer's own portal on their own device.
   function cpTimeGreeting(){
     const h = new Date().getHours();
     if(h < 12) return 'Good morning';
@@ -25599,172 +25395,340 @@
   }
   function cpSetGreetingName(){
     if($('cpGreetTod')) $('cpGreetTod').textContent = cpTimeGreeting();
-    $('cpGreetingName').textContent = currentUser.name || 'there';
+    const first = String(currentUser.name||'').trim().split(/\s+/)[0];
+    $('cpGreetingName').textContent = first || 'there';
+  }
+  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
+  function cpAvatarColor(name){
+    let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
+    return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
+  }
+  function cpInitials(name){
+    const p = String(name||'').trim().split(/\s+/).filter(Boolean);
+    return ((p[0]||'?').charAt(0) + (p.length>1 ? p[p.length-1].charAt(0) : '')).toUpperCase();
+  }
+  function cpFmtShort(iso){
+    if(!iso) return '';
+    return new Date(String(iso).slice(0,10)+'T00:00:00').toLocaleDateString('en-PH', {month:'short', day:'numeric'});
+  }
+  function cpRelDay(iso){
+    const d = daysUntil(String(iso||'').slice(0,10));
+    const long = new Date(String(iso).slice(0,10)+'T00:00:00').toLocaleDateString('en-PH', {month:'short', day:'numeric'});
+    if(d === 0) return 'Today, '+long;
+    if(d === 1) return 'Tomorrow, '+long;
+    return new Date(String(iso).slice(0,10)+'T00:00:00').toLocaleDateString('en-PH', {weekday:'long', month:'short', day:'numeric'});
+  }
+  // Customer-facing wording for a unit's PM status.
+  function cpPmLine(eq){
+    const k = eq.status.key;
+    if(k==='overdue') return { tone:'danger', pill:'Overdue', line:'PM was due '+cpFmtShort(eq.nextPmDate) };
+    if(k==='due-soon') return { tone:'warn', pill:'Due soon', line:'PM due '+cpFmtShort(eq.nextPmDate) };
+    if(k==='scheduled') return { tone:'ok', pill:'Up to date', line:'Next PM '+cpFmtShort(eq.nextPmDate) };
+    return { tone:'muted', pill:'No PM date', line:'No maintenance date set' };
+  }
+
+  // ---- Action needed ----
+  function cpActionItems(rows){
+    const items = [];
+    rows.forEach(r=>{
+      const eq = cpFindEquip(r.equipmentId);
+      const what = r.equipmentId ? cpEquipLabel(eq) : 'General request';
+      if(r.status==='fee_proposed' && r.feeStatus==='proposed'){
+        items.push({ tone:'warn', ic:'receipt', req:r,
+          title:'Approve service fee · ₱'+escapeHtml(Number(r.feeAmount||0).toLocaleString('en-PH')),
+          sub: what+(r.description ? ' · '+escapeHtml(String(r.description).slice(0,80)) : ''),
+          btn:'Review and approve' });
+      }else if(r.status==='schedule_proposed'){
+        const when = r.proposedScheduleDate ? cpRelDay(r.proposedScheduleDate)+(r.proposedScheduleTime ? ' · '+escapeHtml(r.proposedScheduleTime) : '') : 'A date is waiting for you';
+        items.push({ tone:'warn', ic:'calendar', req:r,
+          title:'Confirm your visit schedule', sub: when+' · '+what, btn:'Review and confirm' });
+      }else if(r.origin==='technician_flag' && !['completed','closed','cancelled','preparing','dispatched','en_route','in_progress','schedule_confirmed'].includes(r.status)){
+        items.push({ tone:'info', ic:'alert', req:r,
+          title:'Issue found during a visit',
+          sub: what+' · '+escapeHtml(String(r.flaggedIssueSummary || r.description || 'Our technician noted something to fix.').slice(0,90))+'. We\u2019ll send a quotation.',
+          btn:'View details', secondary:true });
+      }
+    });
+    const overdue = cpEquipment.filter(eq=> eq.status.key==='overdue' &&
+      !rows.some(r=> String(r.equipmentId)===String(eq.id) && !['completed','closed','cancelled'].includes(r.status)));
+    if(overdue.length===1){
+      items.push({ tone:'danger', ic:'calendar', equip:overdue[0], act:'bookOverdue',
+        title:'Maintenance overdue', sub: cpEquipLabel(overdue[0])+' · PM was due '+cpFmtShort(overdue[0].nextPmDate), btn:'Book maintenance' });
+    }else if(overdue.length>1){
+      items.push({ tone:'danger', ic:'calendar', act:'bookOverdueMany', list:overdue,
+        title:overdue.length+' units overdue for maintenance', sub: overdue.slice(0,3).map(cpEquipLabel).join(', ')+(overdue.length>3 ? ' and '+(overdue.length-3)+' more' : ''), btn:'Book maintenance' });
+    }
+    return items;
+  }
+  function cpRenderActions(rows){
+    const items = cpActionItems(rows);
+    const need = items.filter(i=> i.tone!=='info').length;
+    $('cpActionWrap').style.display = items.length ? '' : 'none';
+    $('cpActionCount').textContent = need ? need+' item'+(need===1?'':'s') : '';
+    $('cpActionList').innerHTML = items.map((it, i)=>
+      '<div class="cph-card cph-action cph-t-'+it.tone+'">'+
+        '<div class="cph-row-top"><span class="cph-ic cph-ic-'+it.tone+'">'+CP_ICON[it.ic]+'</span>'+
+        '<div class="cph-text"><p class="cph-title">'+it.title+'</p><p class="cph-sub">'+it.sub+'</p></div></div>'+
+        '<button type="button" class="cph-btn'+(it.secondary ? '' : ' cph-btn-primary')+'" data-act-idx="'+i+'">'+it.btn+'</button>'+
+      '</div>').join('');
+    $('cpActionList').onclick = (e)=>{
+      const b = e.target.closest('[data-act-idx]'); if(!b) return;
+      const it = items[Number(b.dataset.actIdx)]; if(!it) return;
+      if(it.req){ if(typeof srOpenDetail==='function') srOpenDetail(it.req); return; }
+      if(it.act==='bookOverdue') cpBookPm([it.equip]);
+      else if(it.act==='bookOverdueMany') cpBookPm(it.list);
+    };
+  }
+
+  // ---- Next visit ----
+  // Customer words for the lifecycle. "On the way" lights up only at
+  // en_route — i.e. after the whole crew acknowledged, the same moment the
+  // "Your technician is on the way" notification goes out — never at
+  // Preparing.
+  const CP_TRACK = ['Booked','Confirmed','On the way','Working','Done'];
+  function cpTrackIdx(status){
+    if(status==='en_route') return 2;
+    if(status==='in_progress') return 3;
+    if(status==='completed' || status==='closed') return 4;
+    return 1; // schedule_confirmed / preparing / dispatched
+  }
+  function cpTrackHtml(status){
+    const cur = cpTrackIdx(status);
+    let dots = '<div class="cph-track">';
+    CP_TRACK.forEach((_, i)=>{
+      if(i) dots += '<span class="cph-track-ln'+(i<=cur ? ' on' : '')+'"></span>';
+      dots += '<span class="cph-track-dot'+(i<cur || (i===cur && cur===4) ? ' on' : i===cur ? ' now' : '')+'">'+(i<cur || (i===cur && cur===4) ? CP_ICON.check : (i+1))+'</span>';
+    });
+    dots += '</div><div class="cph-track-lb">'+CP_TRACK.map((l,i)=> '<span'+(i===cur ? ' class="now"' : '')+'>'+l+'</span>').join('')+'</div>';
+    return dots;
+  }
+  function cpVisitWhen(r){
+    const d = r.proposedScheduleDate || r.requestedDate;
+    return d ? cpRelDay(d)+(r.proposedScheduleTime ? ' · '+escapeHtml(r.proposedScheduleTime) : '') : 'Date to be confirmed';
+  }
+  async function renderCustomerHero(rows){
+    const hero = $('cpHero');
+    if(!hero) return;
+    rows = rows || [];
+    cpRenderActions(rows);
+
+    const live = rows.filter(r=> cpIsActiveStatus(r.status) || r.status==='completed');
+    const upcoming = rows.filter(r=> r.status==='schedule_confirmed')
+      .sort((a,b)=> String(a.proposedScheduleDate||a.requestedDate||'').localeCompare(String(b.proposedScheduleDate||b.requestedDate||'')));
+    const subject = live[0] || upcoming[0] || null;
+    const others = live.length + upcoming.length - (subject ? 1 : 0);
+    $('cpVisitTitle').textContent = subject && live.length ? 'Current visit' : 'Next visit';
+    const more = $('cpVisitMore');
+    more.style.display = others>0 ? '' : 'none';
+    more.textContent = others>0 ? '+'+others+' more' : '';
+    more.onclick = ()=> cpShowScreen('Requests');
+
+    if(!subject){
+      const next = cpEquipment.filter(eq=> eq.nextPmDate && daysUntil(eq.nextPmDate)>=0)
+        .sort((a,b)=> a.nextPmDate.localeCompare(b.nextPmDate))[0];
+      hero.innerHTML =
+        '<div class="cph-row-top"><span class="cph-ic cph-ic-muted">'+CP_ICON.calendar+'</span>'+
+        '<div class="cph-text"><p class="cph-title">No visit booked</p>'+
+        '<p class="cph-sub">'+(next ? 'Next maintenance is due '+escapeHtml(cpRelDay(next.nextPmDate))+' for '+cpEquipLabel(next)+'.' : 'Book a visit whenever you need service.')+'</p></div></div>'+
+        '<button type="button" class="cph-btn" data-hero="book">Book a service</button>';
+      hero.onclick = (e)=>{ if(e.target.closest('[data-hero="book"]')) cpOpenNewRequest(); };
+      return;
+    }
+    const eq = cpFindEquip(subject.equipmentId);
+    const techNames = (subject.linkedDispatchTicketId && typeof dtFetchTicketTechNames==='function' && subject.status!=='schedule_confirmed')
+      ? await dtFetchTicketTechNames(subject.linkedDispatchTicketId).catch(()=>[]) : [];
+    const doneNote = subject.status==='completed' ? '<p class="cph-note">Work is finished. Your service report will appear below once it\u2019s signed off.</p>' : '';
+    const techHtml = techNames && techNames.length
+      ? '<div class="cph-tech"><span class="cph-avatar" style="background:'+cpAvatarColor(techNames[0])+'">'+escapeHtml(cpInitials(techNames[0]))+'</span>'+
+          '<div class="cph-text"><p class="cph-tech-name">'+escapeHtml(techNames[0])+(techNames.length>1 ? ' + '+(techNames.length-1) : '')+'</p>'+
+          '<p class="cph-sub">'+(techNames.length>1 ? 'Assigned technicians' : 'Assigned technician')+'</p></div>'+
+          '<button type="button" class="cph-icon-btn" data-hero="msg" aria-label="Message">'+CP_ICON.chat+'</button></div>'
+      : '<div class="cph-tech"><span class="cph-avatar cph-avatar-muted">'+CP_ICON.person+'</span>'+
+          '<div class="cph-text"><p class="cph-tech-name">Technician to be assigned</p><p class="cph-sub">You\u2019ll see who\u2019s coming once the crew confirms</p></div>'+
+          '<button type="button" class="cph-icon-btn" data-hero="msg" aria-label="Message">'+CP_ICON.chat+'</button></div>';
+    hero.innerHTML =
+      '<p class="cph-title">'+cpVisitWhen(subject)+'</p>'+
+      '<p class="cph-sub">'+cpEquipLabel(eq)+(subject.description ? ' · '+escapeHtml(String(subject.description).slice(0,90)) : '')+'</p>'+
+      techHtml+cpTrackHtml(subject.status)+doneNote+
+      '<button type="button" class="cph-link-btn" data-hero="open">View request</button>';
+    hero.onclick = (e)=>{
+      const a = e.target.closest('[data-hero]'); if(!a) return;
+      if(typeof srOpenDetail==='function') srOpenDetail(subject);
+    };
+  }
+
+  // ---- Units ----
+  function cpUnitCounts(){
+    const c = { overdue:0, 'due-soon':0, scheduled:0, none:0 };
+    cpEquipment.forEach(eq=> c[eq.status.key] = (c[eq.status.key]||0) + 1);
+    return c;
+  }
+  function cpHomeUnitRowHtml(eq, photoMap){
+    const pm = cpPmLine(eq);
+    const url = photoMap && photoMap[eq.id];
+    const spec = [eq.brand, eq.coolCap].filter(Boolean).map(escapeHtml).join(' · ');
+    const last = eq.lastReport ? 'last service '+escapeHtml(cpFmtShort(eq.lastReport.date)) : 'no service on record';
+    return '<button type="button" class="cph-unit" data-equip-id="'+escapeHtml(String(eq.id))+'">'+
+      '<span class="cph-unit-img">'+(url ? '<img src="'+escapeHtml(url)+'" alt="" loading="lazy">' : CP_ICON.unit)+'</span>'+
+      '<span class="cph-text"><span class="cph-unit-name">'+cpEquipLabel(eq)+'</span>'+
+      '<span class="cph-sub">'+(spec ? spec+' · ' : '')+last+'</span></span>'+
+      '<span class="cph-pill cph-pill-'+pm.tone+'">'+pm.pill+'</span></button>';
+  }
+  function cpRenderUnitsSection(){
+    const c = cpUnitCounts();
+    const total = cpEquipment.length;
+    $('cpUnitsViewAllLink').textContent = total ? 'See all '+total : '';
+    const chip = (key, n, label, tone)=> '<button type="button" class="cph-sum-item cph-sum-'+tone+'" data-filter="'+key+'"'+(n ? '' : ' disabled')+'>'+
+      '<b>'+n+'</b><span>'+label+'</span></button>';
+    $('cpUnitSummary').innerHTML = total
+      ? chip('overdue', c.overdue, 'PM overdue', 'danger') + chip('due-soon', c['due-soon'], 'Due in 30 days', 'warn') +
+        chip('scheduled', c.scheduled, 'Up to date', 'ok') + (c.none ? chip('none', c.none, 'No PM date', 'muted') : '')
+      : '';
+    $('cpUnitSummary').classList.toggle('cph-sum-4', !!c.none);
+    $('cpUnitSummary').onclick = (e)=>{
+      const b = e.target.closest('[data-filter]'); if(!b || b.disabled) return;
+      cpShowScreen('Units', b.dataset.filter);
+    };
+    const attention = cpEquipment.filter(eq=> eq.status.key==='overdue' || eq.status.key==='due-soon')
+      .sort((a,b)=> (a.status.key==='overdue' ? 0 : 1) - (b.status.key==='overdue' ? 0 : 1) || String(a.nextPmDate).localeCompare(String(b.nextPmDate)));
+    const shown = (attention.length ? attention : cpEquipment).slice(0, 3);
+    $('cpUnitsSectionTitle').textContent = attention.length ? 'Units needing maintenance' : 'Your units';
+    const paint = (photoMap)=>{
+      $('cpUnitScroll').innerHTML = !total
+        ? '<p class="cph-empty">No units are enrolled on this account yet. Your service provider adds them after the first visit.</p>'
+        : (attention.length ? '' : '<p class="cph-okline">'+CP_ICON.check+' No unit is overdue or due in the next 30 days.</p>') +
+          shown.map(eq=> cpHomeUnitRowHtml(eq, photoMap)).join('');
+    };
+    const ids = shown.map(eq=> eq.id);
+    paint(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(ids) : {});
+    if(ids.length && typeof cpFetchCoverPhotoMap === 'function'){
+      const before = typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(ids) : {};
+      cpFetchCoverPhotoMap(ids).then(m=>{ if(JSON.stringify(m)!==JSON.stringify(before)) paint(m); }).catch(()=>{});
+    }
+    $('cpUnitScroll').onclick = (e)=>{
+      const b = e.target.closest('[data-equip-id]'); if(!b) return;
+      const eq = cpFindEquip(b.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq);
+    };
+  }
+
+  // ---- Upcoming maintenance (next 90 days, grouped by date) ----
+  function cpRenderPm(){
+    const groups = new Map();
+    cpEquipment.forEach(eq=>{
+      const d = daysUntil(eq.nextPmDate);
+      if(d === null || d < 0 || d > 90) return;
+      if(!groups.has(eq.nextPmDate)) groups.set(eq.nextPmDate, []);
+      groups.get(eq.nextPmDate).push(eq);
+    });
+    const dates = Array.from(groups.keys()).sort().slice(0, 4);
+    $('cpPmWrap').style.display = dates.length ? '' : 'none';
+    $('cpPmList').innerHTML = dates.map(d=>{
+      const list = groups.get(d);
+      const dt = new Date(d+'T00:00:00');
+      const places = Array.from(new Set(list.map(eq=> (eq.equipLocation||'').trim()).filter(Boolean)));
+      return '<div class="cph-li">'+
+        '<span class="cph-date"><small>'+dt.toLocaleDateString('en-PH',{month:'short'})+'</small><b>'+String(dt.getDate()).padStart(2,'0')+'</b></span>'+
+        '<span class="cph-text"><span class="cph-li-title">'+(list.length===1 ? cpEquipLabel(list[0]) : list.length+' units')+'</span>'+
+        '<span class="cph-sub">Preventive maintenance'+(list.length>1 && places.length ? ' · '+escapeHtml(places.slice(0,2).join(', '))+(places.length>2 ? '…' : '') : '')+'</span></span>'+
+        '<button type="button" class="cph-link-btn" data-pm="'+escapeHtml(d)+'">Book</button></div>';
+    }).join('');
+    $('cpPmList').onclick = (e)=>{
+      const b = e.target.closest('[data-pm]'); if(b) cpBookPm(groups.get(b.dataset.pm) || []);
+    };
+  }
+
+  // ---- Recent service reports ----
+  function cpRenderReports(){
+    const done = cpReports.filter(r=> r.completed !== false).slice(0, 3);
+    $('cpRecentActivity').innerHTML = done.length ? done.map(r=>{
+      const cat = r.service_category && typeof serviceCategoryLabel==='function' ? serviceCategoryLabel(r.service_category) : '';
+      const eq = r.equipment_id ? cpFindEquip(r.equipment_id) : null;
+      const unit = eq ? equipDisplayName(eq) : (r.equip_location || r.equip_type || 'Service visit');
+      const title = (cat || 'Service visit')+' · '+unit;
+      return '<div class="cph-li" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(String(r.id||''))+'">'+
+        '<span class="cph-ic cph-ic-muted">'+CP_ICON.receipt+'</span>'+
+        '<span class="cph-text" data-open="1"><span class="cph-li-title">'+escapeHtml(title)+'</span>'+
+        '<span class="cph-sub">'+escapeHtml(cpFmtShort(r.date))+(r.sr_no ? ' · '+escapeHtml(r.sr_no) : '')+(r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</span></span>'+
+        '<button type="button" class="cph-icon-btn" data-dl="1" aria-label="Download PDF" title="Download PDF">'+CP_ICON.download+'</button></div>';
+    }).join('') : '<p class="cph-empty">Reports from completed visits will appear here.</p>';
+    $('cpRecentActivity').onclick = (e)=>{
+      const row = e.target.closest('[data-report-id]'); if(!row) return;
+      if(e.target.closest('[data-dl]')) cpDownloadReport(row.dataset.srNo, row.dataset.reportId);
+      else if(typeof openCustomerReportPreview==='function') openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId);
+    };
+  }
+  // Straight-to-file download (the preview overlay stays one tap away on
+  // the row itself). Same fetch + buildPdf as openCustomerReportPreview.
+  async function cpDownloadReport(sr, reportId){
+    try{
+      toast('Preparing the PDF…');
+      let d = sr ? await cloudGetReport(sr) : null;
+      if(!d && reportId) d = await cloudGetReportById(reportId);
+      if(!d){ toast('This report couldn\u2019t be opened. Try again in a moment.'); return; }
+      const doc = await buildPdf(d);
+      doc.save((sr || d.srNo || 'service-report')+'.pdf');
+    }catch(err){
+      console.error('download customer report failed', err);
+      toast('This report couldn\u2019t be downloaded. Try again in a moment.');
+    }
+  }
+
+  // ---- Support ----
+  function cpRenderSupport(){
+    const phone = String(CP_SUPPORT.phone||'').trim();
+    $('cpSupportCard').innerHTML =
+      '<span class="cph-ic cph-ic-ok">'+CP_ICON.chat+'</span>'+
+      '<span class="cph-text"><span class="cph-li-title">Need help?</span>'+
+      '<span class="cph-sub">'+escapeHtml(CP_SUPPORT.hours)+(phone ? ' · '+escapeHtml(phone) : '')+'</span></span>'+
+      (phone ? '<a class="cph-btn cph-btn-sm" href="tel:'+escapeHtml(phone.replace(/[^\d+]/g,''))+'">Call</a>'
+             : '<button type="button" class="cph-btn cph-btn-sm" data-support="msg">Message us</button>');
+    $('cpSupportCard').onclick = (e)=>{ if(e.target.closest('[data-support]')) cpOpenCentralChat(); };
+  }
+
+  // ---- Request shortcuts ----
+  function cpOpenNewRequest(opts){
+    opts = opts || {};
+    cpShowRequestsScreen('new');
+    if(opts.equipId != null) $('cpReqEquipment').value = opts.equipId;
+    if(opts.urgent) $('cpReqUrgency').value = 'urgent';
+    if(opts.description != null) $('cpReqDescription').value = opts.description;
+    const banner = $('cpReqProblemBanner');
+    if(banner) banner.style.display = opts.urgent ? '' : 'none';
+    if(opts.focus) setTimeout(()=>{ try{ $('cpReqDescription').focus(); }catch(e){} }, 60);
+  }
+  // Books preventive maintenance for one or more units: one unit is
+  // preselected; several get a general request with the units listed.
+  function cpBookPm(list){
+    list = list || [];
+    if(list.length===1) cpOpenNewRequest({ equipId:list[0].id, description:'Preventive maintenance' });
+    else cpOpenNewRequest({ description:'Preventive maintenance for: '+list.map(eq=> equipDisplayName(eq)).join(', ') });
   }
 
   function renderCustomerHome(){
-    // Header
-    $('cpGreetSub').textContent = cpEquipment.length
-      ? cpEquipment.length+' unit'+(cpEquipment.length===1?'':'s')+' enrolled'
-      : 'No units enrolled yet';
-    const initials = (currentUser && currentUser.name ? currentUser.name.trim().charAt(0) : '?').toUpperCase();
-    if($('cpAvatarBtn')) $('cpAvatarBtn').textContent = initials;
+    const n = cpEquipment.length;
+    const list = currentUser.customerList || [];
+    const active = list.find(c=> String(c.id)===String(currentUser.customerId));
+    const acctName = (active && active.name) || (cpCustomer && cpCustomer.name) || '';
+    $('cpGreetSub').textContent = [acctName, n ? n+' unit'+(n===1?'':'s') : 'No units yet'].filter(Boolean).join(' · ');
+    $('cpAcctCaret').style.display = list.length > 1 ? '' : 'none';
+    $('cpAcctChip').classList.toggle('cph-acct-static', list.length <= 1);
+    $('cpAcctChip').onclick = ()=>{ if(list.length > 1 && typeof showCustomerAccountPicker==='function') showCustomerAccountPicker(); };
+    if($('cpAvatarBtn')) $('cpAvatarBtn').textContent = cpInitials(currentUser && currentUser.name);
 
-    // Hero — initial pass off equipment status alone; cpRefreshRequestsBadge
-    // (fired below) re-renders it a moment later with request data too.
+    $('cpActBookIc').innerHTML = CP_ICON.calendar;
+    $('cpActProblemIc').innerHTML = CP_ICON.alert;
+    $('cpActMsgIc').innerHTML = CP_ICON.chat;
+
     renderCustomerHero(cpMyRequestsCache);
-
-    // Unit stack — most-attention-needed first, capped at 3 on Home with a
-    // "Manage units" link into the full Units screen (see
-    // cpUnitsSectionTitle below for the many-units retitle). Cover photos
-    // are fetched in one batch and swapped in once they arrive — the
-    // stack renders immediately with icon fallbacks so photos loading
-    // slowly never blocks the rest of the screen.
-    const sorted = cpEquipment.slice().sort((a,b)=>{
-      const rank = { overdue:0, 'due-soon':1, scheduled:2, none:3 };
-      return (rank[a.status.key]??3) - (rank[b.status.key]??3);
-    });
-    const shown = sorted.slice(0,3);
-    const flaggedCount = cpEquipment.filter(e=> e.status.key==='overdue' || e.status.key==='due-soon').length;
-    $('cpUnitsSectionTitle').textContent = flaggedCount>1 ? 'Units needing attention' : 'Your units';
-    function paintUnitStack(photoMap){
-      $('cpUnitScroll').innerHTML = shown.length
-        ? shown.map(eq=> cpUnitCardHtml(eq, photoMap)).join('')
-        : '<div class="empty-state">No equipment enrolled yet.</div>';
-      $$('.cp-unit-card', $('cpUnitScroll')).forEach(card=>{
-        card.onclick = ()=>{ const eq = cpFindEquip(card.dataset.equipId); if(eq) openCustomerEquipmentDetail(eq); };
-      });
-    }
-    paintUnitStack(typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(shown.map(eq=>eq.id)) : {});
-    if(shown.length && typeof cpFetchCoverPhotoMap === 'function'){
-      const beforeMap = typeof cpCachedCoverPhotoMap==='function' ? cpCachedCoverPhotoMap(shown.map(eq=>eq.id)) : {};
-      cpFetchCoverPhotoMap(shown.map(eq=>eq.id)).then(photoMap=>{
-        // Skip the repaint (and the fresh <img> nodes it would create)
-        // when the fetch resolved to exactly what was already on screen
-        // — e.g. every routine 30s poll once photos are cached.
-        if(JSON.stringify(photoMap)!==JSON.stringify(beforeMap)) paintUnitStack(photoMap);
-      });
-    }
-
-    // Quick actions — four real destinations only; nothing here is
-    // fabricated (no separate "Invoices" tile, since there's no invoicing
-    // feature distinct from the fee already shown on a request/billing
-    // card — see cpQuickQuotes below).
-    // Icon + single label only (no subtitle) — matches the reference
-    // screenshot's icon-grid format (centered icon, label below, no
-    // secondary line). The live counts these subtitles used to show
-    // ("3 enrolled", "2 on file") are still visible one tap away, inside
-    // each tile's own destination screen — nothing is lost, just moved
-    // off the tile itself to match the requested look.
-    $('cpQuickUnits').innerHTML = ''+CP_ICON.grid+'<p class="t">My units</p>';
-    $('cpQuickUnits').onclick = ()=> cpShowScreen('Units');
-    $('cpQuickQuotes').innerHTML = ''+CP_ICON.receipt+'<p class="t">Quotes and invoices</p>';
-    $('cpQuickQuotes').onclick = ()=> cpShowScreen('History', 'Quotations');
-    $('cpQuickHistory').innerHTML = ''+CP_ICON.history+'<p class="t">Service history</p>';
-    $('cpQuickHistory').onclick = ()=> cpShowScreen('History', 'Visits');
-    $('cpQuickHelp').innerHTML = ''+CP_ICON.chat+'<p class="t">Get help</p>';
-    // No standalone support inbox exists yet (see the chat-model note on
-    // cpNotifBell) — "Get help" opens the same request form as "Book a
-    // service" so a person can describe their situation either way,
-    // rather than promising a contact channel that isn't built.
-    $('cpQuickHelp').onclick = ()=>{ if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen(); };
-    $('cpQuickTools').innerHTML = ''+CP_ICON.tools+'<p class="t">Calculators</p>';
-    $('cpQuickTools').onclick = ()=> cpShowScreen('Tools');
-
-    // Accounts — a fifth tile, always shown for any logged-in customer
-    // (previously hidden below 2 linked customers, same condition
-    // cpRenderSwitcher uses for its own dropdown — but that "nothing to
-    // switch to" reasoning doesn't hold here: the destination screen also
-    // carries the "contact Admin to add an account" note, so even a
-    // single-account login has somewhere useful to land). Jumps to the
-    // same picker screen shown at every customer sign-in rather than
-    // duplicating its logic in a second place; the badge shows the
-    // linked-account count (1 when there's just the one), which is
-    // useful context in itself, not just a "something's new" flag like
-    // this app's other badges.
-    const cpAccountsTile = $('cpQuickAccounts');
-    if(cpAccountsTile){
-      const acctList = currentUser.customerList || [];
-      if(acctList.length){
-        cpAccountsTile.style.display = '';
-        cpAccountsTile.innerHTML = ''+CP_ICON.swap+'<span class="cp-quick-badge">'+acctList.length+'</span><p class="t">Switch account</p>';
-        cpAccountsTile.onclick = ()=>{
-          if(typeof showCustomerAccountPicker === 'function') showCustomerAccountPicker();
-        };
-      } else {
-        cpAccountsTile.style.display = 'none';
-      }
-    }
-
-    // Request Status — beside the hero, in the top-grid's second slot
-    // (shares it with #cpBookingBanner; only one of the two shows at a
-    // time). Generalizes the old fee-only billing card: surfaces whatever
-    // is actually awaiting the CUSTOMER'S review right now — a proposed
-    // fee or a proposed schedule — not just a fee. Deliberately narrower
-    // than "any active request" (dispatched/en_route/in_progress already
-    // has its own full treatment in the hero itself; nothing extra for
-    // the customer to review there). Only ever a real request's own
-    // numbers — never fabricated.
-    const needsReview = cpMyRequestsCache.find(r=>
-      (r.status==='fee_proposed' && r.feeStatus==='proposed') || r.status==='schedule_proposed'
-    );
-    const statusCard = $('cpRequestStatusCard');
-    if(statusCard){
-      if(needsReview){
-        const isFee = needsReview.status==='fee_proposed';
-        $('cpReqStatusLabel').textContent = isFee ? 'Service Fee' : 'Proposed Schedule';
-        $('cpReqStatusValue').textContent = isFee
-          ? '₱'+needsReview.feeAmount
-          : (needsReview.proposedScheduleDate ? fmtDate(needsReview.proposedScheduleDate) : 'Date to be confirmed')+
-            (needsReview.proposedScheduleTime ? ' · '+needsReview.proposedScheduleTime : '');
-        $('cpReqStatusSub').textContent = 'Awaiting your review';
-        $('cpReqStatusBtn').onclick = (e)=>{
-          e.stopPropagation();
-          if(typeof srOpenDetail==='function') srOpenDetail(needsReview);
-        };
-        statusCard.style.display = '';
-        if($('cpBookingBanner')) $('cpBookingBanner').style.display = 'none';
-      } else {
-        statusCard.style.display = 'none';
-      }
-    }
-
-    // Recent activity — last 3 reports, newest first (already sorted by
-    // loadCustomerPortalData's query).
+    cpRenderUnitsSection();
+    cpRenderPm();
+    cpRenderReports();
+    cpRenderSupport();
     $('cpActivityFullHistoryLink').onclick = ()=> cpShowScreen('History', 'Visits');
-    $('cpRecentActivity').innerHTML = cpReports.length
-      ? cpReports.slice(0,3).map(r=>{
-          const title = escapeHtml((r.trouble_call && r.trouble_call.trim()) ? r.trouble_call : (r.equip_type||'Service visit'));
-          const warn = !!(r.trouble_call && r.trouble_call.trim());
-          return '<div class="cp-activity-row" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(r.id||'')+'">'+
-            '<span class="cp-activity-dot'+(warn?' warn':'')+'"></span>'+
-            '<div><p class="t">'+title+'</p><p class="s">'+escapeHtml(r.equip_location||'')+'</p></div>'+
-            '<span class="date">'+fmtDate(r.date)+'</span>'+
-          '</div>';
-        }).join('')
-      : '<div class="empty-state">No activity yet.</div>';
-    $$('.cp-activity-row', $('cpRecentActivity')).forEach(row=>{
-      row.onclick = ()=>{
-        const sr = row.dataset.srNo, reportId = row.dataset.reportId;
-        if((sr||reportId) && typeof openCustomerReportPreview==='function') openCustomerReportPreview(sr, reportId);
-      };
-    });
 
     if(cpCustomer && cpCustomer.id) cpRefreshRequestsBadge(cpCustomer.id);
   }
 
-  // "Viewing: [customer ▾]" switcher — always shown once currentUser.
-  // customerList is known (populated at login/session-restore from
-  // customer_login_links — see auth.js), even for a login linked to just
-  // one customer. Previously hidden outright below 2 entries, which meant
-  // most customers — anyone with a single-customer login — never saw any
-  // on-screen confirmation of which company/site account they were
-  // viewing. Below 2 entries the <select> is disabled and restyled to
-  // read as a plain name chip (see .cp-switcher-box.single in app.css)
-  // rather than presenting a dropdown with nothing to switch to. Picking a
-  // different customer re-scopes the whole home screen (equipment,
-  // reports, stat strip) to that customer, and is remembered per device so
-  // it's still selected next time this login signs in here.
   function cpRenderSwitcher(){
     const field = $('cpSwitcherField');
     const sel = $('cpCustomerSwitcher');
@@ -25973,7 +25937,8 @@
     const target = rows.find(r=> cpIsActiveStatus(r.status))
       || rows.find(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed');
     if(target && typeof srOpenDetail === 'function') srOpenDetail(target);
-    else cpShowScreen('History', 'Requests');
+    else if(rows.length) cpShowScreen('Requests');
+    else cpOpenNewRequest({ focus:true });
   }
   function cpRefreshNotifBell(rows){
     const bell = $('cpNotifBell');
@@ -26025,7 +25990,7 @@
   // cpRequestServiceBtn (see customer-equipment-history.js wiring). Backend
   // functions (srCreate, srListForCustomer, srStatusLabel) live in
   // service-requests.js — this is just the customer-facing screen.
-  function cpShowRequestsScreen(){
+  function cpShowRequestsScreen(tab){
     $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = 'none';
     $('customerUnitsScreen').style.display = 'none';
@@ -26035,7 +26000,9 @@
     $('customerProfileScreen').style.display = 'none';
     $('customerLegalScreen').style.display = 'none';
     $('customerRequestsScreen').style.display = '';
-    cpReqShowTab('new');
+    if(typeof cpSetNavActive === 'function') cpSetNavActive('Requests');
+    if($('cpReqProblemBanner')) $('cpReqProblemBanner').style.display = 'none';
+    cpReqShowTab(tab === 'history' ? 'history' : 'new');
     cpPopulateReqEquipmentOptions();
     cpRenderMyRequests(currentUser.customerId);
     window.scrollTo({top:0});
@@ -26154,6 +26121,7 @@
     toast('Request submitted — we\'ll be in touch');
     $('cpReqDescription').value = '';
     $('cpReqUrgency').value = 'normal';
+    if($('cpReqProblemBanner')) $('cpReqProblemBanner').style.display = 'none';
     $('cpReqDate').value = '';
     $('cpReqEquipment').value = '';
     ['cpReqAccessGatePass','cpReqAccessLadder','cpReqAccessWorkPermit','cpReqAccessOthers'].forEach(id=> $(id).checked=false);
@@ -26174,18 +26142,21 @@
   });
 
   // ---------- Shared nav (bottom tabs mobile / top bar desktop) ----------
+  // Requests has its own tab (the thing customers use most); Tools moved
+  // into Account as a row (cpProfileRowTools). The Profile screen keeps
+  // its internal key but reads "Account" on the tab.
   const CP_NAV_ITEMS = [
     { screen:'Home', id:'cpNavHome', icon:'home' },
     { screen:'Units', id:'cpNavUnits', icon:'grid' },
+    { screen:'Requests', id:'cpNavRequests', icon:'tools' },
     { screen:'History', id:'cpNavHistory', icon:'clock' },
-    { screen:'Tools', id:'cpNavTools', icon:'tools' },
-    { screen:'Profile', id:'cpNavProfile', icon:'person' }
+    { screen:'Profile', id:'cpNavProfile', icon:'person', label:'Account' }
   ];
   function cpInitNav(){
     CP_NAV_ITEMS.forEach(item=>{
       const btn = $(item.id);
       if(!btn) return;
-      btn.innerHTML = CP_ICON[item.icon]+'<span>'+item.screen+'</span>';
+      btn.innerHTML = CP_ICON[item.icon]+'<span>'+(item.label || item.screen)+'</span>';
       btn.addEventListener('click', ()=> cpShowScreen(item.screen));
     });
   }
@@ -26205,10 +26176,15 @@
   // See cpEnterPortalShell()'s comment for the bug this fixes.
   function cpShowScreen(screen, sub){
     if(screen==='Home'){ showCustomerHome(); return; }
+    if(screen==='Requests'){
+      if(typeof cpEnterPortalShell === 'function') cpEnterPortalShell();
+      cpShowRequestsScreen(sub || 'history');
+      return;
+    }
     if(typeof cpEnterPortalShell === 'function') cpEnterPortalShell();
     $('customerHomeScreen').style.display = 'none';
     cpSetNavActive(screen);
-    if(screen==='Units'){ $('customerUnitsScreen').style.display = ''; renderCustomerUnitsScreen(); }
+    if(screen==='Units'){ $('customerUnitsScreen').style.display = ''; cpUnitsSetStatusFilter(sub || 'all', true); renderCustomerUnitsScreen(); }
     else if(screen==='History'){ $('customerHistoryScreen').style.display = ''; renderCustomerHistoryScreen(sub); }
     else if(screen==='Tools'){ $('customerToolsScreen').style.display = ''; renderCustomerToolsScreen(); }
     else if(screen==='Profile'){ $('customerProfileScreen').style.display = ''; renderCustomerProfileScreen(); }
@@ -26220,12 +26196,31 @@
   // paint() (which re-runs once cover photos arrive, see cpFetchCoverPhotoMap
   // below) can reapply whatever the person already typed instead of the
   // photo repaint silently wiping it back to "show everything".
+  // Status filter chips (All / PM overdue / Due soon / Up to date / No PM
+  // date) — the Home unit summary opens this screen with one preselected.
+  let cpUnitsStatus = 'all';
+  function cpUnitsSetStatusFilter(key, silent){
+    cpUnitsStatus = key || 'all';
+    $$('#cpUnitsStatusChips [data-status]').forEach(b=> b.classList.toggle('active', b.dataset.status===cpUnitsStatus));
+    if(!silent) cpUnitsApplyFilter();
+  }
+  function cpUnitsRenderChips(){
+    const c = { all:cpEquipment.length, overdue:0, 'due-soon':0, scheduled:0, none:0 };
+    cpEquipment.forEach(eq=> c[eq.status.key]++);
+    const chips = [['all','All'],['overdue','PM overdue'],['due-soon','Due soon'],['scheduled','Up to date'],['none','No PM date']];
+    $('cpUnitsStatusChips').innerHTML = chips.filter(([k])=> k==='all' || c[k] || k===cpUnitsStatus).map(([k,l])=>
+      '<button type="button" class="cp-filter-chip'+(k===cpUnitsStatus ? ' active' : '')+'" data-status="'+k+'">'+l+' <span>'+c[k]+'</span></button>').join('');
+  }
   function cpUnitsApplyFilter(){
     const q = ($('cpUnitsSearch').value||'').trim().toLowerCase();
-    $$('.cp-unit-card', $('cpUnitsGrid')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+    $$('.cp-unit-card', $('cpUnitsGrid')).forEach(el=>{
+      const okStatus = cpUnitsStatus==='all' || el.dataset.status===cpUnitsStatus;
+      el.style.display = okStatus && el.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
   }
   function renderCustomerUnitsScreen(){
     $('cpUnitsScreenSub').textContent = cpEquipment.length+' unit'+(cpEquipment.length===1?'':'s')+' enrolled';
+    cpUnitsRenderChips();
     function paint(photoMap){
       $('cpUnitsGrid').innerHTML = cpEquipment.length
         ? cpEquipment.map(eq=> cpUnitCardHtml(eq, photoMap)).join('')
@@ -26251,6 +26246,9 @@
   // re-runs every time this tab is opened) so repeat visits don't stack
   // duplicate 'input' listeners on the same search box.
   $('cpUnitsSearch').addEventListener('input', cpUnitsApplyFilter);
+  $('cpUnitsStatusChips').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-status]'); if(b) cpUnitsSetStatusFilter(b.dataset.status);
+  });
 
   // ---------- History screen (unified chronological timeline) ----------
   // Replaces the old two-tab Visits/Requests segment with one merged,
@@ -26660,7 +26658,7 @@
     $('cpInfoContactNo').textContent = (cpCustomer && cpCustomer.contact_no) || na;
     $('cpInfoAddress').textContent = (cpCustomer && cpCustomer.address) || na;
   }
-  $('cpProfileRowRequests').addEventListener('click', ()=> cpShowScreen('History', 'Requests'));
+  $('cpProfileRowRequests').addEventListener('click', ()=> cpShowScreen('Requests'));
   $('cpProfileRowTerms').addEventListener('click', ()=> cpShowLegalScreen('terms'));
   $('cpProfileRowPrivacy').addEventListener('click', ()=> cpShowLegalScreen('privacy'));
   $('cpProfileRowLogout').addEventListener('click', ()=>{ if(typeof doLogout==='function') doLogout(); });
@@ -26728,9 +26726,12 @@
   });
 
   // ---------- Wire the pieces the old sidebar used to own ----------
-  $('cpRequestServiceBtn').addEventListener('click', ()=>{
-    if(typeof cpShowRequestsScreen === 'function') cpShowRequestsScreen();
-  });
+  $('cpRequestServiceBtn').addEventListener('click', ()=> cpOpenNewRequest());
+  // Report a problem: the same request form, preset to Urgent with a short
+  // note on top — it lands in admin's urgent tier after 60 min unanswered.
+  $('cpReportProblemBtn').addEventListener('click', ()=> cpOpenNewRequest({ urgent:true, focus:true }));
+  $('cpMessageUsBtn').addEventListener('click', ()=> cpOpenCentralChat());
+  $('cpProfileRowTools').addEventListener('click', ()=>{ cpShowScreen('Tools'); cpSetNavActive('Profile'); });
   $('cpUnitsViewAllLink').addEventListener('click', (e)=>{ e.preventDefault(); cpShowScreen('Units'); });
   cpInitNav();
 

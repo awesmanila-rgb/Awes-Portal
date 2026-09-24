@@ -2651,8 +2651,18 @@
       if(typeof srMarkEnRouteByTicket === 'function') srMarkEnRouteByTicket(id).catch(()=>{});
       const t = dtLastTicketsById[id];
       if(t && t.custId && typeof notifyCustomer === 'function'){
-        notifyCustomer(t.custId, 'Your technician is on the way',
-          'Your service team has confirmed and is heading to your site.', 'jo-enroute');
+        // Names + expected arrival, so the customer knows who to let in and
+        // roughly when (expectedTime is the admin-set time at site).
+        const names = (t.assignedWorkerNames||[]).filter(Boolean);
+        const who = names.length===0 ? 'Your service team'
+          : names.length===1 ? names[0]
+          : names.length===2 ? names[0]+' and '+names[1]
+          : names[0]+' and '+(names.length-1)+' others';
+        let eta = '';
+        const m = /^(\d{1,2}):(\d{2})/.exec(t.expectedTime||'');
+        if(m){ const h = Number(m[1]); eta = ' Expected at your site around '+((h%12)||12)+':'+m[2]+' '+(h<12 ? 'AM' : 'PM')+'.'; }
+        notifyCustomer(t.custId, names.length>1 ? 'Your technicians are on the way' : 'Your technician is on the way',
+          who+(names.length>1 ? ' are' : ' is')+' heading to your site'+(t.jobOrderNo ? ' for '+t.jobOrderNo : '')+'.'+eta, 'jo-enroute');
       }
       if(typeof notifyAdmins === 'function'){
         notifyAdmins('Job order acknowledged', (t ? t.jobOrderNo : id)+' — crew is en route.', 'jo-ack');

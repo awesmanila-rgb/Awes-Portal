@@ -3424,3 +3424,173 @@ body.role-tech #homeAnnouncementsCard #homeAnnViewAllBtn{ color:var(--teal) !imp
 body.role-tech #homeAnnouncementsCard .card-body{ background:var(--surface); border:1px solid var(--border); border-radius:16px; }
 /* Overtime row in the technician attendance strip */
 .th-attend-vals.th-attend-ot{ padding-top:4px; margin-top:2px; border-top:1px dashed var(--border); }
+
+/* ============================================================
+   Customer portal homepage — redesign (.cph)
+   White header with the company mark, greeting and account chip; then a
+   quiet column of white cards (two columns on desktop). One green primary
+   button per section; color only for status. Rendered by
+   renderCustomerHome() / renderCustomerHero() in customer-portal.js.
+   ============================================================ */
+.cph{ background:var(--bg); }
+.cph .cp-header.cp-header-soft{
+  background:var(--surface); border-bottom:1px solid var(--border); border-radius:0;
+  padding:14px 24px; min-height:0;
+}
+.cph .cp-icon-btn, .cph .cp-avatar{ background:var(--bg); border:1px solid var(--border); color:var(--text); }
+.cph .cp-badge-dot{ border-color:var(--surface); background:var(--danger); }
+.cph-brand{ display:flex; align-items:center; gap:9px; font-size:15px; font-weight:700; color:var(--green-dark); }
+.cph-brand img{ width:30px; height:30px; border-radius:8px; object-fit:contain; }
+.cph-hello{ background:var(--surface); padding:4px 24px 18px; border-bottom:1px solid var(--border); }
+@media (min-width:1000px){
+  .cph .cp-header.cp-header-soft, .cph-hello{ padding-left:calc(50% - 600px + 24px); padding-right:calc(50% - 600px + 24px); }
+}
+.cph-greet{ font-size:24px; font-weight:700; color:var(--text); margin:6px 0 10px; letter-spacing:-.02em; line-height:1.2; }
+.cph-acct{
+  display:inline-flex; align-items:center; gap:6px; max-width:100%;
+  background:var(--bg); border:1px solid var(--border); border-radius:999px;
+  padding:6px 14px; font:inherit; font-size:13.5px; color:var(--text); cursor:pointer;
+}
+.cph-acct > span:first-child{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cph-acct.cph-acct-static{ cursor:default; }
+.cph-acct-caret{ color:var(--text-muted); }
+.cph .cp-viewing-bar{ display:none !important; }
+
+.cph-body{ padding-bottom:28px; }
+.cph-grid{ display:grid; grid-template-columns:minmax(0,1fr); gap:0 24px; }
+@media (min-width:1000px){ .cph-grid{ grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); align-items:start; } }
+.cph-col{ min-width:0; }
+.cph-sec{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:22px 2px 10px; }
+.cph-sec h2{ font-size:17px; font-weight:700; margin:0; color:var(--text); letter-spacing:-.01em; }
+.cph-sec a{ font-size:13.5px; font-weight:700; color:var(--teal); cursor:pointer; text-decoration:none; }
+.cph-sec-note{ font-size:13px; color:var(--text-muted); }
+.cph-danger-txt{ color:var(--danger); }
+.cph-accent-txt{ color:var(--teal); }
+
+.cph-card{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:12px; }
+.cph-card.cph-list{ padding:4px 16px; }
+.cph-action.cph-t-warn{ border-color:#EBCB8F; }
+.cph-action.cph-t-danger{ border-color:#E7B5AB; }
+.cph-row-top{ display:flex; gap:12px; align-items:flex-start; }
+.cph-text{ flex:1; min-width:0; display:flex; flex-direction:column; }
+.cph-title{ font-size:16px; font-weight:700; color:var(--text); margin:0; line-height:1.35; }
+.cph-sub{ font-size:13.5px; color:var(--text-muted); margin:2px 0 0; line-height:1.45; }
+.cph-note{ font-size:13px; color:var(--text-muted); background:var(--bg); border-radius:10px; padding:8px 10px; margin:12px 0 0; }
+.cph-empty{ font-size:14px; color:var(--text-muted); margin:12px 0; line-height:1.5; }
+.cph-okline{ display:flex; align-items:center; gap:8px; font-size:14px; color:var(--green-dark); margin:4px 0 6px; }
+.cph-okline svg{ width:16px; height:16px; flex:none; }
+
+.cph-ic{ width:40px; height:40px; border-radius:11px; flex:none; display:flex; align-items:center; justify-content:center; }
+.cph-ic svg{ width:20px; height:20px; }
+.cph-ic-warn{ background:#FBF0DC; color:#8A5A0F; }
+.cph-ic-danger{ background:#FBE3DF; color:var(--danger); }
+.cph-ic-info{ background:var(--teal-light); color:var(--teal); }
+.cph-ic-ok{ background:var(--green-light); color:var(--green-dark); }
+.cph-ic-muted{ background:var(--bg); color:var(--text-muted); }
+
+.cph-btn{
+  display:inline-flex; align-items:center; justify-content:center; width:100%; height:44px; margin-top:14px;
+  border-radius:10px; font:inherit; font-size:15px; font-weight:700; cursor:pointer; text-decoration:none;
+  background:var(--surface); color:var(--green-dark); border:1px solid var(--border);
+}
+.cph-btn:active{ background:var(--green-light); }
+.cph-btn-primary{ background:var(--green); color:#fff; border-color:var(--green); }
+.cph-btn-primary:active{ background:var(--green-dark); }
+.cph-btn-sm{ width:auto; height:36px; margin:0; padding:0 14px; font-size:14px; flex:none; }
+.cph-link-btn{ background:none; border:none; font:inherit; font-size:14px; font-weight:700; color:var(--teal); cursor:pointer; padding:6px 0; }
+.cph-card > .cph-link-btn{ margin-top:10px; }
+.cph-icon-btn{ width:38px; height:38px; flex:none; border-radius:50%; border:1px solid var(--border); background:var(--surface); color:var(--teal); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.cph-icon-btn svg{ width:18px; height:18px; }
+
+/* Next visit */
+.cph-tech{ display:flex; align-items:center; gap:10px; background:var(--bg); border-radius:12px; padding:10px; margin-top:12px; }
+.cph-avatar{ width:38px; height:38px; border-radius:50%; flex:none; color:#fff; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.cph-avatar-muted{ background:var(--border); color:var(--text-muted); }
+.cph-avatar svg{ width:18px; height:18px; }
+.cph-tech-name{ font-size:14.5px; font-weight:700; margin:0; color:var(--text); }
+.cph-tech .cph-sub{ margin:0; font-size:12.5px; }
+.cph-track{ display:flex; align-items:center; margin-top:16px; padding:0 6px; }
+.cph-track-dot{ width:24px; height:24px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; background:var(--bg); color:var(--text-muted); border:1px solid var(--border); }
+.cph-track-dot svg{ width:13px; height:13px; }
+.cph-track-dot.on{ background:var(--green); border-color:var(--green); color:#fff; }
+.cph-track-dot.now{ background:var(--surface); border:2px solid var(--green); color:var(--green-dark); }
+.cph-track-ln{ flex:1; height:2px; background:var(--border); }
+.cph-track-ln.on{ background:var(--green); }
+.cph-track-lb{ display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-muted); margin-top:6px; }
+.cph-track-lb span{ flex:1; text-align:center; }
+.cph-track-lb span:first-child{ text-align:left; }
+.cph-track-lb span:last-child{ text-align:right; }
+.cph-track-lb .now{ color:var(--green-dark); font-weight:700; }
+
+/* Three main actions */
+.cph-actions{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin:4px 0 0; }
+.cph-act{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:80px;
+  background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:10px 6px;
+  font:inherit; font-size:13.5px; font-weight:700; color:var(--text); cursor:pointer; text-align:center; line-height:1.25;
+}
+.cph-act:active{ background:var(--green-light); }
+.cph-act-primary{ background:var(--green); border-color:var(--green); color:#fff; }
+.cph-act-primary:active{ background:var(--green-dark); }
+.cph-act-ic svg{ width:22px; height:22px; display:block; }
+
+/* Units */
+.cph-sum{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
+.cph-sum.cph-sum-4{ grid-template-columns:repeat(4, minmax(0,1fr)); }
+.cph-sum:empty{ display:none; }
+.cph-sum-item{ border:none; border-radius:11px; padding:9px 10px; text-align:left; font:inherit; cursor:pointer; display:flex; flex-direction:column; gap:1px; }
+.cph-sum-item b{ font-size:21px; font-weight:700; line-height:1.15; }
+.cph-sum-item span{ font-size:12px; line-height:1.3; }
+.cph-sum-item:disabled{ cursor:default; opacity:.6; }
+.cph-sum-danger{ background:#FBE3DF; color:var(--danger); }
+.cph-sum-warn{ background:#FBF0DC; color:#8A5A0F; }
+.cph-sum-ok{ background:var(--green-light); color:var(--green-dark); }
+.cph-sum-muted{ background:var(--bg); color:var(--text-muted); }
+#cpUnitScroll{ margin-top:6px; }
+.cph-unit{ width:100%; display:flex; align-items:center; gap:12px; background:none; border:none; border-bottom:1px solid var(--border); padding:11px 0; font:inherit; text-align:left; cursor:pointer; color:var(--text); }
+.cph-unit:last-child{ border-bottom:none; }
+.cph-unit-img{ width:44px; height:44px; border-radius:10px; overflow:hidden; background:var(--bg); color:var(--text-muted); flex:none; display:flex; align-items:center; justify-content:center; }
+.cph-unit-img img{ width:100%; height:100%; object-fit:cover; }
+.cph-unit-img svg{ width:24px; height:24px; }
+.cph-unit-name{ font-size:14.5px; font-weight:700; }
+.cph-unit .cph-sub{ margin:0; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cph-pill{ font-size:12px; font-weight:700; padding:3px 10px; border-radius:999px; white-space:nowrap; flex:none; }
+.cph-pill-danger{ background:#FBE3DF; color:var(--danger); }
+.cph-pill-warn{ background:#FBF0DC; color:#8A5A0F; }
+.cph-pill-ok{ background:var(--green-light); color:var(--green-dark); }
+.cph-pill-muted{ background:var(--bg); color:var(--text-muted); }
+
+/* Lists: maintenance, reports, support */
+.cph-li{ display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }
+.cph-li:last-child{ border-bottom:none; }
+.cph-li .cph-text{ cursor:pointer; }
+.cph-li-title{ font-size:14.5px; font-weight:700; color:var(--text); }
+.cph-li .cph-sub{ margin:0; font-size:12.5px; }
+.cph-date{ width:42px; flex:none; text-align:center; display:flex; flex-direction:column; line-height:1.1; }
+.cph-date small{ font-size:11.5px; color:var(--text-muted); }
+.cph-date b{ font-size:19px; font-weight:700; color:var(--text); }
+.cph-support{ display:flex; align-items:center; gap:12px; }
+
+/* Request form: "Report a problem" note */
+.cph-problem-banner{ margin:14px 0 0; padding:12px 14px; border-radius:12px; background:#FBE3DF; color:#7A2A1D; display:flex; flex-direction:column; gap:3px; font-size:13.5px; line-height:1.45; }
+.cph-problem-banner b{ font-size:14.5px; }
+
+/* Units screen status chips — counts beside each label */
+#cpUnitsStatusChips .cp-filter-chip span{ opacity:.7; margin-left:3px; }
+
+/* Unit cards (Units screen): the corner badge repeated the footer badge in
+   capitals — keep one, sentence case. */
+.cp-unit-card .cp-unit-badge-corner{ display:none; }
+/* .cp-content drops its side padding on phones (the old Home sections
+   supplied their own) — the redesigned sections don't, so the body sets
+   one shared gutter that the header lines up with. */
+.cph .cph-body{ padding:0 16px 28px; }
+.cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:16px; padding-right:16px; }
+@media (min-width:769px){
+  .cph .cph-body{ padding:0 24px 28px; }
+  .cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:24px; padding-right:24px; }
+}
+@media (min-width:1248px){
+  .cph .cp-header.cp-header-soft, .cph .cph-hello{ padding-left:calc(50% - 576px); padding-right:calc(50% - 576px); }
+}
+.cph{ background:var(--bg); }

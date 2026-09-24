@@ -252,3 +252,23 @@ original 32-policy set byte-for-byte (32 -> 35 -> 32).
 **Still to do (needs your hands):** publish the new bundle to GitHub Pages, deploy
 the `list-technicians` Edge Function, then apply Part 2.
 `ALLOWED_ORIGINS` in the function is now set to `https://awesmanila-rgb.github.io`.
+
+## Technician homepage — "Need to do now" (2026-09-24)
+- Replaced the swipeable Overview carousel with **Need to do now**: every action waiting on the technician as its own card (step tag, icon, large title, one plain sentence, full-width button), ranked so Step 1 is always what to do first.
+- Ranking: Time in → finish service reports (Work in Progress) → Arrived at Site (En Route) → Acknowledge (late first) → report drafts → material request to fix/submit → sign tool / material slips → return overdue tools → liquidation → unread messages → Time out.
+- Acknowledge and Arrived at Site run directly from the homepage after a confirm, using the same dtAcknowledge / dtMarkArrived as My Job Order (same customer/admin notifications). Time In is ranked first but does not block other actions.
+- Job-order tasks show a 3-step tracker: Accept → Arrive at site → Report.
+- New sections: **Waiting for approval** (pending cash advances, reimbursements, liquidations, leaves, material requests), **Coming up** (next 3 scheduled job orders), and **Request or check** (10 labelled tiles incl. Attendance, Messages, Cash advance, Reimbursement, Leave; Finance & HR tile removed — each item has its own tile).
+- Greeting rebuilt: large greeting, date, and an attendance strip (Time in / Time out) that opens DTR. Fixed instruction paragraph removed.
+- Larger type throughout (greeting 26px, section titles 21px, task titles 18–20px), single centered 760px column for the technician home. No migration needed.
+
+## Customer portal homepage redesign (2026-09-24)
+- New layout: white header with company mark, greeting and account chip (switch accounts from the chip); **Action needed** (fee to approve, schedule to confirm, issue found on a visit, PM overdue with no request); **Next / Current visit** (date and time, assigned technician, 5-step tracker Booked → Confirmed → On the way → Working → Done); three main actions (Book a service, Report a problem, Message us); **Your units** (status summary + units needing maintenance); **Upcoming maintenance** (next 90 days, grouped by date, one-tap Book); **Recent service reports** (with PDF download); **Support** card. Two columns on desktop.
+- Honest wording: removed "Your AC units are being monitored", "Operating well / Good health", "Filter check needed", and the "Quotes and invoices" tile. Unit status now describes the PM date only. "On the way" lights up only at En Route (after the crew acknowledges).
+- Tabs: Home, Units, Requests, History, Account. Tools moved to Account → Tools and calculators.
+- Report a problem: opens the request form preset to Urgent with guidance.
+- Units screen: status filter chips (PM overdue / Due soon / Up to date / No PM date) with counts; Home summary opens it pre-filtered.
+- Arrival notice: the "on the way" push now names the technician(s), the job order, and the expected arrival time.
+- PM reminders: new pm-reminders Edge Function + migration 20260924_05_pm_reminders.sql + setup/pm_reminders_cron.sql (daily 8:00 AM). One push per account for units due within 7 days, once per PM date, skipped when a request is already open.
+- Fix (in the same migration): push_subscriptions.customer_id was bigint while customer ids are uuid, which blocked customer devices from registering for push. Converted to uuid, only if still bigint.
+- Support card: set CP_SUPPORT.phone / hours in customer-portal.js; a Call button shows only when a phone number is set.

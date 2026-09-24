@@ -762,16 +762,18 @@ window.awesCss = {
 </div>
 
 <!-- Customer Portal — shown instead of #homeScreen when currentUser.role === 'customer'. -->
-<div id="customerHomeScreen" class="home-screen cp-screen" style="display:none;">
+<div id="customerHomeScreen" class="home-screen cp-screen cph" style="display:none;">
 
-  <!-- Compact, pale welcome block — replaces the old full-width saturated
-       green banner so the status card below reads as the primary thing
-       on the page (see AWES_App_enroute redesign spec, "Welcome section"). -->
+  <!-- Customer homepage (redesign). Header: company mark + bell/profile
+       menu, then the greeting and the account chip (which replaces the old
+       separate "Viewing" bar — that bar is kept below, hidden, because
+       cpRenderSwitcher() still drives it). Everything under .cph-body is
+       rendered by renderCustomerHome() / renderCustomerHero() in
+       customer-portal.js. -->
   <div class="cp-header cp-header-soft">
     <div class="cp-header-inner">
       <div>
-        <p class="cp-greet"><span id="cpGreetTod">Good day</span>, <span id="cpGreetingName">there</span></p>
-        <p class="cp-greet-sub" id="cpGreetSub">Loading your units…</p>
+        <div class="cph-brand"><img src="logo.png" alt=""><span>AWES Service</span></div>
       </div>
       <div class="cp-header-actions">
         <!-- Notification bell doubles as the global chat entry point — see
@@ -796,20 +798,11 @@ window.awesCss = {
     </div>
   </div>
 
-  <!-- Always shown once this login's customer list is known (see
-       cpRenderSwitcher() in customer-portal.js) — previously hidden
-       outright unless this login was linked to more than one customer
-       record, which meant the overwhelming majority of single-customer
-       logins never got any on-screen confirmation of which company/site
-       account they were viewing. A single-customer login still gets this
-       same "Viewing" label, just without the Switch badge (nothing to
-       switch to).
-       The native <select> that used to be the switch control is kept in
-       the DOM but hidden: on mobile it rendered as an easy-to-miss inline
-       dropdown, so the visible control is now the name + "Switch" badge
-       below, which opens the same full account-picker screen used at
-       sign-in. The element stays so its existing change handler and any
-       other reference to it keep working. -->
+  <div class="cph-hello">
+    <p class="cph-greet"><span id="cpGreetTod">Good day</span>, <span id="cpGreetingName">there</span></p>
+    <button type="button" class="cph-acct" id="cpAcctChip"><span id="cpGreetSub">Loading your units…</span><span class="cph-acct-caret" id="cpAcctCaret" style="display:none;">▾</span></button>
+  </div>
+
   <div class="cp-viewing-bar" id="cpSwitcherField" style="display:none;">
     <div class="cp-viewing-main">
       <span class="cp-viewing-label">Viewing</span>
@@ -823,83 +816,50 @@ window.awesCss = {
     </div>
   </div>
 
-  <div class="cp-content">
+  <div class="cp-content cph-body">
     <div class="push-prompt" id="pushPromptCust" style="display:none;"></div>
-    <!-- Status card + service callout, side by side on desktop and
-         stacked on mobile (see AWES_App_enroute redesign spec's
-         "Redesigned desktop layout" / "Responsive mobile design"). -->
-    <div class="cp-top-grid">
-      <!-- Hero — filled by renderCustomerHero() with one of: all-clear,
-           scheduled, active (single/multi tech), needs-attention (overdue /
-           quotation pending / quotation ready), or the many-units summary
-           card. Layout skeleton below never changes, only this block. -->
-      <div class="cp-hero" id="cpHero"></div>
+    <div class="cph-grid">
+      <div class="cph-col">
+        <section id="cpActionWrap" style="display:none;">
+          <div class="cph-sec"><h2>Action needed</h2><span class="cph-sec-note cph-danger-txt" id="cpActionCount"></span></div>
+          <div id="cpActionList"></div>
+        </section>
 
-      <!-- Primary CTA — matches this theme's "booking banner" treatment.
-           Mutually exclusive with #cpRequestStatusCard right below it (see
-           renderCustomerHome in customer-portal.js) — whenever a request
-           needs the customer's review (fee proposed, schedule proposed),
-           the status card takes this slot instead of the generic "book
-           another unit" prompt. -->
-      <div class="cp-booking-banner" id="cpBookingBanner">
-        <div>
-          <h2>Need service for another unit?</h2>
-          <p>Book a visit at a time that works for you.</p>
+        <section>
+          <div class="cph-sec"><h2 id="cpVisitTitle">Next visit</h2><a id="cpVisitMore" style="display:none;"></a></div>
+          <div class="cph-card" id="cpHero"></div>
+        </section>
+
+        <div class="cph-actions">
+          <button type="button" class="cph-act cph-act-primary" id="cpRequestServiceBtn"><span class="cph-act-ic" id="cpActBookIc"></span>Book a service</button>
+          <button type="button" class="cph-act" id="cpReportProblemBtn"><span class="cph-act-ic cph-danger-txt" id="cpActProblemIc"></span>Report a problem</button>
+          <button type="button" class="cph-act" id="cpMessageUsBtn"><span class="cph-act-ic cph-accent-txt" id="cpActMsgIc"></span>Message us</button>
         </div>
-        <button type="button" id="cpRequestServiceBtn">Book a service</button>
+
+        <section>
+          <div class="cph-sec"><h2 id="cpUnitsSectionTitle">Your units</h2><a id="cpUnitsViewAllLink">See all</a></div>
+          <div class="cph-card">
+            <div class="cph-sum" id="cpUnitSummary"></div>
+            <div id="cpUnitScroll"></div>
+          </div>
+        </section>
       </div>
 
-      <!-- Request Status — replaces the old fee-only Billing card, and
-           moved up here beside the hero instead of its old spot below
-           Units. Generalized beyond just a proposed fee: shows whichever
-           stage of the customer's active request is actually awaiting
-           their review (fee or schedule), same visual treatment either
-           way. Only a real, live request's own numbers ever show here —
-           see renderCustomerHome. -->
-      <div class="cp-billing-card cp-status-companion" id="cpRequestStatusCard" style="display:none;">
-        <small id="cpReqStatusLabel">Request status</small>
-        <b id="cpReqStatusValue">—</b>
-        <div class="cp-billing-bottom">
-          <span id="cpReqStatusSub"></span>
-          <button type="button" id="cpReqStatusBtn">Review</button>
-        </div>
-      </div>
-    </div>
+      <div class="cph-col">
+        <section id="cpPmWrap" style="display:none;">
+          <div class="cph-sec"><h2>Upcoming maintenance</h2><span class="cph-sec-note">Next 90 days</span></div>
+          <div class="cph-card cph-list" id="cpPmList"></div>
+        </section>
 
-    <div class="cp-section">
-      <div class="cp-section-head">
-        <h2 id="cpUnitsSectionTitle">Your units</h2>
-        <a id="cpUnitsViewAllLink">Manage units</a>
-      </div>
-      <div class="cp-unit-stack" id="cpUnitScroll"></div>
-    </div>
+        <section>
+          <div class="cph-sec"><h2>Recent service reports</h2><a id="cpActivityFullHistoryLink">Full history</a></div>
+          <div class="cph-card cph-list" id="cpRecentActivity"></div>
+        </section>
 
-    <div class="cp-section">
-      <div class="cp-section-head"><h2>Quick actions</h2></div>
-      <div class="cp-quick-grid">
-        <button type="button" class="cp-quick-tile" id="cpQuickUnits"></button>
-        <button type="button" class="cp-quick-tile" id="cpQuickQuotes"></button>
-        <button type="button" class="cp-quick-tile" id="cpQuickHistory"></button>
-        <button type="button" class="cp-quick-tile" id="cpQuickHelp"></button>
-        <!-- Shortcut into the Tools tab (calculators, savings estimator,
-             guides) — that tab only otherwise lives in the bottom nav, so
-             this gives it a second, more visible entry point from Home. -->
-        <button type="button" class="cp-quick-tile" id="cpQuickTools"></button>
-        <!-- Always shown for any logged-in customer, including a
-             single-account login — populated and toggled in
-             renderCustomerHome(). Opens the account picker screen, which
-             also carries "+ Add account" below the enrolled-account
-             cards. -->
-        <button type="button" class="cp-quick-tile" id="cpQuickAccounts" style="display:none;"></button>
+        <section>
+          <div class="cph-card cph-support" id="cpSupportCard"></div>
+        </section>
       </div>
-    </div>
-
-    <div class="cp-section" style="padding-bottom:20px;">
-      <div class="cp-section-head">
-        <h2>Recent activity</h2>
-        <a id="cpActivityFullHistoryLink">Full history</a>
-      </div>
-      <div class="cp-card-list" id="cpRecentActivity"></div>
     </div>
   </div>
 
@@ -911,6 +871,7 @@ window.awesCss = {
   <div class="cp-tools-head cp-tools-head-aligned"><div class="cp-tools-head-inner"><h1>Your units</h1><p id="cpUnitsScreenSub">&nbsp;</p></div></div>
   <div class="cp-page-content" style="padding-top:0; padding-bottom:0;">
     <div class="cp-search"><span></span><input type="text" id="cpUnitsSearch" placeholder="Search your units — name, brand, location…"></div>
+    <div class="cp-filter-chips" id="cpUnitsStatusChips" style="margin:0 0 12px;"></div>
     <div class="cp-units-grid" id="cpUnitsGrid"><div class="empty-state">Loading…</div></div>
   </div>
 </div>
@@ -1037,6 +998,10 @@ window.awesCss = {
       <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 0;">Get updates about your service even when the app is closed.</p>
     </div>
 
+    <div class="cp-profile-row" id="cpProfileRowTools">
+      <div><p class="t">Tools and calculators</p><p class="s">Aircon sizing, energy savings, and care guides</p></div>
+      <span>›</span>
+    </div>
     <div class="cp-profile-row" id="cpProfileRowRequests">
       <div><p class="t">My service requests</p><p class="s">Status, quotes, and messages</p></div>
       <span>›</span>
@@ -1080,7 +1045,7 @@ window.awesCss = {
   <button type="button" class="cp-nav-btn active" data-screen="Home" id="cpNavHome"></button>
   <button type="button" class="cp-nav-btn" data-screen="Units" id="cpNavUnits"></button>
   <button type="button" class="cp-nav-btn" data-screen="History" id="cpNavHistory"></button>
-  <button type="button" class="cp-nav-btn" data-screen="Tools" id="cpNavTools"></button>
+  <button type="button" class="cp-nav-btn" data-screen="Requests" id="cpNavRequests"></button>
   <button type="button" class="cp-nav-btn" data-screen="Profile" id="cpNavProfile"></button>
   <div class="cp-nav-spacer"></div>
 </nav>
@@ -1214,6 +1179,10 @@ window.awesCss = {
   </div>
 
   <div id="cpReqNewPanel">
+        <div class="cph-problem-banner" id="cpReqProblemBanner" style="display:none;">
+          <b>Reporting a problem</b>
+          <span>This request is marked Urgent. Tell us which unit and what is happening (not cooling, leaking, noisy, tripping the breaker). For an emergency, call the office as well.</span>
+        </div>
     <div class="card" style="margin-top:14px;">
       <div class="card-head"><span><svg class="cp-inline-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2z"/></svg> Request Service</span></div>
       <div class="card-body">
