@@ -22734,13 +22734,46 @@
                   { label: 'Quick approve', primary: true, run: ()=> prioQuickApprove('mr:' + m.id) }]
       });
     });
-    // TODAY — cash advance (full review only)
+    // Opens Cash Advance admin on the right section + filter tab.
+    const openCa = (reimb, filter)=> async ()=>{
+      setSidebarActive(reimb ? 'sbNavReimbursement' : 'sbNavCashAdvance');
+      await showCashAdvanceView();
+      caShowAdminSection(reimb ? 'reimb' : 'requests');
+      const btn = document.querySelector('#' + (reimb ? 'caReimbAdminFilterRow' : 'caAdminFilterRow') + ' button[data-filter="' + filter + '"]');
+      if(btn) btn.click();
+    };
+    // TODAY — cash advance / reimbursement requests (full review only).
+    // Reimbursements share the same table and 'pending' status, so they are
+    // labelled and routed to their own section instead of passing as a cash
+    // advance.
     (base.cashAdvances || []).filter(r=> r.status === 'pending').forEach(r=>{
+      const reimb = r.kind === 'reimbursement';
       add('today', {
         key: 'ca:' + r.id, age: prioSince(r.submittedAt),
-        title: 'Cash advance ' + caFmtPeso(Number(r.amount) || 0) + ' — ' + (r.userName || 'Technician'),
+        title: (reimb ? 'Reimbursement ' : 'Cash advance ') + caFmtPeso(Number(r.amount) || 0) + ' — ' + (r.userName || 'Technician'),
         sub: (r.purpose ? String(r.purpose).slice(0, 70) + ' · ' : '') + 'waiting ' + prioAge(prioSince(r.submittedAt)),
-        actions: [{ label: 'Review', run: ()=>{ setSidebarActive('sbNavCashAdvance'); showCashAdvanceView(); } }]
+        actions: [{ label: 'Review', run: openCa(reimb, 'pending') }]
+      });
+    });
+    // Approved but the money has not been handed over yet (not "Given" /
+    // not "Paid"). Approval alone doesn't put cash in the technician's
+    // hand, so this stays on admin's list until Record Disbursement /
+    // Record Payment is done. A cash advance whose date needed is today or
+    // already past goes to URGENT — the technician needs it for the job.
+    (base.cashAdvances || []).filter(r=> r.status === 'approved' && !r.disbursed).forEach(r=>{
+      const reimb = r.kind === 'reimbursement';
+      const needed = r.dateNeeded || '';
+      const due = !reimb && needed && needed <= today;
+      const age = prioSince(r.decidedAt || r.submittedAt);
+      const neededTxt = reimb || !needed ? '' :
+        (needed === today ? 'Needed today' : needed < today ? 'Needed ' + leaveFmtDate(needed) + ' (past due)' : 'Needed ' + leaveFmtDate(needed));
+      add(due ? 'urgent' : 'today', {
+        key: 'rel:' + r.id, age,
+        title: reimb
+          ? 'Reimbursement to pay — ' + caFmtPeso(Number(r.amount) || 0) + ' to ' + (r.userName || 'Technician')
+          : 'Cash advance to release — ' + caFmtPeso(Number(r.amount) || 0) + ' to ' + (r.userName || 'Technician'),
+        sub: [neededTxt, r.purpose ? String(r.purpose).slice(0, 60) : '', (age ? 'approved ' + prioAge(age) + ' ago, ' : 'approved, ') + 'not yet ' + (reimb ? 'paid' : 'given')].filter(Boolean).join(' · '),
+        actions: [{ label: reimb ? 'Record payment' : 'Record release', primary: true, run: openCa(reimb, 'approved') }]
       });
     });
     // TODAY — liquidation (full review only)
