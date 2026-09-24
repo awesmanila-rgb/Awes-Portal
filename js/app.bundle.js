@@ -17216,7 +17216,17 @@
 
   let poCache = [];
   let poEditing = null;      // header row from the DB, or null for a new unsaved PO
-  let poItems = [];          // [{key, id, material_id, code, description, unit, qty, unit_price}]
+  let poItems = [];          // [{key, id, material_id, code, description, specs, unit, qty, unit_price}]
+  // Specs text the supplier needs to fill the order (size, rating, brand…),
+  // built from the Materials Database entry. Same format the database uses
+  // (material_spec_text in 20260924_01) so both paths read the same.
+  function poSpecText(m){
+    if(!m) return '';
+    const parts = [];
+    if(String(m.brand || '').trim()) parts.push('Brand: ' + String(m.brand).trim());
+    Object.keys(m.specs || {}).forEach(k=>{ const v = String(m.specs[k] == null ? '' : m.specs[k]).trim(); if(v) parts.push(k + ': ' + v); });
+    return parts.join('; ');
+  }
   let poSettingsData = null; // po_settings.data
   let poSignatories = [];
   let poSuppliers = [];      // suppliers with their contacts, for the picker + PDF
@@ -17438,7 +17448,11 @@
       poEditing = header;
       poItems = (prefill ? prefill.items : items).map(r=> ({
         key: ++poKeySeq, id: prefill ? null : r.id, material_id: r.material_id || null, code: r.code || '',
-        description: r.description || '', unit: r.unit || '', qty: r.qty, unit_price: r.unit_price
+        description: r.description || '', unit: r.unit || '', qty: r.qty, unit_price: r.unit_price,
+        // NULL = line saved before specs existed: fill from the catalog on
+        // drafts; an issued PO shows exactly what was issued.
+        specs: r.specs != null ? r.specs
+          : ((!header || header.status === 'draft') && r.material_id ? poSpecText(mtCache.find(x=> x.id === r.material_id)) : '')
       }));
       const src = header || (prefill && prefill.header) || {};
       const set = poSettingsData || {};
@@ -17469,7 +17483,7 @@
       purchFail('Couldn\u2019t open the PO: ', e);
     }
   }
-  function poBlankItem(){ return { key: ++poKeySeq, id: null, material_id: null, code: '', description: '', unit: '', qty: '', unit_price: '' }; }
+  function poBlankItem(){ return { key: ++poKeySeq, id: null, material_id: null, code: '', description: '', specs: '', unit: '', qty: '', unit_price: '' }; }
 
   function poApplyMode(){
     const st = poEditing ? poEditing.status : 'draft';
@@ -17590,7 +17604,11 @@
       return '<div class="po-item" data-key="' + it.key + '">' +
         '<div class="po-no">' + (i + 1) + '</div>' +
         '<div class="po-item-desc"><input type="text" data-f="description" value="' + escapeHtml(it.description) + '" placeholder="' + (i === 0 ? 'Type an item name or code…' : 'Item') + '" autocomplete="off"' + dis + '>' +
-          '<div class="po-item-code' + (!it.material_id && it.description ? ' po-need-cat' : '') + '">' + poCodeCell(it) + '</div></div>' +
+          '<div class="po-item-code' + (!it.material_id && it.description ? ' po-need-cat' : '') + '">' + poCodeCell(it) + '</div>' +
+          ((it.material_id || it.specs) ? (poReadOnly
+            ? (it.specs ? '<div class="po-item-specs-ro">' + escapeHtml(it.specs) + '</div>' : '')
+            : '<textarea class="po-item-specs" data-f="specs" rows="2" placeholder="Specs for the supplier — size, rating, model, colour…">' + escapeHtml(it.specs || '') + '</textarea>') : '') +
+        '</div>' +
         '<input type="text" class="num po-qty" data-f="qty" inputmode="decimal" value="' + escapeHtml(it.qty === '' || it.qty == null ? '' : String(it.qty)) + '" placeholder="Qty"' + dis + '>' +
         '<input type="text" class="po-unit" data-f="unit" list="mtUnitList" value="' + escapeHtml(it.unit) + '" placeholder="Unit"' + dis + '>' +
         '<input type="text" class="num po-price" data-f="unit_price" inputmode="decimal" value="' + escapeHtml(it.unit_price === '' || it.unit_price == null ? '' : String(it.unit_price)) + '" placeholder="Unit price"' + dis + '>' +
@@ -17733,6 +17751,7 @@
     if(!it || !m) return;
     const p = poPriceFor(m.id, $('poSupplier').value);
     it.material_id = m.id; it.code = m.code; it.description = m.name;
+    it.specs = poSpecText(m);   // admin can add order-specific details after
     it.unit = (p && p.unitFromPrice) || m.unit;
     if(p) it.unit_price = p.price;
     poRenderItems(); poRenderTotals();
@@ -17830,7 +17849,7 @@
       if(clean.length){
         const rows = clean.map((it, i)=> ({
           id: it.id, po_id: id, line_no: i + 1, material_id: it.material_id || null, code: it.code || '',
-          description: it.description.trim(), unit: (it.unit || '').trim(), qty: Number(it.qty), unit_price: Number(it.unit_price)
+          description: it.description.trim(), specs: String(it.specs || '').trim(), unit: (it.unit || '').trim(), qty: Number(it.qty), unit_price: Number(it.unit_price)
         }));
         const { error } = await db.from('purchase_order_items').upsert(rows, { onConflict: 'id' });
         if(error) throw error;
@@ -18199,8 +18218,9 @@
     // ---- items ----
     doc.autoTable({
       startY: y, margin: { left: M, right: M, top: 40, bottom: 60 },
+      rowPageBreak: 'avoid',   // specs are drawn by hand — never split a line across pages
       head: [['#', 'Item Code', 'Description', 'Qty', 'Unit', 'Unit Price', 'Amount']],
-      body: d.items.map((it, i)=> [String(i + 1), it.code || '', it.description, poQtyFmt(it.qty), it.unit || '', poFmt(it.unit_price), poFmt(poRound2(it.qty * it.unit_price))]),
+      body: d.items.map((it, i)=> [String(i + 1), it.code || '', it.description + (String(it.specs || '').trim() ? '\n' + String(it.specs).trim() : ''), poQtyFmt(it.qty), it.unit || '', poFmt(it.unit_price), poFmt(poRound2(it.qty * it.unit_price))]),
       theme: 'plain',
       styles: { font: F, fontStyle:'normal', fontSize: 8.4, cellPadding: { top: 5.5, bottom: 5.5, left: 6, right: 6 }, textColor: INK, valign:'middle', lineColor: LINE, lineWidth: { bottom: 0.5 } },
       headStyles: { font: F, fontStyle:'bold', fillColor: G, textColor: 255, fontSize: 7.8, halign:'center', lineWidth: 0 },
@@ -18210,7 +18230,36 @@
         3: { halign:'right', cellWidth: 46 }, 4: { halign:'center', cellWidth: 42 },
         5: { halign:'right', cellWidth: 70 }, 6: { halign:'right', cellWidth: 80, fontStyle:'bold' }
       },
-      didParseCell: (c)=>{ if(c.section === 'head' && (c.column.index === 3 || c.column.index === 5 || c.column.index === 6)) c.cell.styles.halign = 'right'; if(c.section === 'head' && c.column.index === 2) c.cell.styles.halign = 'left'; }
+      didParseCell: (c)=>{
+        if(c.section === 'head' && (c.column.index === 3 || c.column.index === 5 || c.column.index === 6)) c.cell.styles.halign = 'right';
+        if(c.section === 'head' && c.column.index === 2) c.cell.styles.halign = 'left';
+        // Description cell with specs: keep the height for both lines but
+        // draw them ourselves (name in normal ink, specs smaller and grey).
+        if(c.section === 'body' && c.column.index === 2){
+          const it = d.items[c.row.index];
+          if(it && String(it.specs || '').trim()){
+            c.cell.styles.valign = 'top';
+            c.cell.poSpec = { name: it.description, specs: String(it.specs).trim() };
+          }
+        }
+      },
+      willDrawCell: (c)=>{
+        if(c.section === 'body' && c.column.index === 2 && c.cell.poSpec){
+          c.cell.poSpecText = c.cell.text; c.cell.text = [];   // background/borders only
+        }
+      },
+      didDrawCell: (c)=>{
+        const sp = c.cell.poSpec;
+        if(!(c.section === 'body' && c.column.index === 2 && sp)) return;
+        const pad = c.cell.padding('left'), w = c.cell.width - pad - c.cell.padding('right');
+        let ty = c.cell.y + c.cell.padding('top') + 7;
+        doc.setFont(F, 'normal'); doc.setFontSize(8.4); doc.setTextColor(...INK);
+        const nameLines = doc.splitTextToSize(sp.name, w);
+        doc.text(nameLines, c.cell.x + pad, ty); ty += nameLines.length * 10.2 + 1;
+        doc.setFontSize(7.4); doc.setTextColor(...SUB);
+        doc.text(doc.splitTextToSize(sp.specs, w), c.cell.x + pad, ty);
+        doc.setTextColor(...INK);
+      }
     });
     y = doc.lastAutoTable.finalY + 14;
 
