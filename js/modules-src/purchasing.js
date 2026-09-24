@@ -65,12 +65,29 @@
   // ---------- entry ----------
   function purchOnShow(key){
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
+    if(key === 'myStock'){ if(currentUser) invShowMyStock(); return; } // storekeeper screen (quantities only)
+    if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
+    // Movement screens: admins and storekeepers (the database decides who
+    // may post for which warehouse)
+    if(key === 'receive'){ invShowReceive(); return; }
+    if(key === 'issue'){ invShowIssue(); return; }
+    if(key === 'returns'){ invShowReturns(); return; }
+    if(key === 'transfers'){ invShowTransfers(); return; }
+    if(key === 'slips'){ invShowSlips(); return; }
+    if(key === 'invReports'){ rpShow(); return; }   // admins + storekeepers (quantities only for storekeepers)
+    // Tools & Equipment — the database decides who may do what
+    const tlPages = { tlHub: tlShowHub, tlRegister: tlShowRegister, tlIssue: tlShowIssue, tlReturn: tlShowReturn, tlHandover: tlShowHandover,
+      tlDefects: tlShowDefects, tlMaint: tlShowMaint, tlSlips: tlShowSlips, tlReports: tlShowReports, myTools: tlShowMine };
+    if(tlPages[key]){ tlPages[key](); return; }
     if(!currentUser || currentUser.role !== 'admin') return;
     purchRealtimeStart();
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
     if(key === 'purchaseOrders') poShow();
     if(key === 'requisitions') mrShow();
+    if(key === 'stock') invShowStock();
+    if(key === 'warehouses') invShowWarehouses();
+    if(key === 'projects') invShowProjects();
   }
 
   async function spShow(){
@@ -1521,7 +1538,9 @@
   // =====================================================================
   const PURCH_RT_TABLES = ['suppliers', 'supplier_contacts', 'supplier_documents', 'materials', 'supplier_materials',
     'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings',
-    'material_requisitions', 'material_requisition_items'];
+    'material_requisitions', 'material_requisition_items',
+    'warehouses', 'warehouse_storekeepers', 'projects', 'project_job_orders', 'stock_balances', 'stock_movements',
+    'stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers'];
   let purchChannel = null;
   let purchPending = new Set();
   let purchPendingIds = new Set();
@@ -1647,6 +1666,15 @@
         if(ids.has('mr:' + mrOpenRow.id) && mrOpenRow.status === 'submitted') $('mrStaleNote').style.display = '';
         else if(ids.has('mr:' + mrOpenRow.id) || has('purchase_orders')) jobs.push(mrOpen(mrOpenRow.id));
       }
+    }
+    // Inventory
+    if(typeof invShowStock === 'function'){
+      if(purchVisible('stock') && has('stock_balances', 'stock_movements', 'warehouses', 'materials')){
+        if($('invOpeningView').style.display === 'none') jobs.push(invLoadStock({ silent:true }).then(ok=>{ if(ok && invItemOpen) return invRenderItem(); }));
+      }
+      if(purchVisible('warehouses') && has('warehouses', 'warehouse_storekeepers', 'stock_balances')) jobs.push(invShowWarehouses({ silent:true }));
+      if(purchVisible('projects') && has('projects', 'project_job_orders', 'stock_movements') && $('invPrjEditView').style.display === 'none') jobs.push(invShowProjects({ silent:true }));
+      if(purchVisible('slips') && has('stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers') && $('invSlipView').style.display === 'none') jobs.push(invShowSlips({ silent:true }));
     }
     try{ await Promise.all(jobs); }catch(e){ console.error('purchasing live refresh failed', e); }
   }

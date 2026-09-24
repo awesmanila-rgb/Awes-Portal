@@ -3069,3 +3069,116 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 /* Technicians have a fixed bottom nav (#techNav); keep the pinned action
    bar above it instead of hidden behind it while scrolling. */
 body.role-tech #mrtFormView .po-actions{ bottom:var(--tech-nav-h, calc(64px + env(safe-area-inset-bottom))); }
+
+/* ---------- Inventory ---------- */
+.inv-summary{ display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:12px; }
+.inv-summary .tile{ border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#FAFBF9; }
+.inv-summary .tile .k{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); }
+.inv-summary .tile .v{ font-size:18px; font-weight:800; color:var(--green-dark); margin-top:2px; }
+.inv-qty{ font-size:15px; font-weight:800; }
+.inv-qty.zero{ color:var(--text-muted); font-weight:600; }
+.inv-wh-chips{ display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.inv-op-total{ text-align:right; font-weight:800; color:var(--green-dark); margin-top:8px; }
+.inv-item-cards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:10px; margin-bottom:14px; }
+.inv-item-cards .tile{ border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+.inv-item-cards .tile .k{ font-size:11px; font-weight:700; color:var(--green-dark); }
+.inv-item-cards .tile .v{ font-size:17px; font-weight:800; margin:2px 0; }
+.inv-item-cards .tile .s{ font-size:12px; color:var(--text-muted); }
+.inv-in{ color:var(--green-dark); font-weight:700; } .inv-out{ color:var(--danger); font-weight:700; }
+.inv-budget-bar{ height:10px; border-radius:6px; background:#EEF1ED; overflow:hidden; margin:6px 0 4px; }
+.inv-budget-bar span{ display:block; height:100%; background:var(--green); }
+.inv-budget-bar.warn span{ background:#C98A12; } .inv-budget-bar.over span{ background:var(--danger); }
+.inv-sk-group{ margin-top:10px; }
+
+/* ---------- Inventory › movements ---------- */
+.inv-hub{ display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+.inv-hub .btn{ padding:11px 6px; font-size:13px; }
+@media (max-width:520px){ .inv-hub{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
+body:not(.role-tech) .inv-mv-top{ display:none; }             /* admins navigate with the sidebar */
+body.role-tech .inv-admin-only{ display:none !important; }
+.inv-ln{ display:grid; grid-template-columns:24px minmax(0,1fr) 96px 64px 110px 34px; gap:6px; align-items:start; padding:6px 0; border-bottom:1px solid var(--border); }
+.inv-ln .po-no{ padding-top:10px; }
+.inv-ln input, .inv-ln select{ padding:8px 9px; font-size:14px; }
+.inv-ln .num{ text-align:right; }
+.inv-ln .inv-unit{ padding-top:10px; font-size:13px; color:var(--text-muted); }
+.inv-ln .inv-av{ font-size:12px; padding-top:10px; text-align:right; white-space:nowrap; }
+.inv-ln .inv-av.low{ color:var(--danger); font-weight:700; }
+.inv-ln .inv-conv{ grid-column:2 / -1; font-size:11.5px; color:var(--green-dark); font-weight:600; margin-top:-2px; }
+.inv-ln .po-rm{ border:1px solid var(--border); background:#fff; border-radius:8px; height:37px; cursor:pointer; color:var(--danger); font-size:18px; }
+.inv-ln-head{ display:grid; grid-template-columns:24px minmax(0,1fr) 96px 64px 110px 34px; gap:6px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); padding:0 2px 4px; }
+.inv-ln-head span:nth-child(3), .inv-ln-head span:nth-child(5){ text-align:right; }
+@media (max-width:560px){
+  .inv-ln-head{ display:none; }
+  .inv-ln{ grid-template-columns:24px 1fr 1fr 34px; }
+  .inv-ln .po-item-desc, .inv-ln .inv-desc{ grid-column:2 / 4; }
+  .inv-ln .po-rm{ grid-column:4; grid-row:1; }
+  .inv-ln .inv-q{ grid-column:2; } .inv-ln .inv-unit{ grid-column:3; }
+  .inv-ln .inv-av{ grid-column:2 / 4; text-align:left; padding-top:0; }
+}
+.inv-sigpad{ border:1px dashed var(--border); border-radius:10px; background:#fff; height:180px; position:relative; }
+.inv-sigpad canvas{ width:100%; height:100%; touch-action:none; display:block; }
+.inv-sigpad::after{ content:'Sign here'; position:absolute; left:14px; bottom:10px; font-size:11px; color:#aab2ad; pointer-events:none; }
+.inv-hold-grp{ font-size:11px; font-weight:700; color:var(--green-dark); margin:10px 0 4px; text-transform:uppercase; letter-spacing:.3px; }
+
+/* ---------- Inventory › Reports ---------- */
+.rp-tabs{ flex-wrap:wrap; }
+.rp-filters{ display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:0 10px; margin-top:12px; }
+.rp-filters .field{ margin-bottom:10px; }
+.rp-check{ font-size:12.5px; margin:-2px 0 10px; }
+.rp-check.ok{ color:var(--green-dark); font-weight:700; } .rp-check.bad{ color:var(--danger); font-weight:700; }
+.rp-table th{ position:sticky; top:0; background:#fff; z-index:1; }
+.rp-table td.num, .rp-table th.num{ text-align:right; white-space:nowrap; }
+.rp-table td .v{ display:block; font-size:11px; color:var(--text-muted); }
+.rp-table tr.rp-month td{ background:var(--green-light); color:var(--green-dark); font-weight:800; font-size:12px; letter-spacing:.3px; text-transform:uppercase; }
+.rp-table tr.rp-total td{ font-weight:800; border-top:2px solid var(--green); }
+.rp-table tr.rp-flag td{ background:#FFF6E8; }
+.rp-sub{ font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; color:var(--green-dark); margin:18px 0 6px; }
+.inv-hub{ grid-template-columns:repeat(6, minmax(0,1fr)); }
+@media (max-width:560px){ .inv-hub{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
+
+/* Stock Balance: heading band over each Qty | ₱ pair */
+.rp-table tr.rp-hgroup th{ position:static; text-align:center; font-size:10.5px; letter-spacing:.3px; border-bottom:none; padding-bottom:0; }
+.rp-table tr.rp-hgroup th.grp{ color:var(--green-dark); border-bottom:2px solid var(--green-light); }
+.rp-table thead tr:not(.rp-hgroup) th:nth-child(n){ font-size:10.5px; }
+.rp-table td.pair, .rp-table th.pair{ border-left:1px solid var(--border); }
+.rp-table tr.rp-hgroup th.grp{ border-left:1px solid var(--border); }
+
+/* ---------- Tools & Equipment ---------- */
+body:not(.role-tech) .tl-hub-back{ display:none; }
+#purchPanel_tlHub .tl-hub-back{ display:none; }
+.tl-hub{ grid-template-columns:repeat(4, minmax(0,1fr)); }
+.tl-add-row{ display:flex; gap:8px; margin-top:8px; position:relative; }
+.tl-add-row input{ flex:1; min-width:0; }
+.tl-line{ border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px; background:#fff; }
+.tl-line-top{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+.tl-line .tl-tag{ font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-weight:800; font-size:12px; color:var(--green-dark); }
+.tl-line .tl-name{ font-weight:700; font-size:13.5px; }
+.tl-line .tl-sub{ font-size:12px; color:var(--text-muted); }
+.tl-line .tl-warn{ font-size:12px; color:#9A6212; font-weight:700; }
+.tl-line .tl-bad{ font-size:12px; color:var(--danger); font-weight:700; }
+.tl-line-ctl{ display:grid; grid-template-columns:180px 1fr; gap:8px; margin-top:8px; }
+.tl-line-ctl select, .tl-line-ctl input[type=text]{ padding:8px 9px; font-size:13.5px; }
+.tl-kit{ display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:6px; font-size:12.5px; }
+.tl-kit label{ display:flex; align-items:center; gap:5px; }
+.tl-photo{ font-size:12px; margin-top:6px; }
+.tl-photo img{ max-height:80px; border-radius:6px; border:1px solid var(--border); display:block; margin-top:4px; }
+.tl-rm{ border:1px solid var(--border); background:#fff; border-radius:8px; width:34px; height:34px; color:var(--danger); font-size:18px; cursor:pointer; flex-shrink:0; }
+.tl-st{ font-size:10.5px; font-weight:800; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.3px; }
+.tl-st.available{ background:var(--green-light); color:var(--green-dark); } .tl-st.issued{ background:#E6F1FB; color:#185FA5; }
+.tl-st.defective, .tl-st.lost{ background:#FDECEB; color:var(--danger); } .tl-st.repair{ background:#FDF1DC; color:#9A6212; } .tl-st.retired{ background:#EEF1ED; color:var(--text-muted); }
+.tl-scan-box{ position:relative; background:#000; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
+.tl-scan-box video{ width:100%; height:100%; object-fit:cover; display:block; }
+.tl-scan-frame{ position:absolute; inset:18% 22%; border:3px solid rgba(255,255,255,.85); border-radius:12px; box-shadow:0 0 0 999px rgba(0,0,0,.25); }
+.tl-kit-row{ display:grid; grid-template-columns:1fr 80px 34px; gap:6px; margin-bottom:6px; }
+@media (max-width:560px){ .tl-hub{ grid-template-columns:repeat(2, minmax(0,1fr)); } .tl-line-ctl{ grid-template-columns:1fr; } }
+
+/* PO: catalog items only */
+.po-item-code.po-need-cat{ color:var(--danger); font-weight:700; font-family:inherit; }
+.po-qa{ border:1px dashed var(--green); border-radius:10px; padding:10px 12px; margin:4px 0 10px 34px; background:#F6FAF7; }
+.po-qa-title{ font-size:12.5px; font-weight:800; color:var(--green-dark); margin-bottom:8px; }
+.po-qa-grid{ display:grid; grid-template-columns:2fr 1.3fr 1fr 1fr; gap:6px; }
+.po-qa-grid input, .po-qa-grid select{ padding:8px 9px; font-size:13.5px; }
+.po-qa-actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.mr-link{ margin-top:6px; max-width:320px; position:relative; }
+.mr-link input{ padding:6px 8px; font-size:13px; }
+@media (max-width:620px){ .po-qa{ margin-left:0; } .po-qa-grid{ grid-template-columns:1fr 1fr; } }

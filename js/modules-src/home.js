@@ -668,6 +668,27 @@
     suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
     requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review & fulfil technician requests' },
     myRequests:     { nav:'',                    title:'Material Requests',    sub:'Request materials for your jobs' },
+    stock:          { nav:'sbNavStock',          title:'Stock on Hand',        sub:'Quantities & value per warehouse' },
+    warehouses:     { nav:'sbNavWarehouses',     title:'Warehouses',           sub:'Stock locations & storekeepers' },
+    projects:       { nav:'sbNavProjects',       title:'Projects',             sub:'Job orders & material cost' },
+    myStock:        { nav:'',                    title:'Warehouse Stock',      sub:'Your warehouses' },
+    receive:        { nav:'sbNavReceive',        title:'Receive Stock',        sub:'Deliveries — against a PO or not' },
+    issue:          { nav:'sbNavIssue',          title:'Issue to Worker',      sub:'Materials out, for a project / job' },
+    returns:        { nav:'sbNavReturns',        title:'Returns',              sub:'Unused materials back to stock' },
+    transfers:      { nav:'sbNavTransfers',      title:'Transfers',            sub:'Between warehouses' },
+    slips:          { nav:'sbNavSlips',          title:'Slips & History',      sub:'Every stock movement document' },
+    myMaterials:    { nav:'',                    title:'My Materials',         sub:'Sign for issued materials' },
+    invReports:     { nav:'sbNavInvReports',     title:'Inventory Reports',    sub:'Balances, movements, cost & stock health' },
+    tlHub:          { nav:'',                    title:'Tools & Equipment',    sub:'Issue, return, register, calibration' },
+    tlRegister:     { nav:'sbNavTlRegister',     title:'Tool Register',        sub:'Every tool & kit, with its history' },
+    tlIssue:        { nav:'sbNavTlIssue',        title:'Issue Tools',          sub:'Signed by warehouseman & worker' },
+    tlReturn:       { nav:'sbNavTlReturn',       title:'Return Tools',         sub:'Condition checked, both sign' },
+    tlHandover:     { nav:'sbNavTlHandover',     title:'Tool Handover',        sub:'Worker to worker, on site' },
+    tlDefects:      { nav:'sbNavTlDefects',      title:'Defect Reports',       sub:'Defective, damaged & lost tools' },
+    tlMaint:        { nav:'sbNavTlMaint',        title:'Calibration & Inspection', sub:'Due dates — overdue tools can\u2019t be issued' },
+    tlSlips:        { nav:'sbNavTlSlips',        title:'Tool Slips',           sub:'Issue, return & handover slips' },
+    tlReports:      { nav:'sbNavTlReports',      title:'Tool Reports',         sub:'Movements, custody, defects, register' },
+    myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
   };
   function showPurchasingView(key){
@@ -826,6 +847,9 @@
     // out here before anything below (which assumes admin/tech-only
     // elements) runs. See showCustomerHome() in customer-equipment-history.js.
     if(currentUser && currentUser.role==='customer'){ showCustomerHome(); return; }
+    if(typeof invRefreshStorekeeperTile === 'function') invRefreshStorekeeperTile();   // storekeepers get a Warehouse Stock tile
+    if(typeof invRefreshMineBadge === 'function') invRefreshMineBadge();               // "N to sign" on My Materials
+    if(typeof tlRefreshMineBadge === 'function') tlRefreshMineBadge();                 // tools to sign / overdue on My Tools
     document.body.classList.add('dashboard-active');
     setSidebarActive('sbNavDashboard');
     $('homeScreen').style.display = '';

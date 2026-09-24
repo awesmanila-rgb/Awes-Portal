@@ -394,7 +394,7 @@
       return '<div class="po-item" data-key="' + it.key + '">' +
         '<div class="po-no">' + (i + 1) + '</div>' +
         '<div class="po-item-desc"><input type="text" data-f="description" value="' + escapeHtml(it.description) + '" placeholder="' + (i === 0 ? 'Type an item name or code…' : 'Item') + '" autocomplete="off"' + dis + '>' +
-          '<div class="po-item-code">' + (it.material_id ? escapeHtml(it.code) : (it.description ? 'not in catalog' : '')) + '</div></div>' +
+          '<div class="po-item-code' + (!it.material_id && it.description ? ' po-need-cat' : '') + '">' + poCodeCell(it) + '</div></div>' +
         '<input type="text" class="num po-qty" data-f="qty" inputmode="decimal" value="' + escapeHtml(it.qty === '' || it.qty == null ? '' : String(it.qty)) + '" placeholder="Qty"' + dis + '>' +
         '<input type="text" class="po-unit" data-f="unit" list="mtUnitList" value="' + escapeHtml(it.unit) + '" placeholder="Unit"' + dis + '>' +
         '<input type="text" class="num po-price" data-f="unit_price" inputmode="decimal" value="' + escapeHtml(it.unit_price === '' || it.unit_price == null ? '' : String(it.unit_price)) + '" placeholder="Unit price"' + dis + '>' +
@@ -423,7 +423,7 @@
         const m = mtCache.find(x=> x.id === it.material_id);
         if(!m || m.name !== it.description){ it.material_id = null; it.code = ''; }
       }
-      e.target.closest('.po-item').querySelector('.po-item-code').textContent = it.material_id ? it.code : (it.description ? 'not in catalog' : '');
+      { const cc = e.target.closest('.po-item').querySelector('.po-item-code'); cc.innerHTML = poCodeCell(it); cc.classList.toggle('po-need-cat', !it.material_id && !!it.description); }
       poSuggest(e.target, it);
     }else it[f] = e.target.value;
   });
@@ -476,6 +476,62 @@
         '<span class="s-price">' + (p ? '₱' + poFmt(p.price) + (p.source === 'supplier' ? '' : p.source === 'standard' ? ' std.' : ' other') : 'no price') + '</span></button>';
     }).join('');
   }
+  // Every PO line must be a Materials Database item. A typed line that
+  // isn't picked shows this prompt — pick it from the list, or add it to
+  // the catalog right here without leaving the PO.
+  function poCodeCell(it){
+    if(it.material_id) return escapeHtml(it.code);
+    if(!it.description) return '';
+    return 'Not in the Materials Database — pick it from the list' + (poReadOnly ? '' : ' or <button type="button" class="po-link" data-qa="1">+ Add to catalog</button>');
+  }
+  $('poItems').addEventListener('click', (e)=>{
+    if(!e.target.closest('[data-qa]')) return;
+    const it = poItemByEl(e.target); if(!it) return;
+    const row = e.target.closest('.po-item');
+    if(row.nextElementSibling && row.nextElementSibling.classList.contains('po-qa')){ row.nextElementSibling.remove(); return; }
+    const box = document.createElement('div'); box.className = 'po-qa'; box.dataset.key = it.key;
+    const cat = PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    box.innerHTML = '<div class="po-qa-title">Add “' + escapeHtml(it.description) + '” to the Materials Database</div>' +
+      '<div class="po-qa-grid"><input type="text" data-q="name" value="' + escapeHtml(it.description) + '" placeholder="Item name">' +
+      '<select data-q="category">' + cat + '</select><input type="text" data-q="unit" list="mtUnitList" value="' + escapeHtml(it.unit || '') + '" placeholder="Unit (ft, pc…)">' +
+      '<input type="text" data-q="code" placeholder="Code"></div>' +
+      '<div class="po-qa-actions"><button type="button" class="btn btn-primary mt-small-btn" data-q-save="1">Add &amp; use</button><button type="button" class="btn btn-secondary mt-small-btn" data-q-cancel="1">Cancel</button>' +
+      '<span class="po-hint" style="margin:0;">You can fill in sizes, brand and supplier prices later in the Materials Database.</span></div>';
+    row.after(box);
+    const code = box.querySelector('[data-q=code]'), catSel = box.querySelector('[data-q=category]');
+    const sugg = ()=>{ if(code.dataset.typed !== '1') code.value = mtSuggestCodeFor(catSel.value); };
+    catSel.addEventListener('change', sugg); code.addEventListener('input', ()=>{ code.dataset.typed = '1'; });
+    mtLoad({ silent:true }).then(sugg, sugg);
+    box.querySelector('[data-q=name]').focus();
+  });
+  $('poItems').addEventListener('click', async (e)=>{
+    const box = e.target.closest('.po-qa'); if(!box) return;
+    if(e.target.closest('[data-q-cancel]')){ box.remove(); return; }
+    if(!e.target.closest('[data-q-save]')) return;
+    const it = poItems.find(x=> String(x.key) === box.dataset.key); if(!it) return;
+    const v = (k)=> box.querySelector('[data-q=' + k + ']').value.trim();
+    const row = { code: mtNormCode(v('code')), name: v('name'), family:'', category: v('category'), scope:[], unit: v('unit'),
+      pack_unit:null, pack_qty:null, brand:'', specs:{}, standard_cost:null, notes:'Added from a Purchase Order' };
+    if(!row.name){ toast('Enter the item name'); return; }
+    if(!row.unit){ toast('Enter the unit (e.g. ft, pc, kg)'); return; }
+    if(!/^[A-Z0-9][A-Z0-9._\-/]*$/.test(row.code)){ toast('Code: letters, numbers, - . / only'); return; }
+    await mtLoad({ silent:true }).catch(()=>{});
+    const clash = mtCache.find(x=> x.code === row.code);
+    if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); return; }
+    const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && x.isActive);
+    if(twin && confirm('“' + twin.name + '” is already in the catalog as ' + twin.code + '. Use that one instead?')){ box.remove(); poPickMaterial(it, twin.id); return; }
+    if(!(await purchEnsureSession())) return;
+    const btn = e.target.closest('[data-q-save]'); btn.disabled = true;
+    try{
+      const { data, error } = await db.from('materials').insert(row).select('id').single();
+      if(error) throw error;
+      await mtLoad({ silent:true });
+      box.remove();
+      poPickMaterial(it, data.id);
+      toast(row.code + ' added to the Materials Database');
+    }catch(err){ purchFail('Couldn\u2019t add the item: ', err); }
+    finally{ btn.disabled = false; }
+  });
   function poPickMaterial(it, materialId){
     const m = mtCache.find(x=> x.id === materialId);
     if(!it || !m) return;
@@ -523,7 +579,8 @@
     const items = poItems.filter(it=> String(it.description || '').trim() || (it.qty !== '' && it.qty != null) || (it.unit_price !== '' && it.unit_price != null));
     for(let i = 0; i < items.length; i++){
       const it = items[i], n = i + 1;
-      if(!String(it.description || '').trim()) return 'Item ' + n + ': enter a description';
+      if(!String(it.description || '').trim()) return 'Item ' + n + ': pick an item from the Materials Database';
+      if(!it.material_id) return 'Item ' + n + ' (' + it.description + '): pick it from the Materials Database list, or tap “+ Add to catalog”';
       const q = Number(it.qty);
       if(it.qty === '' || !isFinite(q) || q <= 0) return 'Item ' + n + ' (' + it.description + '): enter a quantity above 0';
       const p = Number(it.unit_price);

@@ -21,6 +21,7 @@
   function mrLineCovered(it){
     if(Number(it.qty_approved) === 0 && it.qty_approved !== null) return true;
     if(it.fulfilled_by === 'tech_buy') return true;
+    if(it.fulfilled_by === 'stock') return true;   // set by the database once fully issued
     return !!(it.po_id && it.purchase_orders && it.purchase_orders.status !== 'cancelled');
   }
   // Techs don't need the admin's price list — just the active catalog.
@@ -455,6 +456,7 @@
 
   async function mrOpen(id){
     try{
+      if(!mtCache.length) await mtLoad({ silent:true }).catch(()=>{});
       const [h, it] = await Promise.all([
         db.from('material_requisitions').select('*').eq('id', id),
         db.from('material_requisition_items').select('*, purchase_orders(id, po_no, status)').eq('mr_id', id).order('line_no')
@@ -503,13 +505,16 @@
       if(fulfilling){
         if(Number(appr) === 0) cov = '<span class="cov ok">Not needed</span>';
         else if(it.fulfilled_by === 'tech_buy') cov = '<span class="cov ok">Tech buys</span>';
+        else if(it.fulfilled_by === 'stock') cov = '<span class="cov ok">Issued from stock</span>';
+        else if(Number(it.qty_issued) > 0) cov = '<span class="cov open">' + mrQty(it.qty_issued) + ' of ' + mrQty(appr) + ' issued from stock</span>';
         else if(it.po_id && it.purchase_orders) cov = '<span class="cov ' + (it.purchase_orders.status === 'cancelled' ? 'open' : 'ok') + '"><a data-open-po="' + escapeHtml(it.po_id) + '">' +
           escapeHtml(it.purchase_orders.po_no) + '</a> ' + escapeHtml(it.purchase_orders.status) + (it.purchase_orders.status === 'cancelled' ? ' — needs a new PO' : '') + '</span>';
         else cov = '<span class="cov open">Not yet</span>';
       }
       return '<tr data-id="' + escapeHtml(it.id) + '">' +
         (fulfilling ? '<td>' + (covered ? '' : '<input type="checkbox" class="mr-sel"' + (mrSelected.has(it.id) ? ' checked' : '') + '>') + '</td>' : '') +
-        '<td>' + (i + 1) + '</td><td><b>' + escapeHtml(it.description) + '</b><div class="sp-row-sub">' + (it.material_id ? escapeHtml(it.code) : 'not in catalog') + (it.note ? ' · ' + escapeHtml(it.note) : '') + '</div></td>' +
+        '<td>' + (i + 1) + '</td><td><b>' + escapeHtml(it.description) + '</b><div class="sp-row-sub">' + (it.material_id ? escapeHtml(it.code) : 'typed by the technician — not linked to the catalog') + (it.note ? ' · ' + escapeHtml(it.note) : '') + '</div>' +
+          (!it.material_id && ['submitted', 'approved'].includes(st) && !it.po_id ? '<div class="po-item-desc mr-link"><input type="text" data-link="1" placeholder="Link to catalog item…" autocomplete="off"></div>' : '') + '</td>' +
         '<td class="num">' + mrQty(it.qty_requested) + '</td>' +
         '<td class="num">' + (reviewing
           ? '<input type="text" class="mr-qty" inputmode="decimal" value="' + escapeHtml(String(mrQtyDraft[it.id] != null ? mrQtyDraft[it.id] : (appr != null ? appr : it.qty_requested))) + '">'
@@ -529,6 +534,30 @@
     }else html = b('pdf', 'View PDF');
     $('mrActions').innerHTML = html;
   }
+  // Link a technician's typed line to a Materials Database item (needed
+  // before it can go on a Purchase Order, which accepts catalog items only)
+  // keyboard for the link box: ↑/↓ to move, Enter to pick, Esc to close
+  $('mrItemsTable').addEventListener('keydown', (e)=>{
+    if(!e.target.dataset || !e.target.dataset.link) return;
+    const box = e.target.closest('.po-item-desc').querySelector('.po-suggest'); if(!box) return;
+    const btns = Array.from(box.querySelectorAll('[data-pick]')); let i = btns.findIndex(b=> b.classList.contains('hl'));
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(i >= 0) btns[i].classList.remove('hl'); i = e.key === 'ArrowDown' ? Math.min(btns.length - 1, i + 1) : Math.max(0, i - 1); if(btns[i]) btns[i].classList.add('hl'); }
+    else if(e.key === 'Enter' && i >= 0){ e.preventDefault(); btns[i].click(); }
+    else if(e.key === 'Escape') box.remove();
+  });
+  $('mrItemsTable').addEventListener('input', (e)=>{
+    if(!e.target.dataset.link) return;
+    const id = e.target.closest('tr').dataset.id;
+    mrCatalog = mtCache.filter(m=> m.isActive);
+    mrSuggest(e.target, async (mid)=>{
+      const m = mtCache.find(x=> x.id === mid); if(!m) return;
+      if(!(await purchEnsureSession())) return;
+      const { error } = await db.from('material_requisition_items').update({ material_id: m.id, code: m.code }).eq('id', id);
+      if(error){ purchFail('Couldn\u2019t link it: ', error); return; }
+      toast('Linked to ' + m.code + ' ' + m.name);
+      mrOpen(mrOpenRow.id);
+    });
+  });
   $('mrItemsTable').addEventListener('input', (e)=>{
     if(!e.target.classList.contains('mr-qty')) return;
     mrQtyDraft[e.target.closest('tr').dataset.id] = e.target.value;
@@ -630,6 +659,8 @@
   async function mrCreatePos(){
     const sel = mrSelectedOpen();
     if(!sel.length){ toast('Tick the lines to put on Purchase Orders'); return; }
+    const unlinked = sel.filter(it=> !it.material_id);
+    if(unlinked.length){ toast('Link ' + unlinked.map(it=> '“' + it.description + '”').join(', ') + ' to a catalog item first (the box under each line)'); return; }
     if(!(await ensureCloud())){ toast('Not connected'); return; }
     try{ await Promise.all([mtLoad({ silent:true }), poLoadSettings(), poLoadSuppliers()]); }
     catch(e){ purchFail('Couldn\u2019t load suppliers / prices: ', e); return; }
@@ -661,7 +692,9 @@
         const rows = lines.map((it, i)=>{
           const p = it.material_id ? poPriceFor(it.material_id, supplierId || null) : null;
           return { id: poUuid(), po_id: po.id, line_no: i + 1, material_id: it.material_id || null, code: it.code || '', description: it.description,
-            unit: (p && p.unitFromPrice) || it.unit || '', qty: Number(it.qty_approved != null ? it.qty_approved : it.qty_requested), unit_price: p ? p.price : 0 };
+            unit: (p && p.unitFromPrice) || it.unit || '',
+            // only what hasn't already been issued from stock
+            qty: Number(it.qty_approved != null ? it.qty_approved : it.qty_requested) - Number(it.qty_issued || 0), unit_price: p ? p.price : 0 };
         });
         const ir = await db.from('purchase_order_items').insert(rows); if(ir.error) throw ir.error;
         purchMarkOwn(mrOpenRow.id);
@@ -725,7 +758,7 @@
         startY: y + 8, margin: { left:M, right:M, bottom:60 },
         head: [['#', 'Item', 'Code', 'Requested', 'Approved', 'Unit'].concat(showFul ? ['Fulfilment'] : [])],
         body: mrOpenItems.map((it, i)=> [String(i + 1), it.description, it.code || '', mrQty(it.qty_requested), mrQty(it.qty_approved), it.unit || '']
-          .concat(showFul ? [Number(it.qty_approved) === 0 ? 'Not needed' : it.fulfilled_by === 'tech_buy' ? 'Tech buys' : it.purchase_orders ? it.purchase_orders.po_no + (it.purchase_orders.status === 'cancelled' ? ' (cancelled)' : '') : 'Open'] : [])),
+          .concat(showFul ? [Number(it.qty_approved) === 0 ? 'Not needed' : it.fulfilled_by === 'tech_buy' ? 'Tech buys' : it.fulfilled_by === 'stock' ? 'Issued from stock' : it.purchase_orders ? it.purchase_orders.po_no + (it.purchase_orders.status === 'cancelled' ? ' (cancelled)' : '') : 'Open'] : [])),
         theme:'plain',
         styles: { font:F, fontSize:8.4, cellPadding:{ top:5, bottom:5, left:6, right:6 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.5 } },
         headStyles: { font:F, fontStyle:'bold', fillColor:G, textColor:255, fontSize:7.8 },

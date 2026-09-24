@@ -3766,6 +3766,8 @@
     body.innerHTML = '<div class="empty-state">Loading…</div>';
     const cloudOn = await ensureCloud();
     const users = (await cloudListUsers()) || [];
+    // Storekeeper setting (Inventory) — null if inventory isn't installed yet
+    const invCtx = (cloudOn && typeof invLoadUsersContext === 'function') ? await invLoadUsersContext() : null;
     body.innerHTML = '';
     if(!cloudOn){
       const note = document.createElement('div');
@@ -3794,6 +3796,7 @@
             '<div class="u-status">Sign-in username: '+
               (u.username ? escapeHtml(u.username) : '<span style="color:var(--amber);">not set — set one below</span>')+
             '</div>'+
+            (invCtx ? invUserStatusLine(invCtx, u.id) : '')+
           '</div>'+
         '</div>'+
         '<div class="user-card-actions">'+
@@ -3816,6 +3819,7 @@
             '<label class="restrict-row"><input type="checkbox" data-f="readOnly" '+(r.readOnly?'checked':'')+'>'+
               '<span class="rtxt"><span class="rt-title">Read-only</span><span class="rt-desc">User cannot save drafts, start new reports, or generate reports.</span></span></label>'+
           '</div>'+
+          (invCtx ? invUserPanelHtml(invCtx, u.id) : '')+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="cancel" type="button">Cancel</button>'+
             '<button class="save-btn" data-act="save" type="button">Save Changes</button>'+
@@ -3838,6 +3842,7 @@
         panel.querySelector('[data-f="noHistory"]').checked = !!r.noHistory;
         panel.querySelector('[data-f="noReport"]').checked = !!r.noReport;
         panel.querySelector('[data-f="readOnly"]').checked = !!r.readOnly;
+        if(invCtx) invUserPanelReset(invCtx, u.id, panel);
       });
       card.querySelector('[data-act="save"]').addEventListener('click', async ()=>{
         const newName = panel.querySelector('[data-f="name"]').value.trim();
@@ -3866,7 +3871,8 @@
           });
           ok2 = !error && !(data && data.error);
         }
-        if(ok1 && ok2){
+        const ok3 = invCtx ? await invSaveUserWarehouses(invCtx, u.id, panel) : true;
+        if(ok1 && ok2 && ok3){
           toast('Saved changes for '+newName);
           renderUsersList();
         }else toast('Could not save all changes');
@@ -15334,12 +15340,29 @@
   // ---------- entry ----------
   function purchOnShow(key){
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
+    if(key === 'myStock'){ if(currentUser) invShowMyStock(); return; } // storekeeper screen (quantities only)
+    if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
+    // Movement screens: admins and storekeepers (the database decides who
+    // may post for which warehouse)
+    if(key === 'receive'){ invShowReceive(); return; }
+    if(key === 'issue'){ invShowIssue(); return; }
+    if(key === 'returns'){ invShowReturns(); return; }
+    if(key === 'transfers'){ invShowTransfers(); return; }
+    if(key === 'slips'){ invShowSlips(); return; }
+    if(key === 'invReports'){ rpShow(); return; }   // admins + storekeepers (quantities only for storekeepers)
+    // Tools & Equipment — the database decides who may do what
+    const tlPages = { tlHub: tlShowHub, tlRegister: tlShowRegister, tlIssue: tlShowIssue, tlReturn: tlShowReturn, tlHandover: tlShowHandover,
+      tlDefects: tlShowDefects, tlMaint: tlShowMaint, tlSlips: tlShowSlips, tlReports: tlShowReports, myTools: tlShowMine };
+    if(tlPages[key]){ tlPages[key](); return; }
     if(!currentUser || currentUser.role !== 'admin') return;
     purchRealtimeStart();
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
     if(key === 'purchaseOrders') poShow();
     if(key === 'requisitions') mrShow();
+    if(key === 'stock') invShowStock();
+    if(key === 'warehouses') invShowWarehouses();
+    if(key === 'projects') invShowProjects();
   }
 
   async function spShow(){
@@ -16790,7 +16813,9 @@
   // =====================================================================
   const PURCH_RT_TABLES = ['suppliers', 'supplier_contacts', 'supplier_documents', 'materials', 'supplier_materials',
     'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings',
-    'material_requisitions', 'material_requisition_items'];
+    'material_requisitions', 'material_requisition_items',
+    'warehouses', 'warehouse_storekeepers', 'projects', 'project_job_orders', 'stock_balances', 'stock_movements',
+    'stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers'];
   let purchChannel = null;
   let purchPending = new Set();
   let purchPendingIds = new Set();
@@ -16916,6 +16941,15 @@
         if(ids.has('mr:' + mrOpenRow.id) && mrOpenRow.status === 'submitted') $('mrStaleNote').style.display = '';
         else if(ids.has('mr:' + mrOpenRow.id) || has('purchase_orders')) jobs.push(mrOpen(mrOpenRow.id));
       }
+    }
+    // Inventory
+    if(typeof invShowStock === 'function'){
+      if(purchVisible('stock') && has('stock_balances', 'stock_movements', 'warehouses', 'materials')){
+        if($('invOpeningView').style.display === 'none') jobs.push(invLoadStock({ silent:true }).then(ok=>{ if(ok && invItemOpen) return invRenderItem(); }));
+      }
+      if(purchVisible('warehouses') && has('warehouses', 'warehouse_storekeepers', 'stock_balances')) jobs.push(invShowWarehouses({ silent:true }));
+      if(purchVisible('projects') && has('projects', 'project_job_orders', 'stock_movements') && $('invPrjEditView').style.display === 'none') jobs.push(invShowProjects({ silent:true }));
+      if(purchVisible('slips') && has('stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers') && $('invSlipView').style.display === 'none') jobs.push(invShowSlips({ silent:true }));
     }
     try{ await Promise.all(jobs); }catch(e){ console.error('purchasing live refresh failed', e); }
   }
@@ -17431,7 +17465,7 @@
       return '<div class="po-item" data-key="' + it.key + '">' +
         '<div class="po-no">' + (i + 1) + '</div>' +
         '<div class="po-item-desc"><input type="text" data-f="description" value="' + escapeHtml(it.description) + '" placeholder="' + (i === 0 ? 'Type an item name or code…' : 'Item') + '" autocomplete="off"' + dis + '>' +
-          '<div class="po-item-code">' + (it.material_id ? escapeHtml(it.code) : (it.description ? 'not in catalog' : '')) + '</div></div>' +
+          '<div class="po-item-code' + (!it.material_id && it.description ? ' po-need-cat' : '') + '">' + poCodeCell(it) + '</div></div>' +
         '<input type="text" class="num po-qty" data-f="qty" inputmode="decimal" value="' + escapeHtml(it.qty === '' || it.qty == null ? '' : String(it.qty)) + '" placeholder="Qty"' + dis + '>' +
         '<input type="text" class="po-unit" data-f="unit" list="mtUnitList" value="' + escapeHtml(it.unit) + '" placeholder="Unit"' + dis + '>' +
         '<input type="text" class="num po-price" data-f="unit_price" inputmode="decimal" value="' + escapeHtml(it.unit_price === '' || it.unit_price == null ? '' : String(it.unit_price)) + '" placeholder="Unit price"' + dis + '>' +
@@ -17460,7 +17494,7 @@
         const m = mtCache.find(x=> x.id === it.material_id);
         if(!m || m.name !== it.description){ it.material_id = null; it.code = ''; }
       }
-      e.target.closest('.po-item').querySelector('.po-item-code').textContent = it.material_id ? it.code : (it.description ? 'not in catalog' : '');
+      { const cc = e.target.closest('.po-item').querySelector('.po-item-code'); cc.innerHTML = poCodeCell(it); cc.classList.toggle('po-need-cat', !it.material_id && !!it.description); }
       poSuggest(e.target, it);
     }else it[f] = e.target.value;
   });
@@ -17513,6 +17547,62 @@
         '<span class="s-price">' + (p ? '₱' + poFmt(p.price) + (p.source === 'supplier' ? '' : p.source === 'standard' ? ' std.' : ' other') : 'no price') + '</span></button>';
     }).join('');
   }
+  // Every PO line must be a Materials Database item. A typed line that
+  // isn't picked shows this prompt — pick it from the list, or add it to
+  // the catalog right here without leaving the PO.
+  function poCodeCell(it){
+    if(it.material_id) return escapeHtml(it.code);
+    if(!it.description) return '';
+    return 'Not in the Materials Database — pick it from the list' + (poReadOnly ? '' : ' or <button type="button" class="po-link" data-qa="1">+ Add to catalog</button>');
+  }
+  $('poItems').addEventListener('click', (e)=>{
+    if(!e.target.closest('[data-qa]')) return;
+    const it = poItemByEl(e.target); if(!it) return;
+    const row = e.target.closest('.po-item');
+    if(row.nextElementSibling && row.nextElementSibling.classList.contains('po-qa')){ row.nextElementSibling.remove(); return; }
+    const box = document.createElement('div'); box.className = 'po-qa'; box.dataset.key = it.key;
+    const cat = PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    box.innerHTML = '<div class="po-qa-title">Add “' + escapeHtml(it.description) + '” to the Materials Database</div>' +
+      '<div class="po-qa-grid"><input type="text" data-q="name" value="' + escapeHtml(it.description) + '" placeholder="Item name">' +
+      '<select data-q="category">' + cat + '</select><input type="text" data-q="unit" list="mtUnitList" value="' + escapeHtml(it.unit || '') + '" placeholder="Unit (ft, pc…)">' +
+      '<input type="text" data-q="code" placeholder="Code"></div>' +
+      '<div class="po-qa-actions"><button type="button" class="btn btn-primary mt-small-btn" data-q-save="1">Add &amp; use</button><button type="button" class="btn btn-secondary mt-small-btn" data-q-cancel="1">Cancel</button>' +
+      '<span class="po-hint" style="margin:0;">You can fill in sizes, brand and supplier prices later in the Materials Database.</span></div>';
+    row.after(box);
+    const code = box.querySelector('[data-q=code]'), catSel = box.querySelector('[data-q=category]');
+    const sugg = ()=>{ if(code.dataset.typed !== '1') code.value = mtSuggestCodeFor(catSel.value); };
+    catSel.addEventListener('change', sugg); code.addEventListener('input', ()=>{ code.dataset.typed = '1'; });
+    mtLoad({ silent:true }).then(sugg, sugg);
+    box.querySelector('[data-q=name]').focus();
+  });
+  $('poItems').addEventListener('click', async (e)=>{
+    const box = e.target.closest('.po-qa'); if(!box) return;
+    if(e.target.closest('[data-q-cancel]')){ box.remove(); return; }
+    if(!e.target.closest('[data-q-save]')) return;
+    const it = poItems.find(x=> String(x.key) === box.dataset.key); if(!it) return;
+    const v = (k)=> box.querySelector('[data-q=' + k + ']').value.trim();
+    const row = { code: mtNormCode(v('code')), name: v('name'), family:'', category: v('category'), scope:[], unit: v('unit'),
+      pack_unit:null, pack_qty:null, brand:'', specs:{}, standard_cost:null, notes:'Added from a Purchase Order' };
+    if(!row.name){ toast('Enter the item name'); return; }
+    if(!row.unit){ toast('Enter the unit (e.g. ft, pc, kg)'); return; }
+    if(!/^[A-Z0-9][A-Z0-9._\-/]*$/.test(row.code)){ toast('Code: letters, numbers, - . / only'); return; }
+    await mtLoad({ silent:true }).catch(()=>{});
+    const clash = mtCache.find(x=> x.code === row.code);
+    if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); return; }
+    const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && x.isActive);
+    if(twin && confirm('“' + twin.name + '” is already in the catalog as ' + twin.code + '. Use that one instead?')){ box.remove(); poPickMaterial(it, twin.id); return; }
+    if(!(await purchEnsureSession())) return;
+    const btn = e.target.closest('[data-q-save]'); btn.disabled = true;
+    try{
+      const { data, error } = await db.from('materials').insert(row).select('id').single();
+      if(error) throw error;
+      await mtLoad({ silent:true });
+      box.remove();
+      poPickMaterial(it, data.id);
+      toast(row.code + ' added to the Materials Database');
+    }catch(err){ purchFail('Couldn\u2019t add the item: ', err); }
+    finally{ btn.disabled = false; }
+  });
   function poPickMaterial(it, materialId){
     const m = mtCache.find(x=> x.id === materialId);
     if(!it || !m) return;
@@ -17560,7 +17650,8 @@
     const items = poItems.filter(it=> String(it.description || '').trim() || (it.qty !== '' && it.qty != null) || (it.unit_price !== '' && it.unit_price != null));
     for(let i = 0; i < items.length; i++){
       const it = items[i], n = i + 1;
-      if(!String(it.description || '').trim()) return 'Item ' + n + ': enter a description';
+      if(!String(it.description || '').trim()) return 'Item ' + n + ': pick an item from the Materials Database';
+      if(!it.material_id) return 'Item ' + n + ' (' + it.description + '): pick it from the Materials Database list, or tap “+ Add to catalog”';
       const q = Number(it.qty);
       if(it.qty === '' || !isFinite(q) || q <= 0) return 'Item ' + n + ' (' + it.description + '): enter a quantity above 0';
       const p = Number(it.unit_price);
@@ -18401,6 +18492,7 @@
   function mrLineCovered(it){
     if(Number(it.qty_approved) === 0 && it.qty_approved !== null) return true;
     if(it.fulfilled_by === 'tech_buy') return true;
+    if(it.fulfilled_by === 'stock') return true;   // set by the database once fully issued
     return !!(it.po_id && it.purchase_orders && it.purchase_orders.status !== 'cancelled');
   }
   // Techs don't need the admin's price list — just the active catalog.
@@ -18835,6 +18927,7 @@
 
   async function mrOpen(id){
     try{
+      if(!mtCache.length) await mtLoad({ silent:true }).catch(()=>{});
       const [h, it] = await Promise.all([
         db.from('material_requisitions').select('*').eq('id', id),
         db.from('material_requisition_items').select('*, purchase_orders(id, po_no, status)').eq('mr_id', id).order('line_no')
@@ -18883,13 +18976,16 @@
       if(fulfilling){
         if(Number(appr) === 0) cov = '<span class="cov ok">Not needed</span>';
         else if(it.fulfilled_by === 'tech_buy') cov = '<span class="cov ok">Tech buys</span>';
+        else if(it.fulfilled_by === 'stock') cov = '<span class="cov ok">Issued from stock</span>';
+        else if(Number(it.qty_issued) > 0) cov = '<span class="cov open">' + mrQty(it.qty_issued) + ' of ' + mrQty(appr) + ' issued from stock</span>';
         else if(it.po_id && it.purchase_orders) cov = '<span class="cov ' + (it.purchase_orders.status === 'cancelled' ? 'open' : 'ok') + '"><a data-open-po="' + escapeHtml(it.po_id) + '">' +
           escapeHtml(it.purchase_orders.po_no) + '</a> ' + escapeHtml(it.purchase_orders.status) + (it.purchase_orders.status === 'cancelled' ? ' — needs a new PO' : '') + '</span>';
         else cov = '<span class="cov open">Not yet</span>';
       }
       return '<tr data-id="' + escapeHtml(it.id) + '">' +
         (fulfilling ? '<td>' + (covered ? '' : '<input type="checkbox" class="mr-sel"' + (mrSelected.has(it.id) ? ' checked' : '') + '>') + '</td>' : '') +
-        '<td>' + (i + 1) + '</td><td><b>' + escapeHtml(it.description) + '</b><div class="sp-row-sub">' + (it.material_id ? escapeHtml(it.code) : 'not in catalog') + (it.note ? ' · ' + escapeHtml(it.note) : '') + '</div></td>' +
+        '<td>' + (i + 1) + '</td><td><b>' + escapeHtml(it.description) + '</b><div class="sp-row-sub">' + (it.material_id ? escapeHtml(it.code) : 'typed by the technician — not linked to the catalog') + (it.note ? ' · ' + escapeHtml(it.note) : '') + '</div>' +
+          (!it.material_id && ['submitted', 'approved'].includes(st) && !it.po_id ? '<div class="po-item-desc mr-link"><input type="text" data-link="1" placeholder="Link to catalog item…" autocomplete="off"></div>' : '') + '</td>' +
         '<td class="num">' + mrQty(it.qty_requested) + '</td>' +
         '<td class="num">' + (reviewing
           ? '<input type="text" class="mr-qty" inputmode="decimal" value="' + escapeHtml(String(mrQtyDraft[it.id] != null ? mrQtyDraft[it.id] : (appr != null ? appr : it.qty_requested))) + '">'
@@ -18909,6 +19005,30 @@
     }else html = b('pdf', 'View PDF');
     $('mrActions').innerHTML = html;
   }
+  // Link a technician's typed line to a Materials Database item (needed
+  // before it can go on a Purchase Order, which accepts catalog items only)
+  // keyboard for the link box: ↑/↓ to move, Enter to pick, Esc to close
+  $('mrItemsTable').addEventListener('keydown', (e)=>{
+    if(!e.target.dataset || !e.target.dataset.link) return;
+    const box = e.target.closest('.po-item-desc').querySelector('.po-suggest'); if(!box) return;
+    const btns = Array.from(box.querySelectorAll('[data-pick]')); let i = btns.findIndex(b=> b.classList.contains('hl'));
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(i >= 0) btns[i].classList.remove('hl'); i = e.key === 'ArrowDown' ? Math.min(btns.length - 1, i + 1) : Math.max(0, i - 1); if(btns[i]) btns[i].classList.add('hl'); }
+    else if(e.key === 'Enter' && i >= 0){ e.preventDefault(); btns[i].click(); }
+    else if(e.key === 'Escape') box.remove();
+  });
+  $('mrItemsTable').addEventListener('input', (e)=>{
+    if(!e.target.dataset.link) return;
+    const id = e.target.closest('tr').dataset.id;
+    mrCatalog = mtCache.filter(m=> m.isActive);
+    mrSuggest(e.target, async (mid)=>{
+      const m = mtCache.find(x=> x.id === mid); if(!m) return;
+      if(!(await purchEnsureSession())) return;
+      const { error } = await db.from('material_requisition_items').update({ material_id: m.id, code: m.code }).eq('id', id);
+      if(error){ purchFail('Couldn\u2019t link it: ', error); return; }
+      toast('Linked to ' + m.code + ' ' + m.name);
+      mrOpen(mrOpenRow.id);
+    });
+  });
   $('mrItemsTable').addEventListener('input', (e)=>{
     if(!e.target.classList.contains('mr-qty')) return;
     mrQtyDraft[e.target.closest('tr').dataset.id] = e.target.value;
@@ -19010,6 +19130,8 @@
   async function mrCreatePos(){
     const sel = mrSelectedOpen();
     if(!sel.length){ toast('Tick the lines to put on Purchase Orders'); return; }
+    const unlinked = sel.filter(it=> !it.material_id);
+    if(unlinked.length){ toast('Link ' + unlinked.map(it=> '“' + it.description + '”').join(', ') + ' to a catalog item first (the box under each line)'); return; }
     if(!(await ensureCloud())){ toast('Not connected'); return; }
     try{ await Promise.all([mtLoad({ silent:true }), poLoadSettings(), poLoadSuppliers()]); }
     catch(e){ purchFail('Couldn\u2019t load suppliers / prices: ', e); return; }
@@ -19041,7 +19163,9 @@
         const rows = lines.map((it, i)=>{
           const p = it.material_id ? poPriceFor(it.material_id, supplierId || null) : null;
           return { id: poUuid(), po_id: po.id, line_no: i + 1, material_id: it.material_id || null, code: it.code || '', description: it.description,
-            unit: (p && p.unitFromPrice) || it.unit || '', qty: Number(it.qty_approved != null ? it.qty_approved : it.qty_requested), unit_price: p ? p.price : 0 };
+            unit: (p && p.unitFromPrice) || it.unit || '',
+            // only what hasn't already been issued from stock
+            qty: Number(it.qty_approved != null ? it.qty_approved : it.qty_requested) - Number(it.qty_issued || 0), unit_price: p ? p.price : 0 };
         });
         const ir = await db.from('purchase_order_items').insert(rows); if(ir.error) throw ir.error;
         purchMarkOwn(mrOpenRow.id);
@@ -19105,7 +19229,7 @@
         startY: y + 8, margin: { left:M, right:M, bottom:60 },
         head: [['#', 'Item', 'Code', 'Requested', 'Approved', 'Unit'].concat(showFul ? ['Fulfilment'] : [])],
         body: mrOpenItems.map((it, i)=> [String(i + 1), it.description, it.code || '', mrQty(it.qty_requested), mrQty(it.qty_approved), it.unit || '']
-          .concat(showFul ? [Number(it.qty_approved) === 0 ? 'Not needed' : it.fulfilled_by === 'tech_buy' ? 'Tech buys' : it.purchase_orders ? it.purchase_orders.po_no + (it.purchase_orders.status === 'cancelled' ? ' (cancelled)' : '') : 'Open'] : [])),
+          .concat(showFul ? [Number(it.qty_approved) === 0 ? 'Not needed' : it.fulfilled_by === 'tech_buy' ? 'Tech buys' : it.fulfilled_by === 'stock' ? 'Issued from stock' : it.purchase_orders ? it.purchase_orders.po_no + (it.purchase_orders.status === 'cancelled' ? ' (cancelled)' : '') : 'Open'] : [])),
         theme:'plain',
         styles: { font:F, fontSize:8.4, cellPadding:{ top:5, bottom:5, left:6, right:6 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.5 } },
         headStyles: { font:F, fontStyle:'bold', fillColor:G, textColor:255, fontSize:7.8 },
@@ -19135,6 +19259,2897 @@
       await renderPdfPreview(doc, filename, title);
     }catch(e){ console.error('MRF pdf failed', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
   }
+
+
+  // =====================================================================
+  // Inventory — Phase 1 (migration 20260923_07_inventory_foundation.sql)
+  //
+  //   Stock on Hand   admin: qty + average cost + value per warehouse,
+  //                   opening balances, item history, count adjustments
+  //   Warehouses      admin: add / edit / deactivate
+  //   Projects        admin: big jobs grouping job orders; material cost
+  //   Warehouse Stock storekeeper: quantities only, own warehouses only
+  //   Users & Roles   the Storekeeper setting = warehouse assignments
+  //
+  // The DATABASE keeps balances and average cost (trigger on every
+  // stock_movements insert), refuses negative stock, and never lets a
+  // movement be edited or deleted. Storekeepers read *_qty views that
+  // carry no money at all.
+  // =====================================================================
+
+  const INV_TYPE_LABEL = { opening:'Opening', adjustment:'Adjustment', receipt:'Received', issue:'Issued', 'return':'Returned',
+    transfer_out:'Transfer out', transfer_in:'Transfer in', write_off:'Written off' };
+  const INV_PRJ_STATUS = { planning:'Planning', active:'Active', on_hold:'On hold', completed:'Completed', cancelled:'Cancelled' };
+
+  let invWarehouses = [];
+  let invBalances = [];          // stock_balances rows
+  let invProfileNames = new Map();
+
+  function invMoney(n){ return '₱' + poFmt(n); }
+  function invQty(n){ return poQtyFmt(n); }
+  function invWh(id){ return invWarehouses.find(w=> w.id === id); }
+  function invWhLabel(id){ const w = invWh(id); return w ? w.code + ' · ' + w.name : '—'; }
+  function invMissingTables(e){ return /42P01|does not exist|schema cache/.test(describeCloudError(e)); }
+  const INV_MIGRATION_MSG = 'The inventory tables aren\u2019t in the database yet — run migration 20260923_07_inventory_foundation.sql in Supabase first.';
+
+  async function invLoadWarehouses(){
+    const { data, error } = await db.from('warehouses').select('*').order('code');
+    if(error) throw error;
+    invWarehouses = data || [];
+    return invWarehouses;
+  }
+  async function invLoadNames(ids){
+    const need = Array.from(new Set(ids.filter(id=> id && !invProfileNames.has(id))));
+    if(!need.length) return;
+    try{
+      const { data } = await db.from('profiles').select('id, name').in('id', need);
+      (data || []).forEach(p=> invProfileNames.set(p.id, p.name || ''));
+    }catch(e){}
+  }
+
+  // =====================================================================
+  // STOCK ON HAND (admin)
+  // =====================================================================
+  let invItemOpen = null;   // material being viewed
+  function invStockView(which){
+    $('invStockListView').style.display = which === 'list' ? '' : 'none';
+    $('invOpeningView').style.display = which === 'opening' ? '' : 'none';
+    $('invItemView').style.display = which === 'item' ? '' : 'none';
+    $('purchasingView').classList.toggle('po-wide', which !== 'list');
+    if(which !== 'item') invItemOpen = null;
+    window.scrollTo({ top:0 });
+  }
+  async function invShowStock(){
+    invStockView('list');
+    await invLoadStock();
+  }
+  async function invLoadStock(opts){
+    const silent = !!(opts && opts.silent);
+    const list = $('invStockList');
+    if(!silent) list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ if(!silent) list.innerHTML = '<div class="empty-state">Not connected.</div>'; return false; }
+    try{
+      const [, b] = await Promise.all([invLoadWarehouses(), db.from('stock_balances').select('*'), mtLoad({ silent:true })]);
+      if(b.error) throw b.error;
+      invBalances = b.data || [];
+      const whSel = $('invStockWh'), keep = whSel.value;
+      whSel.innerHTML = '<option value="">All warehouses</option>' + invWarehouses.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + (w.is_active ? '' : ' (inactive)') + '</option>').join('');
+      whSel.value = keep;
+      const cat = $('invStockCat');
+      if(cat.options.length <= 1) PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
+      invRenderStock();
+      return true;
+    }catch(e){
+      console.error('load stock failed', describeCloudError(e));
+      if(!silent) list.innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? INV_MIGRATION_MSG : 'Couldn\u2019t load stock: ' + escapeHtml(describeCloudError(e))) + '</div>';
+      return false;
+    }
+  }
+  function invStockRows(){
+    const wh = $('invStockWh').value, cat = $('invStockCat').value, showZero = $('invStockZero').checked;
+    const words = ($('invStockSearch').value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const byMat = new Map();
+    invBalances.forEach(b=>{
+      if(wh && b.warehouse_id !== wh) return;
+      const e = byMat.get(b.material_id) || { qty:0, value:0, per:[] };
+      const q = Number(b.qty_on_hand), v = q * Number(b.avg_cost);
+      e.qty += q; e.value += v; e.per.push(b);
+      byMat.set(b.material_id, e);
+    });
+    const mats = showZero ? mtCache.filter(m=> m.isActive || byMat.has(m.id)) : mtCache.filter(m=> byMat.has(m.id) && byMat.get(m.id).qty > 0);
+    return mats.filter(m=>{
+      if(cat && m.category !== cat) return false;
+      if(!words.length) return true;
+      const hay = [m.code, m.name, m.family, m.brand, mtSpecText(m.specs)].join(' ').toLowerCase();
+      return words.every(w=> hay.includes(w));
+    }).map(m=> ({ m, s: byMat.get(m.id) || { qty:0, value:0, per:[] } }))
+      .sort((a, b)=> a.m.category.localeCompare(b.m.category) || a.m.name.localeCompare(b.m.name, undefined, { numeric:true }));
+  }
+  function invRenderStock(){
+    const rows = invStockRows();
+    const wh = $('invStockWh').value;
+    const inStock = rows.filter(r=> r.s.qty > 0);
+    const value = rows.reduce((a, r)=> a + r.s.value, 0);
+    $('invStockSummary').innerHTML =
+      '<div class="tile"><div class="k">Items in stock</div><div class="v">' + inStock.length + '</div></div>' +
+      '<div class="tile"><div class="k">Stock value' + (wh ? ' — ' + escapeHtml(invWh(wh) ? invWh(wh).code : '') : '') + '</div><div class="v">' + invMoney(value) + '</div></div>' +
+      '<div class="tile"><div class="k">Warehouses</div><div class="v">' + invWarehouses.filter(w=> w.is_active).length + '</div></div>';
+    $('invStockCount').textContent = inStock.length ? inStock.length + ' items · ' + invMoney(value) : '';
+    const list = $('invStockList');
+    if(!invWarehouses.length){ list.innerHTML = '<div class="empty-state">Add a warehouse first — <b>Inventory › Warehouses</b>.</div>'; return; }
+    if(!rows.length){ list.innerHTML = '<div class="empty-state">' + (invBalances.length ? 'Nothing matches.' : 'No stock recorded yet. Tap <b>+ Opening Balance</b> to enter what you have now.') + '</div>'; return; }
+    let html = '', lastCat = null;
+    rows.forEach(({ m, s })=>{
+      if(m.category !== lastCat){ lastCat = m.category; html += '<div class="mt-group-head">' + escapeHtml(m.category) + '</div>'; }
+      const chips = !wh && s.per.length > 1 ? '<div class="inv-wh-chips">' + s.per.filter(b=> Number(b.qty_on_hand) > 0).map(b=>
+        '<span class="sp-tag muted">' + escapeHtml(invWh(b.warehouse_id) ? invWh(b.warehouse_id).code : '?') + ': ' + invQty(b.qty_on_hand) + '</span>').join('') + '</div>' : '';
+      const avg = s.qty > 0 ? s.value / s.qty : 0;
+      html += '<button type="button" class="mt-row" data-id="' + escapeHtml(m.id) + '"><div class="mt-row-main">' +
+        '<div class="mt-row-title"><span class="mt-code">' + escapeHtml(m.code) + '</span>' + escapeHtml(m.name) + '</div>' +
+        '<div class="sp-row-sub">' + (s.qty > 0 ? 'avg ' + invMoney(avg) + ' / ' + escapeHtml(m.unit) : 'no stock') + '</div>' + chips + '</div>' +
+        '<div class="mt-row-price"><span class="inv-qty' + (s.qty > 0 ? '' : ' zero') + '">' + invQty(s.qty) + ' ' + escapeHtml(m.unit) + '</span>' +
+        '<div class="sp-row-sub">' + invMoney(s.value) + '</div></div></button>';
+    });
+    list.innerHTML = html;
+  }
+  ['invStockSearch'].forEach(id=> $(id).addEventListener('input', invRenderStock));
+  ['invStockWh', 'invStockCat', 'invStockZero'].forEach(id=> $(id).addEventListener('change', invRenderStock));
+  $('invStockList').addEventListener('click', (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowStock(); }); return; }
+    const r = e.target.closest('.mt-row'); if(r) invOpenItem(r.dataset.id);
+  });
+  $('invStockExportBtn').addEventListener('click', ()=>{
+    const wh = $('invStockWh').value;
+    const lines = [['warehouse','code','item','unit','qty_on_hand','avg_cost','value'].join(',')];
+    invBalances.filter(b=> (!wh || b.warehouse_id === wh) && Number(b.qty_on_hand) !== 0).forEach(b=>{
+      const m = mtCache.find(x=> x.id === b.material_id) || {};
+      lines.push([invWh(b.warehouse_id) ? invWh(b.warehouse_id).code : '', m.code, m.name, m.unit, Number(b.qty_on_hand), Number(b.avg_cost), (Number(b.qty_on_hand) * Number(b.avg_cost)).toFixed(2)].map(spCsvCell).join(','));
+    });
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'stock-on-hand-' + poToday() + '.csv'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
+    toast('Exported ' + (lines.length - 1) + ' stock line' + (lines.length === 2 ? '' : 's'));
+  });
+
+  // ---------- item detail: per-warehouse + history + adjust ----------
+  async function invOpenItem(materialId){
+    const m = mtCache.find(x=> x.id === materialId);
+    if(!m) return;
+    invItemOpen = m;
+    $('invItemTitle').innerHTML = '<span class="mt-code">' + escapeHtml(m.code) + '</span> ' + escapeHtml(m.name);
+    invStockView('item');
+    invItemOpen = m;
+    await invRenderItem();
+  }
+  async function invRenderItem(){
+    const m = invItemOpen; if(!m) return;
+    const bal = invBalances.filter(b=> b.material_id === m.id);
+    $('invItemCards').innerHTML = invWarehouses.filter(w=> w.is_active || bal.some(b=> b.warehouse_id === w.id)).map(w=>{
+      const b = bal.find(x=> x.warehouse_id === w.id) || { qty_on_hand:0, avg_cost:0 };
+      const q = Number(b.qty_on_hand);
+      return '<div class="tile"><div class="k">' + escapeHtml(w.code + ' · ' + w.name) + '</div>' +
+        '<div class="v">' + invQty(q) + ' ' + escapeHtml(m.unit) + '</div>' +
+        '<div class="s">' + (q ? 'avg ' + invMoney(b.avg_cost) + ' · ' + invMoney(q * Number(b.avg_cost)) : 'none') + '</div>' +
+        '<button type="button" class="btn btn-secondary mt-small-btn" style="margin-top:8px;" data-adjust="' + escapeHtml(w.id) + '">Adjust count</button></div>';
+    }).join('');
+    const hist = $('invItemHistory');
+    hist.innerHTML = '<tbody><tr><td>Loading…</td></tr></tbody>';
+    try{
+      const { data, error } = await db.from('stock_movements').select('*').eq('material_id', m.id).order('created_at', { ascending:false }).limit(300);
+      if(error) throw error;
+      const rows = data || [];
+      await invLoadNames(rows.map(r=> r.created_by).concat(rows.map(r=> r.worker_id)));
+      if(!rows.length){ hist.innerHTML = '<tbody><tr><td style="color:var(--text-muted);">No movements yet.</td></tr></tbody>'; return; }
+      hist.innerHTML = '<thead><tr><th>When</th><th>Warehouse</th><th>Type</th><th>Reference</th><th class="num">Qty</th><th class="num">Balance</th><th class="num">Unit cost</th><th class="num">Value</th><th>By</th></tr></thead><tbody>' +
+        rows.map(r=> '<tr><td>' + escapeHtml(mrWhen(r.created_at)) + '</td><td>' + escapeHtml(invWh(r.warehouse_id) ? invWh(r.warehouse_id).code : '') + '</td>' +
+          '<td>' + escapeHtml(INV_TYPE_LABEL[r.doc_type] || r.doc_type) + '</td><td>' + escapeHtml([r.doc_ref, r.note].filter(Boolean).join(' — ')) + '</td>' +
+          '<td class="num ' + (Number(r.qty) > 0 ? 'inv-in' : 'inv-out') + '">' + (Number(r.qty) > 0 ? '+' : '−') + invQty(Math.abs(r.qty)) + '</td>' +
+          '<td class="num">' + invQty(r.balance_after) + '</td><td class="num">' + invMoney(r.unit_cost) + '</td><td class="num">' + invMoney(r.value) + '</td>' +
+          '<td>' + escapeHtml(invProfileNames.get(r.created_by) || '') + '</td></tr>').join('') + '</tbody>';
+    }catch(e){ hist.innerHTML = '<tbody><tr><td>Couldn\u2019t load history: ' + escapeHtml(describeCloudError(e)) + '</td></tr></tbody>'; }
+  }
+  $('invItemBack').addEventListener('click', ()=>{ invStockView('list'); invRenderStock(); });
+  $('invItemCards').addEventListener('click', async (e)=>{
+    const b = e.target.closest('[data-adjust]'); if(!b || !invItemOpen) return;
+    const w = invWh(b.dataset.adjust), m = invItemOpen;
+    const bal = invBalances.find(x=> x.material_id === m.id && x.warehouse_id === w.id);
+    const cur = bal ? Number(bal.qty_on_hand) : 0;
+    const raw = prompt('Physical count of ' + m.name + ' in ' + w.code + '\n\nSystem shows ' + invQty(cur) + ' ' + m.unit + '. Enter the actual quantity counted:', String(cur));
+    if(raw === null) return;
+    const counted = spParseMoney(raw);
+    if(counted == null || Number.isNaN(counted)){ toast('Enter a number'); return; }
+    const diff = Math.round((counted - cur) * 1000) / 1000;
+    if(diff === 0){ toast('No change — count matches'); return; }
+    const reason = prompt('Reason for the ' + (diff > 0 ? '+' : '−') + invQty(Math.abs(diff)) + ' ' + m.unit + ' adjustment (e.g. recount, damaged, found):');
+    if(reason === null) return;
+    if(!reason.trim()){ toast('A reason is required'); return; }
+    if(!(await purchEnsureSession())) return;
+    try{
+      const { error } = await db.from('stock_movements').insert({ doc_type:'adjustment', doc_ref:'Count ' + poToday(), warehouse_id: w.id, material_id: m.id, qty: diff, note: reason.trim() });
+      if(error) throw error;
+      toast('Adjusted ' + m.code + ' in ' + w.code + ' to ' + invQty(counted) + ' ' + m.unit);
+      await invLoadStock({ silent:true });
+      await invRenderItem();
+    }catch(err){ purchFail('Couldn\u2019t post the adjustment: ', err); }
+  });
+
+  // ---------- opening balance ----------
+  let invOpLines = [], invOpKey = 0;
+  function invOpBlank(){ return { key: ++invOpKey, material_id:null, code:'', description:'', unit:'', qty:'', unit_cost:'' }; }
+  $('invOpeningBtn').addEventListener('click', async ()=>{
+    if(!invWarehouses.filter(w=> w.is_active).length){ toast('Add a warehouse first'); return; }
+    $('invOpWh').innerHTML = invWarehouses.filter(w=> w.is_active).map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + '</option>').join('');
+    if($('invStockWh').value && invWh($('invStockWh').value) && invWh($('invStockWh').value).is_active) $('invOpWh').value = $('invStockWh').value;
+    $('invOpNote').value = '';
+    invOpLines = [invOpBlank()];
+    invRenderOpLines();
+    invStockView('opening');
+  });
+  $('invOpeningBack').addEventListener('click', ()=>{
+    if(invOpLines.some(l=> l.material_id) && !confirm('Discard this opening balance?')) return;
+    invStockView('list'); invRenderStock();
+  });
+  function invRenderOpLines(){
+    $('invOpItems').innerHTML = invOpLines.map((l, i)=>{
+      const val = poRound2((Number(l.qty) || 0) * (Number(l.unit_cost) || 0));
+      return '<div class="po-item inv-op-item" data-key="' + l.key + '"><div class="po-no">' + (i + 1) + '</div>' +
+        '<div class="po-item-desc"><input type="text" data-f="description" value="' + escapeHtml(l.description) + '" placeholder="Search the materials list…" autocomplete="off">' +
+        '<div class="po-item-code">' + (l.material_id ? escapeHtml(l.code) : (l.description ? 'pick an item from the list' : '')) + '</div></div>' +
+        '<input type="text" class="num po-qty" data-f="qty" inputmode="decimal" placeholder="Qty" value="' + escapeHtml(String(l.qty)) + '">' +
+        '<input type="text" class="po-unit" value="' + escapeHtml(l.unit) + '" disabled placeholder="Unit">' +
+        '<input type="text" class="num po-price" data-f="unit_cost" inputmode="decimal" placeholder="Unit cost" value="' + escapeHtml(String(l.unit_cost)) + '">' +
+        '<div class="po-amt">' + invMoney(val) + '</div>' +
+        '<button type="button" class="po-rm" data-rm="1" title="Remove">&minus;</button></div>';
+    }).join('');
+    invOpTotal();
+  }
+  function invOpTotal(){
+    const t = invOpLines.reduce((a, l)=> a + poRound2((Number(l.qty) || 0) * (Number(l.unit_cost) || 0)), 0);
+    const n = invOpLines.filter(l=> l.material_id).length;
+    $('invOpTotal').textContent = n ? n + ' item' + (n === 1 ? '' : 's') + ' · total value ' + invMoney(t) : '';
+  }
+  function invOpLine(el){ const r = el.closest('.po-item'); return r ? invOpLines.find(x=> String(x.key) === r.dataset.key) : null; }
+  $('invOpItems').addEventListener('input', (e)=>{
+    const l = invOpLine(e.target), f = e.target.dataset.f; if(!l || !f) return;
+    if(f === 'description'){
+      l.description = e.target.value;
+      if(l.material_id){ const m = mtCache.find(x=> x.id === l.material_id); if(!m || m.name !== l.description){ l.material_id = null; l.code = ''; l.unit = ''; } }
+      mrCatalog = mtCache.filter(m=> m.isActive);
+      mrSuggest(e.target, (mid)=>{
+        const m = mtCache.find(x=> x.id === mid); if(!m) return;
+        if(invOpLines.some(x=> x !== l && x.material_id === m.id)){ toast(m.code + ' is already on this list'); return; }
+        Object.assign(l, { material_id:m.id, code:m.code, description:m.name, unit:m.unit, unit_cost: m.standardCost != null ? m.standardCost : '' });
+        invRenderOpLines();
+        const q = $('invOpItems').querySelector('.po-item[data-key="' + l.key + '"] [data-f="qty"]'); if(q) q.focus();
+      });
+    }else{
+      l[f] = e.target.value.trim();
+      const row = e.target.closest('.po-item');
+      row.querySelector('.po-amt').textContent = invMoney(poRound2((Number(l.qty) || 0) * (Number(l.unit_cost) || 0)));
+      invOpTotal();
+    }
+  });
+  $('invOpItems').addEventListener('click', (e)=>{
+    if(!e.target.closest('[data-rm]')) return;
+    const l = invOpLine(e.target);
+    invOpLines = invOpLines.filter(x=> x !== l);
+    if(!invOpLines.length) invOpLines.push(invOpBlank());
+    invRenderOpLines();
+  });
+  // keyboard: ↑/↓ to move through suggestions, Enter to pick, Esc to close
+  $('invOpItems').addEventListener('keydown', (e)=>{
+    const box = e.target.closest('.po-item-desc') && e.target.closest('.po-item-desc').querySelector('.po-suggest');
+    if(!box) return;
+    const btns = Array.from(box.querySelectorAll('[data-pick]'));
+    let i = btns.findIndex(b=> b.classList.contains('hl'));
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(i >= 0) btns[i].classList.remove('hl'); i = e.key === 'ArrowDown' ? Math.min(btns.length - 1, i + 1) : Math.max(0, i - 1); if(btns[i]) btns[i].classList.add('hl'); }
+    else if(e.key === 'Enter' && i >= 0){ e.preventDefault(); btns[i].click(); }
+    else if(e.key === 'Escape') box.remove();
+  });
+  $('invOpItems').addEventListener('focusout', (e)=>{
+    setTimeout(()=>{ const d = e.target.closest && e.target.closest('.po-item-desc'); if(d && !d.contains(document.activeElement)){ const b = d.querySelector('.po-suggest'); if(b) b.remove(); } }, 180);
+  });
+  $('invOpAdd').addEventListener('click', ()=>{
+    invOpLines.push(invOpBlank()); invRenderOpLines();
+    const all = $('invOpItems').querySelectorAll('[data-f="description"]'); if(all.length) all[all.length - 1].focus();
+  });
+  $('invOpImport').addEventListener('click', ()=>{ $('invOpFile').value = ''; $('invOpFile').click(); });
+  $('invOpFile').addEventListener('change', async ()=>{
+    const f = $('invOpFile').files && $('invOpFile').files[0]; if(!f) return;
+    const rows = spParseCsv(await f.text());
+    if(rows.length < 2){ toast('The CSV has no data rows'); return; }
+    const head = rows[0].map(h=> h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+    const ci = (k)=> head.indexOf(k);
+    if(ci('code') < 0 || ci('qty') < 0){ toast('CSV needs columns: code, qty (and optionally unit_cost)'); return; }
+    const skipped = [];
+    const lines = [];
+    rows.slice(1).forEach((r, i)=>{
+      const code = mtNormCode(r[ci('code')]), m = mtCache.find(x=> x.code === code);
+      const qty = spParseMoney(r[ci('qty')]);
+      const cost = ci('unit_cost') >= 0 && String(r[ci('unit_cost')] || '').trim() !== '' ? spParseMoney(r[ci('unit_cost')]) : (m && m.standardCost != null ? m.standardCost : null);
+      if(!m){ skipped.push('row ' + (i + 2) + ': unknown code ' + code); return; }
+      if(qty == null || Number.isNaN(qty) || qty <= 0){ skipped.push('row ' + (i + 2) + ': bad qty'); return; }
+      if(cost == null || Number.isNaN(cost)){ skipped.push('row ' + (i + 2) + ': no unit cost'); return; }
+      if(lines.some(l=> l.material_id === m.id)){ skipped.push('row ' + (i + 2) + ': ' + code + ' repeated'); return; }
+      lines.push({ key: ++invOpKey, material_id:m.id, code:m.code, description:m.name, unit:m.unit, qty, unit_cost:cost });
+    });
+    invOpLines = lines.length ? lines : [invOpBlank()];
+    invRenderOpLines();
+    toast('Loaded ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + (skipped.length ? ' — skipped ' + skipped.length + ': ' + skipped.slice(0, 2).join('; ') : ''));
+  });
+  $('invOpPost').addEventListener('click', async ()=>{
+    const wh = invWh($('invOpWh').value);
+    if(!wh){ toast('Choose a warehouse'); return; }
+    const lines = invOpLines.filter(l=> l.material_id || String(l.description || '').trim());
+    if(!lines.length){ toast('Add at least one item'); return; }
+    for(let i = 0; i < lines.length; i++){
+      const l = lines[i];
+      if(!l.material_id){ toast('Item ' + (i + 1) + ': pick it from the materials list'); return; }
+      const q = spParseMoney(l.qty), c = spParseMoney(l.unit_cost);
+      if(q == null || Number.isNaN(q) || q <= 0){ toast(l.code + ': enter a quantity above 0'); return; }
+      if(c == null || Number.isNaN(c)){ toast(l.code + ': enter the unit cost (0 is allowed)'); return; }
+    }
+    const total = lines.reduce((a, l)=> a + poRound2(spParseMoney(l.qty) * spParseMoney(l.unit_cost)), 0);
+    if(!confirm('Post opening balance to ' + wh.code + ' · ' + wh.name + '?\n\n' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', total value ' + invMoney(total) +
+      '\n\nStock movements can\u2019t be edited afterwards — mistakes are corrected with an adjustment.')) return;
+    if(!(await purchEnsureSession())) return;
+    const btn = $('invOpPost'); btn.disabled = true;
+    try{
+      const ref = 'Opening ' + poToday();
+      const { error } = await db.from('stock_movements').insert(lines.map(l=> ({
+        doc_type:'opening', doc_ref: ref, warehouse_id: wh.id, material_id: l.material_id,
+        qty: spParseMoney(l.qty), unit_cost: spParseMoney(l.unit_cost), note: $('invOpNote').value.trim()
+      })));
+      if(error) throw error;
+      toast('Opening balance posted to ' + wh.code);
+      invOpLines = [];
+      await invShowStock();
+    }catch(e){ purchFail('Couldn\u2019t post the opening balance: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // WAREHOUSES (admin)
+  // =====================================================================
+  async function invShowWarehouses(opts){
+    const list = $('invWhList');
+    if(!(opts && opts.silent)) list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const [, k, b] = await Promise.all([invLoadWarehouses(), db.from('warehouse_storekeepers').select('*'), db.from('stock_balances').select('warehouse_id, qty_on_hand, avg_cost')]);
+      if(k.error) throw k.error; if(b.error) throw b.error;
+      await invLoadNames((k.data || []).map(x=> x.user_id));
+      if(!invWarehouses.length){ list.innerHTML = '<div class="empty-state">No warehouses yet. Tap <b>+ Add Warehouse</b>.</div>'; return; }
+      list.innerHTML = invWarehouses.map(w=>{
+        const keepers = (k.data || []).filter(x=> x.warehouse_id === w.id).map(x=> invProfileNames.get(x.user_id) || 'Staff');
+        const bs = (b.data || []).filter(x=> x.warehouse_id === w.id && Number(x.qty_on_hand) > 0);
+        const val = bs.reduce((a, x)=> a + Number(x.qty_on_hand) * Number(x.avg_cost), 0);
+        return '<div class="sp-row' + (w.is_active ? '' : ' inactive') + '" data-id="' + escapeHtml(w.id) + '"' + (w.is_active ? '' : ' style="opacity:.6;"') + '><div class="sp-row-top"><div style="min-width:0;">' +
+          '<div class="sp-row-title"><span class="mt-code">' + escapeHtml(w.code) + '</span> ' + escapeHtml(w.name) + (w.is_active ? '' : ' <span class="sp-tag danger">Inactive</span>') + '</div>' +
+          '<div class="sp-row-sub">' + escapeHtml(w.address || 'No address') + '</div>' +
+          '<div class="sp-row-sub">Storekeeper' + (keepers.length === 1 ? '' : 's') + ': ' + (keepers.length ? escapeHtml(keepers.join(', ')) : '<span style="color:#9A6212;">none assigned</span>') + '</div></div>' +
+          '<div class="mt-row-price">' + invMoney(val) + '<div class="sp-row-sub">' + bs.length + ' item' + (bs.length === 1 ? '' : 's') + ' in stock</div></div></div>' +
+          '<div class="user-card-actions"><button type="button" class="primary" data-wh-edit="1">Edit</button></div></div>';
+      }).join('');
+    }catch(e){
+      list.innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? INV_MIGRATION_MSG : 'Couldn\u2019t load warehouses: ' + escapeHtml(describeCloudError(e))) + '</div>';
+    }
+  }
+  function invWhOpenForm(w){
+    $('invWhForm').style.display = '';
+    $('invWhFormTitle').textContent = w ? 'Edit ' + w.code : 'New Warehouse';
+    $('invWhId').value = w ? w.id : '';
+    $('invWhCode').value = w ? w.code : 'WH-' + String(invWarehouses.length + 1).padStart(2, '0');
+    $('invWhName').value = w ? w.name : '';
+    $('invWhAddress').value = w ? w.address : '';
+    $('invWhActive').value = w ? String(w.is_active) : 'true';
+    $('invWhName').focus();
+  }
+  $('invWhAddBtn').addEventListener('click', ()=> invWhOpenForm(null));
+  $('invWhCancel').addEventListener('click', ()=>{ $('invWhForm').style.display = 'none'; });
+  $('invWhList').addEventListener('click', (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowWarehouses(); }); return; }
+    if(!e.target.closest('[data-wh-edit]')) return;
+    invWhOpenForm(invWh(e.target.closest('.sp-row').dataset.id));
+    window.scrollTo({ top:0 });
+  });
+  $('invWhSave').addEventListener('click', async ()=>{
+    const id = $('invWhId').value;
+    const row = { code: mtNormCode($('invWhCode').value), name: $('invWhName').value.trim(), address: $('invWhAddress').value.trim(), is_active: $('invWhActive').value === 'true' };
+    if(!row.code){ toast('Enter a code, e.g. WH-01'); return; }
+    if(!row.name){ toast('Enter the warehouse name'); return; }
+    if(invWarehouses.some(w=> w.code === row.code && w.id !== id)){ toast('Code ' + row.code + ' is already used'); return; }
+    if(!(await purchEnsureSession())) return;
+    try{
+      const res = id ? await db.from('warehouses').update(row).eq('id', id) : await db.from('warehouses').insert(row);
+      if(res.error) throw res.error;
+      toast(id ? 'Warehouse updated' : row.code + ' added');
+      $('invWhForm').style.display = 'none';
+      invShowWarehouses();
+    }catch(e){ purchFail('Couldn\u2019t save the warehouse: ', e); }
+  });
+
+  // =====================================================================
+  // PROJECTS (admin)
+  // =====================================================================
+  let invProjects = [], invPrjLinks = [], invPrjOpen = null, invJobsAll = [];
+  function invPrjView(which){
+    $('invPrjListView').style.display = which === 'list' ? '' : 'none';
+    $('invPrjEditView').style.display = which === 'edit' ? '' : 'none';
+    $('purchasingView').classList.toggle('po-wide', which === 'edit');
+    if(which === 'list') invPrjOpen = null;
+    window.scrollTo({ top:0 });
+  }
+  // Material cost per project: issues minus returns (and write-offs), for
+  // the project itself or any of its job orders. Movement values are
+  // negative when stock goes out, so cost = −sum(value).
+  function invProjectCost(p, moves){
+    const jobs = new Set(invPrjLinks.filter(l=> l.project_id === p.id).map(l=> l.job_order_id));
+    return moves.filter(m=> m.project_id === p.id || (m.job_order_id && jobs.has(m.job_order_id)))
+      .reduce((a, m)=> a - Number(m.value || 0), 0);
+  }
+  let invPrjMoves = [];
+  async function invShowProjects(opts){
+    if(!(opts && opts.keepView)) invPrjView('list');
+    const list = $('invPrjList');
+    if(!(opts && opts.silent)) list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const [p, l, mv] = await Promise.all([
+        db.from('projects').select('*').order('created_at', { ascending:false }),
+        db.from('project_job_orders').select('*'),
+        db.from('stock_movements').select('project_id, job_order_id, value, doc_type').in('doc_type', ['issue', 'return', 'write_off'])
+      ]);
+      if(p.error) throw p.error; if(l.error) throw l.error; if(mv.error) throw mv.error;
+      invProjects = p.data || []; invPrjLinks = l.data || []; invPrjMoves = mv.data || [];
+      invRenderProjects();
+    }catch(e){
+      list.innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? INV_MIGRATION_MSG : 'Couldn\u2019t load projects: ' + escapeHtml(describeCloudError(e))) + '</div>';
+    }
+  }
+  function invRenderProjects(){
+    const st = $('invPrjStatus').value, q = ($('invPrjSearch').value || '').trim().toLowerCase();
+    const rows = invProjects.filter(p=> (st === 'open' ? ['planning', 'active', 'on_hold'].includes(p.status) : !st || p.status === st) &&
+      (!q || [p.project_no, p.name, p.customer_name, p.site_address].join(' ').toLowerCase().includes(q)));
+    const active = invProjects.filter(p=> p.status === 'active').length;
+    $('invPrjCount').textContent = active ? active + ' active' : '';
+    const list = $('invPrjList');
+    if(!rows.length){ list.innerHTML = '<div class="empty-state">' + (invProjects.length ? 'Nothing matches.' : 'No projects yet. Tap <b>+ New Project</b>.') + '</div>'; return; }
+    list.innerHTML = rows.map(p=>{
+      const jobs = invPrjLinks.filter(l=> l.project_id === p.id).length;
+      const cost = invProjectCost(p, invPrjMoves);
+      const pct = p.budget ? Math.round(cost / Number(p.budget) * 100) : null;
+      return '<button type="button" class="mt-row' + (p.status === 'cancelled' ? ' inactive' : '') + '" data-id="' + escapeHtml(p.id) + '"><div class="mt-row-main">' +
+        '<div class="mt-row-title"><span class="mt-code">' + escapeHtml(p.project_no) + '</span>' + escapeHtml(p.name) + ' <span class="po-status ' + (p.status === 'active' ? 'approved' : p.status === 'completed' ? 'fulfilled' : p.status === 'cancelled' ? 'rejected' : 'draft') + '">' + escapeHtml(INV_PRJ_STATUS[p.status]) + '</span></div>' +
+        '<div class="sp-row-sub">' + escapeHtml([p.customer_name, p.site_address].filter(Boolean).join(' · ') || 'No customer set') + ' · ' + jobs + ' job order' + (jobs === 1 ? '' : 's') + '</div></div>' +
+        '<div class="mt-row-price">' + invMoney(cost) + '<div class="sp-row-sub">' + (p.budget ? pct + '% of ' + invMoney(p.budget) : 'material cost') + '</div></div></button>';
+    }).join('');
+  }
+  $('invPrjSearch').addEventListener('input', invRenderProjects);
+  $('invPrjStatus').addEventListener('change', invRenderProjects);
+  $('invPrjList').addEventListener('click', (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowProjects(); }); return; }
+    const r = e.target.closest('.mt-row'); if(r) invOpenProject(invProjects.find(p=> p.id === r.dataset.id));
+  });
+  $('invPrjAddBtn').addEventListener('click', ()=> invOpenProject(null));
+  $('invPrjBack').addEventListener('click', ()=>{ invPrjView('list'); invRenderProjects(); });
+
+  async function invOpenProject(p){
+    invPrjOpen = p;
+    $('invPrjTitle').textContent = p ? p.project_no : 'New Project';
+    $('invPrjStatusPill').className = 'po-status ' + (p ? (p.status === 'active' ? 'approved' : p.status === 'completed' ? 'fulfilled' : p.status === 'cancelled' ? 'rejected' : 'draft') : 'draft');
+    $('invPrjStatusPill').textContent = p ? INV_PRJ_STATUS[p.status] : 'unsaved';
+    $('invPrjName').value = p ? p.name : ''; $('invPrjCustomer').value = p ? p.customer_name : '';
+    $('invPrjSite').value = p ? p.site_address : ''; $('invPrjBudget').value = p && p.budget != null ? String(p.budget) : '';
+    $('invPrjStart').value = p && p.start_date ? p.start_date : ''; $('invPrjEnd').value = p && p.end_date ? p.end_date : '';
+    $('invPrjStatusSel').value = p ? p.status : 'active'; $('invPrjNotes').value = p ? p.notes : '';
+    $('invPrjJobsSec').style.display = p ? '' : 'none';
+    $('invPrjCostSec').style.display = p ? '' : 'none';
+    invPrjView('edit');
+    invPrjOpen = p;
+    if(p){ invRenderPrjCost(); await invRenderPrjJobs(); }
+  }
+  function invRenderPrjCost(){
+    const p = invPrjOpen; if(!p) return;
+    const cost = invProjectCost(p, invPrjMoves);
+    const budget = p.budget != null ? Number(p.budget) : null;
+    const pct = budget ? cost / budget * 100 : 0;
+    $('invPrjCost').innerHTML = '<div class="inv-summary">' +
+      '<div class="tile"><div class="k">Materials issued (net of returns)</div><div class="v">' + invMoney(cost) + '</div></div>' +
+      (budget != null ? '<div class="tile"><div class="k">Budget</div><div class="v">' + invMoney(budget) + '</div></div>' +
+        '<div class="tile"><div class="k">Remaining</div><div class="v" style="color:' + (budget - cost < 0 ? 'var(--danger)' : 'var(--green-dark)') + ';">' + invMoney(budget - cost) + '</div></div>' : '') + '</div>' +
+      (budget ? '<div class="inv-budget-bar' + (pct >= 100 ? ' over' : pct >= 80 ? ' warn' : '') + '"><span style="width:' + Math.min(100, pct).toFixed(1) + '%"></span></div><div class="po-hint">' + pct.toFixed(1) + '% of budget used</div>' : '') +
+      (cost === 0 ? '<div class="po-hint">No materials issued yet. Issue slips (next phase) will add up here automatically — for the project and all its job orders.</div>' : '');
+  }
+  async function invRenderPrjJobs(){
+    const p = invPrjOpen; if(!p) return;
+    if(!invJobsAll.length && typeof dtListAll === 'function'){ try{ invJobsAll = await dtListAll(); }catch(e){ invJobsAll = []; } }
+    const mine = invPrjLinks.filter(l=> l.project_id === p.id);
+    const jobInfo = (id)=> invJobsAll.find(j=> j.id === id);
+    $('invPrjJobs').innerHTML = mine.length ? mine.map(l=>{
+      const j = jobInfo(l.job_order_id);
+      return '<div class="sp-row" data-jo="' + escapeHtml(l.job_order_id) + '"><div class="sp-row-top"><div><div class="sp-row-title">' + escapeHtml(l.job_order_id) + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml(j ? [j.custName, j.siteAddress].filter(Boolean).join(' · ') : '') + '</div></div>' +
+        '<div class="user-card-actions" style="margin:0;"><button type="button" class="danger" data-jo-rm="1">Remove</button></div></div></div>';
+    }).join('') : '<div class="empty-state" style="padding:12px;">No job orders linked yet.</div>';
+    const taken = new Set(invPrjLinks.map(l=> l.job_order_id));
+    const free = invJobsAll.filter(j=> !taken.has(j.id)).slice(0, 300);
+    $('invPrjJobPick').innerHTML = '<option value="">' + (free.length ? 'Choose a job order to add…' : 'No unlinked job orders') + '</option>' +
+      free.map(j=> '<option value="' + escapeHtml(j.id) + '">' + escapeHtml(j.id + (j.custName ? ' — ' + j.custName : '')) + '</option>').join('');
+  }
+  $('invPrjJobAdd').addEventListener('click', async ()=>{
+    const jo = $('invPrjJobPick').value; if(!jo || !invPrjOpen) return;
+    if(!(await purchEnsureSession())) return;
+    try{
+      const { error } = await db.from('project_job_orders').insert({ project_id: invPrjOpen.id, job_order_id: jo });
+      if(error) throw error;
+      invPrjLinks.push({ project_id: invPrjOpen.id, job_order_id: jo });
+      toast(jo + ' added to ' + invPrjOpen.project_no);
+      invRenderPrjJobs(); invRenderPrjCost();
+    }catch(e){ purchFail(/23505/.test(describeCloudError(e)) ? 'That job order is already in another project: ' : 'Couldn\u2019t add the job order: ', e); }
+  });
+  $('invPrjJobs').addEventListener('click', async (e)=>{
+    if(!e.target.closest('[data-jo-rm]') || !invPrjOpen) return;
+    const jo = e.target.closest('[data-jo]').dataset.jo;
+    if(!confirm('Remove ' + jo + ' from ' + invPrjOpen.project_no + '? Its material cost will no longer count toward this project.')) return;
+    try{
+      const { error } = await db.from('project_job_orders').delete().eq('project_id', invPrjOpen.id).eq('job_order_id', jo);
+      if(error) throw error;
+      invPrjLinks = invPrjLinks.filter(l=> !(l.project_id === invPrjOpen.id && l.job_order_id === jo));
+      invRenderPrjJobs(); invRenderPrjCost();
+    }catch(err){ purchFail('Couldn\u2019t remove it: ', err); }
+  });
+  $('invPrjSave').addEventListener('click', async ()=>{
+    const budget = spParseMoney($('invPrjBudget').value);
+    if(Number.isNaN(budget)){ toast('Budget must be a number'); return; }
+    const row = { name: $('invPrjName').value.trim(), customer_name: $('invPrjCustomer').value.trim(), site_address: $('invPrjSite').value.trim(),
+      budget, start_date: $('invPrjStart').value || null, end_date: $('invPrjEnd').value || null, status: $('invPrjStatusSel').value, notes: $('invPrjNotes').value.trim() };
+    if(!row.name){ toast('Enter the project name'); $('invPrjName').focus(); return; }
+    if(row.start_date && row.end_date && row.end_date < row.start_date){ toast('Target end is before the start'); return; }
+    if(!(await purchEnsureSession())) return;
+    const btn = $('invPrjSave'); btn.disabled = true;
+    try{
+      const res = invPrjOpen ? await db.from('projects').update(row).eq('id', invPrjOpen.id).select('*').single()
+                             : await db.from('projects').insert(row).select('*').single();
+      if(res.error) throw res.error;
+      const saved = res.data, wasNew = !invPrjOpen;
+      const i = invProjects.findIndex(p=> p.id === saved.id);
+      if(i >= 0) invProjects[i] = saved; else invProjects.unshift(saved);
+      toast(wasNew ? saved.project_no + ' created — add its job orders below' : 'Project saved');
+      await invOpenProject(saved);
+    }catch(e){ purchFail('Couldn\u2019t save the project: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // STOREKEEPER: Warehouse Stock (quantities only)
+  // =====================================================================
+  let invMyWh = [], invMyStock = [], invMyMats = [];
+  let invSkCheckedAt = 0, invSkIs = false;
+  // Show the home tile only to staff with at least one warehouse assigned.
+  async function invRefreshStorekeeperTile(){
+    const tile = document.getElementById('techQaStock');
+    if(!tile || !currentUser || currentUser.role === 'admin' || currentUser.role === 'customer'){ if(tile) tile.style.display = 'none'; return; }
+    if(Date.now() - invSkCheckedAt < 60000){ tile.style.display = invSkIs ? '' : 'none'; return; }
+    try{
+      if(!(await ensureCloud())) return;
+      const { data, error } = await db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id);
+      if(error) throw error;
+      invSkIs = !!(data && data.length); invSkCheckedAt = Date.now();
+    }catch(e){ invSkIs = false; }
+    tile.style.display = invSkIs ? '' : 'none';
+  }
+  async function invShowMyStock(){
+    $('invMyItemView').style.display = 'none'; $('invMyListView').style.display = '';
+    const list = $('invMyList');
+    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const k = await db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id);
+      if(k.error) throw k.error;
+      const ids = (k.data || []).map(x=> x.warehouse_id);
+      if(!ids.length){ list.innerHTML = '<div class="empty-state">You aren\u2019t assigned to a warehouse. Ask the admin to set you as a Storekeeper in Users &amp; Roles.</div>'; return; }
+      const [w, s, m] = await Promise.all([
+        db.from('warehouses').select('*').in('id', ids).order('code'),
+        db.from('stock_on_hand_qty').select('*').in('warehouse_id', ids),
+        db.from('materials').select('id, code, name, unit, category, family, specs, brand').eq('is_active', true)
+      ]);
+      if(w.error) throw w.error; if(s.error) throw s.error; if(m.error) throw m.error;
+      invMyWh = w.data || []; invMyStock = s.data || []; invMyMats = m.data || [];
+      const sel = $('invMyWh'), keep = sel.value;
+      sel.innerHTML = invMyWh.map(x=> '<option value="' + escapeHtml(x.id) + '">' + escapeHtml(x.code + ' · ' + x.name) + '</option>').join('');
+      if(keep && invMyWh.some(x=> x.id === keep)) sel.value = keep;
+      sel.style.display = invMyWh.length > 1 ? '' : 'none';
+      invRenderMyStock();
+    }catch(e){
+      list.innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? 'Inventory isn\u2019t set up yet.' : 'Couldn\u2019t load stock: ' + escapeHtml(describeCloudError(e))) + '</div>';
+    }
+  }
+  function invRenderMyStock(){
+    const wh = $('invMyWh').value || (invMyWh[0] && invMyWh[0].id);
+    const words = ($('invMySearch').value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const rows = invMyStock.filter(s=> s.warehouse_id === wh && Number(s.qty_on_hand) > 0).map(s=> ({ s, m: invMyMats.find(x=> x.id === s.material_id) }))
+      .filter(r=> r.m && (!words.length || words.every(w=> [r.m.code, r.m.name, r.m.family].join(' ').toLowerCase().includes(w))))
+      .sort((a, b)=> a.m.name.localeCompare(b.m.name, undefined, { numeric:true }));
+    $('invMyList').innerHTML = rows.length ? rows.map(({ s, m })=>
+      '<button type="button" class="mt-row" data-id="' + escapeHtml(m.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(m.code) + '</span>' + escapeHtml(m.name) + '</div>' +
+      '<div class="sp-row-sub">' + escapeHtml(m.category) + '</div></div><div class="mt-row-price"><span class="inv-qty">' + invQty(s.qty_on_hand) + ' ' + escapeHtml(m.unit) + '</span></div></button>').join('')
+      : '<div class="empty-state">' + (invMyStock.some(s=> s.warehouse_id === wh) ? 'Nothing matches.' : 'No stock recorded in this warehouse yet.') + '</div>';
+  }
+  $('invMySearch').addEventListener('input', invRenderMyStock);
+  $('invMyWh').addEventListener('change', invRenderMyStock);
+  $('invMyList').addEventListener('click', async (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowMyStock(); }); return; }
+    const r = e.target.closest('.mt-row'); if(!r) return;
+    const m = invMyMats.find(x=> x.id === r.dataset.id), wh = $('invMyWh').value || invMyWh[0].id;
+    $('invMyItemTitle').innerHTML = '<span class="mt-code">' + escapeHtml(m.code) + '</span> ' + escapeHtml(m.name);
+    $('invMyListView').style.display = 'none'; $('invMyItemView').style.display = '';
+    const t = $('invMyItemHistory');
+    t.innerHTML = '<tbody><tr><td>Loading…</td></tr></tbody>';
+    try{
+      const { data, error } = await db.from('stock_movements_qty').select('*').eq('material_id', m.id).eq('warehouse_id', wh).order('created_at', { ascending:false }).limit(200);
+      if(error) throw error;
+      t.innerHTML = (data || []).length ? '<thead><tr><th>When</th><th>Type</th><th>Reference</th><th class="num">Qty</th><th class="num">Balance</th></tr></thead><tbody>' +
+        data.map(x=> '<tr><td>' + escapeHtml(mrWhen(x.created_at)) + '</td><td>' + escapeHtml(INV_TYPE_LABEL[x.doc_type] || x.doc_type) + '</td><td>' + escapeHtml([x.doc_ref, x.note].filter(Boolean).join(' — ')) + '</td>' +
+          '<td class="num ' + (Number(x.qty) > 0 ? 'inv-in' : 'inv-out') + '">' + (Number(x.qty) > 0 ? '+' : '−') + invQty(Math.abs(x.qty)) + '</td><td class="num">' + invQty(x.balance_after) + '</td></tr>').join('') + '</tbody>'
+        : '<tbody><tr><td>No movements yet.</td></tr></tbody>';
+    }catch(err){ t.innerHTML = '<tbody><tr><td>Couldn\u2019t load history.</td></tr></tbody>'; }
+  });
+  $('invMyItemBack').addEventListener('click', ()=>{ $('invMyItemView').style.display = 'none'; $('invMyListView').style.display = ''; });
+  $('techQaStock').addEventListener('click', ()=> showPurchasingView('myStock'));
+
+  // =====================================================================
+  // USERS & ROLES hooks — the Storekeeper setting (called from admin.js)
+  // =====================================================================
+  // Returns null when the inventory tables aren't installed yet, so Users &
+  // Roles keeps working exactly as before.
+  async function invLoadUsersContext(){
+    try{
+      const [w, k] = await Promise.all([db.from('warehouses').select('id, code, name, is_active').order('code'), db.from('warehouse_storekeepers').select('*')]);
+      if(w.error || k.error) return null;
+      const byUser = new Map();
+      (k.data || []).forEach(x=>{ if(!byUser.has(x.user_id)) byUser.set(x.user_id, new Set()); byUser.get(x.user_id).add(x.warehouse_id); });
+      return { warehouses: w.data || [], byUser };
+    }catch(e){ return null; }
+  }
+  function invUserStatusLine(ctx, userId){
+    if(!ctx) return '';
+    const mine = ctx.byUser.get(userId);
+    if(!mine || !mine.size) return '';
+    return '<div class="u-status" style="color:var(--green-dark); font-weight:700;">Storekeeper: ' +
+      escapeHtml(ctx.warehouses.filter(w=> mine.has(w.id)).map(w=> w.code).join(', ')) + '</div>';
+  }
+  function invUserPanelHtml(ctx, userId){
+    if(!ctx) return '';
+    const mine = ctx.byUser.get(userId) || new Set();
+    const body = ctx.warehouses.length ? ctx.warehouses.filter(w=> w.is_active || mine.has(w.id)).map(w=>
+      '<label class="restrict-row"><input type="checkbox" data-inv-wh="' + escapeHtml(w.id) + '"' + (mine.has(w.id) ? ' checked' : '') + '>' +
+      '<span class="rtxt"><span class="rt-title">' + escapeHtml(w.code + ' · ' + w.name) + '</span></span></label>').join('')
+      : '<div style="padding:6px 0; font-size:11.5px; color:var(--text-muted);">Add a warehouse first in <b>Inventory › Warehouses</b>.</div>';
+    return '<div class="restrict-group inv-sk-group"><h5>Storekeeper</h5>' +
+      '<div style="margin:-2px 0 6px; font-size:11.5px; color:var(--text-muted); line-height:1.4;">Tick the warehouses this person keeps. They\u2019ll see those warehouses\u2019 stock (quantities only — no costs) and, in the next phase, issue and receive for them.</div>' + body + '</div>';
+  }
+  function invUserPanelReset(ctx, userId, panel){
+    if(!ctx) return;
+    const mine = ctx.byUser.get(userId) || new Set();
+    panel.querySelectorAll('[data-inv-wh]').forEach(c=>{ c.checked = mine.has(c.dataset.invWh); });
+  }
+  async function invSaveUserWarehouses(ctx, userId, panel){
+    if(!ctx) return true;
+    const want = new Set(Array.from(panel.querySelectorAll('[data-inv-wh]')).filter(c=> c.checked).map(c=> c.dataset.invWh));
+    const have = ctx.byUser.get(userId) || new Set();
+    const add = Array.from(want).filter(id=> !have.has(id)), del = Array.from(have).filter(id=> !want.has(id));
+    try{
+      if(add.length){ const r = await db.from('warehouse_storekeepers').insert(add.map(id=> ({ warehouse_id:id, user_id:userId }))); if(r.error) throw r.error; }
+      for(const id of del){ const r = await db.from('warehouse_storekeepers').delete().eq('warehouse_id', id).eq('user_id', userId); if(r.error) throw r.error; }
+      return true;
+    }catch(e){ console.error('storekeeper save failed', describeCloudError(e)); return false; }
+  }
+
+
+  // =====================================================================
+  // Inventory — Phase 2 screens (migration 20260923_08_inventory_movements.sql)
+  //
+  //   Receive / Issue / Return / Transfer — admins (sidebar) and
+  //   storekeepers (Warehouse Stock hub). Every post is ONE call to an
+  //   inv_post_* database function, which validates, costs and writes the
+  //   document + ledger atomically. The screens send quantities only.
+  //   Slips & History — every document, with PDF.
+  //   My Materials — technicians: slips to sign for, and what they hold.
+  // =====================================================================
+
+  const INV_SLIP_KIND = {
+    rcv: { label:'Receipt', title:'RECEIVING REPORT', table:'stock_receipts', items:'stock_receipt_items', fk:'receipt_id', no:'receipt_no' },
+    iss: { label:'Issue', title:'MATERIALS ISSUE SLIP', table:'issue_slips', items:'issue_slip_items', fk:'slip_id', no:'slip_no' },
+    ret: { label:'Return', title:'MATERIALS RETURN SLIP', table:'return_slips', items:'return_slip_items', fk:'return_id', no:'return_no' },
+    trf: { label:'Transfer', title:'STOCK TRANSFER', table:'stock_transfers', items:'stock_transfer_items', fk:'transfer_id', no:'transfer_no' }
+  };
+  const invX = { cat:[], catById:new Map(), whs:[], mine:[], avail:new Map(), workers:[], projects:[], jobs:[], isAdmin:false };
+  const invAvailKey = (wh, m)=> wh + '|' + m;
+  function invAvail(wh, m){ return invX.avail.get(invAvailKey(wh, m)) || 0; }
+  function invIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
+
+  // One load of everything the movement screens need. Quantities only —
+  // stock_on_hand_qty works the same for admins and storekeepers.
+  async function invLoadCtx(){
+    invX.isAdmin = invIsAdmin();
+    const [cat, whs, keep, av, wk, pr, jobs] = await Promise.all([
+      db.from('materials').select('id, code, name, unit, pack_unit, pack_qty, category, family, specs, brand').eq('is_active', true).order('name'),
+      db.from('warehouses').select('*').order('code'),
+      invX.isAdmin ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
+      db.from('stock_on_hand_qty').select('*'),
+      db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'),
+      db.from('projects').select('id, project_no, name, status').in('status', ['planning', 'active', 'on_hold']).order('project_no', { ascending:false }),
+      db.rpc('inv_open_job_orders')
+    ]);
+    for(const r of [cat, whs, av, wk, pr]) if(r.error) throw r.error;
+    invX.cat = (cat.data || []).map(m=> Object.assign({}, m, { specs: m.specs || {} }));
+    invX.catById = new Map(invX.cat.map(m=> [m.id, m]));
+    invX.whs = whs.data || [];
+    const keepIds = keep.data ? new Set(keep.data.map(k=> k.warehouse_id)) : null;
+    invX.mine = invX.whs.filter(w=> w.is_active && (!keepIds || keepIds.has(w.id)));
+    invX.avail = new Map((av.data || []).map(b=> [invAvailKey(b.warehouse_id, b.material_id), Number(b.qty_on_hand)]));
+    invX.workers = wk.data || [];
+    invX.projects = pr.data || [];
+    invX.jobs = jobs.error ? [] : (jobs.data || []);
+  }
+  function invOpts(list, val, label, empty){
+    return (empty != null ? '<option value="">' + escapeHtml(empty) + '</option>' : '') + list.map(x=> '<option value="' + escapeHtml(val(x)) + '">' + escapeHtml(label(x)) + '</option>').join('');
+  }
+  function invFillCommon(prefix){
+    const whOpts = invOpts(invX.mine, w=> w.id, w=> w.code + ' · ' + w.name);
+    return whOpts;
+  }
+  function invFillProjJob(projSel, jobSel){
+    $(projSel).innerHTML = invOpts(invX.projects, p=> p.id, p=> p.project_no + ' — ' + p.name, '— none —');
+    $(jobSel).innerHTML = invOpts(invX.jobs, j=> j.id, j=> j.id + (j.cust_name ? ' — ' + j.cust_name : ''), '— none —');
+  }
+  async function invEnter(render){
+    const host = $('purchasingView');
+    if(!(await ensureCloud())){ toast('Not connected'); return false; }
+    try{ await invLoadCtx(); }
+    catch(e){
+      purchFail(invMissingTables(e) ? 'Run migration 20260923_08_inventory_movements.sql first: ' : 'Couldn\u2019t load inventory: ', e);
+      return false;
+    }
+    if(!invX.mine.length){ toast(invX.isAdmin ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
+    host.classList.add('po-wide');
+    render();
+    return true;
+  }
+  // storekeeper hub navigation
+  $('purchasingView').addEventListener('click', (e)=>{
+    const go = e.target.closest('[data-inv-go]');
+    if(go){ showPurchasingView(go.dataset.invGo); return; }
+    if(e.target.closest('[data-inv-hub]')) showPurchasingView('myStock');
+  });
+
+  // ---------------------------------------------------------------------
+  // Shared line editor (issue / transfer / receive-without-PO)
+  //   lines: {key, material_id, qty, unit_cost, mr_item_id, max, locked}
+  // ---------------------------------------------------------------------
+  const invLE = {};
+  let invLEKey = 0;
+  function invLEBlank(){ return { key: ++invLEKey, material_id:null, qty:'', unit_cost:'', mr_item_id:null, max:null, locked:false, text:'' }; }
+  function invLERender(id){
+    const st = invLE[id], m = (x)=> x.material_id ? invX.catById.get(x.material_id) : null;
+    const wh = st.wh ? $(st.wh).value : '';
+    const lastCol = st.cost ? 'Unit cost (₱)' : st.avail ? 'On hand' : '';
+    $(st.host).innerHTML = '<div class="inv-ln-head"><span>#</span><span>Item</span><span>Qty</span><span>Unit</span><span>' + lastCol + '</span><span></span></div>' +
+      st.lines.map((l, i)=>{
+        const it = m(l), have = it && wh ? invAvail(wh, it.id) : null;
+        const low = st.avail && it && Number(l.qty) > have;
+        const last = st.cost ? '<input type="text" class="num" data-f="unit_cost" inputmode="decimal" placeholder="avg" value="' + escapeHtml(String(l.unit_cost)) + '">'
+          : st.avail ? '<div class="inv-av' + (low ? ' low' : '') + '">' + (it ? invQty(have) + (low ? ' — short' : '') : '') + '</div>' : '<span></span>';
+        return '<div class="inv-ln" data-key="' + l.key + '"><div class="po-no">' + (i + 1) + '</div>' +
+          '<div class="po-item-desc"><input type="text" data-f="text" value="' + escapeHtml(it ? it.name : l.text) + '" placeholder="Search item…" autocomplete="off"' + (l.locked ? ' disabled' : '') + '>' +
+          '<div class="po-item-code">' + (it ? escapeHtml(it.code) : '') + (l.max != null ? ' · up to ' + invQty(l.max) : '') + '</div></div>' +
+          '<input type="text" class="num inv-q" data-f="qty" inputmode="decimal" placeholder="Qty" value="' + escapeHtml(String(l.qty)) + '">' +
+          '<div class="inv-unit">' + escapeHtml(it ? it.unit : '') + '</div>' + last +
+          (l.locked ? '<span></span>' : '<button type="button" class="po-rm" data-rm="1" title="Remove">&minus;</button>') + '</div>';
+      }).join('');
+  }
+  function invLEBind(id, host, opts){
+    invLE[id] = Object.assign({ host, lines:[invLEBlank()] }, opts);
+    const el = $(host);
+    const lineOf = (t)=>{ const r = t.closest('.inv-ln'); return r ? invLE[id].lines.find(x=> String(x.key) === r.dataset.key) : null; };
+    el.addEventListener('input', (e)=>{
+      const l = lineOf(e.target), f = e.target.dataset.f; if(!l || !f) return;
+      if(f === 'text'){
+        l.text = e.target.value; l.material_id = null;
+        e.target.closest('.inv-ln').querySelector('.po-item-code').textContent = '';
+        mrCatalog = invX.cat;
+        mrSuggest(e.target, (mid)=>{
+          if(invLE[id].lines.some(x=> x !== l && x.material_id === mid)){ toast('That item is already on the list'); return; }
+          l.material_id = mid; l.text = '';
+          invLERender(id);
+          const q = el.querySelector('.inv-ln[data-key="' + l.key + '"] [data-f="qty"]'); if(q) q.focus();
+        });
+      }else{
+        l[f] = e.target.value.trim();
+        if(f === 'qty' && invLE[id].avail) invLEAvailCell(id, l);
+      }
+    });
+    el.addEventListener('keydown', (e)=>{
+      const box = e.target.closest('.po-item-desc') && e.target.closest('.po-item-desc').querySelector('.po-suggest');
+      if(!box) return;
+      const btns = Array.from(box.querySelectorAll('[data-pick]')); let i = btns.findIndex(b=> b.classList.contains('hl'));
+      if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(i >= 0) btns[i].classList.remove('hl'); i = e.key === 'ArrowDown' ? Math.min(btns.length - 1, i + 1) : Math.max(0, i - 1); if(btns[i]) btns[i].classList.add('hl'); }
+      else if(e.key === 'Enter' && i >= 0){ e.preventDefault(); btns[i].click(); }
+      else if(e.key === 'Escape') box.remove();
+    });
+    el.addEventListener('focusout', (e)=>{ setTimeout(()=>{ const d = e.target.closest && e.target.closest('.po-item-desc'); if(d && !d.contains(document.activeElement)){ const b = d.querySelector('.po-suggest'); if(b) b.remove(); } }, 180); });
+    el.addEventListener('click', (e)=>{
+      if(!e.target.closest('[data-rm]')) return;
+      const l = lineOf(e.target); invLE[id].lines = invLE[id].lines.filter(x=> x !== l);
+      if(!invLE[id].lines.length) invLE[id].lines.push(invLEBlank());
+      invLERender(id);
+    });
+  }
+  function invLEAvailCell(id, l){
+    const st = invLE[id], it = invX.catById.get(l.material_id), row = $(st.host).querySelector('.inv-ln[data-key="' + l.key + '"] .inv-av');
+    if(!row || !it) return;
+    const have = invAvail($(st.wh).value, it.id), low = Number(l.qty) > have;
+    row.className = 'inv-av' + (low ? ' low' : ''); row.textContent = invQty(have) + (low ? ' — short' : '');
+  }
+  // validated payload lines, or a message
+  function invLECollect(id, needCostIgnored){
+    const out = [];
+    const lines = invLE[id].lines.filter(l=> l.material_id || String(l.text || '').trim() || String(l.qty).trim());
+    for(let i = 0; i < lines.length; i++){
+      const l = lines[i];
+      if(!l.material_id) return 'Line ' + (i + 1) + ': pick the item from the list';
+      const q = spParseMoney(l.qty);
+      if(q == null || Number.isNaN(q) || q <= 0) return invX.catById.get(l.material_id).code + ': enter a quantity above 0';
+      if(l.max != null && q > l.max) return invX.catById.get(l.material_id).code + ': at most ' + invQty(l.max) + ' on this request';
+      const row = { material_id: l.material_id, qty: q };
+      if(l.mr_item_id) row.mr_item_id = l.mr_item_id;
+      if(invLE[id].cost && String(l.unit_cost).trim() !== ''){
+        const c = spParseMoney(l.unit_cost);
+        if(Number.isNaN(c)) return invX.catById.get(l.material_id).code + ': unit cost must be a number';
+        row.unit_cost = c;
+      }
+      out.push(row);
+    }
+    if(!out.length) return 'Add at least one item';
+    return out;
+  }
+  async function invRpc(fn, payload){
+    if(!(await purchEnsureSession())) return null;
+    const { data, error } = await db.rpc(fn, { p: payload });
+    if(error) throw error;
+    return data;
+  }
+
+  // =====================================================================
+  // RECEIVE
+  // =====================================================================
+  let invRcvMode = 'po', invRcvPos = [], invRcvPoLines = [];
+  async function invShowReceive(){
+    await invEnter(async ()=>{
+      $('invRcvWh').innerHTML = invFillCommon();
+      let sup = await db.from('suppliers_directory').select('id, display_name').order('display_name');
+      $('invRcvSupplier').innerHTML = invOpts(sup.data || [], s=> s.id, s=> s.display_name, '— not specified —');
+      invFillProjJob('invRcvProject', 'invRcvJob');
+      $('invRcvRef').value = ''; $('invRcvNote').value = ''; $('invRcvDirect').checked = false;
+      invLEBind('rcv', 'invRcvLines', { cost: invX.isAdmin, avail:false, wh:'invRcvWh' });
+      await invRcvLoadPos();
+      invRcvSetMode('po');
+    });
+  }
+  async function invRcvLoadPos(){
+    const { data, error } = await db.rpc('inv_pos_to_receive');
+    invRcvPos = error ? [] : (data || []);
+    $('invRcvPo').innerHTML = '<option value="">' + (invRcvPos.length ? 'Choose an issued PO…' : 'No issued POs waiting for delivery') + '</option>' +
+      invRcvPos.map(p=> '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.po_no + ' — ' + (p.supplier || 'no supplier') + (p.reference ? ' · ' + p.reference : '')) + '</option>').join('');
+  }
+  function invRcvSetMode(m){
+    invRcvMode = m;
+    $$('#invRcvMode [data-m]').forEach(b=> b.classList.toggle('on', b.dataset.m === m));
+    $('invRcvPoWrap').style.display = m === 'po' ? '' : 'none';
+    $('invRcvSupWrap').style.display = m === 'free' ? '' : 'none';
+    $('invRcvAdd').style.display = m === 'free' ? '' : 'none';
+    $('invRcvHint').textContent = m === 'free'
+      ? (invX.isAdmin ? 'Leave unit cost blank to value it at the current average cost.' : 'Received stock is valued at the current average cost (admins can set a cost).')
+      : 'Enter what arrived now. Partial deliveries are fine — the rest stays open on the PO.';
+    if(m === 'po') invRcvRenderPo(); else { invLE.rcv.lines = [invLEBlank()]; invLERender('rcv'); }
+  }
+  $('invRcvMode').addEventListener('click', (e)=>{ const b = e.target.closest('[data-m]'); if(b) invRcvSetMode(b.dataset.m); });
+  $('invRcvAdd').addEventListener('click', ()=>{ invLE.rcv.lines.push(invLEBlank()); invLERender('rcv'); });
+  $('invRcvPo').addEventListener('change', invRcvRenderPo);
+  $('invRcvDirect').addEventListener('change', ()=>{
+    const on = $('invRcvDirect').checked;
+    $('invRcvProjWrap').style.display = on ? '' : 'none'; $('invRcvJobWrap').style.display = on ? '' : 'none';
+  });
+  function invRcvRenderPo(){
+    if(invRcvMode !== 'po') return;
+    const po = invRcvPos.find(p=> p.id === $('invRcvPo').value);
+    if(!po){ $('invRcvLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose the PO this delivery is for.</div>'; invRcvPoLines = []; return; }
+    invRcvPoLines = (po.items || []).filter(i=> Number(i.qty_received) < Number(i.qty)).map(i=> Object.assign({ now:'', map:i.material_id }, i));
+    $('invRcvLines').innerHTML = '<div class="inv-ln-head"><span>#</span><span>Item</span><span>Receive now</span><span>Unit</span><span>Ordered / in</span><span></span></div>' +
+      invRcvPoLines.map((i, n)=>{
+        const m = i.map ? invX.catById.get(i.map) : null;
+        const remaining = Number(i.qty) - Number(i.qty_received);
+        const mapper = i.material_id ? '' : '<select data-map="1" style="margin-top:4px;"><option value="">Which catalog item is this?</option>' +
+          invX.cat.map(c=> '<option value="' + escapeHtml(c.id) + '"' + (i.map === c.id ? ' selected' : '') + '>' + escapeHtml(c.code + ' — ' + c.name) + '</option>').join('') + '</select>';
+        return '<div class="inv-ln" data-poi="' + escapeHtml(i.id) + '"><div class="po-no">' + (n + 1) + '</div>' +
+          '<div class="inv-desc"><b>' + escapeHtml(i.description) + '</b><div class="po-item-code">' + escapeHtml(i.code || (m ? m.code : 'not in catalog')) + '</div>' + mapper + '</div>' +
+          '<input type="text" class="num inv-q" data-poq="1" inputmode="decimal" placeholder="' + escapeHtml(invQty(remaining)) + '">' +
+          '<div class="inv-unit">' + escapeHtml(i.unit) + '</div>' +
+          '<div class="inv-av">' + invQty(i.qty) + ' / ' + invQty(i.qty_received) + '</div><span></span>' +
+          '<div class="inv-conv" data-conv="1"></div></div>';
+      }).join('') +
+      '<button type="button" class="btn btn-secondary mt-small-btn" id="invRcvAll" style="margin-top:8px;">Fill in: everything remaining</button>';
+  }
+  function invRcvConv(i, qty){
+    const m = invX.catById.get(i.map);
+    if(!m || !(Number(m.pack_qty) > 0) || String(i.unit).trim().toLowerCase() !== String(m.pack_unit || '').trim().toLowerCase()) return '';
+    return qty ? '= ' + invQty(qty * Number(m.pack_qty)) + ' ' + m.unit + ' into stock' : '1 ' + i.unit + ' = ' + invQty(m.pack_qty) + ' ' + m.unit;
+  }
+  $('invRcvLines').addEventListener('input', (e)=>{
+    if(!e.target.dataset.poq) return;
+    const row = e.target.closest('[data-poi]'), i = invRcvPoLines.find(x=> x.id === row.dataset.poi);
+    i.now = e.target.value.trim();
+    row.querySelector('[data-conv]').textContent = invRcvConv(i, spParseMoney(i.now));
+  });
+  $('invRcvLines').addEventListener('change', (e)=>{
+    if(!e.target.dataset.map) return;
+    const row = e.target.closest('[data-poi]'), i = invRcvPoLines.find(x=> x.id === row.dataset.poi);
+    i.map = e.target.value || null;
+    row.querySelector('[data-conv]').textContent = invRcvConv(i, spParseMoney(i.now));
+  });
+  $('invRcvLines').addEventListener('click', (e)=>{
+    if(e.target.id !== 'invRcvAll') return;
+    invRcvPoLines.forEach(i=>{ i.now = String(Number(i.qty) - Number(i.qty_received)); });
+    $$('#invRcvLines [data-poi]').forEach(row=>{
+      const i = invRcvPoLines.find(x=> x.id === row.dataset.poi);
+      row.querySelector('[data-poq]').value = i.now; row.querySelector('[data-conv]').textContent = invRcvConv(i, Number(i.now));
+    });
+  });
+  $('invRcvPost').addEventListener('click', async ()=>{
+    const wh = invX.mine.find(w=> w.id === $('invRcvWh').value);
+    const payload = { warehouse_id: wh.id, supplier_ref: $('invRcvRef').value.trim(), note: $('invRcvNote').value.trim() };
+    let summary;
+    if(invRcvMode === 'po'){
+      const po = invRcvPos.find(p=> p.id === $('invRcvPo').value);
+      if(!po){ toast('Choose the PO'); return; }
+      const lines = [];
+      for(const i of invRcvPoLines){
+        if(!String(i.now).trim()) continue;
+        const q = spParseMoney(i.now), rem = Number(i.qty) - Number(i.qty_received);
+        if(q == null || Number.isNaN(q) || q <= 0){ toast(i.description + ': enter a quantity above 0'); return; }
+        if(q > rem){ toast(i.description + ': only ' + invQty(rem) + ' ' + i.unit + ' left on ' + po.po_no); return; }
+        if(!i.map){ toast(i.description + ': choose which catalog item it is'); return; }
+        lines.push(Object.assign({ po_item_id: i.id, qty: q }, i.material_id ? {} : { material_id: i.map }));
+      }
+      if(!lines.length){ toast('Enter what was received'); return; }
+      Object.assign(payload, { po_id: po.id, lines });
+      summary = lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' from ' + po.po_no;
+    }else{
+      const lines = invLECollect('rcv');
+      if(typeof lines === 'string'){ toast(lines); return; }
+      Object.assign(payload, { supplier_id: $('invRcvSupplier').value || null, lines });
+      summary = lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' without a PO';
+    }
+    const direct = invX.isAdmin && $('invRcvDirect').checked;
+    if(direct){
+      payload.direct_project_id = $('invRcvProject').value || null; payload.direct_job_order_id = $('invRcvJob').value || null;
+      if(!payload.direct_project_id && !payload.direct_job_order_id){ toast('Choose the project or job order it was delivered to'); return; }
+    }
+    if(!confirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
+    const btn = $('invRcvPost'); btn.disabled = true;
+    try{
+      const r = await invRpc('inv_post_receipt', payload); if(!r) return;
+      toast(r.receipt_no + ' posted');
+      invAfterPost('rcv', r.id);
+    }catch(e){ purchFail('Couldn\u2019t post the receipt: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // ISSUE
+  // =====================================================================
+  let invIssMode = 'mrf', invIssMrs = [];
+  async function invShowIssue(){
+    await invEnter(async ()=>{
+      $('invIssWh').innerHTML = invFillCommon();
+      $('invIssWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
+      invFillProjJob('invIssProject', 'invIssJob');
+      $('invIssNote').value = '';
+      invLEBind('iss', 'invIssLines', { cost:false, avail:true, wh:'invIssWh' });
+      const r = await db.from('material_requisitions').select('id, mrf_no, requested_by, requester_name, job_order_id, job_order, urgency, material_requisition_items(*)')
+        .eq('status', 'approved').order('created_at', { ascending:false });
+      invIssMrs = (r.data || []).map(m=> Object.assign(m, { open: (m.material_requisition_items || []).filter(i=>
+        i.material_id && !i.po_id && i.fulfilled_by !== 'tech_buy' && Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0) > 0) })).filter(m=> m.open.length);
+      $('invIssMr').innerHTML = '<option value="">' + (invIssMrs.length ? 'Choose an approved request…' : 'No approved requests with items to issue') + '</option>' +
+        invIssMrs.map(m=> '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.mrf_no + ' — ' + (m.requester_name || '') + (m.job_order ? ' · ' + m.job_order.id : '') + ' · ' + m.open.length + ' item' + (m.open.length === 1 ? '' : 's')) + '</option>').join('');
+      invIssSetMode(invIssMrs.length ? 'mrf' : 'free');
+    });
+  }
+  function invIssSetMode(m){
+    invIssMode = m;
+    $$('#invIssMode [data-m]').forEach(b=> b.classList.toggle('on', b.dataset.m === m));
+    $('invIssMrWrap').style.display = m === 'mrf' ? '' : 'none';
+    $('invIssAdd').style.display = m === 'free' ? '' : 'none';
+    invLE.iss.lines = [invLEBlank()];
+    if(m === 'mrf') invIssFromMr(); else invLERender('iss');
+  }
+  $('invIssMode').addEventListener('click', (e)=>{ const b = e.target.closest('[data-m]'); if(b) invIssSetMode(b.dataset.m); });
+  $('invIssAdd').addEventListener('click', ()=>{ invLE.iss.lines.push(invLEBlank()); invLERender('iss'); });
+  $('invIssMr').addEventListener('change', invIssFromMr);
+  $('invIssWh').addEventListener('change', ()=> invLERender('iss'));
+  function invIssFromMr(){
+    const m = invIssMrs.find(x=> x.id === $('invIssMr').value);
+    if(!m){ invLE.iss.lines = [invLEBlank()]; invLERender('iss'); return; }
+    $('invIssWorker').value = m.requested_by || '';
+    $('invIssJob').value = m.job_order_id && invX.jobs.some(j=> j.id === m.job_order_id) ? m.job_order_id : '';
+    invLE.iss.lines = m.open.map(i=>{
+      const left = Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
+      return { key: ++invLEKey, material_id: i.material_id, qty: String(left), unit_cost:'', mr_item_id: i.id, max: left, locked:true, text:'' };
+    });
+    invLERender('iss');
+  }
+  $('invIssPost').addEventListener('click', async ()=>{
+    const wh = invX.mine.find(w=> w.id === $('invIssWh').value), worker = invX.workers.find(w=> w.id === $('invIssWorker').value);
+    if(!worker){ toast('Choose who the materials are issued to'); return; }
+    const lines = invLECollect('iss');
+    if(typeof lines === 'string'){ toast(lines); return; }
+    const short = lines.filter(l=> l.qty > invAvail(wh.id, l.material_id));
+    if(short.length){ toast('Not enough stock in ' + wh.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
+    const mr = invIssMode === 'mrf' ? invIssMrs.find(x=> x.id === $('invIssMr').value) : null;
+    if(invIssMode === 'mrf' && !mr){ toast('Choose the request'); return; }
+    if(!confirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
+    const btn = $('invIssPost'); btn.disabled = true;
+    try{
+      const r = await invRpc('inv_post_issue', { warehouse_id: wh.id, worker_id: worker.id, mr_id: mr ? mr.id : null,
+        project_id: $('invIssProject').value || null, job_order_id: $('invIssJob').value || null, note: $('invIssNote').value.trim(), lines });
+      if(!r) return;
+      notifyUser(worker.id, 'Materials issued to you', r.slip_no + ' — ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + '. Please open My Materials and sign to acknowledge.', 'iss-' + r.id);
+      toast(r.slip_no + ' posted — ' + worker.name + ' has been asked to acknowledge');
+      invAfterPost('iss', r.id);
+    }catch(e){ purchFail('Couldn\u2019t post the issue: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // RETURN — from what the worker currently holds
+  // =====================================================================
+  let invRetHold = [];
+  async function invShowReturns(){
+    await invEnter(()=>{
+      $('invRetWh').innerHTML = invFillCommon();
+      $('invRetWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
+      $('invRetNote').value = ''; invRetHold = [];
+      $('invRetLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose who is returning materials.</div>';
+    });
+  }
+  function invPrjLabel(pid, job){
+    const p = invX.projects.find(x=> x.id === pid);
+    return [p ? p.project_no + ' — ' + p.name : '', job].filter(Boolean).join(' · ') || 'No project / job order';
+  }
+  $('invRetWorker').addEventListener('change', async ()=>{
+    const wid = $('invRetWorker').value; invRetHold = [];
+    if(!wid){ $('invRetLines').innerHTML = ''; return; }
+    try{
+      const { data, error } = await db.rpc('inv_worker_holdings', { p_worker: wid });
+      if(error) throw error;
+      invRetHold = (data || []).map(h=> Object.assign({ ret:'', cond:'good' }, h));
+    }catch(e){ purchFail('Couldn\u2019t load what they hold: ', e); return; }
+    if(!invRetHold.length){ $('invRetLines').innerHTML = '<div class="empty-state" style="padding:12px;">This person isn\u2019t holding any issued materials.</div>'; return; }
+    let html = '', last = null;
+    invRetHold.forEach((h, n)=>{
+      const g = (h.project_id || '') + '|' + (h.job_order_id || '');
+      if(g !== last){ last = g; html += '<div class="inv-hold-grp">' + escapeHtml(invPrjLabel(h.project_id, h.job_order_id)) + '</div>'; }
+      const m = invX.catById.get(h.material_id) || { code:'?', name:'(inactive item)', unit:'' };
+      html += '<div class="inv-ln" data-h="' + n + '"><div class="po-no">' + (n + 1) + '</div>' +
+        '<div class="inv-desc"><b>' + escapeHtml(m.name) + '</b><div class="po-item-code">' + escapeHtml(m.code) + ' · holding ' + invQty(h.holding) + ' ' + escapeHtml(m.unit) + '</div></div>' +
+        '<input type="text" class="num inv-q" data-rq="1" inputmode="decimal" placeholder="0">' +
+        '<div class="inv-unit">' + escapeHtml(m.unit) + '</div>' +
+        '<select data-rc="1"><option value="good">Good</option><option value="damaged">Damaged</option></select><span></span></div>';
+    });
+    $('invRetLines').innerHTML = html;
+  });
+  $('invRetLines').addEventListener('input', (e)=>{ if(e.target.dataset.rq) invRetHold[Number(e.target.closest('[data-h]').dataset.h)].ret = e.target.value.trim(); });
+  $('invRetLines').addEventListener('change', (e)=>{ if(e.target.dataset.rc) invRetHold[Number(e.target.closest('[data-h]').dataset.h)].cond = e.target.value; });
+  $('invRetPost').addEventListener('click', async ()=>{
+    const wh = invX.mine.find(w=> w.id === $('invRetWh').value), wid = $('invRetWorker').value;
+    if(!wid){ toast('Choose who is returning'); return; }
+    const picked = [];
+    for(const h of invRetHold){
+      if(!String(h.ret).trim()) continue;
+      const q = spParseMoney(h.ret), m = invX.catById.get(h.material_id);
+      if(q == null || Number.isNaN(q) || q <= 0){ toast((m ? m.code : 'Item') + ': enter a quantity above 0'); return; }
+      if(q > Number(h.holding)){ toast((m ? m.code : 'Item') + ': they only hold ' + invQty(h.holding)); return; }
+      picked.push(Object.assign({}, h, { q }));
+    }
+    if(!picked.length){ toast('Enter what is being returned'); return; }
+    // one return slip per project / job order, so each is credited correctly
+    const groups = new Map();
+    picked.forEach(h=>{ const k = (h.project_id || '') + '|' + (h.job_order_id || ''); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(h); });
+    const dmg = picked.filter(h=> h.cond === 'damaged').length;
+    if(!confirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
+    const btn = $('invRetPost'); btn.disabled = true;
+    const done = [];
+    try{
+      for(const [, hs] of groups){
+        const r = await invRpc('inv_post_return', { warehouse_id: wh.id, worker_id: wid, project_id: hs[0].project_id, job_order_id: hs[0].job_order_id,
+          note: $('invRetNote').value.trim(), lines: hs.map(h=> ({ material_id: h.material_id, qty: h.q, condition: h.cond })) });
+        if(!r) return;
+        done.push(r);
+      }
+      toast(done.map(r=> r.return_no).join(', ') + ' posted');
+      invAfterPost('ret', done[0].id);
+    }catch(e){ purchFail('Couldn\u2019t post the return' + (done.length ? ' (posted ' + done.map(r=> r.return_no).join(', ') + ' before the error)' : '') + ': ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // TRANSFER
+  // =====================================================================
+  async function invShowTransfers(){
+    await invEnter(()=>{
+      $('invTrfFrom').innerHTML = invFillCommon();
+      invTrfFillTo();
+      $('invTrfNote').value = '';
+      invLEBind('trf', 'invTrfLines', { cost:false, avail:true, wh:'invTrfFrom' });
+      invLERender('trf');
+    });
+  }
+  function invTrfFillTo(){
+    const from = $('invTrfFrom').value;
+    $('invTrfTo').innerHTML = invOpts(invX.whs.filter(w=> w.is_active && w.id !== from), w=> w.id, w=> w.code + ' · ' + w.name, 'Choose destination…');
+  }
+  $('invTrfFrom').addEventListener('change', ()=>{ invTrfFillTo(); invLERender('trf'); });
+  $('invTrfAdd').addEventListener('click', ()=>{ invLE.trf.lines.push(invLEBlank()); invLERender('trf'); });
+  $('invTrfPost').addEventListener('click', async ()=>{
+    const from = invX.mine.find(w=> w.id === $('invTrfFrom').value), to = invX.whs.find(w=> w.id === $('invTrfTo').value);
+    if(!to){ toast('Choose where it\u2019s going'); return; }
+    const lines = invLECollect('trf');
+    if(typeof lines === 'string'){ toast(lines); return; }
+    const short = lines.filter(l=> l.qty > invAvail(from.id, l.material_id));
+    if(short.length){ toast('Not enough stock in ' + from.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
+    if(!confirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
+    const btn = $('invTrfPost'); btn.disabled = true;
+    try{
+      const r = await invRpc('inv_post_transfer', { from_warehouse_id: from.id, to_warehouse_id: to.id, note: $('invTrfNote').value.trim(), lines });
+      if(!r) return;
+      toast(r.transfer_no + ' posted');
+      invAfterPost('trf', r.id);
+    }catch(e){ purchFail('Couldn\u2019t post the transfer: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // after any post: open the new slip (with its PDF) in Slips & History
+  async function invAfterPost(kind, id){
+    showPurchasingView('slips');
+    setTimeout(()=> invOpenSlip(kind, id), 60);
+  }
+
+  // =====================================================================
+  // SLIPS & HISTORY
+  // =====================================================================
+  let invSlips = [];
+  async function invShowSlips(opts){
+    if(!(opts && opts.silent)){ $('invSlipView').style.display = 'none'; $('invSlipListView').style.display = ''; $('invSlipList').innerHTML = '<div class="empty-state">Loading…</div>'; }
+    if(!(await ensureCloud())) return;
+    try{
+      await invLoadCtx();
+      const [a, b, c, d] = await Promise.all(['rcv', 'iss', 'ret', 'trf'].map(k=> db.from(INV_SLIP_KIND[k].table).select('*').order('created_at', { ascending:false }).limit(300)));
+      for(const r of [a, b, c, d]) if(r.error) throw r.error;
+      invSlips = [].concat((a.data || []).map(x=> Object.assign({ kind:'rcv' }, x)), (b.data || []).map(x=> Object.assign({ kind:'iss' }, x)),
+        (c.data || []).map(x=> Object.assign({ kind:'ret' }, x)), (d.data || []).map(x=> Object.assign({ kind:'trf' }, x)))
+        .sort((x, y)=> String(y.created_at).localeCompare(String(x.created_at)));
+      $('invSlipWh').innerHTML = '<option value="">All warehouses</option>' + invX.whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code) + '</option>').join('');
+      invRenderSlips();
+    }catch(e){
+      $('invSlipList').innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? 'Run migration 20260923_08_inventory_movements.sql first.' : 'Couldn\u2019t load slips: ' + escapeHtml(describeCloudError(e))) + '</div>';
+    }
+  }
+  function invSlipNo(s){ return s[INV_SLIP_KIND[s.kind].no]; }
+  function invSlipWhs(s){ return s.kind === 'trf' ? [s.from_warehouse_id, s.to_warehouse_id] : [s.warehouse_id]; }
+  function invSlipParty(s){
+    const wh = (id)=> { const w = invX.whs.find(x=> x.id === id); return w ? w.code : ''; };
+    if(s.kind === 'rcv') return (s.po_id ? 'Against PO' : 'No PO') + (s.supplier_ref ? ' · ' + s.supplier_ref : '') + (s.direct_project_id || s.direct_job_order_id ? ' · direct to site' : '');
+    if(s.kind === 'iss') return 'To ' + (s.worker_name || '');
+    if(s.kind === 'ret') return 'From ' + (s.worker_name || '');
+    return wh(s.from_warehouse_id) + ' → ' + wh(s.to_warehouse_id);
+  }
+  function invRenderSlips(){
+    const t = $('invSlipType').value, wh = $('invSlipWh').value, pend = $('invSlipPending').checked;
+    const q = ($('invSlipSearch').value || '').trim().toLowerCase();
+    const rows = invSlips.filter(s=> (!t || s.kind === t) && (!wh || invSlipWhs(s).includes(wh)) && (!pend || (s.kind === 'iss' && s.status === 'issued')) &&
+      (!q || [invSlipNo(s), invSlipParty(s), s.job_order_id, s.note, invPrjLabel(s.project_id || s.direct_project_id, '')].join(' ').toLowerCase().includes(q)));
+    $('invSlipList').innerHTML = rows.length ? rows.slice(0, 300).map(s=>
+      '<button type="button" class="mt-row" data-kind="' + s.kind + '" data-id="' + escapeHtml(s.id) + '"><div class="mt-row-main">' +
+      '<div class="mt-row-title"><span class="mt-code">' + escapeHtml(invSlipNo(s)) + '</span>' + escapeHtml(INV_SLIP_KIND[s.kind].label) +
+      (s.kind === 'iss' ? ' <span class="po-status ' + (s.status === 'acknowledged' ? 'fulfilled' : 'returned') + '">' + (s.status === 'acknowledged' ? 'signed' : 'awaiting signature') + '</span>' : '') + '</div>' +
+      '<div class="sp-row-sub">' + escapeHtml([mrWhen(s.created_at), invSlipParty(s), s.job_order_id || s.direct_job_order_id, (s.project_id || s.direct_project_id) ? invPrjLabel(s.project_id || s.direct_project_id, '') : ''].filter(Boolean).join(' · ')) + '</div></div>' +
+      '<div class="mt-row-price none">' + escapeHtml(invSlipWhs(s).map(id=> (invX.whs.find(w=> w.id === id) || {}).code || '').join(' → ')) + '</div></button>').join('')
+      : '<div class="empty-state">' + (invSlips.length ? 'Nothing matches.' : 'No stock movements yet.') + '</div>';
+  }
+  ['invSlipSearch'].forEach(id=> $(id).addEventListener('input', invRenderSlips));
+  ['invSlipType', 'invSlipWh', 'invSlipPending'].forEach(id=> $(id).addEventListener('change', invRenderSlips));
+  $('invSlipList').addEventListener('click', (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowSlips(); }); return; }
+    const r = e.target.closest('.mt-row'); if(r) invOpenSlip(r.dataset.kind, r.dataset.id);
+  });
+  $('invSlipBack').addEventListener('click', ()=>{ $('invSlipView').style.display = 'none'; $('invSlipListView').style.display = ''; invRenderSlips(); });
+
+  let invSlipOpen = null;
+  async function invLoadSlip(kind, id){
+    const K = INV_SLIP_KIND[kind];
+    const [h, it] = await Promise.all([db.from(K.table).select('*').eq('id', id), db.from(K.items).select('*').eq(K.fk, id).order('line_no')]);
+    if(h.error) throw h.error; if(it.error) throw it.error;
+    if(!h.data || !h.data[0]) throw new Error('Slip not found');
+    return { kind, h: h.data[0], items: it.data || [] };
+  }
+  async function invOpenSlip(kind, id){
+    try{
+      if(!invX.whs.length) await invLoadCtx();
+      invSlipOpen = await invLoadSlip(kind, id);
+      invRenderSlipDetail(invSlipOpen, 'invSlip');
+      $('invSlipListView').style.display = 'none'; $('invSlipView').style.display = '';
+      window.scrollTo({ top:0 });
+    }catch(e){ purchFail('Couldn\u2019t open the slip: ', e); }
+  }
+  function invRenderSlipDetail(d, pre){
+    const K = INV_SLIP_KIND[d.kind], h = d.h;
+    const wh = (id)=>{ const w = invX.whs.find(x=> x.id === id); return w ? w.code + ' · ' + w.name : ''; };
+    $(pre + 'Title').innerHTML = '<span class="mt-code">' + escapeHtml(h[K.no]) + '</span> ' + escapeHtml(K.label) +
+      (d.kind === 'iss' ? ' <span class="po-status ' + (h.status === 'acknowledged' ? 'fulfilled' : 'returned') + '">' + (h.status === 'acknowledged' ? 'signed' : 'awaiting signature') + '</span>' : '');
+    const kv = (k, v)=> v ? '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>' : '';
+    $(pre + 'Info').innerHTML = kv('Date', escapeHtml(mrWhen(h.created_at))) +
+      (d.kind === 'trf' ? kv('From', escapeHtml(wh(h.from_warehouse_id))) + kv('To', escapeHtml(wh(h.to_warehouse_id))) : kv('Warehouse', escapeHtml(wh(h.warehouse_id)))) +
+      (d.kind === 'iss' ? kv('Issued to', escapeHtml(h.worker_name)) + kv('Issued by', escapeHtml(h.issued_by_name)) + (h.ack_at ? kv('Signed', escapeHtml(mrWhen(h.ack_at))) : '') : '') +
+      (d.kind === 'ret' ? kv('Returned by', escapeHtml(h.worker_name)) + kv('Received by', escapeHtml(h.received_by_name)) : '') +
+      (d.kind === 'rcv' ? kv('Received by', escapeHtml(h.received_by_name)) + kv('DR / invoice', escapeHtml(h.supplier_ref)) + ((h.direct_project_id || h.direct_job_order_id) ? kv('Delivered to site', escapeHtml(invPrjLabel(h.direct_project_id, h.direct_job_order_id))) : '') : '') +
+      (d.kind === 'trf' ? kv('By', escapeHtml(h.created_by_name)) : '') +
+      ((h.project_id || h.job_order_id) ? kv('Project / job', escapeHtml(invPrjLabel(h.project_id, h.job_order_id))) : '') + kv('Note', escapeHtml(h.note));
+    const name = (id)=> invX.catById.get(id) || { code:'', name:'(inactive item)', unit:'' };
+    $(pre + 'Items').innerHTML = '<thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>Unit</th>' + (d.kind === 'ret' ? '<th>Condition</th>' : d.kind === 'rcv' ? '<th>As on PO</th>' : '') + '</tr></thead><tbody>' +
+      d.items.map((it, i)=>{ const m = name(it.material_id);
+        return '<tr><td>' + (i + 1) + '</td><td><b>' + escapeHtml(m.name) + '</b><div class="sp-row-sub">' + escapeHtml(m.code) + '</div></td><td class="num">' + invQty(it.qty) + '</td><td>' + escapeHtml(m.unit) + '</td>' +
+          (d.kind === 'ret' ? '<td>' + (it.condition === 'damaged' ? '<span class="sp-tag danger">Damaged</span>' : 'Good') + '</td>' : d.kind === 'rcv' ? '<td>' + (it.qty_po_units ? invQty(it.qty_po_units) + ' ' + escapeHtml(it.po_unit) : '—') + '</td>' : '') + '</tr>';
+      }).join('') + '</tbody>';
+  }
+  $('invSlipPdf').addEventListener('click', ()=>{ if(invSlipOpen) invSlipPdf(invSlipOpen); });
+
+  // ---------- slip PDF (same look as the PO) ----------
+  async function invSlipPdf(d){
+    try{
+      await loadAwesScript('jspdf', awesLibs.jspdf); await loadAwesScript('autotable', awesLibs.autotable);
+      await poLoadSettings().catch(()=>{});
+      const co = poSettingsData || {}, style = co.header_style || 'green';
+      const logo = co.logo_path ? await poLoadImage(co.logo_path).then(img=> poLogoForStyle(img, style)) : await poDefaultLogo(style);
+      const fonts = await poLoadFonts();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4', compress:true });
+      let F = 'helvetica', FS = ['helvetica', 'bold'], FB = ['helvetica', 'bold'];
+      if(fonts){ try{
+        doc.addFileToVFS('Inter-Regular.ttf', fonts.regular); doc.addFont('Inter-Regular.ttf', 'Inter', 'normal');
+        doc.addFileToVFS('Inter-SemiBold.ttf', fonts.semibold); doc.addFont('Inter-SemiBold.ttf', 'Inter', 'bold');
+        doc.addFileToVFS('Inter-Bold.ttf', fonts.bold); doc.addFont('Inter-Bold.ttf', 'InterBold', 'normal');
+        F = 'Inter'; FS = ['Inter', 'bold']; FB = ['InterBold', 'normal'];
+      }catch(e){} }
+      const reg = (s)=>{ doc.setFont(F, 'normal'); doc.setFontSize(s); }, semi = (s)=>{ doc.setFont(FS[0], FS[1]); doc.setFontSize(s); }, bold = (s)=>{ doc.setFont(FB[0], FB[1]); doc.setFontSize(s); };
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 36;
+      const G = [21, 77, 52], SUB = [96, 108, 101], INK = [28, 34, 30], LINE = [216, 223, 219];
+      const green = style !== 'white', ink = green ? [255, 255, 255] : INK;
+      const K = INV_SLIP_KIND[d.kind], h = d.h, headH = 104;
+      if(green){ doc.setFillColor(...G); doc.rect(0, 0, W, headH, 'F'); } else { doc.setFillColor(...G); doc.rect(0, headH - 4, W, 4, 'F'); }
+      if(logo && logo.w){ const r = Math.min(150 / logo.w, 44 / logo.h); try{ doc.addImage(logo.dataUrl, 'PNG', M, 16, logo.w * r, logo.h * r, 'inv-logo', 'FAST'); }catch(e){} }
+      semi(9.5); doc.setTextColor(...ink); doc.text(co.company_name || '', M, 78);
+      reg(7.4); doc.text(doc.splitTextToSize(co.address || '', 320).slice(0, 1), M, 90);
+      bold(16); doc.text(K.title, W - M, 36, { align:'right' });
+      semi(10.5); doc.text(h[K.no], W - M, 54, { align:'right' });
+      reg(8.8); doc.text(mrWhen(h.created_at), W - M, 68, { align:'right' });
+      let y = headH + 20;
+      const wh = (id)=>{ const w = invX.whs.find(x=> x.id === id); return w ? w.code + ' — ' + w.name : ''; };
+      const info = [].concat(
+        d.kind === 'trf' ? [['From', wh(h.from_warehouse_id)], ['To', wh(h.to_warehouse_id)]] : [['Warehouse', wh(h.warehouse_id)]],
+        d.kind === 'iss' ? [['Issued to', h.worker_name]] : [], d.kind === 'ret' ? [['Returned by', h.worker_name]] : [],
+        d.kind === 'rcv' ? [['DR / invoice', h.supplier_ref], ['Delivered to site', (h.direct_project_id || h.direct_job_order_id) ? invPrjLabel(h.direct_project_id, h.direct_job_order_id) : '']] : [],
+        [['Project / job', (h.project_id || h.job_order_id) ? invPrjLabel(h.project_id, h.job_order_id) : ''], ['Note', h.note]]).filter(r=> r[1]);
+      info.forEach(([k, v])=>{
+        reg(7.8); doc.setTextColor(...SUB); doc.text(k, M, y);
+        reg(9); doc.setTextColor(...INK); const ls = doc.splitTextToSize(String(v), W - M * 2 - 90); doc.text(ls, M + 90, y); y += ls.length * 11 + 3;
+      });
+      const name = (id)=> invX.catById.get(id) || { code:'', name:'(inactive item)', unit:'' };
+      doc.autoTable({
+        startY: y + 8, margin: { left:M, right:M, bottom:60 },
+        head: [['#', 'Code', 'Item', 'Qty', 'Unit'].concat(d.kind === 'ret' ? ['Condition'] : d.kind === 'rcv' ? ['As on PO'] : [])],
+        body: d.items.map((it, i)=>{ const m = name(it.material_id);
+          return [String(i + 1), m.code, m.name, invQty(it.qty), m.unit].concat(d.kind === 'ret' ? [it.condition === 'damaged' ? 'Damaged' : 'Good'] : d.kind === 'rcv' ? [it.qty_po_units ? invQty(it.qty_po_units) + ' ' + it.po_unit : ''] : []); }),
+        theme:'plain',
+        styles: { font:F, fontSize:8.6, cellPadding:{ top:5, bottom:5, left:6, right:6 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.5 } },
+        headStyles: { font:F, fontStyle:'bold', fillColor:G, textColor:255, fontSize:7.8 },
+        alternateRowStyles: { fillColor:[247, 250, 248] },
+        columnStyles: { 0:{ cellWidth:22, halign:'center' }, 1:{ cellWidth:64, textColor:SUB, fontSize:7.6 }, 3:{ halign:'right', cellWidth:56 }, 4:{ halign:'center', cellWidth:44 } }
+      });
+      // signatures at the bottom
+      let sig = null;
+      if(d.kind === 'iss' && h.ack_signature_path){
+        try{ const r = await db.storage.from('inventory-signatures').download(h.ack_signature_path); if(r.data){ const url = await poBlobToDataUrl(r.data); const sz = await poImageSize(url); sig = { dataUrl:url, w:sz.w, h:sz.h }; } }catch(e){}
+      }
+      const blocks = d.kind === 'iss' ? [['Issued by', h.issued_by_name, null], ['Received by', h.worker_name, sig]]
+        : d.kind === 'ret' ? [['Returned by', h.worker_name, null], ['Received by', h.received_by_name, null]]
+        : d.kind === 'rcv' ? [['Delivered by (supplier)', '', null], ['Received by', h.received_by_name, null]]
+        : [['Released by', h.created_by_name, null], ['Received by', '', null]];
+      const sigTop = H - 46 - 90, sw = (W - M * 2 - 40) / 2;
+      if(doc.lastAutoTable.finalY > sigTop - 10) doc.addPage();
+      blocks.forEach(([cap, nm, img], i)=>{
+        const x = M + i * (sw + 40);
+        semi(6.8); doc.setTextColor(...SUB); doc.text(cap.toUpperCase(), x, sigTop);
+        if(img && img.w){ const r = Math.min((sw - 20) / img.w, 44 / img.h); try{ doc.addImage(img.dataUrl, 'PNG', x + (sw - img.w * r) / 2, sigTop + 56 - img.h * r, img.w * r, img.h * r, undefined, 'FAST'); }catch(e){} }
+        doc.setDrawColor(70, 76, 72); doc.setLineWidth(0.6); doc.line(x, sigTop + 58, x + sw, sigTop + 58);
+        semi(8.6); doc.setTextColor(...INK); doc.text(nm ? nm.toUpperCase() : 'Signature over printed name / Date', x + sw / 2, sigTop + 70, { align:'center' });
+        if(i === 1 && d.kind === 'iss' && h.ack_at){ reg(7.4); doc.setTextColor(...SUB); doc.text('Acknowledged ' + mrWhen(h.ack_at), x + sw / 2, sigTop + 81, { align:'center' }); }
+      });
+      const pages = doc.internal.getNumberOfPages();
+      for(let p = 1; p <= pages; p++){ doc.setPage(p); reg(7); doc.setTextColor(...SUB); doc.text(h[K.no] + '   •   ' + (co.company_name || ''), M, H - 20); doc.text('Page ' + p + ' of ' + pages, W - M, H - 20, { align:'right' }); }
+      const title = K.label + ' ' + h[K.no];
+      $('previewOverlay').querySelector('h3').textContent = title;
+      $('previewOkBtn').textContent = 'Close';
+      $('previewOverlay').style.zIndex = '99';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc, h[K.no] + '.pdf', title);
+    }catch(e){ console.error('slip pdf failed', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
+  }
+
+  // =====================================================================
+  // MY MATERIALS (technician): sign for issue slips; what I hold
+  // =====================================================================
+  let invMine = [], invMineOpen = null, invSigPad = null;
+  async function invShowMyMaterials(){
+    $('invMineSlipView').style.display = 'none'; $('invMineListView').style.display = '';
+    $('invMinePending').innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())){ $('invMinePending').innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const [s, hold, cat, pr] = await Promise.all([
+        db.from('issue_slips').select('*, issue_slip_items(count)').eq('worker_id', currentUser.id).order('created_at', { ascending:false }).limit(100),
+        db.rpc('inv_worker_holdings', { p_worker: currentUser.id }),
+        db.from('materials').select('id, code, name, unit').eq('is_active', true),
+        db.from('projects').select('id, project_no, name')
+      ]);
+      if(s.error) throw s.error;
+      invMine = s.data || [];
+      invX.catById = new Map((cat.data || []).map(m=> [m.id, m]));
+      invX.projects = pr.data || [];
+      const pend = invMine.filter(x=> x.status === 'issued');
+      const row = (x)=> '<button type="button" class="mt-row" data-id="' + escapeHtml(x.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(x.slip_no) + '</span>' +
+        (x.status === 'issued' ? '<span class="po-status returned">sign now</span>' : '<span class="po-status fulfilled">signed</span>') + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml([mrWhen(x.created_at), (x.issue_slip_items && x.issue_slip_items[0] ? x.issue_slip_items[0].count : 0) + ' item(s)', 'by ' + x.issued_by_name, x.job_order_id].filter(Boolean).join(' · ')) + '</div></div></button>';
+      $('invMinePending').innerHTML = pend.length ? pend.map(row).join('') : '<div class="empty-state" style="padding:12px;">Nothing to sign. 👍</div>';
+      $('invMineRecent').innerHTML = invMine.filter(x=> x.status !== 'issued').slice(0, 20).map(row).join('') || '<div class="empty-state" style="padding:12px;">No slips yet.</div>';
+      const hs = hold.error ? [] : (hold.data || []);
+      let html = '', last = null;
+      hs.forEach(hh=>{
+        const g = (hh.project_id || '') + '|' + (hh.job_order_id || '');
+        if(g !== last){ last = g; html += '<div class="inv-hold-grp">' + escapeHtml(invPrjLabel(hh.project_id, hh.job_order_id)) + '</div>'; }
+        const m = invX.catById.get(hh.material_id) || { code:'', name:'(item)', unit:'' };
+        html += '<div class="sp-row"><div class="sp-row-top"><div><div class="sp-row-title">' + escapeHtml(m.name) + '</div><div class="sp-row-sub">' + escapeHtml(m.code) + '</div></div>' +
+          '<div class="mt-row-price"><span class="inv-qty">' + invQty(hh.holding) + ' ' + escapeHtml(m.unit) + '</span></div></div></div>';
+      });
+      $('invMineHold').innerHTML = html || '<div class="empty-state" style="padding:12px;">You\u2019re not holding any issued materials.</div>';
+      invSetMineBadge(pend.length);
+    }catch(e){
+      $('invMinePending').innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? 'Inventory isn\u2019t set up yet.' : 'Couldn\u2019t load: ' + escapeHtml(describeCloudError(e))) + '</div>';
+    }
+  }
+  function invSetMineBadge(n){
+    const b = document.getElementById('techQaMyMatBadge'); if(!b) return;
+    b.textContent = n ? n + ' to sign' : ''; b.style.display = n ? '' : 'none';
+  }
+  // cheap check on the home screen so the tile shows how many slips need signing
+  async function invRefreshMineBadge(){
+    if(!currentUser || currentUser.role === 'admin' || currentUser.role === 'customer') return;
+    try{
+      const { data, error } = await db.from('issue_slips').select('id').eq('worker_id', currentUser.id).eq('status', 'issued');
+      if(!error) invSetMineBadge((data || []).length);
+    }catch(e){}
+  }
+  ['invMinePending', 'invMineRecent'].forEach(id=> $(id).addEventListener('click', (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowMyMaterials(); }); return; }
+    const r = e.target.closest('.mt-row'); if(r) invOpenMineSlip(r.dataset.id);
+  }));
+  $('invMineBack').addEventListener('click', ()=>{ $('invMineSlipView').style.display = 'none'; $('invMineListView').style.display = ''; invShowMyMaterials(); });
+  $('techQaMyMaterials').addEventListener('click', ()=> showPurchasingView('myMaterials'));
+  async function invOpenMineSlip(id){
+    try{
+      const whs = await db.from('warehouses').select('*'); invX.whs = whs.data || [];
+      invMineOpen = await invLoadSlip('iss', id);
+      invRenderSlipDetail(invMineOpen, 'invMine');
+      const signed = invMineOpen.h.status === 'acknowledged';
+      $('invMineSignSec').style.display = signed ? 'none' : '';
+      $('invMineActions').style.display = signed ? 'none' : '';
+      $('invMineListView').style.display = 'none'; $('invMineSlipView').style.display = '';
+      window.scrollTo({ top:0 });
+      if(!signed){
+        await loadAwesScript('signature', awesLibs.signature);
+        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+        invSigFit();
+      }
+    }catch(e){ purchFail('Couldn\u2019t open the slip: ', e); }
+  }
+  // Size the canvas to its box (sharp on high-DPI phones). Re-run on resize
+  // / rotation, redrawing what was already signed so it isn't squashed.
+  function invSigFit(){
+    const c = $('invMineSig');
+    if(!invSigPad || !c.offsetWidth) return;
+    const data = invSigPad.toData(), ratio = Math.max(window.devicePixelRatio || 1, 1);
+    c.width = c.offsetWidth * ratio; c.height = c.offsetHeight * ratio;
+    c.getContext('2d').scale(ratio, ratio);
+    invSigPad.clear();
+    if(data && data.length) invSigPad.fromData(data);
+  }
+  window.addEventListener('resize', ()=>{ if($('invMineSlipView').style.display !== 'none') invSigFit(); });
+  $('invMineSigClear').addEventListener('click', ()=>{ if(invSigPad) invSigPad.clear(); });
+  $('invMineAck').addEventListener('click', async ()=>{
+    if(!invMineOpen) return;
+    if(!invSigPad || invSigPad.isEmpty()){ toast('Please sign in the box first'); return; }
+    if(!(await purchEnsureSession())) return;
+    const btn = $('invMineAck'); btn.disabled = true;
+    try{
+      // crop to the ink (the signing box is mostly empty) so it prints large
+      // and crisp on the slip — same routine as the PO e-signatures
+      const cropped = poCleanSignature($('invMineSig')) || $('invMineSig');
+      const blob = await new Promise(res=> cropped.toBlob(res, 'image/png'));
+      const path = currentUser.id + '/' + invMineOpen.h.id + '-' + Date.now() + '.png';
+      const up = await db.storage.from('inventory-signatures').upload(path, blob, { contentType:'image/png', upsert:false });
+      if(up.error) throw up.error;
+      const { error } = await db.rpc('inv_ack_issue', { p_slip: invMineOpen.h.id, p_signature_path: path });
+      if(error) throw error;
+      toast(invMineOpen.h.slip_no + ' acknowledged — thank you');
+      $('invMineSlipView').style.display = 'none'; $('invMineListView').style.display = '';
+      invShowMyMaterials();
+    }catch(e){ purchFail('Couldn\u2019t acknowledge: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+
+  // =====================================================================
+  // Inventory — Reports (migration 20260923_09_inventory_reports.sql)
+  //
+  // Every figure comes from a database function computed from the stock
+  // ledger (Philippine-time months). Storekeepers get their own warehouses
+  // and quantities only — the functions return NULL for every value, and
+  // this screen simply hides value columns when there are none.
+  //
+  // Each report builds one "model" { title, subtitle, sheets:[{name, head,
+  // rows, money[], totalRow}] } that drives the on-screen table, the PDF
+  // and the Excel file, so all three always show the same numbers.
+  // =====================================================================
+
+  let rpTab = 'balance', rpModel = null, rpProjectsAll = [], rpReorderRows = [];
+  const RP_MONTH = (d)=> new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-PH', { month:'long', year:'numeric' });
+  function rpMoney(){ return invIsAdmin(); }
+  function rpMonthRange(){
+    const f = $('rpFrom').value, t = $('rpTo').value || f;
+    const first = f + '-01';
+    const [y, m] = t.split('-').map(Number);
+    const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);   // last day of the To month
+    return { first, last, label: f === t ? RP_MONTH(first) : RP_MONTH(first) + ' – ' + RP_MONTH(t + '-01') };
+  }
+  const rpItem = (id)=> invX.catById.get(id) || { code:'', name:'(inactive item)', unit:'', category:'' };
+  const rpWhCode = (id)=> (invX.whs.find(w=> w.id === id) || {}).code || '';
+  function rpPrj(pid, job){
+    const p = rpProjectsAll.find(x=> x.id === pid) || invX.projects.find(x=> x.id === pid);
+    return [p ? p.project_no + ' ' + p.name : '', job].filter(Boolean).join(' · ') || '—';
+  }
+  function rpMatchItem(id){
+    const m = rpItem(id), cat = $('rpCat').value;
+    if(cat && m.category !== cat) return false;
+    return true;
+  }
+  function rpSearchOk(text){
+    const words = ($('rpSearch').value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return !words.length || words.every(w=> String(text).toLowerCase().includes(w));
+  }
+
+  async function rpShow(){
+    if(!(await ensureCloud())){ toast('Not connected'); return; }
+    try{
+      await invLoadCtx();
+      if(invIsAdmin()){ const r = await db.from('projects').select('id, project_no, name, budget, status'); rpProjectsAll = r.data || []; }
+    }catch(e){ purchFail('Couldn\u2019t load inventory: ', e); return; }
+    $('purchasingView').classList.add('po-wide');
+    if(!$('rpFrom').value){
+      const now = poToday().slice(0, 7);
+      $('rpFrom').value = now; $('rpTo').value = now;
+    }
+    const whs = invIsAdmin() ? invX.whs : invX.mine;
+    $('rpWh').innerHTML = (whs.length > 1 ? '<option value="">All warehouses</option>' : '') + whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + '</option>').join('');
+    if($('rpCat').options.length <= 1) $('rpCat').innerHTML = '<option value="">All categories</option>' + PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    rpSetTab(rpTab === 'project' && !invIsAdmin() ? 'balance' : rpTab);
+  }
+  function rpSetTab(tab){
+    rpTab = tab;
+    $$('#rpTabs [data-rp]').forEach(b=> b.classList.toggle('active', b.dataset.rp === tab));
+    $$('.rp-filters .rp-f').forEach(f=>{ f.style.display = f.dataset.for.split(' ').includes(tab) ? '' : 'none'; });
+    $('rpMakePo').style.display = tab === 'reorder' && invIsAdmin() ? '' : 'none';
+    rpModel = null;
+    $('rpSummary').innerHTML = ''; $('rpCheck').textContent = ''; $('rpCheck').className = 'rp-check';
+    $('rpOut').innerHTML = '<div class="empty-state">Choose the options and tap <b>Run Report</b>.</div>';
+  }
+  $('rpTabs').addEventListener('click', (e)=>{ const b = e.target.closest('[data-rp]'); if(b) rpSetTab(b.dataset.rp); });
+  $('rpRun').addEventListener('click', ()=> rpRun());
+  $('rpSearch').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') rpRun(); });
+
+  async function rpRun(){
+    const btn = $('rpRun'); btn.disabled = true; btn.textContent = 'Running…';
+    $('rpOut').innerHTML = '<div class="empty-state">Running…</div>';
+    try{
+      if(!(await purchEnsureSession())) return;
+      const fn = { balance: rpBalance, register: rpRegister, project: rpProjectCost, slow: rpSlow, reorder: rpReorder, unreturned: rpUnreturned }[rpTab];
+      rpModel = await fn();
+      rpRender(rpModel);
+    }catch(e){
+      rpModel = null;
+      $('rpOut').innerHTML = '<div class="empty-state">' + (invMissingTables(e) || /function .*inv_rpt/.test(describeCloudError(e)) ? 'Run migration 20260923_09_inventory_reports.sql in Supabase first.' : 'Couldn\u2019t run the report: ' + escapeHtml(describeCloudError(e))) + '</div>';
+    }finally{ btn.disabled = false; btn.textContent = 'Run Report'; }
+  }
+  async function rpCall(fn, args){
+    const { data, error } = await db.rpc(fn, args);
+    if(error) throw error;
+    return data || [];
+  }
+
+  // ---------- 1. Stock balance: beginning → ending ----------
+  async function rpBalance(){
+    const r = rpMonthRange(), wh = $('rpWh').value || null;
+    const rows = (await rpCall('inv_rpt_balance', { p_from: r.first, p_to: r.last, p_warehouse: wh }))
+      .filter(x=> rpMatchItem(x.material_id) && rpSearchOk([rpItem(x.material_id).code, rpItem(x.material_id).name].join(' ')));
+    const money = rpMoney() && rows.some(x=> x.end_value != null);
+    // With values, every quantity sits right beside its peso amount under
+    // one heading (Beginning: Qty | ₱, + Purchased: Qty | ₱ …).
+    const MEAS = [['Beginning', 'beg'], ['+ Purchased', 'purch'], ['+ Returned', 'ret'], ['− Issued', 'iss'], ['± Transfers', 'trf'], ['± Adjust.', 'adj'], ['= Ending', 'end']];
+    const lead = ['Month', 'Warehouse', 'Code', 'Item', 'Unit'];
+    const head = money ? lead.concat(...MEAS.map(()=> ['Qty', '₱'])) : lead.concat(MEAS.map(m=> m[0]));
+    const headGroups = money ? [['', lead.length]].concat(MEAS.map(m=> [m[0], 2])) : null;
+    const moneyCols = money ? MEAS.map((m, i)=> lead.length + i * 2 + 1) : null;
+    const sorted = rows.slice().sort((a, b)=> a.month.localeCompare(b.month) || rpWhCode(a.warehouse_id).localeCompare(rpWhCode(b.warehouse_id)) || rpItem(a.material_id).name.localeCompare(rpItem(b.material_id).name, undefined, { numeric:true }));
+    const out = sorted.map(x=>{
+      const m = rpItem(x.material_id);
+      const cells = money ? [].concat(...MEAS.map(([, k])=> [+x[k + '_qty'], +x[k + '_value']])) : MEAS.map(([, k])=> +x[k + '_qty']);
+      return [RP_MONTH(x.month), rpWhCode(x.warehouse_id), m.code, m.name, m.unit].concat(cells);
+    });
+    // month totals (values only — adding feet to kilograms means nothing)
+    const months = Array.from(new Set(sorted.map(x=> x.month)));
+    const totals = months.map(mo=>{
+      const rs = sorted.filter(x=> x.month === mo);
+      const sum = (k)=> rs.reduce((a, x)=> a + Number(x[k] || 0), 0);
+      return { month: mo, beg: sum('beg_value'), purch: sum('purch_value'), ret: sum('ret_value'), iss: sum('iss_value'), trf: sum('trf_value'), adj: sum('adj_value'), end: sum('end_value') };
+    });
+    // reconciliation: the To month's ending vs Stock on Hand now (only
+    // meaningful when the report runs up to the current month)
+    let check = null;
+    if(r.last.slice(0, 7) === poToday().slice(0, 7)){
+      const last = sorted.filter(x=> x.month.slice(0, 7) === r.last.slice(0, 7));
+      const bad = last.filter(x=> Math.abs(Number(x.end_qty) - invAvail(x.warehouse_id, x.material_id)) > 0.0005);
+      const onhandOnly = Array.from(invX.avail.entries()).filter(([k, q])=>{
+        const [w, m] = k.split('|');
+        return q > 0 && (!wh || w === wh) && rpMatchItem(m) && !last.some(x=> x.warehouse_id === w && x.material_id === m);
+      });
+      check = (bad.length || onhandOnly.length)
+        ? { ok:false, text: '⚠ ' + (bad.length + onhandOnly.length) + ' item(s) don\u2019t tie to Stock on Hand — ' + bad.concat(onhandOnly.map(([k])=> ({ material_id:k.split('|')[1] }))).slice(0, 4).map(x=> rpItem(x.material_id).code).join(', ') }
+        : { ok:true, text: '✓ This month\u2019s ending balances tie to Stock on Hand' + (search() ? ' (for the items shown)' : '') + '.' };
+    }
+    function search(){ return ($('rpSearch').value || '').trim() || $('rpCat').value; }
+    const lastT = totals[totals.length - 1];
+    return {
+      title: 'Monthly Stock Balance', subtitle: r.label + ' · ' + (wh ? rpWhCode(wh) : 'All warehouses'),
+      summary: money && lastT ? [['Beginning value', invMoney(totals[0].beg)], ['Purchased', invMoney(totals.reduce((a, t)=> a + t.purch, 0))],
+        ['Issued', invMoney(totals.reduce((a, t)=> a + t.iss, 0))], ['Ending value', invMoney(lastT.end)]]
+        : [['Items', String(new Set(sorted.map(x=> x.material_id)).size)], ['Months', String(months.length)]],
+      check,
+      sheets: [{ name:'Stock Balance', head, headGroups, rows: out, groupCol: 0, numFrom: 5, moneyCols,
+        // month totals: pesos only (feet + kilograms can't be added), each under its own ₱ column
+        groupTotals: money ? Object.fromEntries(totals.map(t=> [RP_MONTH(t.month),
+          ['', '', '', 'Month total', ''].concat(...['beg', 'purch', 'ret', 'iss', 'trf', 'adj', 'end'].map(k=> ['', t[k]]))])) : null,
+        landscape: true }]
+    };
+  }
+
+  // ---------- 2. Purchases, issuances & returns ----------
+  async function rpRegister(){
+    const r = rpMonthRange(), wh = $('rpWh').value || null, kind = $('rpKind').value, view = $('rpRegView').value;
+    const lines = (await rpCall('inv_rpt_register', { p_from: r.first, p_to: r.last, p_warehouse: wh }))
+      .filter(x=> (!kind || x.kind === kind) && rpMatchItem(x.material_id) &&
+        rpSearchOk([rpItem(x.material_id).code, rpItem(x.material_id).name, x.doc_ref, x.worker_name, x.supplier, x.po_no, rpPrj(x.project_id, x.job_order_id)].join(' ')));
+    const money = rpMoney() && lines.some(x=> x.value != null);
+    const K = { purchase:'Purchase', issue:'Issue', 'return':'Return' };
+    const tot = (k, f)=> lines.filter(x=> x.kind === k && (!f || f(x))).reduce((a, x)=> a + Number(x.value || 0), 0);
+    const summary = money ? [['Purchased', invMoney(tot('purchase'))], ['Issued', invMoney(tot('issue'))], ['Returned (good)', invMoney(tot('return', x=> x.condition === 'good'))],
+      ['Net issued', invMoney(tot('issue') - tot('return', x=> x.condition === 'good'))]]
+      : [['Lines', String(lines.length)], ['Purchases', String(lines.filter(x=> x.kind === 'purchase').length)], ['Issues', String(lines.filter(x=> x.kind === 'issue').length)], ['Returns', String(lines.filter(x=> x.kind === 'return').length)]];
+    const sheets = [];
+    // per item
+    const byItem = new Map();
+    lines.forEach(x=>{
+      const e = byItem.get(x.material_id) || { p:0, pv:0, i:0, iv:0, rg:0, rv:0, rd:0 };
+      const q = Number(x.qty), v = Number(x.value || 0);
+      if(x.kind === 'purchase'){ e.p += q; e.pv += v; }
+      else if(x.kind === 'issue'){ e.i += q; e.iv += v; }
+      else if(x.condition === 'damaged') e.rd += q; else { e.rg += q; e.rv += v; }
+      byItem.set(x.material_id, e);
+    });
+    const itemRows = Array.from(byItem.entries()).sort((a, b)=> rpItem(a[0]).name.localeCompare(rpItem(b[0]).name, undefined, { numeric:true })).map(([id, e])=>{
+      const m = rpItem(id);
+      return [m.code, m.name, m.unit, e.p, e.i, e.rg, e.rd, e.i - e.rg].concat(money ? [e.pv, e.iv, e.rv, e.iv - e.rv] : []);
+    });
+    const itemTot = money ? ['', 'Total', '', '', '', '', '', ''].concat([itemRows.reduce((a, r)=> a + r[8], 0), itemRows.reduce((a, r)=> a + r[9], 0), itemRows.reduce((a, r)=> a + r[10], 0), itemRows.reduce((a, r)=> a + r[11], 0)]) : null;
+    if(view === 'summary'){
+      sheets.push({ name:'By Item', head:['Code', 'Item', 'Unit', 'Purchased', 'Issued', 'Returned (good)', 'Returned (damaged)', 'Net issued'].concat(money ? ['Purchased ₱', 'Issued ₱', 'Returned ₱', 'Net issued ₱'] : []),
+        rows:itemRows, numFrom:3, moneyFrom: money ? 8 : null, totalRow:itemTot, landscape:true });
+      // by project / job
+      const group = (keyFn, labelFn, filter)=>{
+        const g = new Map();
+        lines.filter(filter).forEach(x=>{ const k = keyFn(x); const e = g.get(k) || { label: labelFn(x), n:0, v:0, q:0 }; e.n++; e.v += Number(x.value || 0) * (x.kind === 'return' ? -1 : 1); g.set(k, e); });
+        return Array.from(g.values()).sort((a, b)=> b.v - a.v || a.label.localeCompare(b.label));
+      };
+      const prj = group(x=> (x.project_id || '') + '|' + (x.job_order_id || ''), x=> rpPrj(x.project_id, x.job_order_id), x=> x.kind !== 'purchase' && (x.project_id || x.job_order_id) && x.condition !== 'damaged');
+      if(prj.length) sheets.push({ name:'By Project', head:['Project / job order', 'Lines'].concat(money ? ['Net material cost ₱'] : []), rows: prj.map(e=> [e.label, e.n].concat(money ? [e.v] : [])), numFrom:1, moneyFrom: money ? 2 : null });
+      const wk = group(x=> x.worker_name || '—', x=> x.worker_name || '—', x=> x.kind !== 'purchase' && x.condition !== 'damaged');
+      if(wk.length) sheets.push({ name:'By Worker', head:['Worker', 'Lines'].concat(money ? ['Net issued ₱'] : []), rows: wk.map(e=> [e.label, e.n].concat(money ? [e.v] : [])), numFrom:1, moneyFrom: money ? 2 : null });
+      const sp = group(x=> x.supplier || '—', x=> x.supplier || 'No supplier', x=> x.kind === 'purchase');
+      if(sp.length) sheets.push({ name:'By Supplier', head:['Supplier', 'Lines'].concat(money ? ['Purchased ₱'] : []), rows: sp.map(e=> [e.label, e.n].concat(money ? [e.v] : [])), numFrom:1, moneyFrom: money ? 2 : null });
+    }
+    // detail (always included in Excel; shown on screen in Detail view)
+    const detail = lines.map(x=>{
+      const m = rpItem(x.material_id);
+      return [mrWhen(x.at), K[x.kind] + (x.condition === 'damaged' ? ' (damaged)' : ''), x.doc_ref, rpWhCode(x.warehouse_id), m.code, m.name, Number(x.qty), m.unit,
+        x.kind === 'purchase' ? [x.supplier, x.po_no].filter(Boolean).join(' · ') : (x.worker_name || ''), rpPrj(x.project_id, x.job_order_id), x.note || '']
+        .concat(money ? [x.unit_cost != null ? Number(x.unit_cost) : '', x.value != null ? Number(x.value) : ''] : []);
+    });
+    const detailSheet = { name:'Detail', head:['Date', 'Type', 'Slip no.', 'Warehouse', 'Code', 'Item', 'Qty', 'Unit', 'Supplier / worker', 'Project / job', 'Note'].concat(money ? ['Unit cost ₱', 'Value ₱'] : []),
+      rows: detail, numCols:[6], moneyFrom: money ? 11 : null, landscape:true };
+    if(view === 'detail') sheets.unshift(detailSheet);
+    else{ detailSheet.excelOnly = true; sheets.push(detailSheet); }   // Summary on screen/PDF; Excel gets the detail too
+    return { title: 'Purchases, Issuances & Returns', subtitle: r.label + ' · ' + (wh ? rpWhCode(wh) : 'All warehouses') + (kind ? ' · ' + K[kind] + 's only' : ''), summary, sheets };
+  }
+
+  // ---------- 3. Project cost by month (admin) ----------
+  async function rpProjectCost(){
+    const r = rpMonthRange();
+    const rows = await rpCall('inv_rpt_project_cost', { p_from: r.first, p_to: r.last });
+    const months = [];
+    for(let d = new Date(r.first + 'T00:00:00'); d <= new Date(r.last + 'T00:00:00'); d.setMonth(d.getMonth() + 1)) months.push(d.toISOString().slice(0, 7));
+    const ids = Array.from(new Set(rows.map(x=> x.project_id)));
+    const out = ids.map(pid=>{
+      const p = rpProjectsAll.find(x=> x.id === pid) || { project_no:'?', name:'', budget:null };
+      const per = months.map(mo=> rows.filter(x=> x.project_id === pid && String(x.month).slice(0, 7) === mo).reduce((a, x)=> a + Number(x.cost), 0));
+      const toDate = rows.filter(x=> x.project_id === pid).reduce((a, x)=> a + Number(x.cost), 0);
+      const inRange = per.reduce((a, v)=> a + v, 0);
+      const budget = p.budget != null ? Number(p.budget) : null;
+      return [p.project_no, p.name].concat(per, [inRange, toDate, budget != null ? budget : '', budget ? Math.round(toDate / budget * 1000) / 10 : '']);
+    }).sort((a, b)=> b[2 + months.length + 1] - a[2 + months.length + 1]);
+    const monthHeads = months.map(mo=> new Date(mo + '-01T00:00:00').toLocaleDateString('en-PH', { month:'short', year:'2-digit' }) + ' ₱');
+    const flagged = out.filter(r=> r[r.length - 1] !== '' && r[r.length - 1] >= 80);
+    return {
+      title: 'Project Material Cost by Month', subtitle: r.label,
+      summary: [['Projects', String(out.length)], ['Cost in period', invMoney(out.reduce((a, r)=> a + r[2 + months.length], 0))], ['At / over 80% of budget', String(flagged.length)]],
+      sheets: [{ name:'Project Cost', head:['Project', 'Name'].concat(monthHeads, ['In period ₱', 'To date ₱', 'Budget ₱', '% of budget']), rows: out,
+        moneyFrom: 2, moneyTo: 2 + months.length + 2, pctCol: 2 + months.length + 3, flagRow: (row)=> row[row.length - 1] !== '' && row[row.length - 1] >= 80, landscape: months.length > 3 }]
+    };
+  }
+
+  // ---------- 4. Slow-moving / dead stock ----------
+  async function rpSlow(){
+    const days = Number($('rpDays').value), wh = $('rpWh').value;
+    const rows = (await rpCall('inv_rpt_slow_moving', {}))
+      .filter(x=> x.days_idle >= days && (!wh || x.warehouse_id === wh) && rpMatchItem(x.material_id) && rpSearchOk([rpItem(x.material_id).code, rpItem(x.material_id).name].join(' ')))
+      .sort((a, b)=> b.days_idle - a.days_idle);
+    const money = rpMoney() && rows.some(x=> x.value != null);
+    const tied = rows.reduce((a, x)=> a + Number(x.value || 0), 0);
+    return {
+      title: 'Slow-Moving & Dead Stock', subtitle: 'Not issued for ' + days + '+ days · as of ' + poDateLong(poToday()),
+      summary: [['Items', String(rows.length)]].concat(money ? [['Value tied up', invMoney(tied)]] : []).concat([['180+ days (dead)', String(rows.filter(x=> x.days_idle >= 180).length)]]),
+      sheets: [{ name:'Slow-Moving', head:['Warehouse', 'Code', 'Item', 'On hand', 'Unit', 'Last issued', 'Days idle'].concat(money ? ['Value ₱'] : []),
+        rows: rows.map(x=>{ const m = rpItem(x.material_id); return [rpWhCode(x.warehouse_id), m.code, m.name, Number(x.qty_on_hand), m.unit, x.last_out ? poDateLong(x.last_out) : 'never', x.days_idle].concat(money ? [Number(x.value)] : []); }),
+        numCols:[3, 6], moneyFrom: money ? 7 : null, flagRow:(row)=> row[6] >= 180, totalRow: money ? ['', '', 'Total', '', '', '', '', tied] : null }]
+    };
+  }
+
+  // ---------- 5. Reorder suggestions ----------
+  async function rpReorder(){
+    const win = Number($('rpWindow').value);
+    const rows = (await rpCall('inv_rpt_reorder', { p_days: win }))
+      .filter(x=> rpMatchItem(x.material_id) && rpSearchOk([rpItem(x.material_id).code, rpItem(x.material_id).name, x.supplier].join(' ')))
+      .sort((a, b)=> (b.reorder ? 1 : 0) - (a.reorder ? 1 : 0) || Number(a.months_cover == null ? 999 : a.months_cover) - Number(b.months_cover == null ? 999 : b.months_cover));
+    rpReorderRows = rows;
+    const money = rpMoney();
+    const need = rows.filter(x=> x.reorder);
+    return {
+      title: 'Reorder Suggestions', subtitle: 'Usage over the last ' + win + ' days · as of ' + poDateLong(poToday()),
+      summary: [['To reorder', String(need.length)], ['Tracked items', String(rows.length)]].concat(money ? [['Est. order value', invMoney(need.reduce((a, x)=> a + Number(x.suggested_qty) * Number(x.unit_price || 0), 0))]] : []),
+      note: 'Reorder when stock covers less than the supplier\u2019s lead time + ½ month; the suggestion tops it up to lead time + 1 month. Lead time comes from the preferred supplier\u2019s price list (7 days if not set).',
+      sheets: [{ name:'Reorder', head:(money ? ['✓'] : []).concat(['Code', 'Item', 'On hand', 'Unit', 'Used / month', 'Months left', 'Lead (days)', 'Suggested qty']).concat(money ? ['Supplier', 'Unit price ₱', 'Est. value ₱'] : []),
+        rows: rows.map(x=>{ const m = rpItem(x.material_id);
+          return (money ? [x.reorder ? '☐' : ''] : []).concat([m.code, m.name, Number(x.on_hand), m.unit, Number(x.usage_per_month), x.months_cover != null ? Number(x.months_cover) : '—', x.lead_days, Number(x.suggested_qty)])
+            .concat(money ? [x.supplier || '—', x.unit_price != null ? Number(x.unit_price) : '', x.unit_price != null ? Number(x.suggested_qty) * Number(x.unit_price) : ''] : []); }),
+        numCols: money ? [3, 5, 6, 7, 8] : [2, 4, 5, 6, 7], moneyFrom: money ? 10 : null, flagRow:(row, i)=> rows[i].reorder, selectable: money }]
+    };
+  }
+
+  // ---------- 6. Unreturned by worker ----------
+  async function rpUnreturned(){
+    const minDays = Number($('rpHeld').value), wh = $('rpWh').value;
+    const rows = (await rpCall('inv_rpt_unreturned', {}))
+      .filter(x=> x.days_held >= minDays && (!wh || x.warehouse_id === wh) && rpSearchOk([x.worker_name, rpItem(x.material_id).code, rpItem(x.material_id).name, rpPrj(x.project_id, x.job_order_id)].join(' ')))
+      .sort((a, b)=> String(a.worker_name).localeCompare(String(b.worker_name)) || b.days_held - a.days_held);
+    const money = rpMoney() && rows.some(x=> x.value != null);
+    return {
+      title: 'Unreturned Materials by Worker', subtitle: (minDays ? 'Held ' + minDays + '+ days' : 'All held materials') + ' · as of ' + poDateLong(poToday()),
+      summary: [['Workers', String(new Set(rows.map(x=> x.worker_id)).size)], ['Lines', String(rows.length)]].concat(money ? [['Value held', invMoney(rows.reduce((a, x)=> a + Number(x.value || 0), 0))]] : []),
+      sheets: [{ name:'Unreturned', head:['Worker', 'Code', 'Item', 'Holding', 'Unit', 'Project / job', 'Since', 'Days'].concat(money ? ['Value ₱'] : []),
+        rows: rows.map(x=>{ const m = rpItem(x.material_id); return [x.worker_name, m.code, m.name, Number(x.holding), m.unit, rpPrj(x.project_id, x.job_order_id), poDateLong(x.oldest), x.days_held].concat(money ? [Number(x.value || 0)] : []); }),
+        groupCol: 0, numCols:[3, 7], moneyFrom: money ? 8 : null, flagRow:(row)=> row[7] >= 60 }]
+    };
+  }
+
+  // ---------- on-screen rendering ----------
+  function rpIsMoney(sheet, ci){
+    if(sheet.moneyCols) return sheet.moneyCols.includes(ci);
+    return sheet.moneyFrom != null && ci >= sheet.moneyFrom && (sheet.moneyTo == null || ci <= sheet.moneyTo);
+  }
+  function rpFmt(v, sheet, ci){
+    if(v === '' || v == null) return '';
+    const isMoney = rpIsMoney(sheet, ci);
+    if(ci === sheet.pctCol) return typeof v === 'number' ? v.toFixed(1) + '%' : v;
+    if(typeof v === 'number') return isMoney ? poFmt(v) : invQty(v);
+    return escapeHtml(v);
+  }
+  function rpIsNum(sheet, ci){
+    return (sheet.numFrom != null && ci >= sheet.numFrom) || (sheet.numCols || []).includes(ci) || rpIsMoney(sheet, ci) || ci === sheet.pctCol;
+  }
+  // pre: element-id prefix, so other report pages (Tool Reports: 'tr') can
+  // reuse the same renderer, PDF and Excel export
+  function rpRender(model, pre){
+    pre = pre || 'rp';
+    $(pre + 'Summary').innerHTML = (model.summary || []).map(([k, v])=> '<div class="tile"><div class="k">' + escapeHtml(k) + '</div><div class="v">' + escapeHtml(v) + '</div></div>').join('');
+    const c = $(pre + 'Check');
+    c.textContent = model.check ? model.check.text : (model.note || '');
+    c.className = 'rp-check' + (model.check ? (model.check.ok ? ' ok' : ' bad') : '');
+    $(pre + 'Out').innerHTML = model.sheets.filter(s=> !s.excelOnly).map((sh, si)=>{
+      if(!sh.rows.length) return (si ? '<div class="rp-sub">' + escapeHtml(sh.name) + '</div>' : '') + '<div class="empty-state">No data for these options.</div>';
+      let body = '', lastGroup = null;
+      sh.rows.forEach((row, ri)=>{
+        if(sh.groupCol != null && row[sh.groupCol] !== lastGroup){
+          if(lastGroup != null && sh.groupTotals && sh.groupTotals[lastGroup]) body += rpTotalRow(sh.groupTotals[lastGroup], sh);
+          lastGroup = row[sh.groupCol];
+          body += '<tr class="rp-month"><td colspan="' + (sh.head.length - (sh.groupCol != null ? 1 : 0)) + '">' + escapeHtml(lastGroup) + '</td></tr>';
+        }
+        const flag = sh.flagRow && sh.flagRow(row, ri);
+        body += '<tr' + (flag ? ' class="rp-flag"' : '') + ' data-ri="' + ri + '">' + row.map((v, ci)=>{
+          if(ci === sh.groupCol) return '';
+          if(sh.selectable && ci === 0) return '<td>' + (v ? '<input type="checkbox" class="rp-sel" checked>' : '') + '</td>';
+          return '<td class="' + (rpIsNum(sh, ci) ? 'num' : '') + (rpPairStart(sh, ci) ? ' pair' : '') + '">' + rpFmt(v, sh, ci) + '</td>';
+        }).join('') + '</tr>';
+      });
+      if(lastGroup != null && sh.groupTotals && sh.groupTotals[lastGroup]) body += rpTotalRow(sh.groupTotals[lastGroup], sh);
+      if(sh.totalRow) body += rpTotalRow(sh.totalRow, sh);
+      return (si ? '<div class="rp-sub">' + escapeHtml(sh.name) + '</div>' : '') +
+        '<div class="sp-table-wrap"><table class="sp-table rp-table"><thead>' + (sh.headGroups ? '<tr class="rp-hgroup">' + rpGroupSpans(sh).map(([l, n])=>
+          '<th colspan="' + n + '"' + (l ? ' class="grp"' : '') + '>' + escapeHtml(l) + '</th>').join('') + '</tr>' : '') + '<tr>' + sh.head.map((h, ci)=> ci === sh.groupCol ? '' : '<th class="' + (rpIsNum(sh, ci) ? 'num' : '') + (rpPairStart(sh, ci) ? ' pair' : '') + '">' + escapeHtml(h) + '</th>').join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    }).join('');
+  }
+  const rpPairStart = (sh, ci)=> !!(sh.headGroups && sh.moneyCols && sh.moneyCols.includes(ci + 1));
+  // heading spans with the hidden group column (e.g. Month) taken out
+  function rpGroupSpans(sh){
+    let ci = 0;
+    return sh.headGroups.map(([l, n])=>{
+      const hide = sh.groupCol != null && sh.groupCol >= ci && sh.groupCol < ci + n ? 1 : 0;
+      ci += n;
+      return [l, n - hide];
+    }).filter(([, n])=> n > 0);
+  }
+  function rpTotalRow(row, sh){ return '<tr class="rp-total">' + row.map((v, ci)=> ci === sh.groupCol ? '' : '<td class="' + (rpIsNum(sh, ci) ? 'num' : '') + (rpPairStart(sh, ci) ? ' pair' : '') + '">' + rpFmt(v, sh, ci) + '</td>').join('') + '</tr>'; }
+
+  // ---------- Excel ----------
+  $('rpXlsx').addEventListener('click', ()=> rpExportXlsx(rpModel, $('rpFrom').value));
+  async function rpExportXlsx(rpModel, tag){
+    if(!rpModel){ toast('Run the report first'); return; }
+    try{
+      await loadAwesScript('xlsx', awesLibs.xlsx);
+      const wb = XLSX.utils.book_new();
+      const co = (poSettingsData && poSettingsData.company_name) || 'AW Engineering Services';
+      rpModel.sheets.forEach(sh=>{
+        const rows = sh.rows.map(r=> r.map((v, ci)=> sh.selectable && ci === 0 ? (v ? 'reorder' : '') : v));
+        const band = sh.headGroups ? [[].concat(...sh.headGroups.map(([l, n])=> [l].concat(Array(n - 1).fill(''))))] : [];
+        const aoa = [[co], [rpModel.title], [rpModel.subtitle], []].concat(band, [sh.head], rows);
+        if(sh.totalRow) aoa.push(sh.totalRow);
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        if(sh.headGroups){
+          let c = 0; ws['!merges'] = [];
+          sh.headGroups.forEach(([l, n])=>{ if(n > 1 && l) ws['!merges'].push({ s:{ r:4, c }, e:{ r:4, c: c + n - 1 } }); c += n; });
+        }
+        ws['!cols'] = sh.head.map((h, ci)=> ({ wch: Math.min(48, Math.max(String(h).length + 2, ...rows.slice(0, 200).map(r=> String(r[ci] == null ? '' : r[ci]).length + 1))) }));
+        // number formats: money with 2 decimals, quantities up to 3
+        const first = 5 + band.length;   // column headings on row 5 (6 with a heading band) → data after
+        for(let ri = 0; ri < rows.length + (sh.totalRow ? 1 : 0); ri++){
+          sh.head.forEach((h, ci)=>{
+            const cell = ws[XLSX.utils.encode_cell({ r: first + ri, c: ci })];
+            if(!cell || cell.t !== 'n') return;
+            cell.z = ci === sh.pctCol ? '0.0"%"' : rpIsMoney(sh, ci) ? '#,##0.00' : '#,##0.###';
+          });
+        }
+        XLSX.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31));
+      });
+      const name = rpModel.title.replace(/[^A-Za-z0-9]+/g, '-').replace(/-+$/, '') + '-' + (tag || poToday().slice(0, 7)) + '.xlsx';
+      XLSX.writeFile(wb, name);
+      toast('Excel file downloaded');
+    }catch(e){ console.error('xlsx failed', e); toast('Couldn\u2019t create the Excel file: ' + (e && e.message ? e.message : e)); }
+  }
+
+  // ---------- PDF ----------
+  $('rpPdf').addEventListener('click', ()=> rpExportPdf(rpModel, $('rpFrom').value));
+  async function rpExportPdf(rpModel, tag){
+    if(!rpModel){ toast('Run the report first'); return; }
+    try{
+      await loadAwesScript('jspdf', awesLibs.jspdf); await loadAwesScript('autotable', awesLibs.autotable);
+      await poLoadSettings().catch(()=>{});
+      const co = poSettingsData || {}, style = co.header_style || 'green';
+      const logo = co.logo_path ? await poLoadImage(co.logo_path).then(img=> poLogoForStyle(img, style)) : await poDefaultLogo(style);
+      const fonts = await poLoadFonts();
+      const land = rpModel.sheets.some(s=> s.landscape && !s.excelOnly);
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: land ? 'l' : 'p', unit:'pt', format:'a4', compress:true });
+      let F = 'helvetica', FS = ['helvetica', 'bold'], FB = ['helvetica', 'bold'];
+      if(fonts){ try{
+        doc.addFileToVFS('Inter-Regular.ttf', fonts.regular); doc.addFont('Inter-Regular.ttf', 'Inter', 'normal');
+        doc.addFileToVFS('Inter-SemiBold.ttf', fonts.semibold); doc.addFont('Inter-SemiBold.ttf', 'Inter', 'bold');
+        doc.addFileToVFS('Inter-Bold.ttf', fonts.bold); doc.addFont('Inter-Bold.ttf', 'InterBold', 'normal');
+        F = 'Inter'; FS = ['Inter', 'bold']; FB = ['InterBold', 'normal'];
+      }catch(e){} }
+      const peso = F === 'Inter' ? '\u20B1' : 'PHP ';
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 30;
+      const G = [21, 77, 52], SUB = [96, 108, 101], INK = [28, 34, 30], LINE = [216, 223, 219];
+      const green = style !== 'white';
+      const header = ()=>{
+        if(green){ doc.setFillColor(...G); doc.rect(0, 0, W, 64, 'F'); } else { doc.setFillColor(...G); doc.rect(0, 61, W, 3, 'F'); }
+        if(logo && logo.w){ const r = Math.min(110 / logo.w, 32 / logo.h); try{ doc.addImage(logo.dataUrl, 'PNG', M, 16, logo.w * r, logo.h * r, 'rp-logo', 'FAST'); }catch(e){} }
+        doc.setTextColor(...(green ? [255, 255, 255] : G));
+        doc.setFont(FB[0], FB[1]); doc.setFontSize(15); doc.text(rpModel.title.toUpperCase(), W - M, 30, { align:'right' });
+        doc.setFont(F, 'normal'); doc.setFontSize(8.5); doc.text(rpModel.subtitle + '   •   ' + (co.company_name || ''), W - M, 46, { align:'right' });
+      };
+      header();
+      let y = 82;
+      if(rpModel.summary && rpModel.summary.length){
+        doc.setFont(F, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...INK);
+        doc.text(rpModel.summary.map(([k, v])=> k + ': ' + String(v).replace('₱', peso)).join('     '), M, y); y += 12;
+      }
+      const note = rpModel.check ? rpModel.check.text.replace('✓', '').replace('⚠', '!') : rpModel.note;
+      if(note){ doc.setFontSize(7.5); doc.setTextColor(...SUB); doc.text(doc.splitTextToSize(note, W - M * 2), M, y); y += 14; }
+      rpModel.sheets.filter(s=> !s.excelOnly).forEach((sh, si)=>{
+        if(si){ doc.setFont(FS[0], FS[1]); doc.setFontSize(9); doc.setTextColor(...G); if(y > H - 90){ doc.addPage(); header(); y = 82; } doc.text(sh.name.toUpperCase(), M, y + 4); y += 10; }
+        const txt = (v, ci)=>{ const t = rpFmt(v, sh, ci); return typeof t === 'string' ? t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : t; };
+        const body = [];
+        let last = null;
+        sh.rows.forEach(row=>{
+          if(sh.groupCol != null && row[sh.groupCol] !== last){
+            if(last != null && sh.groupTotals && sh.groupTotals[last]) body.push({ total:true, cells: sh.groupTotals[last] });
+            last = row[sh.groupCol];
+            body.push({ group:true, cells:[last] });
+          }
+          body.push({ cells: row });
+        });
+        if(last != null && sh.groupTotals && sh.groupTotals[last]) body.push({ total:true, cells: sh.groupTotals[last] });
+        if(sh.totalRow) body.push({ total:true, cells: sh.totalRow });
+        const cols = sh.head.map((h, ci)=> ci).filter(ci=> !(sh.selectable && ci === 0) && ci !== sh.groupCol);
+        doc.autoTable({
+          startY: y + 4, margin:{ left:M, right:M, top:78, bottom:36 },
+          head: (sh.headGroups ? [rpGroupSpans(sh).map(([l, n])=> ({ content: l, colSpan: n, styles:{ halign:'center', fillColor: l ? [31, 122, 80] : G } }))] : [])
+            .concat([cols.map(ci=> sh.head[ci].replace('₱', peso))]),
+          body: body.map(b=> b.group ? [{ content: String(b.cells[0]).toUpperCase(), colSpan: cols.length, styles:{ fillColor:[233, 243, 237], textColor:G, fontStyle:'bold', fontSize:7.5 } }]
+            : cols.map(ci=> ({ content: txt(b.cells[ci], ci), styles: b.total ? { fontStyle:'bold' } : {} }))),
+          theme:'plain',
+          styles:{ font:F, fontSize: cols.length > 14 ? 6.4 : cols.length > 10 ? 7 : 8, cellPadding:{ top:3.5, bottom:3.5, left:4, right:4 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.4 } },
+          headStyles:{ font:F, fontStyle:'bold', fillColor:G, textColor:255, fontSize: cols.length > 14 ? 6.2 : 7 },
+          columnStyles: Object.fromEntries(cols.map((ci, i)=> [i, rpIsNum(sh, ci) ? { halign:'right' } : {}])),
+          // column labels line up with their numbers (right-aligned)
+          didParseCell: (c)=>{
+            if(c.section === 'head' && c.row.index === (sh.headGroups ? 1 : 0) && rpIsNum(sh, cols[c.column.index])) c.cell.styles.halign = 'right';
+          },
+          didDrawCell: (c)=>{
+            if(c.section === 'head' && c.row.index === 0) return;
+            const ci = cols[c.column.index];
+            if(ci != null && rpPairStart(sh, ci)){ doc.setDrawColor(200, 210, 204); doc.setLineWidth(0.5); doc.line(c.cell.x, c.cell.y, c.cell.x, c.cell.y + c.cell.height); }
+          },
+          didDrawPage: ()=>{ header(); }
+        });
+        y = doc.lastAutoTable.finalY + 16;
+      });
+      const pages = doc.internal.getNumberOfPages();
+      for(let p = 1; p <= pages; p++){ doc.setPage(p); doc.setFont(F, 'normal'); doc.setFontSize(7); doc.setTextColor(...SUB);
+        doc.text('Generated ' + new Date().toLocaleString('en-PH') + (invIsAdmin() ? '' : ' · quantities only'), M, H - 16); doc.text('Page ' + p + ' of ' + pages, W - M, H - 16, { align:'right' }); }
+      const title = rpModel.title;
+      $('previewOverlay').querySelector('h3').textContent = title;
+      $('previewOkBtn').textContent = 'Close';
+      $('previewOverlay').style.zIndex = '99';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc, title.replace(/[^A-Za-z0-9]+/g, '-').replace(/-+$/, '') + '-' + (tag || '') + '.pdf', title);
+    }catch(e){ console.error('report pdf failed', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
+  }
+
+  // ---------- reorder → draft POs (admin) ----------
+  $('rpMakePo').addEventListener('click', async ()=>{
+    if(!rpModel || rpTab !== 'reorder'){ toast('Run the Reorder report first'); return; }
+    const picked = Array.from($$('#rpOut tr[data-ri]')).filter(tr=> tr.querySelector('.rp-sel') && tr.querySelector('.rp-sel').checked)
+      .map(tr=> rpReorderRows[Number(tr.dataset.ri)]).filter(x=> x && Number(x.suggested_qty) > 0);
+    if(!picked.length){ toast('Tick the items to order'); return; }
+    const groups = new Map();
+    picked.forEach(x=>{ const k = x.supplier_id || ''; if(!groups.has(k)) groups.set(k, []); groups.get(k).push(x); });
+    if(!confirm('Create ' + groups.size + ' draft PO' + (groups.size === 1 ? '' : 's') + ' for ' + picked.length + ' item' + (picked.length === 1 ? '' : 's') + '?\n\n' +
+      Array.from(groups.entries()).map(([k, xs])=> (xs[0].supplier || 'No preferred supplier (choose in the PO)') + ': ' + xs.length).join('\n') + '\n\nThey open as drafts — check quantities and prices before issuing.')) return;
+    if(!(await purchEnsureSession())) return;
+    try{
+      await Promise.all([mtLoad({ silent:true }), poLoadSettings(), poLoadSuppliers()]);
+      const made = [];
+      for(const [sid, xs] of groups){
+        const sup = poSuppliers.find(s=> s.id === sid);
+        const { data: po, error } = await db.from('purchase_orders').insert({ supplier_id: sid || null, reference: 'Reorder ' + poToday(),
+          payment_terms: sup ? (sup.payment_terms || '') : '', deliver_to: (poSettingsData && poSettingsData.deliver_to) || '', vat_mode: (poSettingsData && poSettingsData.vat_mode) || 'exclusive' }).select('id, po_no').single();
+        if(error) throw error;
+        const rows = xs.map((x, i)=>{ const m = rpItem(x.material_id), pr = poPriceFor(x.material_id, sid || null);
+          return { id: poUuid(), po_id: po.id, line_no: i + 1, material_id: x.material_id, code: m.code, description: m.name,
+            unit: (pr && pr.unitFromPrice) || m.unit, qty: Number(x.suggested_qty), unit_price: pr ? pr.price : 0 }; });
+        const ir = await db.from('purchase_order_items').insert(rows); if(ir.error) throw ir.error;
+        made.push(po.po_no);
+      }
+      toast('Created draft ' + made.join(', ') + ' — review them in Purchase Orders');
+    }catch(e){ purchFail('Couldn\u2019t create the POs: ', e); }
+  });
+
+
+  // =====================================================================
+  // Tools & Equipment (migration 20260923_10_tools_equipment.sql)
+  //
+  // Every change of status / custody is ONE call to a tl_* database
+  // function (issue, return, handover, sign, defect decision, calibration),
+  // which validates it. Admins read the tools table; storekeepers and
+  // workers read tools_view (no purchase cost).
+  // =====================================================================
+
+  const TL_CATEGORIES = ['Power Tools', 'Hand Tools', 'Testing & Measuring', 'Pumps & Recovery', 'Brazing & Welding',
+    'Flaring & Swaging', 'Ladders & Access', 'Safety / PPE', 'Other'];
+  const TL_STATUS = { available:'Available', issued:'Issued', defective:'Defective', repair:'In repair', lost:'Lost', retired:'Retired' };
+  const TL_COND = { good:'Good', needs_repair:'Needs repair', defective:'Defective', missing_parts:'Missing parts', lost:'Lost' };
+  const TL_SLIP = { issue:{ label:'Issue', title:'TOOL ISSUE SLIP' }, 'return':{ label:'Return', title:'TOOL RETURN SLIP' }, handover:{ label:'Handover', title:'TOOL HANDOVER SLIP' } };
+  const TL_BUCKET = 'tool-files';
+  const tl = { tools:[], whs:[], mine:[], workers:[], jobs:[], projects:[], suppliers:[], isAdmin:false };
+
+  const tlToday = ()=> poToday();
+  const tlTool = (id)=> tl.tools.find(t=> t.id === id);
+  const tlWh = (id)=> (tl.whs.find(w=> w.id === id) || {}).code || '';
+  const tlOverdue = (t)=> t.status === 'issued' && t.due_back && t.due_back < tlToday();
+  const tlMaintLate = (t)=> t.next_maint_due && t.next_maint_due < tlToday();
+  const tlMaintSoon = (t)=> t.next_maint_due && !tlMaintLate(t) && t.next_maint_due <= new Date(Date.now() + 30 * 864e5 + 8 * 3600e3).toISOString().slice(0, 10);
+  const tlStatusPill = (s)=> '<span class="tl-st ' + escapeHtml(s) + '">' + escapeHtml(TL_STATUS[s] || s) + '</span>';
+  function tlLabel(t){ return t ? t.asset_tag + ' · ' + t.name : ''; }
+
+  async function tlLoad(){
+    tl.isAdmin = invIsAdmin();
+    const [tools, whs, keep, wk, jobs, pr] = await Promise.all([
+      db.from(tl.isAdmin ? 'tools' : 'tools_view').select('*').order('asset_tag'),
+      db.from('warehouses').select('*').order('code'),
+      tl.isAdmin ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
+      db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'),
+      db.rpc('inv_open_job_orders'),
+      db.from('projects').select('id, project_no, name, status').order('project_no', { ascending:false })
+    ]);
+    if(tools.error) throw tools.error;
+    tl.tools = tools.data || [];
+    tl.whs = whs.data || [];
+    const ids = keep.data ? new Set(keep.data.map(k=> k.warehouse_id)) : null;
+    tl.mine = tl.whs.filter(w=> w.is_active && (!ids || ids.has(w.id)));
+    tl.workers = wk.data || [];
+    tl.jobs = jobs.error ? [] : (jobs.data || []);
+    tl.projects = pr.error ? [] : (pr.data || []);
+  }
+  async function tlEnter(needWh){
+    if(!(await ensureCloud())){ toast('Not connected'); return false; }
+    try{ await tlLoad(); }
+    catch(e){ purchFail(invMissingTables(e) ? 'Run migration 20260923_10_tools_equipment.sql first: ' : 'Couldn\u2019t load tools: ', e); return false; }
+    if(needWh && !tl.mine.length){ toast(tl.isAdmin ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
+    $('purchasingView').classList.add('po-wide');
+    return true;
+  }
+  const tlOpts = (list, val, lab, empty)=> (empty != null ? '<option value="">' + escapeHtml(empty) + '</option>' : '') +
+    list.map(x=> '<option value="' + escapeHtml(val(x)) + '">' + escapeHtml(lab(x)) + '</option>').join('');
+  const tlWhOpts = ()=> tlOpts(tl.mine, w=> w.id, w=> w.code + ' · ' + w.name);
+  const tlWorkerOpts = (empty)=> tlOpts(tl.workers, w=> w.id, w=> w.name, empty || 'Choose a person…');
+  const tlPrj = (pid, job)=>{ const p = tl.projects.find(x=> x.id === pid); return [p ? p.project_no + ' ' + p.name : '', job].filter(Boolean).join(' · '); };
+
+  // navigation: hub buttons + "← Tools"
+  $('purchasingView').addEventListener('click', (e)=>{
+    const go = e.target.closest('[data-tl-go]'); if(go){ showPurchasingView(go.dataset.tlGo); return; }
+    if(e.target.closest('[data-tl-hub]')) showPurchasingView('tlHub');
+  });
+  // "Here / Later on their phone" pickers
+  $$('[data-signmode]').forEach(g=> g.addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-m]'); if(!b) return;
+    g.querySelectorAll('[data-m]').forEach(x=> x.classList.toggle('on', x === b));
+  }));
+  const tlMode = (id)=> ($(id).querySelector('.on') || {}).dataset.m || 'counter';
+
+  // ---------- signature capture ----------
+  let tlPad = null, tlSignResolve = null;
+  function tlSign(title, who){
+    return new Promise(async (resolve)=>{
+      tlSignResolve = resolve;
+      $('tlSignTitle').textContent = title; $('tlSignWho').textContent = who || '';
+      $('tlSignOverlay').classList.add('open');
+      try{
+        await loadAwesScript('signature', awesLibs.signature);
+        const c = $('tlSignCanvas'), r = Math.max(window.devicePixelRatio || 1, 1);
+        c.width = c.offsetWidth * r; c.height = c.offsetHeight * r; c.getContext('2d').scale(r, r);
+        tlPad = new SignaturePad(c, { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+      }catch(e){ toast('Signature tool couldn\u2019t load — check the connection'); tlSignDone(null); }
+    });
+  }
+  function tlSignDone(v){ $('tlSignOverlay').classList.remove('open'); const r = tlSignResolve; tlSignResolve = null; if(r) r(v); }
+  $('tlSignClear').addEventListener('click', ()=>{ if(tlPad) tlPad.clear(); });
+  $('tlSignClose').addEventListener('click', ()=> tlSignDone(null));
+  $('tlSignOk').addEventListener('click', async ()=>{
+    if(!tlPad || tlPad.isEmpty()){ toast('Please sign in the box'); return; }
+    const c = poCleanSignature($('tlSignCanvas')) || $('tlSignCanvas');
+    tlSignDone(await new Promise(res=> c.toBlob(res, 'image/png')));
+  });
+  async function tlUpload(blob, ext){
+    const path = currentUser.id + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+    const up = await db.storage.from(TL_BUCKET).upload(path, blob, { contentType: ext === 'png' ? 'image/png' : 'image/jpeg', upsert:false });
+    if(up.error) throw up.error;
+    return path;
+  }
+  async function tlPhotoBlob(file){
+    const c = await poImageToPng(file, 1400, 1400);
+    return { blob: await new Promise(res=> c.toBlob(res, 'image/jpeg', 0.8)), url: c.toDataURL('image/jpeg', 0.6) };
+  }
+  async function tlDownloadUrl(path){
+    if(!path) return null;
+    try{ const r = await db.storage.from(TL_BUCKET).download(path); return r.data ? await poBlobToDataUrl(r.data) : null; }catch(e){ return null; }
+  }
+
+  // ---------- QR scanner (built-in BarcodeDetector, else jsQR, else type it) ----------
+  let tlScanStream = null, tlScanResolve = null, tlScanLoop = 0;
+  function tlParseTag(txt){ const m = /TL-\d{3,}/i.exec(String(txt || '')); return m ? m[0].toUpperCase() : null; }
+  function tlScan(){
+    return new Promise(async (resolve)=>{
+      tlScanResolve = resolve;
+      $('tlScanManual').value = ''; $('tlScanMsg').textContent = 'Point the camera at the label.';
+      $('tlScanOverlay').classList.add('open');
+      try{
+        tlScanStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
+        const v = $('tlScanVideo'); v.srcObject = tlScanStream; await v.play();
+        let detect;
+        if('BarcodeDetector' in window){ const bd = new BarcodeDetector({ formats:['qr_code'] }); detect = async ()=>{ const r = await bd.detect(v); return r[0] && r[0].rawValue; }; }
+        else{
+          await loadAwesScript('jsqr', awesLibs.jsqr);
+          const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently:true });
+          detect = async ()=>{ if(!v.videoWidth) return null; cv.width = v.videoWidth; cv.height = v.videoHeight; cx.drawImage(v, 0, 0);
+            const r = jsQR(cx.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height); return r && r.data; };
+        }
+        const id = ++tlScanLoop;
+        const tick = async ()=>{
+          if(id !== tlScanLoop || !tlScanResolve) return;
+          try{ const raw = await detect(); const tag = tlParseTag(raw); if(tag){ tlScanDone(tag); return; } }catch(e){}
+          setTimeout(tick, 250);
+        };
+        tick();
+      }catch(e){ $('tlScanMsg').textContent = 'Camera not available — type the asset tag below.'; }
+    });
+  }
+  function tlScanDone(tag){
+    tlScanLoop++;
+    if(tlScanStream){ tlScanStream.getTracks().forEach(t=> t.stop()); tlScanStream = null; }
+    $('tlScanOverlay').classList.remove('open');
+    const r = tlScanResolve; tlScanResolve = null; if(r) r(tag);
+  }
+  $('tlScanClose').addEventListener('click', ()=> tlScanDone(null));
+  $('tlScanManualOk').addEventListener('click', ()=>{ const t = tlParseTag($('tlScanManual').value); if(t) tlScanDone(t); else toast('Enter a tag like TL-0001'); });
+  $('tlScanManual').addEventListener('keydown', (e)=>{ if(e.key === 'Enter') $('tlScanManualOk').click(); });
+
+  // ---------- QR labels (vector QR, crisp at any size) ----------
+  async function tlLabelsPdf(tools){
+    if(!tools.length){ toast('No tools to label'); return; }
+    await loadAwesScript('jspdf', awesLibs.jspdf); await loadAwesScript('qrgen', awesLibs.qrgen);
+    await poLoadSettings().catch(()=>{});
+    const co = (poSettingsData && poSettingsData.company_name) || 'AW Engineering Services';
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:'p', unit:'mm', format:'a4', compress:true });
+    const cols = 3, rows = 8, lw = 64, lh = 33, mx = (210 - cols * lw) / 2, my = (297 - rows * lh) / 2;
+    tools.forEach((t, i)=>{
+      if(i && i % (cols * rows) === 0) doc.addPage();
+      const k = i % (cols * rows), x = mx + (k % cols) * lw, y = my + Math.floor(k / cols) * lh;
+      doc.setDrawColor(200); doc.setLineWidth(0.2); doc.roundedRect(x + 1, y + 1, lw - 2, lh - 2, 2, 2);
+      const qr = qrcode(0, 'M'); qr.addData('AWES-TOOL:' + t.asset_tag); qr.make();
+      const n = qr.getModuleCount(), size = 25, cell = size / n, qx = x + 4, qy = y + (lh - size) / 2;
+      doc.setFillColor(0, 0, 0);
+      for(let r = 0; r < n; r++) for(let c = 0; c < n; c++) if(qr.isDark(r, c)) doc.rect(qx + c * cell, qy + r * cell, cell + 0.02, cell + 0.02, 'F');
+      doc.setTextColor(21, 77, 52); doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(t.asset_tag, qx + size + 3, y + 11);
+      doc.setTextColor(30, 30, 30); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+      doc.text(doc.splitTextToSize(t.name, lw - size - 10).slice(0, 2), qx + size + 3, y + 16);
+      doc.setFontSize(6); doc.setTextColor(110); doc.text(doc.splitTextToSize(co, lw - size - 10).slice(0, 1), qx + size + 3, y + lh - 5);
+    });
+    $('previewOverlay').querySelector('h3').textContent = 'QR Labels';
+    $('previewOkBtn').textContent = 'Close';
+    $('previewOverlay').style.zIndex = '99';
+    $('previewOverlay').classList.add('open');
+    await renderPdfPreview(doc, 'tool-labels-' + tlToday() + '.pdf', 'Tool QR Labels');
+  }
+
+  // =====================================================================
+  // REGISTER
+  // =====================================================================
+  let tlDetailTool = null, tlEditTool = null, tlKitRows = [];
+  function tlRegView(v){
+    $('tlRegList').style.display = v === 'list' ? '' : 'none';
+    $('tlRegForm').style.display = v === 'form' ? '' : 'none';
+    $('tlRegDetail').style.display = v === 'detail' ? '' : 'none';
+    window.scrollTo({ top:0 });
+  }
+  async function tlShowRegister(){
+    if(!(await tlEnter(false))) return;
+    tlRegView('list');
+    $('tlRegWh').innerHTML = '<option value="">All warehouses</option>' + tl.whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code) + '</option>').join('');
+    tlRenderRegister();
+  }
+  function tlRegFiltered(){
+    const st = $('tlRegStatus').value, wh = $('tlRegWh').value, kind = $('tlRegKind').value;
+    const words = ($('tlRegSearch').value || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return tl.tools.filter(t=> (!wh || t.home_warehouse_id === wh) && (!kind || t.kind === kind) &&
+      (!st || (st === 'overdue' ? tlOverdue(t) : st === 'maint' ? (tlMaintLate(t) || tlMaintSoon(t)) : t.status === st)) &&
+      (!words.length || words.every(w=> [t.asset_tag, t.name, t.brand, t.model, t.serial_no, t.holder_name, t.category].join(' ').toLowerCase().includes(w))));
+  }
+  function tlRenderRegister(){
+    const rows = tlRegFiltered(), all = tl.tools;
+    const n = (f)=> all.filter(f).length;
+    $('tlRegisterCount').textContent = all.length ? all.length + ' tools' : '';
+    $('tlRegSummary').innerHTML = [['Available', n(t=> t.status === 'available')], ['Issued', n(t=> t.status === 'issued')], ['Overdue', n(tlOverdue)],
+      ['Defective / repair', n(t=> t.status === 'defective' || t.status === 'repair')], ['Calibration overdue', n(tlMaintLate)]]
+      .map(([k, v])=> '<div class="tile"><div class="k">' + k + '</div><div class="v">' + v + '</div></div>').join('');
+    $('tlRegRows').innerHTML = rows.length ? rows.map(t=>
+      '<button type="button" class="mt-row" data-id="' + escapeHtml(t.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(t.asset_tag) + '</span>' +
+      escapeHtml(t.name) + (t.kind === 'kit' ? ' <span class="sp-tag muted">Kit · ' + (t.kit_contents || []).length + ' items</span>' : '') + ' ' + tlStatusPill(t.status) + '</div>' +
+      '<div class="sp-row-sub">' + escapeHtml([t.category, [t.brand, t.model].filter(Boolean).join(' '), t.serial_no ? 'S/N ' + t.serial_no : '', tlWh(t.home_warehouse_id)].filter(Boolean).join(' · ')) + '</div>' +
+      (t.status === 'issued' ? '<div class="sp-row-sub' + (tlOverdue(t) ? '" style="color:var(--danger);font-weight:700;' : '') + '">With ' + escapeHtml(t.holder_name) + (t.due_back ? ' · due ' + escapeHtml(poDateLong(t.due_back)) + (tlOverdue(t) ? ' — OVERDUE' : '') : '') + '</div>' : '') +
+      (t.next_maint_due ? '<div class="sp-row-sub" style="' + (tlMaintLate(t) ? 'color:var(--danger);font-weight:700;' : tlMaintSoon(t) ? 'color:#9A6212;font-weight:700;' : '') + '">' + escapeHtml(t.maint_type === 'inspection' ? 'Inspection' : 'Calibration') + ' due ' + escapeHtml(poDateLong(t.next_maint_due)) + (tlMaintLate(t) ? ' — OVERDUE (can\u2019t be issued)' : '') + '</div>' : '') +
+      '</div></button>').join('') : '<div class="empty-state">' + (all.length ? 'Nothing matches.' : 'No tools yet.' + (tl.isAdmin ? ' Tap <b>+ Add Tool / Kit</b> or import a CSV.' : '')) + '</div>';
+  }
+  ['tlRegSearch'].forEach(id=> $(id).addEventListener('input', tlRenderRegister));
+  ['tlRegStatus', 'tlRegWh', 'tlRegKind'].forEach(id=> $(id).addEventListener('change', tlRenderRegister));
+  $('tlRegRows').addEventListener('click', (e)=>{ const r = e.target.closest('.mt-row'); if(r) tlOpenDetail(r.dataset.id); });
+  $('tlScanBtn').addEventListener('click', async ()=>{
+    const tag = await tlScan(); if(!tag) return;
+    const t = tl.tools.find(x=> x.asset_tag === tag);
+    if(t) tlOpenDetail(t.id); else toast(tag + ' isn\u2019t in the register' + (tl.isAdmin ? '' : ' (or not your warehouse)'));
+  });
+  $('tlLabelsBtn').addEventListener('click', ()=>{
+    const rows = tlRegFiltered();
+    if(rows.length > 1 && !confirm('Print QR labels for the ' + rows.length + ' tools shown? (Filter the list first to print fewer.)')) return;
+    tlLabelsPdf(rows).catch(e=> toast('Couldn\u2019t make labels: ' + e.message));
+  });
+
+  // ---------- add / edit (admin) ----------
+  function tlRenderKitRows(){
+    $('tlFKitRows').innerHTML = tlKitRows.map((k, i)=> '<div class="tl-kit-row" data-i="' + i + '"><input type="text" data-k="name" value="' + escapeHtml(k.name) + '" placeholder="e.g. Screwdriver set">' +
+      '<input type="text" data-k="qty" inputmode="numeric" value="' + escapeHtml(String(k.qty)) + '" placeholder="Qty"><button type="button" class="tl-rm" data-rm="1">&minus;</button></div>').join('');
+  }
+  $('tlFKitRows').addEventListener('input', (e)=>{ const r = e.target.closest('[data-i]'); if(r) tlKitRows[+r.dataset.i][e.target.dataset.k] = e.target.value; });
+  $('tlFKitRows').addEventListener('click', (e)=>{ if(!e.target.closest('[data-rm]')) return; tlKitRows.splice(+e.target.closest('[data-i]').dataset.i, 1); tlRenderKitRows(); });
+  $('tlFKitAdd').addEventListener('click', ()=>{ tlKitRows.push({ name:'', qty:1 }); tlRenderKitRows(); });
+  function tlFormKind(){
+    const kit = $('tlFKind').value === 'kit';
+    $('tlFKitSec').style.display = kit ? '' : 'none';
+    $('tlFSerialsWrap').style.display = !tlEditTool && Number($('tlFQty').value) > 1 ? '' : 'none';
+  }
+  $('tlFKind').addEventListener('change', tlFormKind);
+  $('tlFQty').addEventListener('input', tlFormKind);
+  async function tlOpenForm(t){
+    tlEditTool = t || null;
+    $('tlFormTitle').textContent = t ? 'Edit ' + t.asset_tag : 'New Tool / Kit';
+    $('tlFCat').innerHTML = TL_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    $('tlFWh').innerHTML = tlOpts(tl.whs.filter(w=> w.is_active || (t && w.id === t.home_warehouse_id)), w=> w.id, w=> w.code + ' · ' + w.name);
+    const sup = await db.from('suppliers').select('id, name, trade_name').eq('is_active', true).order('name');
+    $('tlFSup').innerHTML = tlOpts(sup.data || [], s=> s.id, s=> s.trade_name || s.name, '— none —');
+    const v = (id, x)=>{ $(id).value = x == null ? '' : String(x); };
+    v('tlFKind', t ? t.kind : 'tool'); v('tlFName', t && t.name); v('tlFCat', t ? t.category : 'Power Tools'); v('tlFBrand', t && t.brand); v('tlFModel', t && t.model);
+    v('tlFSerial', t && t.serial_no); v('tlFWh', t ? t.home_warehouse_id : (tl.mine[0] || tl.whs[0] || {}).id); v('tlFQty', 1); v('tlFSerials', '');
+    v('tlFMaint', t && t.maint_type); v('tlFInterval', t && t.maint_interval_days); v('tlFNext', t && t.next_maint_due);
+    v('tlFPDate', t && t.purchase_date); v('tlFCost', t && t.purchase_cost); v('tlFSup', t && t.supplier_id); v('tlFPo', t && t.po_no);
+    v('tlFWarranty', t && t.warranty_until); v('tlFNotes', t && t.notes);
+    $('tlFQtyWrap').style.display = t ? 'none' : '';
+    tlKitRows = t ? (t.kit_contents || []).map(k=> Object.assign({}, k)) : [];
+    tlRenderKitRows(); tlFormKind();
+    tlRegView('form');
+  }
+  $('tlAddBtn').addEventListener('click', ()=> tlOpenForm(null));
+  $('tlFormBack').addEventListener('click', ()=> tlEditTool ? tlOpenDetail(tlEditTool.id) : tlRegView('list'));
+  $('tlFSave').addEventListener('click', async ()=>{
+    const name = $('tlFName').value.trim();
+    if(!name){ toast('Enter the tool name'); return; }
+    const cost = spParseMoney($('tlFCost').value), iv = $('tlFInterval').value.trim() ? parseInt($('tlFInterval').value, 10) : null;
+    if(Number.isNaN(cost)){ toast('Cost must be a number'); return; }
+    if($('tlFMaint').value && !(iv > 0)){ toast('Enter how often it needs ' + $('tlFMaint').value + ' (days)'); return; }
+    const kind = $('tlFKind').value;
+    const kit = kind === 'kit' ? tlKitRows.filter(k=> String(k.name).trim()).map(k=> ({ name: String(k.name).trim(), qty: Math.max(1, parseInt(k.qty, 10) || 1) })) : [];
+    if(kind === 'kit' && !kit.length){ toast('List what\u2019s in the kit'); return; }
+    const row = { kind, name, category: $('tlFCat').value, brand: $('tlFBrand').value.trim(), model: $('tlFModel').value.trim(), home_warehouse_id: $('tlFWh').value,
+      kit_contents: kit, maint_type: $('tlFMaint').value || null, maint_interval_days: $('tlFMaint').value ? iv : null, next_maint_due: $('tlFMaint').value ? ($('tlFNext').value || null) : null,
+      purchase_date: $('tlFPDate').value || null, purchase_cost: cost, supplier_id: $('tlFSup').value || null, po_no: $('tlFPo').value.trim(),
+      warranty_until: $('tlFWarranty').value || null, notes: $('tlFNotes').value.trim() };
+    if(!(await purchEnsureSession())) return;
+    try{
+      if(tlEditTool){
+        const { error } = await db.from('tools').update(Object.assign(row, { serial_no: $('tlFSerial').value.trim() })).eq('id', tlEditTool.id);
+        if(error) throw error;
+        toast(tlEditTool.asset_tag + ' saved');
+        await tlLoad(); tlOpenDetail(tlEditTool.id);
+      }else{
+        const qty = Math.max(1, Math.min(200, parseInt($('tlFQty').value, 10) || 1));
+        const serials = $('tlFSerials').value.split(/\r?\n/).map(x=> x.trim());
+        const rows = Array.from({ length: qty }, (_, i)=> Object.assign({}, row, { serial_no: qty === 1 ? $('tlFSerial').value.trim() : (serials[i] || '') }));
+        const { data, error } = await db.from('tools').insert(rows).select('id, asset_tag');
+        if(error) throw error;
+        toast('Added ' + data.map(x=> x.asset_tag).join(', '));
+        await tlLoad(); tlRegView('list'); tlRenderRegister();
+        if(confirm('Print QR labels for the new ' + (data.length === 1 ? 'tool' : data.length + ' tools') + ' now?')) tlLabelsPdf(tl.tools.filter(t=> data.some(d=> d.id === t.id)));
+      }
+    }catch(e){ purchFail('Couldn\u2019t save: ', e); }
+  });
+  // CSV import (admin): name, kind, category, brand, model, serial_no, warehouse_code, purchase_date, purchase_cost, maint_type, maint_interval_days, next_maint_due
+  $('tlImportBtn').addEventListener('click', ()=>{ $('tlImportFile').value = ''; $('tlImportFile').click(); });
+  $('tlImportFile').addEventListener('change', async ()=>{
+    const f = $('tlImportFile').files && $('tlImportFile').files[0]; if(!f) return;
+    const rows = spParseCsv(await f.text()); if(rows.length < 2){ toast('The CSV has no data rows'); return; }
+    const h = rows[0].map(x=> x.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')), col = (r, k)=>{ const i = h.indexOf(k); return i < 0 ? '' : String(r[i] || '').trim(); };
+    if(!h.includes('name') || !h.includes('warehouse_code')){ toast('CSV needs at least: name, warehouse_code'); return; }
+    const out = [], bad = [];
+    rows.slice(1).forEach((r, i)=>{
+      const w = tl.whs.find(x=> x.code.toUpperCase() === col(r, 'warehouse_code').toUpperCase());
+      if(!col(r, 'name') || !w){ bad.push(i + 2); return; }
+      const mt = ['calibration', 'inspection'].includes(col(r, 'maint_type')) ? col(r, 'maint_type') : null;
+      out.push({ name: col(r, 'name'), kind: col(r, 'kind') === 'kit' ? 'kit' : 'tool', category: TL_CATEGORIES.find(c=> c.toLowerCase() === col(r, 'category').toLowerCase()) || 'Other',
+        brand: col(r, 'brand'), model: col(r, 'model'), serial_no: col(r, 'serial_no'), home_warehouse_id: w.id, purchase_date: col(r, 'purchase_date') || null,
+        purchase_cost: col(r, 'purchase_cost') ? spParseMoney(col(r, 'purchase_cost')) : null, maint_type: mt,
+        maint_interval_days: mt && parseInt(col(r, 'maint_interval_days'), 10) > 0 ? parseInt(col(r, 'maint_interval_days'), 10) : null, next_maint_due: mt ? (col(r, 'next_maint_due') || null) : null });
+    });
+    if(!out.length){ toast('Nothing to import' + (bad.length ? ' — check rows ' + bad.slice(0, 5).join(', ') : '')); return; }
+    if(!confirm('Add ' + out.length + ' tool' + (out.length === 1 ? '' : 's') + (bad.length ? ' (skipping ' + bad.length + ' row(s) with no name or unknown warehouse)' : '') + '?')) return;
+    const { data, error } = await db.from('tools').insert(out).select('id');
+    if(error){ purchFail('Import failed: ', error); return; }
+    toast('Imported ' + data.length + ' tools'); await tlLoad(); tlRenderRegister();
+  });
+
+  // ---------- detail + history ----------
+  async function tlOpenDetail(id){
+    const t = tlTool(id); if(!t) return;
+    tlDetailTool = t;
+    $('tlDetTitle').innerHTML = '<span class="mt-code">' + escapeHtml(t.asset_tag) + '</span> ' + escapeHtml(t.name) + ' ' + tlStatusPill(t.status);
+    const kv = (k, v)=> v ? '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>' : '';
+    $('tlDetInfo').innerHTML = kv('Type', t.kind === 'kit' ? 'Kit' : 'Tool / equipment') + kv('Category', escapeHtml(t.category)) + kv('Brand / model', escapeHtml([t.brand, t.model].filter(Boolean).join(' '))) +
+      kv('Serial no.', escapeHtml(t.serial_no)) + kv('Home warehouse', escapeHtml(tlWh(t.home_warehouse_id))) +
+      (t.status === 'issued' ? kv('With', escapeHtml(t.holder_name) + (t.due_back ? ' · due ' + escapeHtml(poDateLong(t.due_back)) : '') + (tlOverdue(t) ? ' <b style="color:var(--danger)">OVERDUE</b>' : '')) + kv('For', escapeHtml(tlPrj(t.project_id, t.job_order_id))) : '') +
+      (t.maint_type ? kv(t.maint_type === 'inspection' ? 'Inspection' : 'Calibration', 'every ' + t.maint_interval_days + ' days · next ' + escapeHtml(poDateLong(t.next_maint_due)) + (tlMaintLate(t) ? ' <b style="color:var(--danger)">OVERDUE</b>' : '')) : '') +
+      (t.kind === 'kit' ? '<div class="wide"><div class="k">Kit contents</div><div class="v">' + escapeHtml((t.kit_contents || []).map(k=> k.name + (k.qty > 1 ? ' ×' + k.qty : '')).join(', ')) + '</div></div>' : '') +
+      kv('Purchased', escapeHtml([t.purchase_date ? poDateLong(t.purchase_date) : '', t.po_no, t.purchase_cost != null && tl.isAdmin ? '₱' + poFmt(t.purchase_cost) : ''].filter(Boolean).join(' · '))) +
+      kv('Warranty until', t.warranty_until ? escapeHtml(poDateLong(t.warranty_until)) + (t.warranty_until < tlToday() ? ' (expired)' : '') : '');
+    const b = (a, l, c)=> '<button type="button" class="btn ' + (c || 'btn-secondary') + '" data-da="' + a + '">' + l + '</button>';
+    $('tlDetActions').innerHTML = b('label', 'Print QR Label') + (t.maint_type && t.status !== 'issued' ? b('maint', 'Record ' + (t.maint_type === 'inspection' ? 'Inspection' : 'Calibration')) : '') +
+      (tl.isAdmin ? b('edit', 'Edit') + (t.status === 'lost' ? b('found', 'Mark Found') : '') + (['available', 'lost', 'defective'].includes(t.status) ? b('retire', 'Retire', 'danger') : '') : '');
+    tlRegView('detail');
+    const h = await db.from('tool_events').select('*').eq('tool_id', t.id).order('at', { ascending:false }).limit(200);
+    $('tlDetHist').innerHTML = (h.data || []).length ? '<thead><tr><th>When</th><th>Event</th><th>Ref.</th><th>Details</th><th>By</th></tr></thead><tbody>' +
+      h.data.map(e=> '<tr><td>' + escapeHtml(mrWhen(e.at)) + '</td><td><b>' + escapeHtml(e.event) + '</b></td><td>' + escapeHtml(e.ref) + '</td><td>' + escapeHtml(e.detail) + '</td><td>' + escapeHtml(e.by_name) + '</td></tr>').join('') + '</tbody>'
+      : '<tbody><tr><td style="color:var(--text-muted);">No history yet.</td></tr></tbody>';
+  }
+  $('tlDetBack').addEventListener('click', ()=>{ tlRegView('list'); tlRenderRegister(); });
+  $('tlDetActions').addEventListener('click', async (e)=>{
+    const b = e.target.closest('[data-da]'); if(!b || !tlDetailTool) return;
+    const t = tlDetailTool, a = b.dataset.da;
+    if(a === 'label') return tlLabelsPdf([t]);
+    if(a === 'edit') return tlOpenForm(t);
+    if(a === 'maint'){ showPurchasingView('tlMaint'); setTimeout(()=> tlMaintOpenForm(t.id), 300); return; }
+    const reason = prompt(a === 'found' ? 'Where was ' + t.asset_tag + ' found?' : 'Why is ' + t.asset_tag + ' being retired?');
+    if(!reason || !reason.trim()) return;
+    if(!(await purchEnsureSession())) return;
+    const { error } = await db.rpc('tl_admin_status', { p_tool: t.id, p_status: a === 'found' ? 'available' : 'retired', p_note: reason.trim() });
+    if(error){ purchFail('Couldn\u2019t update: ', error); return; }
+    toast(t.asset_tag + (a === 'found' ? ' back in service' : ' retired')); await tlLoad(); tlOpenDetail(t.id);
+  });
+
+  // =====================================================================
+  // DEFECTS
+  // =====================================================================
+  let tlDefects = [], tlDefOpen = null;
+  async function tlShowDefects(){
+    if(!(await tlEnter(false))) return;
+    $('tlDefDetail').style.display = 'none'; $('tlDefList').style.display = '';
+    const r = await db.from('tool_defects').select('*').order('created_at', { ascending:false }).limit(500);
+    tlDefects = r.data || [];
+    tlRenderDefects();
+  }
+  function tlRenderDefects(){
+    const st = $('tlDefStatus').value, q = ($('tlDefSearch').value || '').trim().toLowerCase();
+    const rows = tlDefects.filter(d=> (st === 'active' ? d.status !== 'closed' : !st || d.status === st) &&
+      (!q || [d.defect_no, tlLabel(tlTool(d.tool_id)), d.worker_name, d.description].join(' ').toLowerCase().includes(q)));
+    $('tlDefectsCount').textContent = tlDefects.filter(d=> d.status !== 'closed').length ? tlDefects.filter(d=> d.status !== 'closed').length + ' open' : '';
+    $('tlDefRows').innerHTML = rows.length ? rows.map(d=>{ const t = tlTool(d.tool_id) || {};
+      return '<button type="button" class="mt-row" data-id="' + escapeHtml(d.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(d.defect_no) + '</span>' +
+        escapeHtml(tlLabel(t)) + ' <span class="tl-st ' + (d.status === 'closed' ? 'retired' : d.status === 'in_repair' ? 'repair' : 'defective') + '">' + escapeHtml(d.status.replace('_', ' ')) + '</span>' +
+        (d.under_warranty ? ' <span class="sp-tag">Under warranty</span>' : '') + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml([TL_COND[d.condition] || d.condition, d.worker_name ? 'from ' + d.worker_name : '', mrWhen(d.created_at), d.decision !== 'pending' ? 'decision: ' + d.decision.replace('_', ' ') : ''].filter(Boolean).join(' · ')) + '</div>' +
+        (d.description ? '<div class="sp-row-sub">' + escapeHtml(d.description) + '</div>' : '') + '</div></button>'; }).join('')
+      : '<div class="empty-state">No defect reports here.</div>';
+  }
+  $('tlDefSearch').addEventListener('input', tlRenderDefects); $('tlDefStatus').addEventListener('change', tlRenderDefects);
+  $('tlDefRows').addEventListener('click', (e)=>{ const r = e.target.closest('.mt-row'); if(r) tlOpenDefect(r.dataset.id); });
+  $('tlDefBack').addEventListener('click', ()=>{ $('tlDefDetail').style.display = 'none'; $('tlDefList').style.display = ''; tlRenderDefects(); });
+  async function tlOpenDefect(id){
+    const d = tlDefects.find(x=> x.id === id); if(!d) return;
+    tlDefOpen = d; const t = tlTool(d.tool_id) || {};
+    $('tlDefTitle').innerHTML = '<span class="mt-code">' + escapeHtml(d.defect_no) + '</span> ' + escapeHtml(tlLabel(t));
+    const kv = (k, v)=> v ? '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>' : '';
+    $('tlDefInfo').innerHTML = kv('Condition', escapeHtml(TL_COND[d.condition] || d.condition)) + kv('Returned by', escapeHtml(d.worker_name)) + kv('Job / project', escapeHtml(tlPrj(d.project_id, d.job_order_id))) +
+      kv('Reported', escapeHtml(mrWhen(d.created_at) + ' by ' + d.reported_by_name)) + kv('Warranty', d.under_warranty ? '<b>Still under warranty</b> — claim from the supplier' : 'Not under warranty') +
+      kv('Status', escapeHtml(d.status.replace('_', ' ') + (d.decision !== 'pending' ? ' · ' + d.decision.replace('_', ' ') : ''))) +
+      (d.repair_cost != null && tl.isAdmin ? kv('Repair cost', '₱' + poFmt(d.repair_cost) + (d.repair_vendor ? ' · ' + escapeHtml(d.repair_vendor) : '')) : '') +
+      (d.chargeable_to_worker ? kv('Chargeable to worker', 'Yes (per company policy)') : '') +
+      '<div class="wide"><div class="k">Description</div><div class="v">' + escapeHtml(d.description || '—') + '</div></div>' +
+      (d.photo_path ? '<div class="wide"><div class="k">Photo</div><div class="v mr-photo" id="tlDefPhoto">Loading…</div></div>' : '');
+    if(d.photo_path) tlDownloadUrl(d.photo_path).then(u=>{ const el = document.getElementById('tlDefPhoto'); if(el) el.innerHTML = u ? '<img src="' + u + '">' : 'Photo unavailable'; });
+    $('tlDCause').value = d.cause; $('tlDDec').value = d.decision; $('tlDVendor').value = d.repair_vendor || '';
+    $('tlDCost').value = d.repair_cost != null ? String(d.repair_cost) : ''; $('tlDCharge').checked = !!d.chargeable_to_worker; $('tlDNote').value = '';
+    $('tlDefDecideSec').style.display = tl.isAdmin && d.status !== 'closed' ? '' : 'none';
+    $('tlDefList').style.display = 'none'; $('tlDefDetail').style.display = '';
+    window.scrollTo({ top:0 });
+  }
+  $('tlDefDecideSec').addEventListener('click', async (e)=>{
+    const b = e.target.closest('[data-dstat]'); if(!b || !tlDefOpen) return;
+    const st = b.dataset.dstat, dec = $('tlDDec').value, cost = spParseMoney($('tlDCost').value);
+    if(st === 'closed' && dec === 'pending'){ toast('Choose a decision before closing'); return; }
+    if(st === 'in_repair' && dec !== 'repair'){ toast('Set the decision to Repair first'); return; }
+    if(Number.isNaN(cost)){ toast('Repair cost must be a number'); return; }
+    if(st === 'closed' && !confirm('Close ' + tlDefOpen.defect_no + ' as "' + dec.replace('_', ' ') + '"? ' + (['replace', 'write_off'].includes(dec) ? 'The tool will be retired.' : 'The tool goes back into service.'))) return;
+    if(!(await purchEnsureSession())) return;
+    const { error } = await db.rpc('tl_decide_defect', { p: { defect_id: tlDefOpen.id, decision: dec, status: st, cause: $('tlDCause').value,
+      repair_vendor: $('tlDVendor').value.trim(), repair_cost: cost, chargeable_to_worker: $('tlDCharge').checked, note: $('tlDNote').value.trim() } });
+    if(error){ purchFail('Couldn\u2019t save the decision: ', error); return; }
+    toast(tlDefOpen.defect_no + ' updated'); await tlShowDefects();
+  });
+
+  // =====================================================================
+  // CALIBRATION & INSPECTION
+  // =====================================================================
+  let tlMaintTool = null;
+  async function tlShowMaint(){
+    if(!(await tlEnter(false))) return;
+    $('tlMtForm').style.display = 'none';
+    tlRenderMaint();
+  }
+  function tlRenderMaint(){
+    const due = $('tlMtShow').value === 'due', q = ($('tlMtSearch').value || '').trim().toLowerCase();
+    const rows = tl.tools.filter(t=> t.maint_type && t.status !== 'retired' && (!due || tlMaintLate(t) || tlMaintSoon(t)) &&
+      (!q || [t.asset_tag, t.name, t.serial_no].join(' ').toLowerCase().includes(q))).sort((a, b)=> String(a.next_maint_due).localeCompare(String(b.next_maint_due)));
+    $('tlMaintCount').textContent = tl.tools.filter(tlMaintLate).length ? tl.tools.filter(tlMaintLate).length + ' overdue' : '';
+    $('tlMtRows').innerHTML = rows.length ? rows.map(t=> '<div class="sp-row" data-id="' + escapeHtml(t.id) + '"><div class="sp-row-top"><div style="min-width:0;"><div class="sp-row-title"><span class="mt-code">' + escapeHtml(t.asset_tag) + '</span> ' + escapeHtml(t.name) + ' ' + tlStatusPill(t.status) + '</div>' +
+      '<div class="sp-row-sub">' + escapeHtml((t.maint_type === 'inspection' ? 'Inspection' : 'Calibration') + ' every ' + t.maint_interval_days + ' days · ' + tlWh(t.home_warehouse_id)) + '</div></div>' +
+      '<div class="mt-row-price" style="' + (tlMaintLate(t) ? 'color:var(--danger);' : tlMaintSoon(t) ? 'color:#9A6212;' : '') + '">' + escapeHtml(t.next_maint_due ? poDateLong(t.next_maint_due) : 'not set') + '<div class="sp-row-sub">' + (tlMaintLate(t) ? 'OVERDUE' : tlMaintSoon(t) ? 'due soon' : 'next due') + '</div></div></div>' +
+      '<div class="user-card-actions"><button type="button" class="primary" data-mt="1"' + (t.status === 'issued' ? ' disabled title="Return it first"' : '') + '>Record result</button></div></div>').join('')
+      : '<div class="empty-state">' + (due ? 'Nothing overdue or due in the next 30 days. ✓' : 'No tools have a calibration or inspection schedule yet — set one on the tool.') + '</div>';
+  }
+  $('tlMtSearch').addEventListener('input', tlRenderMaint); $('tlMtShow').addEventListener('change', tlRenderMaint);
+  $('tlMtRows').addEventListener('click', (e)=>{ if(e.target.closest('[data-mt]')) tlMaintOpenForm(e.target.closest('.sp-row').dataset.id); });
+  function tlMaintOpenForm(id){
+    const t = tlTool(id); if(!t) return;
+    tlMaintTool = t;
+    $('tlMtFormTitle').textContent = 'Record ' + (t.maint_type === 'inspection' ? 'inspection' : 'calibration') + ' — ' + t.asset_tag + ' ' + t.name;
+    $('tlMtDate').value = tlToday(); $('tlMtResult').value = 'pass'; $('tlMtRef').value = ''; $('tlMtNote').value = '';
+    $('tlMtForm').style.display = ''; $('tlMtForm').scrollIntoView({ block:'center' });
+  }
+  $('tlMtCancel').addEventListener('click', ()=>{ $('tlMtForm').style.display = 'none'; });
+  $('tlMtSave').addEventListener('click', async ()=>{
+    const t = tlMaintTool; if(!t) return;
+    if($('tlMtResult').value === 'fail' && !$('tlMtNote').value.trim()){ toast('Describe why it failed'); return; }
+    if(!(await purchEnsureSession())) return;
+    const { data, error } = await db.rpc('tl_log_maintenance', { p: { tool_id: t.id, type: t.maint_type, done_on: $('tlMtDate').value, result: $('tlMtResult').value,
+      cert_ref: $('tlMtRef').value.trim(), note: $('tlMtNote').value.trim() } });
+    if(error){ purchFail('Couldn\u2019t save: ', error); return; }
+    toast(data && data.defect_no ? 'Failed — ' + data.defect_no + ' opened; tool out of service' : 'Passed — next due ' + poDateLong(data.next_due));
+    await tlLoad(); $('tlMtForm').style.display = 'none'; tlRenderMaint();
+  });
+
+  // =====================================================================
+  // shared: tool line list with type-ahead + scan + optional photo
+  // =====================================================================
+  function tlLineList(id, pool){        // pool(): tools allowed on this list
+    const st = { lines:[], pool };
+    const find = $(id + 'Find');
+    const add = (t)=>{
+      if(!t){ return; }
+      if(st.lines.some(l=> l.tool_id === t.id)){ toast(t.asset_tag + ' is already on the list'); return; }
+      if(!st.pool().some(x=> x.id === t.id)){ toast(t.asset_tag + ' can\u2019t be added here (' + (TL_STATUS[t.status] || t.status) + (t.status === 'available' ? ', other warehouse' : '') + ')'); return; }
+      st.lines.push({ tool_id: t.id, note:'', photo:null });
+      render();
+    };
+    function render(){
+      $(id).innerHTML = st.lines.length ? st.lines.map((l, i)=>{ const t = tlTool(l.tool_id);
+        return '<div class="tl-line" data-i="' + i + '"><div class="tl-line-top"><div><span class="tl-tag">' + escapeHtml(t.asset_tag) + '</span> <span class="tl-name">' + escapeHtml(t.name) + '</span>' +
+          '<div class="tl-sub">' + escapeHtml([t.kind === 'kit' ? 'Kit: ' + (t.kit_contents || []).map(k=> k.name + (k.qty > 1 ? ' ×' + k.qty : '')).join(', ') : '', t.serial_no ? 'S/N ' + t.serial_no : ''].filter(Boolean).join(' · ')) + '</div>' +
+          (tlMaintLate(t) ? '<div class="tl-bad">' + escapeHtml((t.maint_type === 'inspection' ? 'Inspection' : 'Calibration') + ' overdue since ' + poDateLong(t.next_maint_due)) + ' — it won\u2019t be issued</div>' : tlMaintSoon(t) ? '<div class="tl-warn">' + escapeHtml((t.maint_type === 'inspection' ? 'Inspection' : 'Calibration') + ' due ' + poDateLong(t.next_maint_due)) + '</div>' : '') +
+          '</div><button type="button" class="tl-rm" data-rm="1">&minus;</button></div>' +
+          '<div class="tl-line-ctl"><label class="btn btn-secondary mt-small-btn" style="margin:0;">Photo<input type="file" accept="image/*" capture="environment" data-photo="1" style="display:none;"></label>' +
+          '<input type="text" data-note="1" placeholder="Note (optional)" value="' + escapeHtml(l.note) + '"></div>' +
+          (l.photo ? '<div class="tl-photo"><img src="' + l.photo.url + '"></div>' : '') + '</div>'; }).join('')
+        : '<div class="empty-state" style="padding:12px;">No tools yet — type a tag or name below, or scan.</div>';
+    }
+    $(id).addEventListener('click', (e)=>{ if(e.target.closest('[data-rm]')){ st.lines.splice(+e.target.closest('[data-i]').dataset.i, 1); render(); } });
+    $(id).addEventListener('input', (e)=>{ if(e.target.dataset.note) st.lines[+e.target.closest('[data-i]').dataset.i].note = e.target.value; });
+    $(id).addEventListener('change', async (e)=>{
+      if(!e.target.dataset.photo || !e.target.files[0]) return;
+      try{ st.lines[+e.target.closest('[data-i]').dataset.i].photo = await tlPhotoBlob(e.target.files[0]); render(); }catch(err){ toast('Couldn\u2019t read that photo'); }
+    });
+    find.addEventListener('input', ()=>{
+      const row = find.parentElement; let box = row.querySelector('.po-suggest');
+      const w = find.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const hits = w.length ? st.pool().filter(t=> !st.lines.some(l=> l.tool_id === t.id) && w.every(x=> [t.asset_tag, t.name, t.serial_no, t.brand].join(' ').toLowerCase().includes(x))).slice(0, 8) : [];
+      if(!hits.length){ if(box) box.remove(); return; }
+      if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; row.appendChild(box); }
+      box.innerHTML = hits.map((t, i)=> '<button type="button" data-pick="' + escapeHtml(t.id) + '"' + (i === 0 ? ' class="hl"' : '') + '><span><b>' + escapeHtml(t.asset_tag) + '</b> ' + escapeHtml(t.name) + '</span><span class="s-price">' + escapeHtml(t.serial_no) + '</span></button>').join('');
+      box.onclick = (ev)=>{ const b = ev.target.closest('[data-pick]'); if(!b) return; add(tlTool(b.dataset.pick)); find.value = ''; box.remove(); find.focus(); };
+    });
+    find.addEventListener('keydown', (e)=>{
+      const box = find.parentElement.querySelector('.po-suggest');
+      if(e.key === 'Enter'){ e.preventDefault(); const tag = tlParseTag(find.value);
+        const t = tag ? tl.tools.find(x=> x.asset_tag === tag) : null;
+        if(t){ add(t); find.value = ''; if(box) box.remove(); } else if(box){ const h = box.querySelector('.hl'); if(h) h.click(); } }
+    });
+    $(id + 'Scan').addEventListener('click', async ()=>{ const tag = await tlScan(); if(!tag) return; const t = tl.tools.find(x=> x.asset_tag === tag); if(t) add(t); else toast(tag + ' isn\u2019t in the register'); });
+    st.render = render; st.reset = ()=>{ st.lines = []; render(); };
+    return st;
+  }
+  // collect signatures (+ photos) then post
+  async function tlSigsAndPost(opts){
+    // opts: { keeperTitle, keeperWho, workerTitle, workerWho, needWorker, lines }
+    const k = await tlSign(opts.keeperTitle, opts.keeperWho); if(!k) return null;
+    let w = null;
+    if(opts.needWorker){ w = await tlSign(opts.workerTitle, opts.workerWho); if(!w) return null; }
+    const paths = { keeper: await tlUpload(k, 'png'), worker: w ? await tlUpload(w, 'png') : '' };
+    for(const l of (opts.lines || [])) if(l.photo && !l.photo_path) l.photo_path = await tlUpload(l.photo.blob, 'jpg');
+    return paths;
+  }
+
+  // =====================================================================
+  // ISSUE
+  // =====================================================================
+  const tlIs = tlLineList('tlIsLines', ()=> tl.tools.filter(t=> t.status === 'available' && t.home_warehouse_id === $('tlIsWh').value));
+  async function tlShowIssue(){
+    if(!(await tlEnter(true))) return;
+    $('tlIsWh').innerHTML = tlWhOpts(); $('tlIsWorker').innerHTML = tlWorkerOpts();
+    $('tlIsJob').innerHTML = tlOpts(tl.jobs, j=> j.id, j=> j.id + (j.cust_name ? ' — ' + j.cust_name : ''), '— none —');
+    $('tlIsProject').innerHTML = tlOpts(tl.projects.filter(p=> ['planning', 'active', 'on_hold'].includes(p.status)), p=> p.id, p=> p.project_no + ' — ' + p.name, '— none —');
+    $('tlIsDue').value = ''; $('tlIsNote').value = ''; $('tlIsLinesFind').value = '';
+    tlIs.reset();
+  }
+  $('tlIsWh').addEventListener('change', ()=>{ tlIs.lines = tlIs.lines.filter(l=> tlTool(l.tool_id).home_warehouse_id === $('tlIsWh').value); tlIs.render(); });
+  $('tlIsPost').addEventListener('click', async ()=>{
+    const worker = tl.workers.find(w=> w.id === $('tlIsWorker').value), wh = tl.mine.find(w=> w.id === $('tlIsWh').value);
+    if(!worker){ toast('Choose who the tools are issued to'); return; }
+    if(!tlIs.lines.length){ toast('Add at least one tool'); return; }
+    const late = tlIs.lines.map(l=> tlTool(l.tool_id)).filter(tlMaintLate);
+    if(late.length){ toast(late.map(t=> t.asset_tag).join(', ') + ': calibration/inspection overdue — remove it or record a pass first'); return; }
+    if($('tlIsDue').value && $('tlIsDue').value < tlToday()){ toast('The due-back date is in the past'); return; }
+    const mode = tlMode('tlIsMode');
+    if(!(await purchEnsureSession())) return;
+    const btn = $('tlIsPost'); btn.disabled = true;
+    try{
+      const sig = await tlSigsAndPost({ keeperTitle:'Warehouseman signature', keeperWho:'Issued by ' + (currentUser.name || '') + ' — ' + tlIs.lines.length + ' tool(s) to ' + worker.name,
+        workerTitle:'Worker signature', workerWho: worker.name + ' — I received the tools listed, in good condition', needWorker: mode === 'counter', lines: tlIs.lines });
+      if(!sig) return;
+      const { data, error } = await db.rpc('tl_post_issue', { p: { warehouse_id: wh.id, worker_id: worker.id, job_order_id: $('tlIsJob').value || null, project_id: $('tlIsProject').value || null,
+        due_back: $('tlIsDue').value || null, note: $('tlIsNote').value.trim(), sign_mode: mode, sig_keeper_path: sig.keeper, sig_worker_path: sig.worker,
+        lines: tlIs.lines.map(l=> ({ tool_id: l.tool_id, photo_path: l.photo_path || '', note: l.note })) } });
+      if(error) throw error;
+      notifyUser(worker.id, 'Tools issued to you', data.slip_no + ' — ' + tlIs.lines.length + ' tool(s)' + (mode === 'phone' ? '. Open My Tools and sign to confirm.' : '.') + ($('tlIsDue').value ? ' Due back ' + poDateLong($('tlIsDue').value) + '.' : ''), 'tis-' + data.id);
+      toast(data.slip_no + (mode === 'phone' ? ' posted — waiting for ' + worker.name + '\u2019s signature' : ' posted'));
+      tlAfterPost(data.id);
+    }catch(e){ purchFail('Couldn\u2019t issue: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // RETURN — tools held by the chosen worker
+  // =====================================================================
+  let tlRt = [];
+  async function tlShowReturn(){
+    if(!(await tlEnter(true))) return;
+    $('tlRtWh').innerHTML = tlWhOpts();
+    const holders = tl.workers.filter(w=> tl.tools.some(t=> t.status === 'issued' && t.holder_id === w.id));
+    $('tlRtWorker').innerHTML = tlOpts(holders, w=> w.id, w=> w.name + ' (' + tl.tools.filter(t=> t.status === 'issued' && t.holder_id === w.id).length + ')', holders.length ? 'Choose a person…' : 'Nobody is holding tools');
+    $('tlRtNote').value = ''; tlRt = [];
+    $('tlRtLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose who is returning tools.</div>';
+  }
+  function tlRenderReturn(){
+    $('tlRtLines').innerHTML = tlRt.length ? tlRt.map((l, i)=>{ const t = tlTool(l.tool_id);
+      return '<div class="tl-line" data-i="' + i + '"><div class="tl-line-top"><label class="sp-check" style="margin:0;"><input type="checkbox" data-inc="1"' + (l.inc ? ' checked' : '') + '> ' +
+        '<span><span class="tl-tag">' + escapeHtml(t.asset_tag) + '</span> <span class="tl-name">' + escapeHtml(t.name) + '</span></span></label>' +
+        (tlOverdue(t) ? '<span class="tl-bad">overdue</span>' : '') + '</div>' +
+        '<div class="tl-sub">' + escapeHtml([t.job_order_id, t.issued_at ? 'since ' + mrWhen(t.issued_at) : '', t.due_back ? 'due ' + poDateLong(t.due_back) : ''].filter(Boolean).join(' · ')) + '</div>' +
+        (l.inc ? '<div class="tl-line-ctl"><select data-cond="1">' + Object.entries(TL_COND).map(([k, v])=> '<option value="' + k + '"' + (l.cond === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select>' +
+          '<input type="text" data-note="1" placeholder="' + (l.cond === 'good' ? 'Note (optional)' : 'What\u2019s wrong? (or add a photo)') + '" value="' + escapeHtml(l.note) + '"></div>' +
+          (t.kind === 'kit' && l.cond !== 'lost' ? '<div class="tl-kit"><span class="tl-sub">Missing from kit:</span>' + (t.kit_contents || []).map((k, ki)=> '<label><input type="checkbox" data-kit="' + ki + '"' + (l.missing.includes(ki) ? ' checked' : '') + '> ' + escapeHtml(k.name) + (k.qty > 1 ? ' ×' + k.qty : '') + '</label>').join('') + '</div>' : '') +
+          (l.cond !== 'good' && l.cond !== 'lost' ? '<div class="tl-photo"><label class="btn btn-secondary mt-small-btn" style="margin:0;">Photo of the damage<input type="file" accept="image/*" capture="environment" data-photo="1" style="display:none;"></label>' + (l.photo ? '<img src="' + l.photo.url + '">' : '') + '</div>' : '') : '') +
+        '</div>'; }).join('') : '<div class="empty-state" style="padding:12px;">This person isn\u2019t holding any tools.</div>';
+  }
+  $('tlRtWorker').addEventListener('change', ()=>{
+    const w = $('tlRtWorker').value;
+    tlRt = tl.tools.filter(t=> t.status === 'issued' && t.holder_id === w).map(t=> ({ tool_id: t.id, inc:true, cond:'good', note:'', missing:[], photo:null }));
+    tlRenderReturn();
+  });
+  $('tlRtLines').addEventListener('change', async (e)=>{
+    const r = e.target.closest('[data-i]'); if(!r) return; const l = tlRt[+r.dataset.i];
+    if(e.target.dataset.inc){ l.inc = e.target.checked; tlRenderReturn(); }
+    else if(e.target.dataset.cond){ l.cond = e.target.value; tlRenderReturn(); }
+    else if(e.target.dataset.kit != null){ const k = +e.target.dataset.kit; l.missing = e.target.checked ? l.missing.concat(k) : l.missing.filter(x=> x !== k); }
+    else if(e.target.dataset.photo && e.target.files[0]){ try{ l.photo = await tlPhotoBlob(e.target.files[0]); tlRenderReturn(); }catch(err){ toast('Couldn\u2019t read that photo'); } }
+  });
+  $('tlRtLines').addEventListener('input', (e)=>{ if(e.target.dataset.note) tlRt[+e.target.closest('[data-i]').dataset.i].note = e.target.value; });
+  $('tlRtPost').addEventListener('click', async ()=>{
+    const worker = tl.workers.find(w=> w.id === $('tlRtWorker').value), wh = tl.mine.find(w=> w.id === $('tlRtWh').value);
+    const lines = tlRt.filter(l=> l.inc);
+    if(!worker || !lines.length){ toast('Choose who is returning and tick the tools'); return; }
+    for(const l of lines){ const t = tlTool(l.tool_id);
+      if(l.cond !== 'good' && l.cond !== 'lost' && !l.photo && !l.note.trim() && !l.missing.length){ toast(t.asset_tag + ': add a photo or a note about the problem'); return; } }
+    const bad = lines.filter(l=> l.cond !== 'good' || l.missing.length).length;
+    if(bad && !confirm(bad + ' tool(s) not in good condition — a defect report opens for each and they go out of service. Continue?')) return;
+    const mode = tlMode('tlRtMode');
+    if(!(await purchEnsureSession())) return;
+    const btn = $('tlRtPost'); btn.disabled = true;
+    try{
+      const sig = await tlSigsAndPost({ keeperTitle:'Warehouseman signature', keeperWho:'Received by ' + (currentUser.name || '') + ' — ' + lines.length + ' tool(s) from ' + worker.name,
+        workerTitle:'Worker signature', workerWho: worker.name + ' — I returned the tools listed, in the condition noted', needWorker: mode === 'counter', lines });
+      if(!sig) return;
+      const { data, error } = await db.rpc('tl_post_return', { p: { warehouse_id: wh.id, worker_id: worker.id, note: $('tlRtNote').value.trim(), sign_mode: mode,
+        sig_keeper_path: sig.keeper, sig_worker_path: sig.worker,
+        lines: lines.map(l=>{ const t = tlTool(l.tool_id); return { tool_id: l.tool_id, condition: l.cond, note: l.note.trim(), photo_path: l.photo_path || '',
+          kit_missing: l.missing.map(k=> t.kit_contents[k]) }; }) } });
+      if(error) throw error;
+      if(mode === 'phone') notifyUser(worker.id, 'Please sign your tool return', data.slip_no + ' — open My Tools and sign to confirm.', 'trs-' + data.id);
+      toast(data.slip_no + ' posted' + (data.defects ? ' — ' + data.defects + ' defect report(s) opened' : ''));
+      tlAfterPost(data.id);
+    }catch(e){ purchFail('Couldn\u2019t receive: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // HANDOVER (admin / storekeeper screen; workers use My Tools)
+  // =====================================================================
+  let tlHo = [];
+  async function tlShowHandover(){
+    if(!(await tlEnter(false))) return;
+    const holders = tl.workers.filter(w=> tl.tools.some(t=> t.status === 'issued' && t.holder_id === w.id));
+    $('tlHoFrom').innerHTML = tlOpts(holders, w=> w.id, w=> w.name, holders.length ? 'Choose who has the tools…' : 'Nobody is holding tools');
+    $('tlHoTo').innerHTML = tlWorkerOpts(); $('tlHoNote').value = ''; tlHo = [];
+    $('tlHoLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose who is handing over.</div>';
+  }
+  function tlRenderPick(host, arr){
+    $(host).innerHTML = arr.length ? arr.map((l, i)=>{ const t = tlTool(l.tool_id);
+      return '<label class="tl-line" style="display:block;" data-i="' + i + '"><input type="checkbox" data-pick="1"' + (l.inc ? ' checked' : '') + '> <span class="tl-tag">' + escapeHtml(t.asset_tag) + '</span> <span class="tl-name">' + escapeHtml(t.name) + '</span>' +
+        '<div class="tl-sub">' + escapeHtml([t.job_order_id, t.due_back ? 'due ' + poDateLong(t.due_back) : ''].filter(Boolean).join(' · ')) + '</div></label>'; }).join('')
+      : '<div class="empty-state" style="padding:12px;">No tools held.</div>';
+  }
+  $('tlHoFrom').addEventListener('change', ()=>{ tlHo = tl.tools.filter(t=> t.status === 'issued' && t.holder_id === $('tlHoFrom').value).map(t=> ({ tool_id:t.id, inc:false })); tlRenderPick('tlHoLines', tlHo); });
+  $('tlHoLines').addEventListener('change', (e)=>{ if(e.target.dataset.pick) tlHo[+e.target.closest('[data-i]').dataset.i].inc = e.target.checked; });
+  async function tlDoHandover(fromId, toId, toolIds, note){
+    const from = tl.workers.find(w=> w.id === fromId) || { name: currentUser.name }, to = tl.workers.find(w=> w.id === toId);
+    if(!to || fromId === toId){ toast('Choose who is receiving the tools'); return null; }
+    if(!toolIds.length){ toast('Tick the tools being handed over'); return null; }
+    if(!(await purchEnsureSession())) return null;
+    const g = await tlSign('Giver signature', from.name + ' — I handed over ' + toolIds.length + ' tool(s) to ' + to.name); if(!g) return null;
+    const r = await tlSign('Receiver signature', to.name + ' — I received ' + toolIds.length + ' tool(s) from ' + from.name); if(!r) return null;
+    const { data, error } = await db.rpc('tl_post_handover', { p: { from_worker_id: fromId, to_worker_id: toId, note: note || '',
+      sig_giver_path: await tlUpload(g, 'png'), sig_receiver_path: await tlUpload(r, 'png'), lines: toolIds.map(id=> ({ tool_id:id })) } });
+    if(error) throw error;
+    notifyUser(toId, 'Tools handed over to you', data.slip_no + ' — ' + toolIds.length + ' tool(s) from ' + from.name + '. You\u2019re now responsible for them.', 'tho-' + data.id);
+    toast(data.slip_no + ' — custody moved to ' + to.name);
+    return data;
+  }
+  $('tlHoPost').addEventListener('click', async ()=>{
+    const btn = $('tlHoPost'); btn.disabled = true;
+    try{ const d = await tlDoHandover($('tlHoFrom').value, $('tlHoTo').value, tlHo.filter(l=> l.inc).map(l=> l.tool_id), $('tlHoNote').value.trim()); if(d) tlAfterPost(d.id); }
+    catch(e){ purchFail('Couldn\u2019t hand over: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // SLIPS
+  // =====================================================================
+  let tlSlips = [], tlSlipOpen = null;
+  async function tlAfterPost(slipId){
+    showPurchasingView('tlSlips');
+    setTimeout(()=> tlOpenSlip(slipId), 150);
+  }
+  async function tlShowSlips(){
+    if(!(await tlEnter(false))) return;
+    $('tlSlipDetail').style.display = 'none'; $('tlSlipList').style.display = '';
+    const r = await db.from('tool_slips').select('*').order('created_at', { ascending:false }).limit(500);
+    tlSlips = r.data || [];
+    tlRenderSlips();
+  }
+  const tlParties = (s)=> s.type === 'issue' ? 'To ' + s.to_worker_name : s.type === 'return' ? 'From ' + s.from_worker_name : s.from_worker_name + ' → ' + s.to_worker_name;
+  function tlRenderSlips(){
+    const ty = $('tlSlipType').value, q = ($('tlSlipSearch').value || '').trim().toLowerCase();
+    const rows = tlSlips.filter(s=> (!ty || (ty === 'pending' ? s.status === 'pending_signature' : s.type === ty)) && (!q || [s.slip_no, tlParties(s), s.job_order_id, s.note].join(' ').toLowerCase().includes(q)));
+    $('tlSlipsCount').textContent = tlSlips.filter(s=> s.status === 'pending_signature').length ? tlSlips.filter(s=> s.status === 'pending_signature').length + ' awaiting signature' : '';
+    $('tlSlipRows').innerHTML = rows.length ? rows.map(s=> '<button type="button" class="mt-row" data-id="' + escapeHtml(s.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(s.slip_no) + '</span>' +
+      escapeHtml(TL_SLIP[s.type].label) + ' <span class="po-status ' + (s.status === 'complete' ? 'fulfilled' : 'returned') + '">' + (s.status === 'complete' ? 'signed by both' : 'awaiting worker signature') + '</span></div>' +
+      '<div class="sp-row-sub">' + escapeHtml([mrWhen(s.created_at), tlParties(s), s.job_order_id, s.warehouse_id ? tlWh(s.warehouse_id) : 'on site'].filter(Boolean).join(' · ')) + '</div></div></button>').join('')
+      : '<div class="empty-state">No tool slips yet.</div>';
+  }
+  $('tlSlipSearch').addEventListener('input', tlRenderSlips); $('tlSlipType').addEventListener('change', tlRenderSlips);
+  $('tlSlipRows').addEventListener('click', (e)=>{ const r = e.target.closest('.mt-row'); if(r) tlOpenSlip(r.dataset.id); });
+  $('tlSlipBack').addEventListener('click', ()=>{ $('tlSlipDetail').style.display = 'none'; $('tlSlipList').style.display = ''; tlShowSlips(); });
+  async function tlLoadSlip(id){
+    const [h, l] = await Promise.all([db.from('tool_slips').select('*').eq('id', id), db.from('tool_slip_lines').select('*').eq('slip_id', id)]);
+    if(h.error) throw h.error; if(l.error) throw l.error;
+    if(!h.data || !h.data[0]) throw new Error('Slip not found');
+    return { h: h.data[0], lines: l.data || [] };
+  }
+  function tlRenderSlipInto(d, pre){
+    const s = d.h;
+    $(pre + 'Title').innerHTML = '<span class="mt-code">' + escapeHtml(s.slip_no) + '</span> ' + escapeHtml(TL_SLIP[s.type].label) +
+      ' <span class="po-status ' + (s.status === 'complete' ? 'fulfilled' : 'returned') + '">' + (s.status === 'complete' ? 'signed by both' : 'awaiting worker signature') + '</span>';
+    const kv = (k, v)=> v ? '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>' : '';
+    $(pre + 'Info').innerHTML = kv('Date', escapeHtml(mrWhen(s.created_at))) + kv(s.type === 'handover' ? 'From' : s.type === 'issue' ? 'Warehouse' : 'Into', escapeHtml(s.type === 'handover' ? s.from_worker_name : tlWh(s.warehouse_id))) +
+      kv(s.type === 'return' ? 'Returned by' : 'Received by', escapeHtml(s.type === 'return' ? s.from_worker_name : s.to_worker_name)) +
+      kv(s.type === 'handover' ? 'Recorded by' : 'Warehouseman', escapeHtml(s.keeper_name)) + kv('Job / project', escapeHtml(tlPrj(s.project_id, s.job_order_id))) +
+      kv('Due back', s.due_back ? escapeHtml(poDateLong(s.due_back)) : '') + kv('Worker signed', s.sign_mode === 'phone' ? 'on their phone' + (s.completed_at ? ' · ' + escapeHtml(mrWhen(s.completed_at)) : '') : 'at the counter') + kv('Note', escapeHtml(s.note));
+    $(pre + 'Items').innerHTML = '<thead><tr><th>Tag</th><th>Tool</th><th>Serial</th>' + (s.type === 'return' ? '<th>Condition</th>' : '') + '<th>Note</th></tr></thead><tbody>' +
+      d.lines.map(l=>{ const t = tlTool(l.tool_id) || { asset_tag:'?', name:'(tool)', serial_no:'' };
+        return '<tr><td><b>' + escapeHtml(t.asset_tag) + '</b></td><td>' + escapeHtml(t.name) + '</td><td>' + escapeHtml(t.serial_no) + '</td>' +
+          (s.type === 'return' ? '<td>' + (l.condition === 'good' ? 'Good' : '<span class="sp-tag danger">' + escapeHtml(TL_COND[l.condition]) + '</span>') + '</td>' : '') +
+          '<td>' + escapeHtml([l.note, (l.kit_missing || []).length ? 'Missing: ' + l.kit_missing.map(k=> k.name).join(', ') : ''].filter(Boolean).join(' · ')) + '</td></tr>'; }).join('') + '</tbody>';
+  }
+  async function tlOpenSlip(id){
+    try{
+      if(!tl.tools.length) await tlLoad();
+      tlSlipOpen = await tlLoadSlip(id);
+      tlRenderSlipInto(tlSlipOpen, 'tlSlip');
+      $('tlSlipList').style.display = 'none'; $('tlSlipDetail').style.display = '';
+      window.scrollTo({ top:0 });
+    }catch(e){ purchFail('Couldn\u2019t open the slip: ', e); }
+  }
+  $('tlSlipPdf').addEventListener('click', ()=>{ if(tlSlipOpen) tlSlipPdf(tlSlipOpen); });
+  async function tlSlipPdf(d){
+    try{
+      await loadAwesScript('jspdf', awesLibs.jspdf); await loadAwesScript('autotable', awesLibs.autotable);
+      await poLoadSettings().catch(()=>{});
+      const co = poSettingsData || {}, style = co.header_style || 'green';
+      const logo = co.logo_path ? await poLoadImage(co.logo_path).then(img=> poLogoForStyle(img, style)) : await poDefaultLogo(style);
+      const fonts = await poLoadFonts();
+      const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4', compress:true });
+      let F = 'helvetica', FB = ['helvetica', 'bold'];
+      if(fonts){ try{ doc.addFileToVFS('Inter-Regular.ttf', fonts.regular); doc.addFont('Inter-Regular.ttf', 'Inter', 'normal');
+        doc.addFileToVFS('Inter-Bold.ttf', fonts.bold); doc.addFont('Inter-Bold.ttf', 'InterBold', 'normal'); F = 'Inter'; FB = ['InterBold', 'normal']; }catch(e){} }
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 36, G = [21, 77, 52], SUB = [96, 108, 101], INK = [28, 34, 30];
+      const s = d.h, green = style !== 'white';
+      if(green){ doc.setFillColor(...G); doc.rect(0, 0, W, 96, 'F'); } else { doc.setFillColor(...G); doc.rect(0, 92, W, 4, 'F'); }
+      if(logo && logo.w){ const r = Math.min(140 / logo.w, 40 / logo.h); try{ doc.addImage(logo.dataUrl, 'PNG', M, 16, logo.w * r, logo.h * r, 'tl-logo', 'FAST'); }catch(e){} }
+      doc.setTextColor(...(green ? [255, 255, 255] : INK));
+      doc.setFont(F, 'normal'); doc.setFontSize(9); doc.text(co.company_name || '', M, 76);
+      doc.setFont(FB[0], FB[1]); doc.setFontSize(16); doc.text(TL_SLIP[s.type].title, W - M, 36, { align:'right' });
+      doc.setFontSize(10.5); doc.text(s.slip_no, W - M, 54, { align:'right' });
+      doc.setFont(F, 'normal'); doc.setFontSize(8.8); doc.text(mrWhen(s.created_at), W - M, 68, { align:'right' });
+      let y = 116;
+      const info = [[s.type === 'handover' ? 'From' : 'Warehouse', s.type === 'handover' ? s.from_worker_name : tlWh(s.warehouse_id) + ' — ' + ((tl.whs.find(w=> w.id === s.warehouse_id) || {}).name || '')],
+        [s.type === 'return' ? 'Returned by' : 'Received by', s.type === 'return' ? s.from_worker_name : s.to_worker_name], ['Job / project', tlPrj(s.project_id, s.job_order_id)],
+        ['Due back', s.due_back ? poDateLong(s.due_back) : ''], ['Note', s.note]].filter(r=> r[1]);
+      info.forEach(([k, v])=>{ doc.setFontSize(7.8); doc.setTextColor(...SUB); doc.text(k, M, y); doc.setFontSize(9); doc.setTextColor(...INK); const ls = doc.splitTextToSize(String(v), W - M * 2 - 90); doc.text(ls, M + 90, y); y += ls.length * 11 + 3; });
+      doc.autoTable({ startY: y + 8, margin:{ left:M, right:M, bottom:60 },
+        head:[['Tag', 'Tool', 'Serial no.'].concat(s.type === 'return' ? ['Condition'] : [], ['Note'])],
+        body: d.lines.map(l=>{ const t = tlTool(l.tool_id) || {};
+          return [t.asset_tag || '', t.name || '', t.serial_no || ''].concat(s.type === 'return' ? [TL_COND[l.condition]] : [],
+            [[l.note, (l.kit_missing || []).length ? 'Missing: ' + l.kit_missing.map(k=> k.name).join(', ') : '', t.kind === 'kit' && s.type === 'issue' ? 'Kit: ' + (t.kit_contents || []).map(k=> k.name + (k.qty > 1 ? ' ×' + k.qty : '')).join(', ') : ''].filter(Boolean).join(' · ')]); }),
+        // explicit row fills: without them the rows inherit the header band's green fill
+        theme:'plain', styles:{ font:F, fontSize:8.6, cellPadding:5, textColor:INK, fillColor:[255, 255, 255], lineColor:[216, 223, 219], lineWidth:{ bottom:0.5 } },
+        alternateRowStyles:{ fillColor:[247, 250, 248] },
+        headStyles:{ font:F, fillColor:G, textColor:255, fontSize:7.8 }, columnStyles:{ 0:{ cellWidth:58, fontStyle:'bold' } } });
+      const [kSig, wSig] = await Promise.all([s.sig_keeper_path, s.sig_worker_path].map(async p=>{ const u = await tlDownloadUrl(p); if(!u) return null; const z = await poImageSize(u); return { dataUrl:u, w:z.w, h:z.h }; }));
+      const caps = s.type === 'issue' ? [['Issued by (warehouseman)', s.keeper_name, kSig], ['Received by (worker)', s.to_worker_name, wSig]]
+        : s.type === 'return' ? [['Returned by (worker)', s.from_worker_name, wSig], ['Received by (warehouseman)', s.keeper_name, kSig]]
+        : [['Handed over by', s.from_worker_name, kSig], ['Received by', s.to_worker_name, wSig]];
+      const top = H - 46 - 92, sw = (W - M * 2 - 40) / 2;
+      if(doc.lastAutoTable.finalY > top - 10) doc.addPage();
+      caps.forEach(([cap, nm, img], i)=>{
+        const x = M + i * (sw + 40);
+        doc.setFont(F, 'normal'); doc.setFontSize(6.8); doc.setTextColor(...SUB); doc.text(cap.toUpperCase(), x, top);
+        if(img && img.w){ const r = Math.min((sw - 20) / img.w, 46 / img.h); try{ doc.addImage(img.dataUrl, 'PNG', x + (sw - img.w * r) / 2, top + 58 - img.h * r, img.w * r, img.h * r, undefined, 'FAST'); }catch(e){} }
+        else{ doc.setFontSize(7.4); doc.setTextColor(200, 120, 20); doc.text('awaiting signature', x + sw / 2, top + 40, { align:'center' }); }
+        doc.setDrawColor(70, 76, 72); doc.setLineWidth(0.6); doc.line(x, top + 60, x + sw, top + 60);
+        doc.setFont(FB[0], FB[1]); doc.setFontSize(8.6); doc.setTextColor(...INK); doc.text((nm || '').toUpperCase(), x + sw / 2, top + 72, { align:'center' });
+      });
+      doc.setFont(F, 'normal'); doc.setFontSize(7); doc.setTextColor(...SUB);
+      doc.text(s.slip_no + '   •   ' + (co.company_name || '') + (s.status === 'complete' ? '' : '   •   NOT YET SIGNED BY THE WORKER'), M, H - 20);
+      $('previewOverlay').querySelector('h3').textContent = TL_SLIP[s.type].label + ' ' + s.slip_no;
+      $('previewOkBtn').textContent = 'Close'; $('previewOverlay').style.zIndex = '99'; $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc, s.slip_no + '.pdf', TL_SLIP[s.type].label + ' ' + s.slip_no);
+    }catch(e){ console.error('tool slip pdf', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
+  }
+
+  // =====================================================================
+  // MY TOOLS (worker)
+  // =====================================================================
+  let tlMinePend = [], tlMineOpen = null, tlMineHo = [];
+  async function tlShowMine(){
+    $('tlMineSlip').style.display = 'none'; $('tlMineHo').style.display = 'none'; $('tlMineList').style.display = '';
+    $('tlMinePending').innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(await ensureCloud())) return;
+    try{
+      const [t, s, wk] = await Promise.all([db.from('tools_view').select('*').eq('holder_id', currentUser.id).order('asset_tag'),
+        db.from('tool_slips').select('*').eq('status', 'pending_signature').order('created_at', { ascending:false }),
+        db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name')]);
+      if(t.error) throw t.error;
+      tl.tools = t.data || []; tl.workers = wk.data || [];
+      tlMinePend = (s.data || []).filter(x=> (x.type === 'issue' && x.to_worker_id === currentUser.id) || (x.type === 'return' && x.from_worker_id === currentUser.id));
+      $('tlMinePending').innerHTML = tlMinePend.length ? tlMinePend.map(x=> '<button type="button" class="mt-row" data-id="' + escapeHtml(x.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(x.slip_no) + '</span>' +
+        escapeHtml(TL_SLIP[x.type].label) + ' <span class="po-status returned">sign now</span></div><div class="sp-row-sub">' + escapeHtml(mrWhen(x.created_at) + ' · by ' + x.keeper_name) + '</div></div></button>').join('')
+        : '<div class="empty-state" style="padding:12px;">Nothing to sign. 👍</div>';
+      $('tlMineHold').innerHTML = tl.tools.length ? tl.tools.map(t=> '<div class="sp-row"><div class="sp-row-top"><div><div class="sp-row-title"><span class="mt-code">' + escapeHtml(t.asset_tag) + '</span> ' + escapeHtml(t.name) + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml([t.job_order_id, t.kind === 'kit' ? (t.kit_contents || []).length + ' items in kit' : t.serial_no ? 'S/N ' + t.serial_no : ''].filter(Boolean).join(' · ')) + '</div></div>' +
+        '<div class="mt-row-price" style="' + (tlOverdue(t) ? 'color:var(--danger);' : '') + '">' + (t.due_back ? escapeHtml(poDateLong(t.due_back)) : '—') + '<div class="sp-row-sub">' + (tlOverdue(t) ? 'OVERDUE' : 'due back') + '</div></div></div></div>').join('')
+        : '<div class="empty-state" style="padding:12px;">You\u2019re not holding any company tools.</div>';
+      $('tlMineHandover').style.display = tl.tools.length ? '' : 'none';
+      tlSetMineBadge(tlMinePend.length, tl.tools.filter(tlOverdue).length);
+    }catch(e){ $('tlMinePending').innerHTML = '<div class="empty-state">' + (invMissingTables(e) ? 'Tools aren\u2019t set up yet.' : 'Couldn\u2019t load: ' + escapeHtml(describeCloudError(e))) + '</div>'; }
+  }
+  function tlSetMineBadge(pend, overdue){
+    const b = document.getElementById('techQaMyToolsBadge'); if(!b) return;
+    const txt = [pend ? pend + ' to sign' : '', overdue ? overdue + ' overdue' : ''].filter(Boolean).join(' · ');
+    b.textContent = txt; b.style.display = txt ? '' : 'none';
+  }
+  async function tlRefreshMineBadge(){
+    if(!currentUser || currentUser.role === 'admin' || currentUser.role === 'customer') return;
+    try{
+      const [t, s] = await Promise.all([db.from('tools_view').select('status, due_back').eq('holder_id', currentUser.id), db.from('tool_slips').select('type, to_worker_id, from_worker_id').eq('status', 'pending_signature')]);
+      if(t.error) return;
+      tlSetMineBadge((s.data || []).filter(x=> (x.type === 'issue' && x.to_worker_id === currentUser.id) || (x.type === 'return' && x.from_worker_id === currentUser.id)).length, (t.data || []).filter(tlOverdue).length);
+    }catch(e){}
+  }
+  $('techQaMyTools').addEventListener('click', ()=> showPurchasingView('myTools'));
+  $('tlMinePending').addEventListener('click', async (e)=>{
+    const r = e.target.closest('.mt-row'); if(!r) return;
+    try{
+      const d = await tlLoadSlip(r.dataset.id);
+      const ids = d.lines.map(l=> l.tool_id).filter(id=> !tlTool(id));
+      if(ids.length){ const x = await db.from('tools_view').select('*').in('id', ids); (x.data || []).forEach(t=> tl.tools.push(t)); }
+      tlMineOpen = d; tlRenderSlipInto(d, 'tlMine');
+      $('tlMineList').style.display = 'none'; $('tlMineSlip').style.display = ''; window.scrollTo({ top:0 });
+    }catch(err){ purchFail('Couldn\u2019t open the slip: ', err); }
+  });
+  $('tlMineBack').addEventListener('click', tlShowMine);
+  $('tlMineSign').addEventListener('click', async ()=>{
+    if(!tlMineOpen) return;
+    const s = tlMineOpen.h;
+    const blob = await tlSign('Your signature', s.type === 'issue' ? 'I received the tools listed on ' + s.slip_no : 'I returned the tools listed on ' + s.slip_no + ', in the condition noted');
+    if(!blob) return;
+    if(!(await purchEnsureSession())) return;
+    try{
+      const path = await tlUpload(blob, 'png');
+      const { error } = await db.rpc('tl_sign_slip', { p_slip: s.id, p_path: path });
+      if(error) throw error;
+      toast(s.slip_no + ' signed — thank you'); tlShowMine();
+    }catch(e){ purchFail('Couldn\u2019t sign: ', e); }
+  });
+  $('tlMineHandover').addEventListener('click', ()=>{
+    tlMineHo = tl.tools.map(t=> ({ tool_id:t.id, inc:false }));
+    $('tlMineHoTo').innerHTML = tlOpts(tl.workers.filter(w=> w.id !== currentUser.id), w=> w.id, w=> w.name, 'Choose a person…');
+    tlRenderPick('tlMineHoLines', tlMineHo);
+    $('tlMineList').style.display = 'none'; $('tlMineHo').style.display = '';
+  });
+  $('tlMineHoLines').addEventListener('change', (e)=>{ if(e.target.dataset.pick) tlMineHo[+e.target.closest('[data-i]').dataset.i].inc = e.target.checked; });
+  $('tlMineHoBack').addEventListener('click', tlShowMine);
+  $('tlMineHoPost').addEventListener('click', async ()=>{
+    const btn = $('tlMineHoPost'); btn.disabled = true;
+    try{ tl.workers.push({ id: currentUser.id, name: currentUser.name });
+      const d = await tlDoHandover(currentUser.id, $('tlMineHoTo').value, tlMineHo.filter(l=> l.inc).map(l=> l.tool_id), ''); if(d) tlShowMine(); }
+    catch(e){ purchFail('Couldn\u2019t hand over: ', e); }
+    finally{ btn.disabled = false; }
+  });
+
+  // =====================================================================
+  // TOOL REPORTS (same engine / PDF / Excel as Inventory Reports)
+  // =====================================================================
+  let trTab = 'monthly', trModel = null;
+  async function tlShowReports(){
+    if(!(await tlEnter(false))) return;
+    if(!$('trFrom').value){ $('trFrom').value = tlToday().slice(0, 7); $('trTo').value = tlToday().slice(0, 7); }
+    $('trWh').innerHTML = '<option value="">All warehouses</option>' + (tl.isAdmin ? tl.whs : tl.mine).map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code) + '</option>').join('');
+    trSetTab(trTab);
+  }
+  function trSetTab(t){
+    trTab = t; trModel = null;
+    $$('#trTabs [data-tr]').forEach(b=> b.classList.toggle('active', b.dataset.tr === t));
+    $$('#purchPanel_tlReports [data-trf]').forEach(f=>{ f.style.display = f.dataset.trf.split(' ').includes(t) ? '' : 'none'; });
+    $('trSummary').innerHTML = ''; $('trCheck').textContent = ''; $('trOut').innerHTML = '<div class="empty-state">Choose the options and tap <b>Run Report</b>.</div>';
+  }
+  $('trTabs').addEventListener('click', (e)=>{ const b = e.target.closest('[data-tr]'); if(b) trSetTab(b.dataset.tr); });
+  $('trPdf').addEventListener('click', ()=> rpExportPdf(trModel, $('trFrom').value));
+  $('trXlsx').addEventListener('click', ()=> rpExportXlsx(trModel, $('trFrom').value));
+  $('trRun').addEventListener('click', async ()=>{
+    const btn = $('trRun'); btn.disabled = true;
+    try{ await tlLoad(); trModel = await ({ monthly: trMonthly, custody: trCustody, defects: trDefects, register: trRegister })[trTab](); rpRender(trModel, 'tr'); }
+    catch(e){ $('trOut').innerHTML = '<div class="empty-state">Couldn\u2019t run the report: ' + escapeHtml(describeCloudError(e)) + '</div>'; }
+    finally{ btn.disabled = false; }
+  });
+  function trRange(){
+    const f = $('trFrom').value, t = $('trTo').value || f, [y, m] = t.split('-').map(Number);
+    return { first: f + '-01', last: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10), label: f === t ? RP_MONTH(f + '-01') : RP_MONTH(f + '-01') + ' – ' + RP_MONTH(t + '-01') };
+  }
+  const trLocal = (ts)=> new Date(new Date(ts).getTime() + 8 * 3600e3).toISOString().slice(0, 10);
+  const trWhOk = (id)=> !$('trWh').value || id === $('trWh').value;
+  async function trMonthly(){
+    const r = trRange();
+    const [sl, df] = await Promise.all([db.from('tool_slips').select('*, tool_slip_lines(*)').gte('created_at', r.first + 'T00:00:00+08:00').lte('created_at', r.last + 'T23:59:59+08:00'),
+      db.from('tool_defects').select('*').gte('created_at', r.first + 'T00:00:00+08:00').lte('created_at', r.last + 'T23:59:59+08:00')]);
+    const months = []; for(let d = new Date(r.first + 'T00:00:00Z'); d.toISOString().slice(0, 10) <= r.last; d.setUTCMonth(d.getUTCMonth() + 1)) months.push(d.toISOString().slice(0, 7));
+    const money = tl.isAdmin;
+    const rows = months.map(mo=>{
+      const bought = tl.tools.filter(t=> t.purchase_date && t.purchase_date.slice(0, 7) === mo && trWhOk(t.home_warehouse_id));
+      const inM = (s)=> trLocal(s.created_at).slice(0, 7) === mo && (s.type === 'handover' || trWhOk(s.warehouse_id));
+      const lines = (ty)=> (sl.data || []).filter(s=> s.type === ty && inM(s)).reduce((a, s)=> a.concat(s.tool_slip_lines || []), []);
+      const ret = lines('return');
+      return [RP_MONTH(mo + '-01'), bought.length, lines('issue').length, ret.filter(l=> l.condition === 'good').length, ret.filter(l=> ['needs_repair', 'defective', 'missing_parts'].includes(l.condition)).length,
+        ret.filter(l=> l.condition === 'lost').length, lines('handover').length, (df.data || []).filter(d=> trLocal(d.created_at).slice(0, 7) === mo).length]
+        .concat(money ? [bought.reduce((a, t)=> a + Number(t.purchase_cost || 0), 0)] : []);
+    });
+    const sum = (i)=> rows.reduce((a, x)=> a + x[i], 0);
+    return { title:'Tools & Equipment — Monthly Movements', subtitle: r.label + ' · ' + ($('trWh').value ? tlWh($('trWh').value) : 'All warehouses'),
+      summary: [['Purchased', String(sum(1))], ['Issued', String(sum(2))], ['Returned good', String(sum(3))], ['Defective / lost', String(sum(4) + sum(5))]].concat(money ? [['Spent on tools', invMoney(sum(8))]] : []),
+      sheets:[{ name:'Monthly', head:['Month', 'Purchased', 'Issued', 'Returned good', 'Returned defective', 'Lost', 'Handovers', 'Defect reports'].concat(money ? ['Purchase cost ₱'] : []), rows,
+        numCols:[1, 2, 3, 4, 5, 6, 7], moneyCols: money ? [8] : null, totalRow: ['Total', sum(1), sum(2), sum(3), sum(4), sum(5), sum(6), sum(7)].concat(money ? [sum(8)] : []) }] };
+  }
+  async function trCustody(){
+    const out = tl.tools.filter(t=> t.status === 'issued' && trWhOk(t.home_warehouse_id)).sort((a, b)=> String(a.holder_name).localeCompare(String(b.holder_name)) || String(a.due_back || '9').localeCompare(String(b.due_back || '9')));
+    const days = (t)=> t.issued_at ? Math.round((Date.now() - new Date(t.issued_at).getTime()) / 864e5) : '';
+    return { title:'Tools in Custody & Overdue', subtitle:'As of ' + poDateLong(tlToday()),
+      summary:[['Tools out', String(out.length)], ['Workers', String(new Set(out.map(t=> t.holder_id)).size)], ['Overdue', String(out.filter(tlOverdue).length)]],
+      sheets:[{ name:'Custody', head:['Worker', 'Tag', 'Tool', 'Serial', 'Job / project', 'Issued', 'Due back', 'Days out', 'Status'],
+        rows: out.map(t=> [t.holder_name, t.asset_tag, t.name, t.serial_no, tlPrj(t.project_id, t.job_order_id), t.issued_at ? poDateLong(trLocal(t.issued_at)) : '', t.due_back ? poDateLong(t.due_back) : '—', days(t), tlOverdue(t) ? 'OVERDUE' : 'ok']),
+        groupCol:0, numCols:[7], flagRow:(row)=> row[8] === 'OVERDUE' }] };
+  }
+  async function trDefects(){
+    const r = trRange();
+    const q = await db.from('tool_defects').select('*').gte('created_at', r.first + 'T00:00:00+08:00').lte('created_at', r.last + 'T23:59:59+08:00').order('created_at');
+    const ds = (q.data || []).filter(d=>{ const t = tlTool(d.tool_id); return !t || trWhOk(t.home_warehouse_id); });
+    const money = tl.isAdmin;
+    const grp = (key)=>{ const m = new Map(); ds.forEach(d=>{ const k = key(d) || '—'; const e = m.get(k) || [k, 0, 0]; e[1]++; e[2] += Number(d.repair_cost || 0); m.set(k, e); }); return Array.from(m.values()).sort((a, b)=> b[1] - a[1]); };
+    const model = (d)=>{ const t = tlTool(d.tool_id) || {}; return [t.name, t.brand, t.model].filter(Boolean).join(' '); };
+    const cut = (rows)=> money ? rows : rows.map(x=> x.slice(0, 2));
+    return { title:'Defective Tools Report', subtitle: r.label,
+      summary:[['Defect reports', String(ds.length)], ['Still open', String(ds.filter(d=> d.status !== 'closed').length)], ['Under warranty', String(ds.filter(d=> d.under_warranty).length)]].concat(money ? [['Repair cost', invMoney(ds.reduce((a, d)=> a + Number(d.repair_cost || 0), 0))]] : []),
+      sheets:[
+        { name:'Defects', head:['Date', 'DEF no.', 'Tag', 'Tool', 'Condition', 'Worker', 'Cause', 'Decision', 'Status', 'Warranty'].concat(money ? ['Repair ₱'] : []),
+          rows: ds.map(d=>{ const t = tlTool(d.tool_id) || {}; return [poDateLong(trLocal(d.created_at)), d.defect_no, t.asset_tag || '', t.name || '', TL_COND[d.condition] || d.condition, d.worker_name || '—', d.cause, d.decision.replace('_', ' '), d.status.replace('_', ' '), d.under_warranty ? 'yes' : ''].concat(money ? [d.repair_cost != null ? Number(d.repair_cost) : ''] : []); }),
+          moneyCols: money ? [10] : null, landscape:true },
+        { name:'By Tool Model', head:['Tool model', 'Defects'].concat(money ? ['Repair ₱'] : []), rows: cut(grp(model)), numCols:[1], moneyCols: money ? [2] : null },
+        { name:'By Worker', head:['Worker', 'Defects'].concat(money ? ['Repair ₱'] : []), rows: cut(grp(d=> d.worker_name)), numCols:[1], moneyCols: money ? [2] : null },
+        { name:'By Cause', head:['Cause', 'Defects'].concat(money ? ['Repair ₱'] : []), rows: cut(grp(d=> d.cause)), numCols:[1], moneyCols: money ? [2] : null }] };
+  }
+  async function trRegister(){
+    const rows = tl.tools.filter(t=> trWhOk(t.home_warehouse_id)).sort((a, b)=> a.category.localeCompare(b.category) || a.asset_tag.localeCompare(b.asset_tag));
+    const money = tl.isAdmin, val = (f)=> rows.filter(f).reduce((a, t)=> a + Number(t.purchase_cost || 0), 0);
+    return { title:'Tool & Equipment Register', subtitle:'As of ' + poDateLong(tlToday()) + ' · ' + ($('trWh').value ? tlWh($('trWh').value) : 'All warehouses'),
+      summary:[['Tools & kits', String(rows.length)], ['In service', String(rows.filter(t=> ['available', 'issued'].includes(t.status)).length)], ['Out of service', String(rows.filter(t=> ['defective', 'repair'].includes(t.status)).length)], ['Lost', String(rows.filter(t=> t.status === 'lost').length)]]
+        .concat(money ? [['Value in service', invMoney(val(t=> ['available', 'issued'].includes(t.status)))], ['Value lost', invMoney(val(t=> t.status === 'lost'))]] : []),
+      sheets:[{ name:'Register', head:['Category', 'Tag', 'Tool', 'Brand / model', 'Serial', 'Warehouse', 'Status', 'Holder', 'Next calibration', 'Purchased'].concat(money ? ['Cost ₱'] : []),
+        rows: rows.map(t=> [t.category, t.asset_tag, t.name + (t.kind === 'kit' ? ' (kit)' : ''), [t.brand, t.model].filter(Boolean).join(' '), t.serial_no, tlWh(t.home_warehouse_id), TL_STATUS[t.status], t.holder_name,
+          t.next_maint_due ? poDateLong(t.next_maint_due) + (tlMaintLate(t) ? ' (overdue)' : '') : '', t.purchase_date ? poDateLong(t.purchase_date) : ''].concat(money ? [t.purchase_cost != null ? Number(t.purchase_cost) : ''] : [])),
+        groupCol:0, moneyCols: money ? [10] : null, flagRow:(row)=> ['Lost', 'Defective'].includes(row[6]) || String(row[8]).includes('overdue'), landscape:true }] };
+  }
+
+  // hub landing
+  async function tlShowHub(){ await tlEnter(false); }
 
 
 // ---------- Header title (changes per feature page) ----------
@@ -19807,6 +22822,27 @@
     suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
     requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review & fulfil technician requests' },
     myRequests:     { nav:'',                    title:'Material Requests',    sub:'Request materials for your jobs' },
+    stock:          { nav:'sbNavStock',          title:'Stock on Hand',        sub:'Quantities & value per warehouse' },
+    warehouses:     { nav:'sbNavWarehouses',     title:'Warehouses',           sub:'Stock locations & storekeepers' },
+    projects:       { nav:'sbNavProjects',       title:'Projects',             sub:'Job orders & material cost' },
+    myStock:        { nav:'',                    title:'Warehouse Stock',      sub:'Your warehouses' },
+    receive:        { nav:'sbNavReceive',        title:'Receive Stock',        sub:'Deliveries — against a PO or not' },
+    issue:          { nav:'sbNavIssue',          title:'Issue to Worker',      sub:'Materials out, for a project / job' },
+    returns:        { nav:'sbNavReturns',        title:'Returns',              sub:'Unused materials back to stock' },
+    transfers:      { nav:'sbNavTransfers',      title:'Transfers',            sub:'Between warehouses' },
+    slips:          { nav:'sbNavSlips',          title:'Slips & History',      sub:'Every stock movement document' },
+    myMaterials:    { nav:'',                    title:'My Materials',         sub:'Sign for issued materials' },
+    invReports:     { nav:'sbNavInvReports',     title:'Inventory Reports',    sub:'Balances, movements, cost & stock health' },
+    tlHub:          { nav:'',                    title:'Tools & Equipment',    sub:'Issue, return, register, calibration' },
+    tlRegister:     { nav:'sbNavTlRegister',     title:'Tool Register',        sub:'Every tool & kit, with its history' },
+    tlIssue:        { nav:'sbNavTlIssue',        title:'Issue Tools',          sub:'Signed by warehouseman & worker' },
+    tlReturn:       { nav:'sbNavTlReturn',       title:'Return Tools',         sub:'Condition checked, both sign' },
+    tlHandover:     { nav:'sbNavTlHandover',     title:'Tool Handover',        sub:'Worker to worker, on site' },
+    tlDefects:      { nav:'sbNavTlDefects',      title:'Defect Reports',       sub:'Defective, damaged & lost tools' },
+    tlMaint:        { nav:'sbNavTlMaint',        title:'Calibration & Inspection', sub:'Due dates — overdue tools can\u2019t be issued' },
+    tlSlips:        { nav:'sbNavTlSlips',        title:'Tool Slips',           sub:'Issue, return & handover slips' },
+    tlReports:      { nav:'sbNavTlReports',      title:'Tool Reports',         sub:'Movements, custody, defects, register' },
+    myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
   };
   function showPurchasingView(key){
@@ -19965,6 +23001,9 @@
     // out here before anything below (which assumes admin/tech-only
     // elements) runs. See showCustomerHome() in customer-equipment-history.js.
     if(currentUser && currentUser.role==='customer'){ showCustomerHome(); return; }
+    if(typeof invRefreshStorekeeperTile === 'function') invRefreshStorekeeperTile();   // storekeepers get a Warehouse Stock tile
+    if(typeof invRefreshMineBadge === 'function') invRefreshMineBadge();               // "N to sign" on My Materials
+    if(typeof tlRefreshMineBadge === 'function') tlRefreshMineBadge();                 // tools to sign / overdue on My Tools
     document.body.classList.add('dashboard-active');
     setSidebarActive('sbNavDashboard');
     $('homeScreen').style.display = '';

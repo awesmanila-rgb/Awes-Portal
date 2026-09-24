@@ -20,6 +20,8 @@
     body.innerHTML = '<div class="empty-state">Loading…</div>';
     const cloudOn = await ensureCloud();
     const users = (await cloudListUsers()) || [];
+    // Storekeeper setting (Inventory) — null if inventory isn't installed yet
+    const invCtx = (cloudOn && typeof invLoadUsersContext === 'function') ? await invLoadUsersContext() : null;
     body.innerHTML = '';
     if(!cloudOn){
       const note = document.createElement('div');
@@ -48,6 +50,7 @@
             '<div class="u-status">Sign-in username: '+
               (u.username ? escapeHtml(u.username) : '<span style="color:var(--amber);">not set — set one below</span>')+
             '</div>'+
+            (invCtx ? invUserStatusLine(invCtx, u.id) : '')+
           '</div>'+
         '</div>'+
         '<div class="user-card-actions">'+
@@ -70,6 +73,7 @@
             '<label class="restrict-row"><input type="checkbox" data-f="readOnly" '+(r.readOnly?'checked':'')+'>'+
               '<span class="rtxt"><span class="rt-title">Read-only</span><span class="rt-desc">User cannot save drafts, start new reports, or generate reports.</span></span></label>'+
           '</div>'+
+          (invCtx ? invUserPanelHtml(invCtx, u.id) : '')+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="cancel" type="button">Cancel</button>'+
             '<button class="save-btn" data-act="save" type="button">Save Changes</button>'+
@@ -92,6 +96,7 @@
         panel.querySelector('[data-f="noHistory"]').checked = !!r.noHistory;
         panel.querySelector('[data-f="noReport"]').checked = !!r.noReport;
         panel.querySelector('[data-f="readOnly"]').checked = !!r.readOnly;
+        if(invCtx) invUserPanelReset(invCtx, u.id, panel);
       });
       card.querySelector('[data-act="save"]').addEventListener('click', async ()=>{
         const newName = panel.querySelector('[data-f="name"]').value.trim();
@@ -120,7 +125,8 @@
           });
           ok2 = !error && !(data && data.error);
         }
-        if(ok1 && ok2){
+        const ok3 = invCtx ? await invSaveUserWarehouses(invCtx, u.id, panel) : true;
+        if(ok1 && ok2 && ok3){
           toast('Saved changes for '+newName);
           renderUsersList();
         }else toast('Could not save all changes');

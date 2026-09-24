@@ -58,7 +58,13 @@ window.awesLibs = {
   // Live technician map on the admin Home Overview. Admin-only and loaded on
   // first view of that card, same reasoning as tesseract above — no reason to
   // make every technician's first load pay for a map library they never see.
-  leaflet: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js'
+  leaflet: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js',
+  // Inventory Reports › Excel export. Loaded on first export only.
+  xlsx: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+  // Tools & Equipment: QR asset labels (generator) and the camera scanner's
+  // fallback decoder when the browser has no built-in BarcodeDetector.
+  qrgen: 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js',
+  jsqr: 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'
 };
 window.awesCss = {
   leaflet: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'
@@ -266,6 +272,37 @@ window.awesCss = {
           <button type="button" class="sidebar-link" id="sbNavPurchaseOrders"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg></span>Purchase Order Form</button>
         </div></div>
       </div>
+      <!-- Inventory — Phase 1: stock on hand, warehouses, projects.
+           Pages live in #purchasingView (same show/hide framework as
+           Purchasing); logic in inventory.js. -->
+      <div class="sb-section" data-sb-key="inventory">
+        <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_inventory"><span class="sb-title">Inventory</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+        <div class="sb-section-body" id="sbSec_inventory"><div class="sb-section-inner">
+          <button type="button" class="sidebar-link" id="sbNavStock"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg></span>Stock on Hand</button>
+          <button type="button" class="sidebar-link" id="sbNavWarehouses"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg></span>Warehouses</button>
+          <button type="button" class="sidebar-link" id="sbNavReceive"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg></span>Receive</button>
+          <button type="button" class="sidebar-link" id="sbNavIssue"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M4 3h16"/></svg></span>Issue to Worker</button>
+          <button type="button" class="sidebar-link" id="sbNavReturns"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span>Returns</button>
+          <button type="button" class="sidebar-link" id="sbNavTransfers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M21 7H9"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12"/></svg></span>Transfers</button>
+          <button type="button" class="sidebar-link" id="sbNavSlips"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg></span>Slips &amp; History</button>
+          <button type="button" class="sidebar-link" id="sbNavInvReports"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>Inventory Reports</button>
+          <button type="button" class="sidebar-link" id="sbNavProjects"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h4M8 17h7"/></svg></span>Projects</button>
+        </div></div>
+      </div>
+      <!-- Tools & Equipment (tools.js) -->
+      <div class="sb-section" data-sb-key="tools">
+        <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_tools"><span class="sb-title">Tools &amp; Equipment</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+        <div class="sb-section-body" id="sbSec_tools"><div class="sb-section-inner">
+          <button type="button" class="sidebar-link" id="sbNavTlRegister"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span>Tool Register</button>
+          <button type="button" class="sidebar-link" id="sbNavTlIssue"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M4 3h16"/></svg></span>Issue Tools</button>
+          <button type="button" class="sidebar-link" id="sbNavTlReturn"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span>Return Tools</button>
+          <button type="button" class="sidebar-link" id="sbNavTlHandover"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M21 7H9"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12"/></svg></span>Handover</button>
+          <button type="button" class="sidebar-link" id="sbNavTlDefects"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg></span>Defects</button>
+          <button type="button" class="sidebar-link" id="sbNavTlMaint"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M8 5l1 2M16 5l-1 2"/></svg></span>Calibration &amp; Inspection</button>
+          <button type="button" class="sidebar-link" id="sbNavTlSlips"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg></span>Tool Slips</button>
+          <button type="button" class="sidebar-link" id="sbNavTlReports"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>Tool Reports</button>
+        </div></div>
+      </div>
       <div class="sb-section" data-sb-key="management">
         <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_management"><span class="sb-title">Management</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
         <div class="sb-section-body" id="sbSec_management"><div class="sb-section-inner">
@@ -435,6 +472,18 @@ window.awesCss = {
         <button type="button" class="tech-qa-tile qa-teal" id="techQaFinanceHr">
           <span class="tech-qa-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>
           <span class="tech-qa-label">Finance &amp; HR</span>
+        </button>
+        <button type="button" class="tech-qa-tile qa-blue" id="techQaMyTools">
+          <span class="tech-qa-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span>
+          <span class="tech-qa-label">My Tools<span class="home-tile-badge" id="techQaMyToolsBadge" style="display:none;"></span></span>
+        </button>
+        <button type="button" class="tech-qa-tile qa-orange" id="techQaMyMaterials">
+          <span class="tech-qa-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg></span>
+          <span class="tech-qa-label">My Materials<span class="home-tile-badge" id="techQaMyMatBadge" style="display:none;"></span></span>
+        </button>
+        <button type="button" class="tech-qa-tile qa-teal" id="techQaStock" style="display:none;">
+          <span class="tech-qa-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg></span>
+          <span class="tech-qa-label">Warehouse Stock</span>
         </button>
         <button type="button" class="tech-qa-tile qa-brown" id="techQaMaterials">
           <span class="tech-qa-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
@@ -2511,7 +2560,7 @@ window.awesCss = {
           <div class="po-items-head" aria-hidden="true"><span>#</span><span>Item</span><span>Qty</span><span>Unit</span><span>Unit Price (₱)</span><span>Amount</span><span></span></div>
           <div id="poItems"></div>
           <button type="button" class="btn btn-secondary mt-small-btn" id="poAddItem">+ Add item</button>
-          <div class="po-hint">Start typing to pick from the Materials Database — the price fills in from this supplier's price list. You can also type any item not in the catalog.</div>
+          <div class="po-hint">Every item must come from the Materials Database — start typing to pick it (the price fills in from this supplier's price list). Something new? Tap <b>+ Add to catalog</b> on the line.</div>
         </section>
 
         <section class="po-sec po-sum">
@@ -2541,7 +2590,619 @@ window.awesCss = {
       </div>
     </div>
   </div>
+
+  <!-- ================= INVENTORY ================= -->
+  <div class="card purch-panel" id="purchPanel_stock" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg> Stock on Hand</span><span class="purch-head-right"><span class="sp-count" id="invStockCount"></span><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div id="invStockListView">
+        <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+          Quantities and value per warehouse, calculated from every stock movement. Enter your current stock with
+          <b>Opening Balance</b>; issuing, receiving and returns come in the next phase.
+        </p>
+        <div class="sp-toolbar mt-toolbar">
+          <input type="text" id="invStockSearch" placeholder="Search code, item, size…">
+          <select id="invStockWh"><option value="">All warehouses</option></select>
+          <select id="invStockCat"><option value="">All categories</option></select>
+          <label class="sp-check"><input type="checkbox" id="invStockZero"> Show zero stock</label>
+        </div>
+        <div class="sp-actions-row">
+          <button type="button" class="btn btn-primary" id="invOpeningBtn">+ Opening Balance</button>
+          <button type="button" class="btn btn-secondary" id="invStockExportBtn">Export CSV</button>
+        </div>
+        <div class="inv-summary" id="invStockSummary"></div>
+        <div id="invStockList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="invOpeningView" style="display:none;">
+        <div class="po-ed-top">
+          <button type="button" class="po-back" id="invOpeningBack">&larr; Stock on Hand</button>
+          <div class="po-ed-title">Opening Balance</div>
+        </div>
+        <section class="po-sec">
+          <div class="po-sec-title">Warehouse</div>
+          <div class="po-grid">
+            <div class="field po-c6"><label>Warehouse <span class="req">*</span></label><select id="invOpWh"></select></div>
+            <div class="field po-c6"><label>Reference / note</label><input type="text" id="invOpNote" placeholder="e.g. Initial count, Sep 2026"></div>
+          </div>
+        </section>
+        <section class="po-sec">
+          <div class="po-sec-title">Items</div>
+          <div class="po-items-head inv-op-head" aria-hidden="true"><span>#</span><span>Item</span><span>Qty</span><span>Unit</span><span>Unit Cost (₱)</span><span>Value</span><span></span></div>
+          <div id="invOpItems"></div>
+          <button type="button" class="btn btn-secondary mt-small-btn" id="invOpAdd">+ Add item</button>
+          <button type="button" class="btn btn-secondary mt-small-btn" id="invOpImport">Import CSV (code, qty, unit_cost)</button>
+          <input type="file" id="invOpFile" accept=".csv,text/csv" style="display:none;">
+          <div class="po-hint">Unit cost fills in from the item's standard cost — change it to what you actually paid. It sets the item's average cost.</div>
+          <div class="inv-op-total" id="invOpTotal"></div>
+        </section>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="invOpPost">Post Opening Balance</button></div>
+      </div>
+      <div id="invItemView" style="display:none;">
+        <div class="po-ed-top">
+          <button type="button" class="po-back" id="invItemBack">&larr; Stock on Hand</button>
+          <div class="po-ed-title" id="invItemTitle"></div>
+        </div>
+        <div class="inv-item-cards" id="invItemCards"></div>
+        <section class="po-sec">
+          <div class="po-sec-title">Movement History</div>
+          <div class="sp-table-wrap"><table class="sp-table" id="invItemHistory"></table></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_warehouses" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Warehouses</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+        Where stock is kept. Storekeepers are assigned in <b>Management › Users &amp; Roles</b> — they can only see and handle their own warehouses.
+      </p>
+      <div class="sp-actions-row"><button type="button" class="btn btn-primary" id="invWhAddBtn">+ Add Warehouse</button></div>
+      <div id="invWhForm" class="po-sec" style="display:none;">
+        <div class="po-sec-title" id="invWhFormTitle">New Warehouse</div>
+        <input type="hidden" id="invWhId">
+        <div class="po-grid">
+          <div class="field po-c3"><label>Code <span class="req">*</span></label><input type="text" id="invWhCode" placeholder="WH-01" autocapitalize="characters"></div>
+          <div class="field po-c6"><label>Name <span class="req">*</span></label><input type="text" id="invWhName" placeholder="e.g. Pasig Main Warehouse"></div>
+          <div class="field po-c3"><label>Status</label><select id="invWhActive"><option value="true">Active</option><option value="false">Inactive</option></select></div>
+          <div class="field po-c12"><label>Address</label><input type="text" id="invWhAddress"></div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn btn-primary" id="invWhSave" style="flex:1;">Save Warehouse</button>
+          <button type="button" class="btn btn-secondary" id="invWhCancel">Cancel</button>
+        </div>
+      </div>
+      <div id="invWhList"><div class="empty-state">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_projects" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h4M8 17h7"/></svg> Projects</span><span class="purch-head-right"><span class="sp-count" id="invPrjCount"></span><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div id="invPrjListView">
+        <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+          Big jobs that group several job orders. Materials issued to a project (or any of its job orders) add up here as project cost.
+        </p>
+        <div class="sp-toolbar po-toolbar">
+          <input type="text" id="invPrjSearch" placeholder="Search project no., name, customer…">
+          <select id="invPrjStatus"><option value="open">Planning / Active / On hold</option><option value="">All</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
+        </div>
+        <div class="sp-actions-row"><button type="button" class="btn btn-primary" id="invPrjAddBtn">+ New Project</button></div>
+        <div id="invPrjList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="invPrjEditView" style="display:none;">
+        <div class="po-ed-top">
+          <button type="button" class="po-back" id="invPrjBack">&larr; Projects</button>
+          <div class="po-ed-title"><span id="invPrjTitle">New Project</span> <span class="po-status" id="invPrjStatusPill"></span></div>
+        </div>
+        <section class="po-sec">
+          <div class="po-sec-title">Project</div>
+          <div class="po-grid">
+            <div class="field po-c6"><label>Project Name <span class="req">*</span></label><input type="text" id="invPrjName" placeholder="e.g. Tiaong Warehouse — AFSS / FDAS"></div>
+            <div class="field po-c6"><label>Customer</label><input type="text" id="invPrjCustomer"></div>
+            <div class="field po-c12"><label>Site Address</label><input type="text" id="invPrjSite"></div>
+            <div class="field po-c3"><label>Material Budget (₱)</label><input type="text" id="invPrjBudget" inputmode="decimal" placeholder="Optional"></div>
+            <div class="field po-c3"><label>Start</label><input type="date" id="invPrjStart"></div>
+            <div class="field po-c3"><label>Target End</label><input type="date" id="invPrjEnd"></div>
+            <div class="field po-c3"><label>Status</label>
+              <select id="invPrjStatusSel"><option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On hold</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></div>
+            <div class="field po-c12"><label>Notes</label><textarea id="invPrjNotes" rows="2"></textarea></div>
+          </div>
+        </section>
+        <section class="po-sec" id="invPrjCostSec" style="display:none;">
+          <div class="po-sec-title">Material Cost</div>
+          <div id="invPrjCost"></div>
+        </section>
+        <section class="po-sec" id="invPrjJobsSec" style="display:none;">
+          <div class="po-sec-title">Job Orders in this Project</div>
+          <div id="invPrjJobs"></div>
+          <div class="po-grid" style="margin-top:8px;">
+            <div class="field po-c6" style="margin-bottom:0;"><select id="invPrjJobPick"></select></div>
+            <div class="po-c6"><button type="button" class="btn btn-secondary mt-small-btn" id="invPrjJobAdd">+ Add job order</button></div>
+          </div>
+        </section>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="invPrjSave">Save Project</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Storekeeper (staff account with warehouses assigned): quantities only. -->
+  <div class="card purch-panel" id="purchPanel_myStock" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg> Warehouse Stock</span></div>
+    <div class="card-body">
+      <div id="invMyListView">
+        <div class="inv-hub">
+          <button type="button" class="btn btn-primary" data-inv-go="receive">Receive</button>
+          <button type="button" class="btn btn-primary" data-inv-go="issue">Issue</button>
+          <button type="button" class="btn btn-secondary" data-inv-go="returns">Return</button>
+          <button type="button" class="btn btn-secondary" data-inv-go="transfers">Transfer</button>
+          <button type="button" class="btn btn-secondary" data-inv-go="slips">Slips</button>
+          <button type="button" class="btn btn-secondary" data-inv-go="invReports">Reports</button>
+          <button type="button" class="btn btn-secondary" data-inv-go="tlHub">Tools</button>
+        </div>
+        <div class="sp-toolbar po-toolbar">
+          <input type="text" id="invMySearch" placeholder="Search item…">
+          <select id="invMyWh"></select>
+        </div>
+        <div id="invMyList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="invMyItemView" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="invMyItemBack">&larr; Warehouse Stock</button><div class="po-ed-title" id="invMyItemTitle"></div></div>
+        <div class="sp-table-wrap"><table class="sp-table" id="invMyItemHistory"></table></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_receive" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg> Receive Stock</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <section class="po-sec">
+        <div class="po-sec-title">Delivery</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>Into Warehouse <span class="req">*</span></label><select id="invRcvWh"></select></div>
+          <div class="field po-c6"><label>Source</label>
+            <div class="sp-pick" id="invRcvMode"><button type="button" data-m="po" class="on">Against a PO</button><button type="button" data-m="free">Without a PO</button></div></div>
+          <div class="field po-c6" id="invRcvPoWrap"><label>Purchase Order <span class="req">*</span></label><select id="invRcvPo"></select></div>
+          <div class="field po-c6" id="invRcvSupWrap" style="display:none;"><label>Supplier</label><select id="invRcvSupplier"></select></div>
+          <div class="field po-c6"><label>Delivery Receipt / Invoice No.</label><input type="text" id="invRcvRef" placeholder="e.g. DR-5521"></div>
+          <div class="field po-c12 inv-admin-only" id="invRcvDirectWrap"><label class="sp-check"><input type="checkbox" id="invRcvDirect"> Delivered straight to a project site (charged to the project, doesn’t stay in stock)</label></div>
+          <div class="field po-c6" id="invRcvProjWrap" style="display:none;"><label>Project</label><select id="invRcvProject"></select></div>
+          <div class="field po-c6" id="invRcvJobWrap" style="display:none;"><label>Job Order</label><select id="invRcvJob"></select></div>
+          <div class="field po-c12"><label>Note</label><input type="text" id="invRcvNote"></div>
+        </div>
+      </section>
+      <section class="po-sec">
+        <div class="po-sec-title">Items Received</div>
+        <div id="invRcvLines"></div>
+        <button type="button" class="btn btn-secondary mt-small-btn" id="invRcvAdd" style="display:none;">+ Add item</button>
+        <div class="po-hint" id="invRcvHint"></div>
+      </section>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="invRcvPost">Post Receipt</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_issue" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M4 3h16"/></svg> Issue to Worker</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <section class="po-sec">
+        <div class="po-sec-title">Issue</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>From Warehouse <span class="req">*</span></label><select id="invIssWh"></select></div>
+          <div class="field po-c6"><label>Source</label>
+            <div class="sp-pick" id="invIssMode"><button type="button" data-m="mrf" class="on">From an approved request</button><button type="button" data-m="free">Direct</button></div></div>
+          <div class="field po-c12" id="invIssMrWrap"><label>Material Request</label><select id="invIssMr"></select></div>
+          <div class="field po-c6"><label>Issued To <span class="req">*</span></label><select id="invIssWorker"></select></div>
+          <div class="field po-c6"><label>Project</label><select id="invIssProject"></select></div>
+          <div class="field po-c6"><label>Job Order</label><select id="invIssJob"></select></div>
+          <div class="field po-c6"><label>Note</label><input type="text" id="invIssNote"></div>
+        </div>
+      </section>
+      <section class="po-sec">
+        <div class="po-sec-title">Items</div>
+        <div id="invIssLines"></div>
+        <button type="button" class="btn btn-secondary mt-small-btn" id="invIssAdd">+ Add item</button>
+        <div class="po-hint">The worker gets a notification to acknowledge receipt with their signature.</div>
+      </section>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="invIssPost">Post Issue Slip</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_returns" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg> Return to Stock</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <section class="po-sec">
+        <div class="po-sec-title">Return</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>Into Warehouse <span class="req">*</span></label><select id="invRetWh"></select></div>
+          <div class="field po-c6"><label>Returned By <span class="req">*</span></label><select id="invRetWorker"></select></div>
+          <div class="field po-c12"><label>Note</label><input type="text" id="invRetNote"></div>
+        </div>
+      </section>
+      <section class="po-sec">
+        <div class="po-sec-title">Materials Held by the Worker</div>
+        <div id="invRetLines"><div class="empty-state" style="padding:12px;">Choose who is returning materials.</div></div>
+        <div class="po-hint">Good items go back into stock and are credited to the project. Damaged items are recorded but not restocked — they stay charged to the project.</div>
+      </section>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="invRetPost">Post Return</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_transfers" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M21 7H9"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12"/></svg> Transfer Between Warehouses</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <section class="po-sec">
+        <div class="po-sec-title">Transfer</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>From <span class="req">*</span></label><select id="invTrfFrom"></select></div>
+          <div class="field po-c6"><label>To <span class="req">*</span></label><select id="invTrfTo"></select></div>
+          <div class="field po-c12"><label>Note</label><input type="text" id="invTrfNote"></div>
+        </div>
+      </section>
+      <section class="po-sec">
+        <div class="po-sec-title">Items</div>
+        <div id="invTrfLines"></div>
+        <button type="button" class="btn btn-secondary mt-small-btn" id="invTrfAdd">+ Add item</button>
+      </section>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="invTrfPost">Post Transfer</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_slips" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg> Slips & History</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <div id="invSlipListView">
+        <div class="sp-toolbar mt-toolbar">
+          <input type="text" id="invSlipSearch" placeholder="Search number, worker, supplier, project…">
+          <select id="invSlipType"><option value="">All types</option><option value="rcv">Receipts</option><option value="iss">Issue slips</option><option value="ret">Returns</option><option value="trf">Transfers</option></select>
+          <select id="invSlipWh"><option value="">All warehouses</option></select>
+          <label class="sp-check"><input type="checkbox" id="invSlipPending"> Awaiting acknowledgement</label>
+        </div>
+        <div id="invSlipList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="invSlipView" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="invSlipBack">&larr; Slips</button><div class="po-ed-title" id="invSlipTitle"></div></div>
+        <section class="po-sec"><div class="mr-info" id="invSlipInfo"></div></section>
+        <section class="po-sec"><div class="po-sec-title">Items</div><div class="sp-table-wrap"><table class="sp-table" id="invSlipItems"></table></div></section>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="invSlipPdf">View PDF</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_myMaterials" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg> My Materials</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
+    <div class="card-body">
+      <div id="invMineListView">
+        <div class="po-sec-title">Waiting for your signature</div>
+        <div id="invMinePending"><div class="empty-state">Loading…</div></div>
+        <div class="po-sec-title" style="margin-top:16px;">Materials with you</div>
+        <div id="invMineHold"></div>
+        <div class="po-sec-title" style="margin-top:16px;">Recent slips</div>
+        <div id="invMineRecent"></div>
+      </div>
+      <div id="invMineSlipView" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="invMineBack">&larr; My Materials</button><div class="po-ed-title" id="invMineTitle"></div></div>
+        <section class="po-sec"><div class="mr-info" id="invMineInfo"></div></section>
+        <section class="po-sec"><div class="po-sec-title">Items</div><div class="sp-table-wrap"><table class="sp-table" id="invMineItems"></table></div></section>
+        <section class="po-sec" id="invMineSignSec">
+          <div class="po-sec-title">Sign to confirm you received these</div>
+          <div class="inv-sigpad"><canvas id="invMineSig"></canvas></div>
+          <button type="button" class="btn btn-secondary mt-small-btn" id="invMineSigClear">Clear</button>
+        </section>
+        <div class="po-actions" id="invMineActions"><button type="button" class="btn btn-primary" id="invMineAck">Acknowledge Receipt</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_invReports" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg> Inventory Reports</span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <div class="seg-tabs rp-tabs" id="rpTabs">
+        <button type="button" class="seg-tab active" data-rp="balance">Stock Balance</button>
+        <button type="button" class="seg-tab" data-rp="register">Purchases, Issues &amp; Returns</button>
+        <button type="button" class="seg-tab inv-admin-only" data-rp="project">Project Cost</button>
+        <button type="button" class="seg-tab" data-rp="slow">Slow-Moving</button>
+        <button type="button" class="seg-tab" data-rp="reorder">Reorder</button>
+        <button type="button" class="seg-tab" data-rp="unreturned">Unreturned</button>
+      </div>
+      <div class="rp-filters">
+        <div class="field rp-f" data-for="balance register project"><label>From</label><input type="month" id="rpFrom"></div>
+        <div class="field rp-f" data-for="balance register project"><label>To</label><input type="month" id="rpTo"></div>
+        <div class="field rp-f" data-for="balance register slow unreturned"><label>Warehouse</label><select id="rpWh"></select></div>
+        <div class="field rp-f" data-for="balance register slow reorder"><label>Category</label><select id="rpCat"></select></div>
+        <div class="field rp-f" data-for="register"><label>Show</label><select id="rpKind"><option value="">Purchases, issues &amp; returns</option><option value="purchase">Purchases only</option><option value="issue">Issuances only</option><option value="return">Returns only</option></select></div>
+        <div class="field rp-f" data-for="register"><label>View</label><select id="rpRegView"><option value="summary">Summary</option><option value="detail">Detail (every line)</option></select></div>
+        <div class="field rp-f" data-for="slow"><label>Not issued for</label><select id="rpDays"><option value="60">60+ days</option><option value="90" selected>90+ days</option><option value="180">180+ days</option></select></div>
+        <div class="field rp-f" data-for="reorder"><label>Usage based on</label><select id="rpWindow"><option value="60">last 60 days</option><option value="90" selected>last 90 days</option><option value="180">last 180 days</option></select></div>
+        <div class="field rp-f" data-for="unreturned"><label>Held for</label><select id="rpHeld"><option value="0">any time</option><option value="30" selected>30+ days</option><option value="60">60+ days</option><option value="90">90+ days</option></select></div>
+        <div class="field rp-f" data-for="balance register slow reorder unreturned"><label>Search</label><input type="text" id="rpSearch" placeholder="Item, worker, project…"></div>
+      </div>
+      <div class="sp-actions-row">
+        <button type="button" class="btn btn-primary" id="rpRun">Run Report</button>
+        <button type="button" class="btn btn-secondary" id="rpPdf">PDF</button>
+        <button type="button" class="btn btn-secondary" id="rpXlsx">Excel</button>
+        <button type="button" class="btn btn-secondary inv-admin-only" id="rpMakePo" style="display:none;">Create draft PO(s) for ticked items</button>
+      </div>
+      <div class="inv-summary" id="rpSummary"></div>
+      <div class="rp-check" id="rpCheck"></div>
+      <div id="rpOut"><div class="empty-state">Choose the options and tap <b>Run Report</b>.</div></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlHub" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg> Tools &amp; Equipment</span><span class="purch-head-right"><span class="sp-count" id="tlHubCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div class="inv-hub tl-hub">
+        <button type="button" class="btn btn-primary" data-tl-go="tlIssue">Issue</button>
+        <button type="button" class="btn btn-primary" data-tl-go="tlReturn">Return</button>
+        <button type="button" class="btn btn-secondary" data-tl-go="tlHandover">Handover</button>
+        <button type="button" class="btn btn-secondary" data-tl-go="tlRegister">Register</button>
+        <button type="button" class="btn btn-secondary" data-tl-go="tlMaint">Calibration</button>
+        <button type="button" class="btn btn-secondary" data-tl-go="tlDefects">Defects</button>
+        <button type="button" class="btn btn-secondary" data-tl-go="tlSlips">Slips</button>
+        <button type="button" class="btn btn-secondary" data-tl-go="tlReports">Reports</button>
+      </div>
+      <div class="po-hint">Scan a tool’s QR label anywhere in these screens with <b>Scan</b>.</div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlRegister" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg> Tool Register</span><span class="purch-head-right"><span class="sp-count" id="tlRegisterCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div id="tlRegList">
+        <div class="sp-toolbar mt-toolbar">
+          <input type="text" id="tlRegSearch" placeholder="Search tag, name, serial, holder…">
+          <select id="tlRegStatus"><option value="">All statuses</option><option value="available">Available</option><option value="issued">Issued</option><option value="overdue">Issued — overdue</option><option value="defective">Defective</option><option value="repair">In repair</option><option value="lost">Lost</option><option value="retired">Retired</option><option value="maint">Calibration due / overdue</option></select>
+          <select id="tlRegWh"><option value="">All warehouses</option></select>
+          <select id="tlRegKind"><option value="">Tools &amp; kits</option><option value="tool">Tools</option><option value="kit">Kits</option></select>
+        </div>
+        <div class="sp-actions-row">
+          <button type="button" class="btn btn-primary inv-admin-only" id="tlAddBtn">+ Add Tool / Kit</button>
+          <button type="button" class="btn btn-secondary" id="tlScanBtn">Scan QR</button>
+          <button type="button" class="btn btn-secondary" id="tlLabelsBtn">Print QR Labels</button>
+          <button type="button" class="btn btn-secondary inv-admin-only" id="tlImportBtn">Import CSV</button>
+          <input type="file" id="tlImportFile" accept=".csv,text/csv" style="display:none;">
+        </div>
+        <div class="inv-summary" id="tlRegSummary"></div>
+        <div id="tlRegRows"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="tlRegForm" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="tlFormBack">&larr; Register</button><div class="po-ed-title" id="tlFormTitle">New Tool</div></div>
+        <section class="po-sec"><div class="po-sec-title">Tool</div>
+          <div class="po-grid">
+            <div class="field po-c3"><label>Type</label><select id="tlFKind"><option value="tool">Single tool / equipment</option><option value="kit">Kit (small hand tools)</option></select></div>
+            <div class="field po-c6"><label>Name <span class="req">*</span></label><input type="text" id="tlFName" placeholder="e.g. Vacuum Pump 6 CFM"></div>
+            <div class="field po-c3"><label>Category</label><select id="tlFCat"></select></div>
+            <div class="field po-c3"><label>Brand</label><input type="text" id="tlFBrand"></div>
+            <div class="field po-c3"><label>Model</label><input type="text" id="tlFModel"></div>
+            <div class="field po-c3"><label>Serial No.</label><input type="text" id="tlFSerial"></div>
+            <div class="field po-c3"><label>Home Warehouse <span class="req">*</span></label><select id="tlFWh"></select></div>
+            <div class="field po-c3" id="tlFQtyWrap"><label>How many units</label><input type="text" id="tlFQty" inputmode="numeric" value="1"></div>
+          </div>
+          <div id="tlFSerialsWrap" style="display:none;"><div class="field"><label>Serial numbers (one per line, optional)</label><textarea id="tlFSerials" rows="3"></textarea></div></div>
+        </section>
+        <section class="po-sec" id="tlFKitSec" style="display:none;"><div class="po-sec-title">Kit contents</div>
+          <div id="tlFKitRows"></div><button type="button" class="btn btn-secondary mt-small-btn" id="tlFKitAdd">+ Add item</button>
+          <div class="po-hint">On return, the warehouseman ticks anything missing — a defect report opens automatically.</div></section>
+        <section class="po-sec"><div class="po-sec-title">Calibration / Inspection</div>
+          <div class="po-grid">
+            <div class="field po-c3"><label>Needs</label><select id="tlFMaint"><option value="">Nothing scheduled</option><option value="calibration">Calibration</option><option value="inspection">Safety inspection</option></select></div>
+            <div class="field po-c3"><label>Every (days)</label><input type="text" id="tlFInterval" inputmode="numeric" placeholder="e.g. 180"></div>
+            <div class="field po-c3"><label>Next due</label><input type="date" id="tlFNext"></div>
+          </div>
+          <div class="po-hint">A tool that’s overdue can’t be issued until it’s recorded as passed.</div></section>
+        <section class="po-sec inv-admin-only"><div class="po-sec-title">Purchase</div>
+          <div class="po-grid">
+            <div class="field po-c3"><label>Purchase date</label><input type="date" id="tlFPDate"></div>
+            <div class="field po-c3"><label>Cost per unit (₱)</label><input type="text" id="tlFCost" inputmode="decimal"></div>
+            <div class="field po-c3"><label>Supplier</label><select id="tlFSup"></select></div>
+            <div class="field po-c3"><label>PO no.</label><input type="text" id="tlFPo" placeholder="PO-2026-0001"></div>
+            <div class="field po-c3"><label>Warranty until</label><input type="date" id="tlFWarranty"></div>
+            <div class="field po-c12"><label>Notes</label><input type="text" id="tlFNotes"></div>
+          </div></section>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="tlFSave">Save</button></div>
+      </div>
+      <div id="tlRegDetail" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="tlDetBack">&larr; Register</button><div class="po-ed-title" id="tlDetTitle"></div></div>
+        <section class="po-sec"><div class="mr-info" id="tlDetInfo"></div></section>
+        <section class="po-sec"><div class="po-sec-title">History</div><div class="sp-table-wrap"><table class="sp-table" id="tlDetHist"></table></div></section>
+        <div class="po-actions" id="tlDetActions"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlIssue" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M4 3h16"/></svg> Issue Tools</span><span class="purch-head-right"><span class="sp-count" id="tlIssueCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <section class="po-sec"><div class="po-sec-title">Issue</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>From Warehouse <span class="req">*</span></label><select id="tlIsWh"></select></div>
+          <div class="field po-c6"><label>Issued To <span class="req">*</span></label><select id="tlIsWorker"></select></div>
+          <div class="field po-c6"><label>Job Order</label><select id="tlIsJob"></select></div>
+          <div class="field po-c6"><label>Project</label><select id="tlIsProject"></select></div>
+          <div class="field po-c6"><label>Due Back</label><input type="date" id="tlIsDue"></div>
+          <div class="field po-c6"><label>Worker signs</label>
+            <div class="sp-pick" data-signmode="1" id="tlIsMode"><button type="button" data-m="counter" class="on">Here, on this device</button><button type="button" data-m="phone">Later, on their phone</button></div></div>
+          <div class="field po-c12"><label>Note</label><input type="text" id="tlIsNote"></div>
+        </div></section>
+        <section class="po-sec"><div class="po-sec-title">Tools</div>
+          <div id="tlIsLines"></div>
+          <div class="tl-add-row"><input type="text" id="tlIsLinesFind" placeholder="Type a tag or name…" autocomplete="off"><button type="button" class="btn btn-secondary mt-small-btn" id="tlIsLinesScan">Scan QR</button></div>
+          <div class="po-hint">Only available tools in this warehouse can be added. A photo of the condition going out is optional but recommended.</div></section>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="tlIsPost">Sign &amp; Issue</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlReturn" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg> Return Tools</span><span class="purch-head-right"><span class="sp-count" id="tlReturnCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <section class="po-sec"><div class="po-sec-title">Return</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>Into Warehouse <span class="req">*</span></label><select id="tlRtWh"></select></div>
+          <div class="field po-c6"><label>Returned By <span class="req">*</span></label><select id="tlRtWorker"></select></div>
+          <div class="field po-c6"><label>Worker signs</label>
+            <div class="sp-pick" data-signmode="1" id="tlRtMode"><button type="button" data-m="counter" class="on">Here, on this device</button><button type="button" data-m="phone">Later, on their phone</button></div></div>
+          <div class="field po-c6"><label>Note</label><input type="text" id="tlRtNote"></div>
+        </div></section>
+      <section class="po-sec"><div class="po-sec-title">Tools held by this worker</div>
+        <div id="tlRtLines"><div class="empty-state" style="padding:12px;">Choose who is returning tools.</div></div>
+        <div class="po-hint">Anything not in good condition needs a photo or a note, and opens a defect report automatically. Tick missing kit items.</div></section>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="tlRtPost">Sign &amp; Receive</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlHandover" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M21 7H9"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12"/></svg> Handover</span><span class="purch-head-right"><span class="sp-count" id="tlHandoverCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <section class="po-sec"><div class="po-sec-title">Handover on site</div>
+        <div class="po-grid">
+          <div class="field po-c6"><label>From (holder) <span class="req">*</span></label><select id="tlHoFrom"></select></div>
+          <div class="field po-c6"><label>To <span class="req">*</span></label><select id="tlHoTo"></select></div>
+          <div class="field po-c12"><label>Note</label><input type="text" id="tlHoNote"></div>
+        </div></section>
+      <section class="po-sec"><div class="po-sec-title">Tools to hand over</div><div id="tlHoLines"><div class="empty-state" style="padding:12px;">Choose who is handing over.</div></div></section>
+      <div class="po-hint">Both workers sign. Custody moves to the receiver — no trip back to the warehouse needed.</div>
+      <div class="po-actions"><button type="button" class="btn btn-primary" id="tlHoPost">Both Sign &amp; Hand Over</button></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlDefects" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg> Defect Reports</span><span class="purch-head-right"><span class="sp-count" id="tlDefectsCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div id="tlDefList">
+        <div class="sp-toolbar po-toolbar"><input type="text" id="tlDefSearch" placeholder="Search DEF no., tool, worker…">
+          <select id="tlDefStatus"><option value="active">Open &amp; in repair</option><option value="open">Open</option><option value="in_repair">In repair</option><option value="closed">Closed</option><option value="">All</option></select></div>
+        <div id="tlDefRows"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="tlDefDetail" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="tlDefBack">&larr; Defects</button><div class="po-ed-title" id="tlDefTitle"></div></div>
+        <section class="po-sec"><div class="mr-info" id="tlDefInfo"></div></section>
+        <section class="po-sec inv-admin-only" id="tlDefDecideSec"><div class="po-sec-title">Decision</div>
+          <div class="po-grid">
+            <div class="field po-c3"><label>Cause</label><select id="tlDCause"><option value="unknown">Unknown</option><option value="wear">Normal wear</option><option value="misuse">Misuse</option><option value="accident">Accident</option></select></div>
+            <div class="field po-c3"><label>Decision</label><select id="tlDDec"><option value="pending">Pending</option><option value="repair">Repair</option><option value="replace">Replace (retire this one)</option><option value="write_off">Write off</option><option value="no_fault">No fault — back in service</option></select></div>
+            <div class="field po-c3"><label>Repair shop</label><input type="text" id="tlDVendor"></div>
+            <div class="field po-c3"><label>Repair cost (₱)</label><input type="text" id="tlDCost" inputmode="decimal"></div>
+            <div class="field po-c12"><label class="sp-check"><input type="checkbox" id="tlDCharge"> Chargeable to the worker (per company policy — recorded only, nothing is deducted automatically)</label></div>
+            <div class="field po-c12"><label>Note</label><input type="text" id="tlDNote"></div>
+          </div>
+          <div class="sp-actions-row"><button type="button" class="btn btn-secondary" data-dstat="open">Save</button><button type="button" class="btn btn-secondary" data-dstat="in_repair">Sent for repair</button><button type="button" class="btn btn-primary" data-dstat="closed">Close report</button></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlMaint" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M8 5l1 2M16 5l-1 2"/></svg> Calibration &amp; Inspection</span><span class="purch-head-right"><span class="sp-count" id="tlMaintCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div class="sp-toolbar po-toolbar"><input type="text" id="tlMtSearch" placeholder="Search tool…">
+        <select id="tlMtShow"><option value="due">Overdue &amp; due in 30 days</option><option value="">All scheduled tools</option></select></div>
+      <div id="tlMtRows"><div class="empty-state">Loading…</div></div>
+      <section class="po-sec" id="tlMtForm" style="display:none;"><div class="po-sec-title" id="tlMtFormTitle">Record</div>
+        <div class="po-grid">
+          <div class="field po-c3"><label>Date done</label><input type="date" id="tlMtDate"></div>
+          <div class="field po-c3"><label>Result</label><select id="tlMtResult"><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
+          <div class="field po-c3"><label>Certificate / ref.</label><input type="text" id="tlMtRef"></div>
+          <div class="field po-c3"><label>Note</label><input type="text" id="tlMtNote"></div>
+        </div>
+        <div class="sp-actions-row"><button type="button" class="btn btn-primary" id="tlMtSave">Save Record</button><button type="button" class="btn btn-secondary" id="tlMtCancel">Cancel</button></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlSlips" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg> Tool Slips</span><span class="purch-head-right"><span class="sp-count" id="tlSlipsCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div id="tlSlipList">
+        <div class="sp-toolbar po-toolbar"><input type="text" id="tlSlipSearch" placeholder="Search slip no., worker…">
+          <select id="tlSlipType"><option value="">All slips</option><option value="issue">Issue</option><option value="return">Return</option><option value="handover">Handover</option><option value="pending">Awaiting worker signature</option></select></div>
+        <div id="tlSlipRows"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="tlSlipDetail" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="tlSlipBack">&larr; Slips</button><div class="po-ed-title" id="tlSlipTitle"></div></div>
+        <section class="po-sec"><div class="mr-info" id="tlSlipInfo"></div></section>
+        <section class="po-sec"><div class="po-sec-title">Tools</div><div class="sp-table-wrap"><table class="sp-table" id="tlSlipItems"></table></div></section>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="tlSlipPdf">View PDF</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_tlReports" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg> Tool Reports</span><span class="purch-head-right"><span class="sp-count" id="tlReportsCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div class="seg-tabs rp-tabs" id="trTabs">
+        <button type="button" class="seg-tab active" data-tr="monthly">Monthly Movements</button>
+        <button type="button" class="seg-tab" data-tr="custody">Custody &amp; Overdue</button>
+        <button type="button" class="seg-tab" data-tr="defects">Defects</button>
+        <button type="button" class="seg-tab" data-tr="register">Register</button>
+      </div>
+      <div class="rp-filters">
+        <div class="field" data-trf="monthly defects"><label>From</label><input type="month" id="trFrom"></div>
+        <div class="field" data-trf="monthly defects"><label>To</label><input type="month" id="trTo"></div>
+        <div class="field" data-trf="monthly custody defects register"><label>Warehouse</label><select id="trWh"></select></div>
+      </div>
+      <div class="sp-actions-row"><button type="button" class="btn btn-primary" id="trRun">Run Report</button><button type="button" class="btn btn-secondary" id="trPdf">PDF</button><button type="button" class="btn btn-secondary" id="trXlsx">Excel</button></div>
+      <div class="inv-summary" id="trSummary"></div><div class="rp-check" id="trCheck"></div>
+      <div id="trOut"><div class="empty-state">Choose the options and tap <b>Run Report</b>.</div></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_myTools" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg> My Tools</span><span class="purch-head-right"><span class="sp-count" id="myToolsCount"></span></span></div>
+    <div class="card-body">
+      <div class="po-ed-top tl-hub-back"><button type="button" class="po-back" data-tl-hub="1">&larr; Tools</button></div>
+      <div id="tlMineList">
+        <div class="po-sec-title">Waiting for your signature</div><div id="tlMinePending"><div class="empty-state">Loading…</div></div>
+        <div class="po-sec-title" style="margin-top:16px;">Tools with you</div><div id="tlMineHold"></div>
+        <button type="button" class="btn btn-secondary" id="tlMineHandover" style="width:100%; margin-top:10px;">Hand over tools to someone</button>
+      </div>
+      <div id="tlMineSlip" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="tlMineBack">&larr; My Tools</button><div class="po-ed-title" id="tlMineTitle"></div></div>
+        <section class="po-sec"><div class="mr-info" id="tlMineInfo"></div></section>
+        <section class="po-sec"><div class="po-sec-title">Tools</div><div class="sp-table-wrap"><table class="sp-table" id="tlMineItems"></table></div></section>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="tlMineSign">Sign to Confirm</button></div>
+      </div>
+      <div id="tlMineHo" style="display:none;">
+        <div class="po-ed-top"><button type="button" class="po-back" id="tlMineHoBack">&larr; My Tools</button><div class="po-ed-title">Hand Over</div></div>
+        <section class="po-sec"><div class="field"><label>Give to <span class="req">*</span></label><select id="tlMineHoTo"></select></div><div id="tlMineHoLines"></div></section>
+        <div class="po-hint">You sign first, then pass your phone to the receiver to sign.</div>
+        <div class="po-actions"><button type="button" class="btn btn-primary" id="tlMineHoPost">Both Sign &amp; Hand Over</button></div>
+      </div>
+    </div>
+  </div>
 </main>
+
+<!-- Tools: signature capture + QR scanner (tools.js) -->
+<div class="overlay" id="tlSignOverlay" style="z-index:96;">
+  <div class="sheet" style="max-width:560px;">
+    <div class="sheet-head"><h3 id="tlSignTitle">Signature</h3><button class="sheet-close" id="tlSignClose" type="button">&times;</button></div>
+    <div class="po-hint" id="tlSignWho" style="margin-top:0;"></div>
+    <div class="inv-sigpad"><canvas id="tlSignCanvas"></canvas></div>
+    <div class="sp-actions-row" style="margin-top:10px;"><button type="button" class="btn btn-secondary" id="tlSignClear">Clear</button><button type="button" class="btn btn-primary" id="tlSignOk">Confirm Signature</button></div>
+  </div>
+</div>
+<div class="overlay" id="tlScanOverlay" style="z-index:96;">
+  <div class="sheet" style="max-width:520px;">
+    <div class="sheet-head"><h3>Scan Tool QR</h3><button class="sheet-close" id="tlScanClose" type="button">&times;</button></div>
+    <div class="tl-scan-box"><video id="tlScanVideo" playsinline muted></video><div class="tl-scan-frame"></div></div>
+    <div class="po-hint" id="tlScanMsg">Point the camera at the label.</div>
+    <div class="tl-add-row"><input type="text" id="tlScanManual" placeholder="…or type the asset tag, e.g. TL-0001" autocomplete="off"><button type="button" class="btn btn-primary mt-small-btn" id="tlScanManualOk">Use</button></div>
+  </div>
+</div>
 
 <!-- Purchasing: sign in again after the Supabase session expired. Keeps
      whatever sheet/form is open underneath. Wired in purchasing.js
