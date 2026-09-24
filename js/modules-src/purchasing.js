@@ -507,6 +507,20 @@
     if(!b) return;
     const d = spDocsCache.find(x=> x.id === b.closest('.sp-row').dataset.id);
     if(!d) return;
+    if(b.dataset.dact === 'open' && (/^(application\/pdf|image\/)/.test(d.mime_type || '') || /\.(pdf|png|jpe?g|webp|gif)$/i.test(d.file_name || d.storage_path || ''))){
+      // PDFs and images open in the app's PDF viewer (Download / Share there).
+      b.disabled = true;
+      try{
+        const { data, error } = await db.storage.from(SP_DOC_BUCKET).download(d.storage_path);
+        if(error) throw error;
+        const isPdf = (d.mime_type || '') === 'application/pdf' || /\.pdf$/i.test(d.file_name || d.storage_path || '');
+        const blob = isPdf ? new Blob([data], { type:'application/pdf' }) : data;
+        await openFileInPdfViewer(blob, d.file_name || d.title || 'document', d.title || d.file_name || d.doc_type);
+      }catch(err){
+        purchFail('Couldn\u2019t open document: ', err);
+      }finally{ b.disabled = false; }
+      return;
+    }
     if(b.dataset.dact === 'open'){
       // Open the tab synchronously (inside the tap) so mobile popup
       // blockers allow it, then point it at the signed URL once we have it.

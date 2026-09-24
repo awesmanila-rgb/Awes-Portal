@@ -977,6 +977,16 @@
       // move to Storage) still carry inline base64 in attachmentData and
       // are handled by the branches below, so old liquidations keep
       // displaying rather than breaking.
+      if(item.attachmentPath && (/\.pdf$/i.test(item.attachmentPath) || item.attachmentMime === 'application/pdf')){
+        // Stored PDF receipt → the app's PDF viewer (Download / Share there).
+        toast('Opening receipt…');
+        caReceiptSignedUrl(item.attachmentPath).then(async url=>{
+          if(!url){ toast('Could not load that receipt'); return; }
+          const blob = await (await fetch(url)).blob();
+          await openFileInPdfViewer(new Blob([blob], {type:'application/pdf'}), item.attachmentName || 'receipt.pdf', item.attachmentName || 'Receipt');
+        }).catch(err=>{ console.error('open receipt pdf failed', err); toast('Could not open that file'); });
+        return;
+      }
       if(item.attachmentPath){
         $('liqAttachmentImageWrap').style.display = '';
         $('liqAttachmentImg').removeAttribute('src');
@@ -1004,6 +1014,13 @@
         // is allowed — and revoke it afterwards so it doesn't leak.
         try{
           const blob = caDataUrlToBlob(item.attachmentData, item.attachmentMime);
+          if(blob.type === 'application/pdf' || /\.pdf$/i.test(item.attachmentName || '')){
+            // PDF receipts open in the app's PDF viewer (Download / Share there).
+            openFileInPdfViewer(blob.type === 'application/pdf' ? blob : new Blob([blob], {type:'application/pdf'}),
+              item.attachmentName || 'receipt.pdf', item.attachmentName || 'Receipt')
+              .catch(err=>{ console.error('open receipt pdf failed', err); toast('Could not open that file'); });
+            return;
+          }
           const url = URL.createObjectURL(blob);
           const win = window.open(url, '_blank');
           if(!win){
@@ -1086,17 +1103,15 @@
       if(el) el.addEventListener('click', ()=> openLiquidationAttachment(Object.assign({}, item, {__recordId: record.id})));
     });
 
-    const dlBtn = $('caLiqDownloadPdfBtn');
+    // Approved liquidations open in the PDF viewer, which is where
+    // Download / Share live (no separate download button, no auto-download).
+    const viewBtn = $('caLiqViewPdfBtn');
     if(liq.status==='approved'){
-      dlBtn.style.display = '';
-      dlBtn.onclick = ()=> caDownloadLiquidationPdf(record);
-      // Auto-save a PDF copy the first time the technician sees the approval,
-      // so they end up with a record of it without having to remember to tap
-      // the button. Guarded per-record so it only fires once.
-      caMaybeAutoSaveLiquidationPdf(record);
+      viewBtn.style.display = '';
+      viewBtn.onclick = ()=> caViewLiquidationPdf(record);
     }else{
-      dlBtn.style.display = 'none';
-      dlBtn.onclick = null;
+      viewBtn.style.display = 'none';
+      viewBtn.onclick = null;
     }
   }
 
@@ -1163,22 +1178,11 @@
     doc.text('System-generated copy — this document cannot be edited.', margin, 800);
     return doc;
   }
-  async function caDownloadLiquidationPdf(record){
+  async function caViewLiquidationPdf(record){
     try{
       const doc = await caBuildLiquidationPdf(record);
-      await shareOrDownloadPdf(doc, 'Liquidation-'+(record.id||'form')+'.pdf');
+      await openFileInPdfViewer(doc, 'Liquidation-'+(record.id||'form')+'.pdf', 'Liquidation Form');
     }catch(e){ console.error('liquidation pdf failed', e); toast('Could not generate the PDF'); }
-  }
-  async function caMaybeAutoSaveLiquidationPdf(record){
-    const flagKey = 'liqpdf:'+record.id;
-    try{
-      const existing = await window.storage.get(flagKey, false);
-      if(existing) return; // already saved once
-    }catch(e){ /* treat a lookup error the same as "not set yet" */ }
-    try{
-      await caDownloadLiquidationPdf(record);
-      await window.storage.set(flagKey, '1', false);
-    }catch(e){ console.error('auto-save liquidation pdf failed', e); }
   }
 
   // ---------- Progressive step tracker for the Cash Advance/Liquidation flow ----------

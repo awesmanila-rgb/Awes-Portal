@@ -305,7 +305,7 @@
       html = b('save', 'Save Draft') + b('preview', 'Preview PDF') + b('issue', 'Issue PO', 'btn-primary');
       if(poEditing) html += b('duplicate', 'Duplicate') + b('delete', 'Delete Draft', 'danger');
     }else{
-      html = b('preview', 'View PDF', 'btn-primary') + b('download', 'Download PDF') + b('duplicate', 'Duplicate');
+      html = b('preview', 'View PDF', 'btn-primary') + b('duplicate', 'Duplicate');
       if(st === 'issued') html += b('cancel', 'Cancel PO', 'danger');
     }
     $('poActions').innerHTML = html;
@@ -666,7 +666,6 @@
     try{
       if(act === 'save') await poSave();
       else if(act === 'preview') await poShowPdf('view');
-      else if(act === 'download') await poShowPdf('download');
       else if(act === 'duplicate') poDuplicate();
       else if(act === 'issue') await poIssue();
       else if(act === 'cancel') await poCancel();
@@ -1135,11 +1134,6 @@
       const supplierPart = d.supplier ? '-' + String(poSupplierName(d.supplier)).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) : '';
       const filename = (d.header.po_no || 'Draft-PO') + supplierPart + (d.status === 'issued' ? '' : '-' + d.status.toUpperCase()) + '.pdf';
       const title = 'Purchase Order ' + (d.header.po_no || '(draft)');
-      if(mode === 'download'){
-        const how = await shareOrDownloadPdf(doc, filename, title);
-        toast(how === 'shared' ? 'PO shared' : 'PO downloaded');
-        return;
-      }
       $('previewOverlay').querySelector('h3').textContent = title;
       $('previewOkBtn').textContent = 'Close';
       $('previewOverlay').style.zIndex = '99';

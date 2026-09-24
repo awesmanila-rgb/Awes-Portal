@@ -47,7 +47,7 @@
         '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+'</span></div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button><button data-act="share">Share</button></div>');
+          : '<div class="hist-actions"><button data-act="view">View</button></div>');
       if(isDraft){
         // "Continue" reopens the draft in the form so the technician can
         // finish filling it out and submit it — same underlying action as
@@ -97,19 +97,6 @@
           }catch(err){
             console.error('view report failed', err);
             toast('Could not open this report');
-          }
-        });
-        // This handler used to be un-caught: any error inside buildPdf (and there
-        // was one for every cloud-loaded report) rejected silently and the button
-        // simply appeared to do nothing.
-        row.querySelector('[data-act="share"]').addEventListener('click', async (e)=>{
-          e.stopPropagation();
-          try{
-            const doc = await buildPdf(d);
-            await shareOrDownloadPdf(doc, (d.srNo||'service-report')+'.pdf');
-          }catch(err){
-            console.error('PDF generation failed', err);
-            toast('Could not generate PDF for this report');
           }
         });
       }

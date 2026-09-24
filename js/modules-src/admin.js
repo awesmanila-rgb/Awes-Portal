@@ -1348,10 +1348,20 @@
           '<div class="u-name">'+escapeHtml(r.title)+'</div>'+
           '<div class="u-status">'+leaveFmtWhen(r.created_at)+'</div>'+
         '</div><div class="u-actions">'+
-          '<a href="'+r.file_data+'" download="'+escapeHtml(r.title)+'" style="border:1px solid var(--border); background:#fff; border-radius:6px; padding:6px 10px; font-size:12px; text-decoration:none; color:var(--text);">Download</a>'+
+          '<button type="button" data-view-doc="'+r.id+'">View</button>'+
           '<button type="button" data-remove-doc="'+r.id+'">Remove</button>'+
         '</div></div>'
       ).join('');
+      // Opens in the PDF viewer (images are wrapped as a one-page PDF),
+      // which is where Download / Share live.
+      list.querySelectorAll('[data-view-doc]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const r = rows.find(x=> String(x.id) === btn.dataset.viewDoc);
+          if(!r || !r.file_data) return;
+          try{ await openFileInPdfViewer(r.file_data, r.title, r.title); }
+          catch(e){ console.error('open document failed', e); toast('Could not open this document'); }
+        });
+      });
       list.querySelectorAll('[data-remove-doc]').forEach(btn=>{
         btn.addEventListener('click', ()=> tpDeleteDocument(btn.dataset.removeDoc));
       });

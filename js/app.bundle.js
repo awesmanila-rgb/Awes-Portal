@@ -5094,10 +5094,20 @@
           '<div class="u-name">'+escapeHtml(r.title)+'</div>'+
           '<div class="u-status">'+leaveFmtWhen(r.created_at)+'</div>'+
         '</div><div class="u-actions">'+
-          '<a href="'+r.file_data+'" download="'+escapeHtml(r.title)+'" style="border:1px solid var(--border); background:#fff; border-radius:6px; padding:6px 10px; font-size:12px; text-decoration:none; color:var(--text);">Download</a>'+
+          '<button type="button" data-view-doc="'+r.id+'">View</button>'+
           '<button type="button" data-remove-doc="'+r.id+'">Remove</button>'+
         '</div></div>'
       ).join('');
+      // Opens in the PDF viewer (images are wrapped as a one-page PDF),
+      // which is where Download / Share live.
+      list.querySelectorAll('[data-view-doc]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const r = rows.find(x=> String(x.id) === btn.dataset.viewDoc);
+          if(!r || !r.file_data) return;
+          try{ await openFileInPdfViewer(r.file_data, r.title, r.title); }
+          catch(e){ console.error('open document failed', e); toast('Could not open this document'); }
+        });
+      });
       list.querySelectorAll('[data-remove-doc]').forEach(btn=>{
         btn.addEventListener('click', ()=> tpDeleteDocument(btn.dataset.removeDoc));
       });
@@ -6401,6 +6411,9 @@
 
   // title: share-sheet title (defaults to the Service Report wording used by
   // every existing caller). Purchase Orders pass their own.
+  // Used only by the Service Report submit flow ("Generate & Share Report"),
+  // which hands the finished report off automatically. Everywhere a PDF is
+  // *viewed*, the viewer's own Download / Share buttons are used instead.
   async function shareOrDownloadPdf(doc, filename, title){
     const blob = doc.output('blob');
     if(navigator.canShare && navigator.canShare({files:[new File([blob], filename, {type:'application/pdf'})]})){
@@ -6415,6 +6428,94 @@
     }
     doc.save(filename);
     return 'downloaded';
+  }
+
+  // ---- PDF viewer actions: Download and Share are separate on purpose ----
+  // Download always saves the file to the device; Share always opens the
+  // phone's share sheet (Messenger, Viber, Gmail, Drive…). Neither silently
+  // turns into the other.
+  function pdfSafeFilename(name){
+    const n = String(name || 'document.pdf').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'document.pdf';
+    return /\.pdf$/i.test(n) ? n : n + '.pdf';
+  }
+  function downloadPdfFile(doc, filename){
+    doc.save(pdfSafeFilename(filename));
+  }
+  // Returns 'shared' | 'cancelled' | 'unsupported'.
+  async function sharePdfFiles(items, title){
+    const files = items.map(it=> new File([it.doc.output('blob')], pdfSafeFilename(it.filename), { type:'application/pdf' }));
+    if(!(navigator.share && navigator.canShare && navigator.canShare({ files }))) return 'unsupported';
+    try{
+      await navigator.share({ files, title: title || 'AWES Document', text: (title || 'AWES document') + ' — ' + files.map(f=> f.name).join(', ') });
+      return 'shared';
+    }catch(e){
+      return (e && e.name === 'AbortError') ? 'cancelled' : 'unsupported';
+    }
+  }
+
+  // Lets PDFs that weren't built with jsPDF (uploaded memos, supplier
+  // documents, receipt PDFs) go through the same viewer. It mimics the
+  // three jsPDF methods the viewer uses: output('arraybuffer'|'blob') and save().
+  async function pdfDocFromBlob(blob){
+    const buf = await blob.arrayBuffer();
+    const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([buf], { type:'application/pdf' });
+    return {
+      output(type){
+        if(type === 'blob') return pdfBlob;
+        return buf.slice(0); // pdf.js detaches the buffer it's given
+      },
+      save(filename){
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url; a.download = pdfSafeFilename(filename);
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=> URL.revokeObjectURL(url), 60000);
+      }
+    };
+  }
+  function pdfDataUrlToBlob(dataUrl){
+    const m = /^data:([^;,]+)?(;base64)?,(.*)$/.exec(dataUrl || '');
+    if(!m) throw new Error('not a data URL');
+    const mime = m[1] || 'application/octet-stream';
+    if(!m[2]) return new Blob([decodeURIComponent(m[3])], { type:mime });
+    const bin = atob(m[3]);
+    const bytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type:mime });
+  }
+  // An uploaded photo (a scanned memo, a permit snapshot) is wrapped in a
+  // one-page PDF so it also gets the viewer's Download / Share.
+  async function pdfDocFromImage(src){
+    await loadAwesScript('jspdf', awesLibs.jspdf);
+    const img = await new Promise((res, rej)=>{ const i = new Image(); i.onload = ()=> res(i); i.onerror = ()=> rej(new Error('image load failed')); i.src = src; });
+    const { jsPDF } = window.jspdf;
+    const w = img.naturalWidth || 595, h = img.naturalHeight || 842;
+    const doc = new jsPDF({ orientation: w > h ? 'l' : 'p', unit:'pt', format:[w, h], compress:true });
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0);
+    doc.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, w, h);
+    return doc;
+  }
+  // One entry point for "open this file in the PDF viewer": a Blob, a data:
+  // URL, or a jsPDF doc; PDFs and images both work.
+  async function openFileInPdfViewer(source, filename, title){
+    let doc;
+    if(source && typeof source.output === 'function') doc = source;
+    else{
+      const blob = typeof source === 'string' ? pdfDataUrlToBlob(source) : source;
+      const isImage = /^image\//.test(blob.type || '');
+      if(isImage){
+        const url = URL.createObjectURL(blob);
+        try{ doc = await pdfDocFromImage(url); } finally { URL.revokeObjectURL(url); }
+      }else doc = await pdfDocFromBlob(blob);
+    }
+    const ov = $('previewOverlay');
+    ov.querySelector('h3').textContent = title || filename || 'Document';
+    $('previewOkBtn').textContent = 'Close';
+    ov.style.zIndex = '99'; // sits above whichever sheet opened it
+    ov.classList.add('open');
+    setPreviewZoom(1);
+    await renderPdfPreview(doc, pdfSafeFilename(filename || title || 'document'), title || '');
   }
 
   // Mobile browsers use canvas rendering for reliable PDF preview. PDF.js is lazy-loaded.
@@ -6433,18 +6534,24 @@
   let previewCurrentDoc = null;
   let previewCurrentFilename = 'Report.pdf';
   let previewCurrentTitle = '';
+  // Batch previews (one report per unit) put every doc here so Download
+  // saves all of them and Share sends all of them together.
+  let previewCurrentDocs = [];
   function closePreview(){
     $('previewOverlay').classList.remove('open');
     previewRenderToken++; // invalidate any in-flight render
     const frame = $('previewFrame');
     frame.innerHTML = '<div class="empty-state" style="display:none;">Rendering preview…</div>';
     previewCurrentDoc = null;
+    previewCurrentDocs = [];
     previewCurrentTitle = '';
+    $('previewOverlay').style.zIndex = '';
   }
   async function renderPdfPreview(doc, filename, title){
     previewCurrentDoc = doc;
     previewCurrentFilename = filename || 'Report.pdf';
     previewCurrentTitle = title || '';
+    previewCurrentDocs = [{ doc, filename: previewCurrentFilename }];
     const myToken = ++previewRenderToken;
     const frame = $('previewFrame');
     frame.innerHTML = '';
@@ -6505,8 +6612,11 @@
         frame.appendChild(canvas);
       }
     }
-    // Keep the first doc downloadable from the preview's own button.
+    // Download / Share act on every report in the batch, not just the first.
     previewCurrentDoc = docs[0] ? docs[0].doc : null;
+    previewCurrentFilename = (docs[0] && docs[0].filename) || 'service-report.pdf';
+    previewCurrentTitle = 'Service Reports';
+    previewCurrentDocs = docs.map((d, i)=> ({ doc: d.doc, filename: d.filename || ('service-report-' + (i+1) + '.pdf') }));
     applyPreviewZoom(); // pages created after the zoom was set
   }
   // ---- Preview zoom ----
@@ -6556,7 +6666,7 @@
             const own = srOpParamsFor(item.id || '');
             SR_OP_FIELDS.forEach(f=> d[f] = own[f] || '');
           }
-          docs.push({ doc: await buildPdf(d), label: (typeof dtEquipSummaryLine==='function' ? dtEquipSummaryLine(item) : '') });
+          docs.push({ doc: await buildPdf(d), label: (typeof dtEquipSummaryLine==='function' ? dtEquipSummaryLine(item) : ''), filename: (d.srNo||'service-report')+'-unit-'+(docs.length+1)+'.pdf' });
         }
         await renderPdfPreviewMulti(docs);
       }else{
@@ -6572,22 +6682,32 @@
   });
   $('closePreview').addEventListener('click', closePreview);
   $('previewOkBtn').addEventListener('click', closePreview);
-  // Download does NOT close the overlay — someone checking a report over a
-  // weak field connection may want to save it and keep looking, or try
-  // again if the share sheet/save silently didn't go through.
+  // Neither button closes the overlay — someone checking a report over a
+  // weak field connection may want to save/send it and keep looking, or
+  // try again if the save or share didn't go through.
   $('previewDownloadBtn').addEventListener('click', async ()=>{
-    if(!previewCurrentDoc) return;
+    if(!previewCurrentDocs.length) return;
     const btn = $('previewDownloadBtn');
-    const original = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Downloading…';
+    btn.disabled = true;
     try{
-      await shareOrDownloadPdf(previewCurrentDoc, previewCurrentFilename, previewCurrentTitle);
+      for(const it of previewCurrentDocs) downloadPdfFile(it.doc, it.filename);
+      toast(previewCurrentDocs.length > 1 ? previewCurrentDocs.length + ' PDFs downloaded' : 'PDF downloaded');
     }catch(err){
       console.error('preview download failed', err);
-      toast('Could not download this report');
-    }finally{
-      btn.disabled = false; btn.textContent = original;
-    }
+      toast('Could not download this PDF');
+    }finally{ btn.disabled = false; }
+  });
+  $('previewShareBtn').addEventListener('click', async ()=>{
+    if(!previewCurrentDocs.length) return;
+    const btn = $('previewShareBtn');
+    btn.disabled = true;
+    try{
+      const how = await sharePdfFiles(previewCurrentDocs, previewCurrentTitle || previewCurrentFilename);
+      if(how === 'unsupported') toast('Sharing isn\u2019t supported on this browser — use Download instead');
+    }catch(err){
+      console.error('preview share failed', err);
+      toast('Could not share this PDF');
+    }finally{ btn.disabled = false; }
   });
 
   function showShareSuccess(detail){
@@ -6787,7 +6907,7 @@
         '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+'</span></div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button><button data-act="share">Share</button></div>');
+          : '<div class="hist-actions"><button data-act="view">View</button></div>');
       if(isDraft){
         // "Continue" reopens the draft in the form so the technician can
         // finish filling it out and submit it — same underlying action as
@@ -6837,19 +6957,6 @@
           }catch(err){
             console.error('view report failed', err);
             toast('Could not open this report');
-          }
-        });
-        // This handler used to be un-caught: any error inside buildPdf (and there
-        // was one for every cloud-loaded report) rejected silently and the button
-        // simply appeared to do nothing.
-        row.querySelector('[data-act="share"]').addEventListener('click', async (e)=>{
-          e.stopPropagation();
-          try{
-            const doc = await buildPdf(d);
-            await shareOrDownloadPdf(doc, (d.srNo||'service-report')+'.pdf');
-          }catch(err){
-            console.error('PDF generation failed', err);
-            toast('Could not generate PDF for this report');
           }
         });
       }
@@ -13861,6 +13968,16 @@
       // move to Storage) still carry inline base64 in attachmentData and
       // are handled by the branches below, so old liquidations keep
       // displaying rather than breaking.
+      if(item.attachmentPath && (/\.pdf$/i.test(item.attachmentPath) || item.attachmentMime === 'application/pdf')){
+        // Stored PDF receipt → the app's PDF viewer (Download / Share there).
+        toast('Opening receipt…');
+        caReceiptSignedUrl(item.attachmentPath).then(async url=>{
+          if(!url){ toast('Could not load that receipt'); return; }
+          const blob = await (await fetch(url)).blob();
+          await openFileInPdfViewer(new Blob([blob], {type:'application/pdf'}), item.attachmentName || 'receipt.pdf', item.attachmentName || 'Receipt');
+        }).catch(err=>{ console.error('open receipt pdf failed', err); toast('Could not open that file'); });
+        return;
+      }
       if(item.attachmentPath){
         $('liqAttachmentImageWrap').style.display = '';
         $('liqAttachmentImg').removeAttribute('src');
@@ -13888,6 +14005,13 @@
         // is allowed — and revoke it afterwards so it doesn't leak.
         try{
           const blob = caDataUrlToBlob(item.attachmentData, item.attachmentMime);
+          if(blob.type === 'application/pdf' || /\.pdf$/i.test(item.attachmentName || '')){
+            // PDF receipts open in the app's PDF viewer (Download / Share there).
+            openFileInPdfViewer(blob.type === 'application/pdf' ? blob : new Blob([blob], {type:'application/pdf'}),
+              item.attachmentName || 'receipt.pdf', item.attachmentName || 'Receipt')
+              .catch(err=>{ console.error('open receipt pdf failed', err); toast('Could not open that file'); });
+            return;
+          }
           const url = URL.createObjectURL(blob);
           const win = window.open(url, '_blank');
           if(!win){
@@ -13970,17 +14094,15 @@
       if(el) el.addEventListener('click', ()=> openLiquidationAttachment(Object.assign({}, item, {__recordId: record.id})));
     });
 
-    const dlBtn = $('caLiqDownloadPdfBtn');
+    // Approved liquidations open in the PDF viewer, which is where
+    // Download / Share live (no separate download button, no auto-download).
+    const viewBtn = $('caLiqViewPdfBtn');
     if(liq.status==='approved'){
-      dlBtn.style.display = '';
-      dlBtn.onclick = ()=> caDownloadLiquidationPdf(record);
-      // Auto-save a PDF copy the first time the technician sees the approval,
-      // so they end up with a record of it without having to remember to tap
-      // the button. Guarded per-record so it only fires once.
-      caMaybeAutoSaveLiquidationPdf(record);
+      viewBtn.style.display = '';
+      viewBtn.onclick = ()=> caViewLiquidationPdf(record);
     }else{
-      dlBtn.style.display = 'none';
-      dlBtn.onclick = null;
+      viewBtn.style.display = 'none';
+      viewBtn.onclick = null;
     }
   }
 
@@ -14047,22 +14169,11 @@
     doc.text('System-generated copy — this document cannot be edited.', margin, 800);
     return doc;
   }
-  async function caDownloadLiquidationPdf(record){
+  async function caViewLiquidationPdf(record){
     try{
       const doc = await caBuildLiquidationPdf(record);
-      await shareOrDownloadPdf(doc, 'Liquidation-'+(record.id||'form')+'.pdf');
+      await openFileInPdfViewer(doc, 'Liquidation-'+(record.id||'form')+'.pdf', 'Liquidation Form');
     }catch(e){ console.error('liquidation pdf failed', e); toast('Could not generate the PDF'); }
-  }
-  async function caMaybeAutoSaveLiquidationPdf(record){
-    const flagKey = 'liqpdf:'+record.id;
-    try{
-      const existing = await window.storage.get(flagKey, false);
-      if(existing) return; // already saved once
-    }catch(e){ /* treat a lookup error the same as "not set yet" */ }
-    try{
-      await caDownloadLiquidationPdf(record);
-      await window.storage.set(flagKey, '1', false);
-    }catch(e){ console.error('auto-save liquidation pdf failed', e); }
   }
 
   // ---------- Progressive step tracker for the Cash Advance/Liquidation flow ----------
@@ -15782,6 +15893,20 @@
     if(!b) return;
     const d = spDocsCache.find(x=> x.id === b.closest('.sp-row').dataset.id);
     if(!d) return;
+    if(b.dataset.dact === 'open' && (/^(application\/pdf|image\/)/.test(d.mime_type || '') || /\.(pdf|png|jpe?g|webp|gif)$/i.test(d.file_name || d.storage_path || ''))){
+      // PDFs and images open in the app's PDF viewer (Download / Share there).
+      b.disabled = true;
+      try{
+        const { data, error } = await db.storage.from(SP_DOC_BUCKET).download(d.storage_path);
+        if(error) throw error;
+        const isPdf = (d.mime_type || '') === 'application/pdf' || /\.pdf$/i.test(d.file_name || d.storage_path || '');
+        const blob = isPdf ? new Blob([data], { type:'application/pdf' }) : data;
+        await openFileInPdfViewer(blob, d.file_name || d.title || 'document', d.title || d.file_name || d.doc_type);
+      }catch(err){
+        purchFail('Couldn\u2019t open document: ', err);
+      }finally{ b.disabled = false; }
+      return;
+    }
     if(b.dataset.dact === 'open'){
       // Open the tab synchronously (inside the tap) so mobile popup
       // blockers allow it, then point it at the signed URL once we have it.
@@ -17376,7 +17501,7 @@
       html = b('save', 'Save Draft') + b('preview', 'Preview PDF') + b('issue', 'Issue PO', 'btn-primary');
       if(poEditing) html += b('duplicate', 'Duplicate') + b('delete', 'Delete Draft', 'danger');
     }else{
-      html = b('preview', 'View PDF', 'btn-primary') + b('download', 'Download PDF') + b('duplicate', 'Duplicate');
+      html = b('preview', 'View PDF', 'btn-primary') + b('duplicate', 'Duplicate');
       if(st === 'issued') html += b('cancel', 'Cancel PO', 'danger');
     }
     $('poActions').innerHTML = html;
@@ -17737,7 +17862,6 @@
     try{
       if(act === 'save') await poSave();
       else if(act === 'preview') await poShowPdf('view');
-      else if(act === 'download') await poShowPdf('download');
       else if(act === 'duplicate') poDuplicate();
       else if(act === 'issue') await poIssue();
       else if(act === 'cancel') await poCancel();
@@ -18206,11 +18330,6 @@
       const supplierPart = d.supplier ? '-' + String(poSupplierName(d.supplier)).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) : '';
       const filename = (d.header.po_no || 'Draft-PO') + supplierPart + (d.status === 'issued' ? '' : '-' + d.status.toUpperCase()) + '.pdf';
       const title = 'Purchase Order ' + (d.header.po_no || '(draft)');
-      if(mode === 'download'){
-        const how = await shareOrDownloadPdf(doc, filename, title);
-        toast(how === 'shared' ? 'PO shared' : 'PO downloaded');
-        return;
-      }
       $('previewOverlay').querySelector('h3').textContent = title;
       $('previewOkBtn').textContent = 'Close';
       $('previewOverlay').style.zIndex = '99';

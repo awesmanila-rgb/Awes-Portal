@@ -1905,7 +1905,7 @@ window.awesCss = {
                when there's nothing left to edit. -->
           <div id="caLiqReadonlyView" style="display:none;">
             <div id="caLiqReadonlyItems"></div>
-            <button type="button" class="btn btn-secondary" id="caLiqDownloadPdfBtn" style="width:100%; margin-top:12px; display:none;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg> Download PDF Copy</button>
+            <button type="button" class="btn btn-secondary" id="caLiqViewPdfBtn" style="width:100%; margin-top:12px; display:none;"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg> View PDF</button>
           </div>
 
           <!-- Editable form: shown when nothing has been submitted yet, or
@@ -3966,9 +3966,13 @@ window.awesCss = {
     <div id="previewFrame" style="flex:1; width:100%; overflow-y:auto; border:1px solid var(--border); border-radius:8px; background:#eee; padding:10px; text-align:center;">
       <div class="empty-state" style="display:none;">Rendering preview…</div>
     </div>
-    <div style="padding-top:12px; display:flex; gap:8px;">
-      <button class="btn btn-secondary" id="previewDownloadBtn" type="button"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg> Download</button>
-      <button class="btn btn-primary" id="previewOkBtn" style="flex:1;" type="button">Looks Good — Continue to Signatures</button>
+    <!-- The only place in the app a PDF can be downloaded or shared. -->
+    <div class="preview-actions">
+      <div class="preview-actions-row">
+        <button class="btn btn-secondary" id="previewDownloadBtn" type="button"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg> Download</button>
+        <button class="btn btn-secondary" id="previewShareBtn" type="button"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg> Share</button>
+      </div>
+      <button class="btn btn-primary" id="previewOkBtn" type="button">Looks Good — Continue to Signatures</button>
     </div>
   </div>
 </div>
