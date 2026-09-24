@@ -193,6 +193,9 @@
     const first = String(currentUser.name||'').trim().split(/\s+/)[0] || '';
     const dateStr = now.toLocaleDateString('en-PH', {weekday:'long', month:'short', day:'numeric'});
     const tIn = todayDtr && todayDtr.timeIn, tOut = todayDtr && todayDtr.timeOut;
+    // Overtime is a second shift logged after Time Out — only shown once it
+    // has started, so a normal day keeps the strip to one line.
+    const otIn = todayDtr && todayDtr.otTimeIn, otOut = todayDtr && todayDtr.otTimeOut;
     const loading = todayDtr === undefined;
     const val = (iso, missing)=> iso
       ? '<b>'+thFmtClock(iso)+'</b>'
@@ -207,6 +210,7 @@
         '<span class="th-attend-body">'+
           '<span class="th-attend-label">Attendance today</span>'+
           '<span class="th-attend-vals"><span>Time in: '+val(tIn, true)+'</span><span>Time out: '+val(tOut, !!tIn)+'</span></span>'+
+          (otIn ? '<span class="th-attend-vals th-attend-ot"><span>OT in: '+val(otIn, true)+'</span><span>OT out: '+val(otOut, true)+'</span></span>' : '')+
         '</span>'+
         '<span class="th-attend-go">Open ›</span>'+
       '</button>';
@@ -464,6 +468,11 @@
       }
     }
 
+    if(todayDtr && todayDtr.otTimeIn && !todayDtr.otTimeOut){
+      add({ rank:91, tone:'green', ic:'logOut', title:'Time out from overtime',
+        sub:'Overtime started at '+thFmtClock(todayDtr.otTimeIn)+'. Record your OT time out when you finish.',
+        btn:'OT time out', act:'dtr' });
+    }
     tasks.sort((a,b)=> a.rank-b.rank || String(a.key||'').localeCompare(String(b.key||'')));
     thRenderTasks(tasks);
     thRenderWaiting(cashAdvances, leaves, extras.reqs);

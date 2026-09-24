@@ -3422,3 +3422,5 @@ body.role-tech #homeAnnouncementsCard .card-head{
 body.role-tech #homeAnnouncementsCard .card-head .ic{ display:none; }
 body.role-tech #homeAnnouncementsCard #homeAnnViewAllBtn{ color:var(--teal) !important; font-size:14px !important; }
 body.role-tech #homeAnnouncementsCard .card-body{ background:var(--surface); border:1px solid var(--border); border-radius:16px; }
+/* Overtime row in the technician attendance strip */
+.th-attend-vals.th-attend-ot{ padding-top:4px; margin-top:2px; border-top:1px dashed var(--border); }
