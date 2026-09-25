@@ -50,7 +50,7 @@
     }
     const whs = invIsAdmin() ? invX.whs : invX.mine;
     $('rpWh').innerHTML = (whs.length > 1 ? '<option value="">All warehouses</option>' : '') + whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + '</option>').join('');
-    if($('rpCat').options.length <= 1) $('rpCat').innerHTML = '<option value="">All categories</option>' + PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    if($('rpCat').options.length <= 1) $('rpCat').innerHTML = '<option value="">All categories</option>' + PURCH_CAT_ALL.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
     rpSetTab(rpTab === 'project' && !invIsAdmin() ? 'balance' : rpTab);
   }
   function rpSetTab(tab){

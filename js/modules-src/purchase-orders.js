@@ -19,6 +19,7 @@
   const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, suppliers(name, trade_name), purchase_order_items(count)';
 
   let poCache = [];
+  let poStatusFilter = '';   // '' = all, else draft / issued / cancelled (status tabs)
   let poEditing = null;      // header row from the DB, or null for a new unsaved PO
   let poItems = [];          // [{key, id, material_id, code, description, specs, unit, qty, unit_price}]
   // Specs text the supplier needs to fill the order (size, rating, brand…),
@@ -59,18 +60,74 @@
   }
   function poSupplierName(s){ return s ? (s.trade_name || s.name || '') : ''; }
 
+  // ---- Discounts ----
+  // Typed as percentages, peso amounts, or a mix: "22% + 3%", "less 22% less 3%",
+  // "22% 3%", "500", "10% + 250". Stored as discount_terms, e.g.
+  // [{pct:22},{pct:3}] or [{amt:500}]. Percentages are SUCCESSIVE (trade
+  // discount style): 22% off the subtotal, then 3% off what is left — so
+  // 22% + 3% = 24.34% overall, not 25%. Same math as the database
+  // (po_discount_from_terms), which recomputes the peso discount whenever
+  // items change.
+  function poParseDiscount(text){
+    const t = String(text == null ? '' : text).replace(/[₱,]/g, '').replace(/\s*%/g, '%').trim();
+    if(!t) return { terms: [] };
+    const parts = t.split(/\s*(?:\+|;|&|\/|\band\b|\bless\b)\s*|\s+/i).filter(Boolean);
+    const terms = [];
+    for(const tok of parts){
+      let m = /^(\d+(?:\.\d+)?)%$/.exec(tok);
+      if(m){
+        const v = Number(m[1]);
+        if(!(v > 0 && v < 100)) return { terms, error: 'Discount ' + tok + ' must be more than 0% and less than 100%' };
+        terms.push({ pct: Math.round(v * 10000) / 10000 });
+        continue;
+      }
+      m = /^\d+(?:\.\d+)?$/.exec(tok);
+      if(m){
+        const v = poRound2(Number(tok));
+        if(v > 0) terms.push({ amt: v });
+        continue;
+      }
+      return { terms, error: 'Discount: couldn\u2019t read “' + tok + '”. Use % or a peso amount, e.g. 22% + 3%' };
+    }
+    return { terms };
+  }
+  function poDiscountText(terms){
+    return (terms || []).map(x=> x.pct != null ? x.pct + '%' : poFmt(x.amt)).join(' + ');
+  }
+  // What the discount field currently holds, as terms (bad input counts as none).
+  function poDiscountInput(){
+    const r = poParseDiscount($('poDiscount').value);
+    return r.error ? [] : r.terms;
+  }
+  // discount: terms array, or (older POs) a plain peso number.
+  function poDiscountSteps(subtotal, discount){
+    const terms = Array.isArray(discount) ? discount : (Number(discount) > 0 ? [{ amt: Number(discount) }] : []);
+    let rem = Math.max(subtotal, 0), total = 0;
+    const steps = terms.map(x=>{
+      const a = x.pct != null ? poRound2(rem * Number(x.pct) / 100) : Math.min(poRound2(Number(x.amt) || 0), rem);
+      rem = poRound2(rem - a); total = poRound2(total + a);
+      return { label: x.pct != null ? 'Less: ' + x.pct + '% discount' : 'Less: Discount', amount: a, pct: x.pct != null };
+    });
+    return { total, steps };
+  }
+  // The discount a saved PO header carries (terms when present, else the peso amount).
+  function poHeaderDiscount(h){
+    return h && Array.isArray(h.discount_terms) && h.discount_terms.length ? h.discount_terms : (h ? h.discount : 0);
+  }
+
   // Same math as the database (po_compute_totals) — display only.
   // EWT is computed on the amount net of VAT (vatable) and deducted:
   // net payable = total − EWT.
   function poCalc(items, vatMode, discount, ewtRate){
     const subtotal = poRound2(items.reduce((a, it)=> a + poRound2((Number(it.qty) || 0) * (Number(it.unit_price) || 0)), 0));
-    const net = Math.max(poRound2(subtotal - (Number(discount) || 0)), 0);
+    const disc = poDiscountSteps(subtotal, discount);
+    const net = Math.max(poRound2(subtotal - disc.total), 0);
     let vat = 0, total = net, vatable = net;
     if(vatMode === 'exclusive'){ vat = poRound2(net * PO_VAT_RATE); total = poRound2(net + vat); }
     else if(vatMode === 'inclusive'){ vat = poRound2(net - net / (1 + PO_VAT_RATE)); vatable = poRound2(net - vat); }
     const rate = Number(ewtRate) || 0;
     const ewt = poRound2(vatable * rate);
-    return { subtotal, discount: Number(discount) || 0, net, vat, vatable, total, ewtRate: rate, ewt, netPayable: poRound2(total - ewt) };
+    return { subtotal, discount: disc.total, discountSteps: disc.steps, net, vat, vatable, total, ewtRate: rate, ewt, netPayable: poRound2(total - ewt) };
   }
   function poEwtLabel(rate){
     const pct = Math.round(Number(rate) * 10000) / 100;
@@ -171,8 +228,13 @@
   }
   function poRenderList(){
     const q = ($('poSearch').value || '').trim().toLowerCase();
-    const st = $('poFilterStatus').value;
+    const st = poStatusFilter;
     const counts = poCache.reduce((a, r)=>{ a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+    document.querySelectorAll('#poStatusTabs .po-tab-count').forEach(el=>{
+      const k = el.dataset.countFor;
+      const n = k ? (counts[k] || 0) : poCache.length;
+      el.textContent = n ? String(n) : '';
+    });
     $('poCount').textContent = poCache.length
       ? [counts.draft ? counts.draft + ' draft' + (counts.draft > 1 ? 's' : '') : '', counts.issued ? counts.issued + ' issued' : ''].filter(Boolean).join(' · ')
       : '';
@@ -183,7 +245,9 @@
     });
     const list = $('poList');
     if(!rows.length){
-      list.innerHTML = '<div class="empty-state">' + (poCache.length ? 'No purchase orders match.'
+      const tabName = { draft:'draft', issued:'issued', cancelled:'cancelled' }[st];
+      list.innerHTML = '<div class="empty-state">' + (poCache.length
+        ? (tabName && !q ? 'No ' + tabName + ' purchase orders.' : 'No purchase orders match.')
         : 'No purchase orders yet. Tap <b>+ New Purchase Order</b> to create one.') + '</div>';
       return;
     }
@@ -198,7 +262,17 @@
     }).join('');
   }
   $('poSearch').addEventListener('input', poRenderList);
-  $('poFilterStatus').addEventListener('change', poRenderList);
+  $('poStatusTabs').addEventListener('click', (e)=>{
+    const tab = e.target.closest('.seg-tab');
+    if(!tab || tab.dataset.status === poStatusFilter) return;
+    poStatusFilter = tab.dataset.status || '';
+    document.querySelectorAll('#poStatusTabs .seg-tab').forEach(b=>{
+      const on = b === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    poRenderList();
+  });
   $('poList').addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){
       purchReauth().then(ok=>{ if(ok) poShow(); });
@@ -264,11 +338,19 @@
       $('poSupplier').value = src.supplier_id || '';
       $('poReference').value = src.reference || '';
       $('poDate').value = header ? header.po_date : poToday();
-      $('poDeliveryDate').value = src.delivery_date || '';
+      {
+        const f = poFulfilmentOf(src, !!(header || prefill));
+        poSetFulfilment(f);
+        poSetWhen(poWhenOf(src));
+        $('poDeliveryDate').value = src.delivery_date || '';
+      }
       $('poTerms').value = src.payment_terms != null ? src.payment_terms : '';
       $('poVatMode').value = src.vat_mode || set.vat_mode || 'exclusive';
       $('poDeliverTo').value = src.deliver_to != null && (header || prefill) ? src.deliver_to : (set.deliver_to || '');
-      $('poDiscount').value = src.discount ? String(src.discount) : '';
+      // An older PO that typed "For Pickup" as the address is now a pick-up.
+      if(poFulfilment === 'pickup' && poLegacyPickupText(src.deliver_to)) $('poDeliverTo').value = set.deliver_to || '';
+      $('poDiscount').value = Array.isArray(src.discount_terms) && src.discount_terms.length ? poDiscountText(src.discount_terms)
+        : (Number(src.discount) > 0 ? String(src.discount) : '');
       $('poEwt').value = String(Number(src.ewt_rate) || 0);
       if(!$('poEwt').value) $('poEwt').value = '0';
       poFillSignatorySelects(src.prepared_by_id, src.approved_by_id);
@@ -287,6 +369,49 @@
       purchFail('Couldn\u2019t open the PO: ', e);
     }
   }
+  // ---- Delivery method & date ----
+  // fulfilment: 'delivery' | 'pickup'; delivery_when: 'date' | 'asap' | 'tba'.
+  // NULL on older POs → delivery, and "date" when it has one, else ASAP.
+  let poFulfilment = 'delivery';
+  function poLegacyPickupText(t){ return /^\s*(for\s+)?pick[\s-]?up\s*\.?\s*$/i.test(String(t || '')); }
+  function poFulfilmentOf(h, saved){
+    if(h && (h.fulfilment === 'pickup' || h.fulfilment === 'delivery')) return h.fulfilment;
+    return saved && h && poLegacyPickupText(h.deliver_to) ? 'pickup' : 'delivery';
+  }
+  function poWhenOf(h){
+    if(h && ['date', 'asap', 'tba'].includes(h.delivery_when)) return h.delivery_when;
+    return h && h.delivery_date ? 'date' : 'asap';
+  }
+  function poWhenText(h){
+    const w = poWhenOf(h);
+    return w === 'date' ? poDateLong(h.delivery_date) : w === 'tba' ? 'To be advised' : 'As soon as possible';
+  }
+  function poSetFulfilment(v){
+    poFulfilment = v === 'pickup' ? 'pickup' : 'delivery';
+    $$('#poFulfilment button').forEach(b=>{ const on = b.dataset.v === poFulfilment; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); });
+    const pick = poFulfilment === 'pickup';
+    $('poDeliverToField').style.display = pick ? 'none' : '';
+    $('poPickupNote').style.display = pick ? '' : 'none';
+    $('poWhenLabel').textContent = pick ? 'Pick-up Date' : 'Delivery Date';
+    $('poDateLabel').textContent = pick ? 'Pick-up on' : 'Deliver on';
+  }
+  function poSetWhen(v){
+    $('poDeliveryWhen').value = ['date', 'asap', 'tba'].includes(v) ? v : 'asap';
+    $('poDeliveryDateField').style.display = $('poDeliveryWhen').value === 'date' ? '' : 'none';
+  }
+  $('poFulfilment').addEventListener('click', (e)=>{
+    const b = e.target.closest('button[data-v]');
+    if(!b || b.disabled || poReadOnly || b.dataset.v === poFulfilment) return;
+    poSetFulfilment(b.dataset.v);
+    poDirty = true;
+  });
+  $('poDeliveryWhen').addEventListener('change', ()=>{
+    poSetWhen($('poDeliveryWhen').value);
+    if($('poDeliveryWhen').value === 'date' && !$('poDeliveryDate').value){
+      const d = $('poDeliveryDate'); setTimeout(()=>{ d.focus(); if(typeof d.showPicker === 'function'){ try{ d.showPicker(); }catch(_){} } }, 30);
+    }
+  });
+
   function poBlankItem(){ return { key: ++poKeySeq, id: null, material_id: null, code: '', description: '', specs: '', unit: '', qty: '', unit_price: '' }; }
 
   function poApplyMode(){
@@ -307,7 +432,7 @@
         (poEditing.cancel_reason ? ' — Reason: ' + poEditing.cancel_reason : '');
       note.style.display = '';
     }else note.style.display = 'none';
-    $$('#poEditorView input, #poEditorView select, #poEditorView textarea').forEach(el=>{ el.disabled = poReadOnly; });
+    $$('#poEditorView input, #poEditorView select, #poEditorView textarea, #poFulfilment button').forEach(el=>{ el.disabled = poReadOnly; });
     $('poAddItem').style.display = poReadOnly ? 'none' : '';
     poRenderActions();
   }
@@ -485,13 +610,13 @@
     const hits = mtCache.filter(m=> m.isActive).filter(m=>{
       const hay = [m.code, m.name, m.family, m.brand, mtSpecText(m.specs)].join(' ').toLowerCase();
       return words.every(w=> hay.includes(w));
-    }).slice(0, 8);
+    }).slice(0, 12);
     if(!hits.length){ if(box) box.remove(); return; }
     if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; host.appendChild(box); }
     box.innerHTML = hits.map((m, i)=>{
       const p = poPriceFor(m.id, sup);
-      return '<button type="button" data-pick="' + escapeHtml(m.id) + '"' + (i === 0 ? ' class="hl"' : '') + '><span><b>' + escapeHtml(m.code) + '</b> ' + escapeHtml(m.name) + '</span>' +
-        '<span class="s-price">' + (p ? '₱' + poFmt(p.price) + (p.source === 'supplier' ? '' : p.source === 'standard' ? ' std.' : ' other') : 'no price') + '</span></button>';
+      return mtSuggestBtn(m, i, (p ? '₱' + poFmt(p.price) + (p.source === 'supplier' ? '' : p.source === 'standard' ? ' std.' : ' other') : 'no price') +
+        (m.unit ? '<br><span class="s-unit">per ' + escapeHtml(m.unit) + '</span>' : ''));
     }).join('');
   }
   // Every PO line must be a Materials Database item. A typed line that
@@ -571,8 +696,17 @@
 
   function poRenderTotals(){
     const vm = $('poVatMode').value;
-    const t = poCalc(poCleanItems(), vm, poNum($('poDiscount').value) || 0, Number($('poEwt').value) || 0);
+    const dp = poParseDiscount($('poDiscount').value);
+    $('poDiscount').classList.toggle('po-bad', !!dp.error);
+    $('poDiscount').title = dp.error || 'Type % or a peso amount, e.g. 22% + 3%';
+    const t = poCalc(poCleanItems(), vm, dp.error ? [] : dp.terms, Number($('poEwt').value) || 0);
     $('poTotSub').textContent = '₱' + poFmt(t.subtotal);
+    // Show each discount's peso amount when a % is involved or there's more than one.
+    const showSteps = t.discountSteps.length > 1 || t.discountSteps.some(x=> x.pct);
+    $('poTotDiscRows').innerHTML = dp.error ? '<div class="row po-disc-err"><span>' + escapeHtml(dp.error) + '</span></div>'
+      : showSteps ? t.discountSteps.map(x=> '<div class="row po-disc-step"><span>' + escapeHtml(x.label) + '</span><span>(₱' + poFmt(x.amount) + ')</span></div>').join('') +
+          (t.discountSteps.length > 1 ? '<div class="row po-disc-step po-disc-sum"><span>Total discount (' + (Math.round(t.discount / (t.subtotal || 1) * 10000) / 100) + '%)</span><span>(₱' + poFmt(t.discount) + ')</span></div>' : '')
+      : '';
     const row = (l, v)=> '<div class="row"><span>' + l + '</span><span>' + v + '</span></div>';
     $('poTotVatRows').innerHTML = vm === 'exclusive' ? row('Add: VAT 12%', '₱' + poFmt(t.vat))
       : vm === 'inclusive' ? row('VATable sales', '₱' + poFmt(t.vatable)) + row('VAT 12% (included)', '₱' + poFmt(t.vat))
@@ -605,24 +739,46 @@
       const p = Number(it.unit_price);
       if(it.unit_price === '' || !isFinite(p) || p < 0) return 'Item ' + n + ' (' + it.description + '): enter a unit price (0 is allowed)';
     }
-    const d = spParseMoney($('poDiscount').value);
-    if(Number.isNaN(d)) return 'Discount must be a number';
+    const d = poParseDiscount($('poDiscount').value);
+    if(d.error) return d.error;
+    if($('poDeliveryWhen').value === 'date' && !$('poDeliveryDate').value)
+      return 'Pick the ' + (poFulfilment === 'pickup' ? 'pick-up' : 'delivery') + ' date, or choose As soon as possible / To be advised';
     return null;
   }
   function poGatherHeader(){
     return {
       supplier_id: $('poSupplier').value || null,
       po_date: $('poDate').value || poToday(),
-      delivery_date: $('poDeliveryDate').value || null,
-      deliver_to: $('poDeliverTo').value.trim(),
+      fulfilment: poFulfilment,
+      delivery_when: $('poDeliveryWhen').value,
+      delivery_date: $('poDeliveryWhen').value === 'date' ? ($('poDeliveryDate').value || null) : null,
+      deliver_to: poFulfilment === 'pickup' ? '' : $('poDeliverTo').value.trim(),
       payment_terms: $('poTerms').value.trim(),
       reference: $('poReference').value.trim(),
       vat_mode: $('poVatMode').value,
-      discount: poNum($('poDiscount').value) || 0,
+      discount: poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), 0).discount,
+      discount_terms: poDiscountInput(),
       ewt_rate: Number($('poEwt').value) || 0,
       prepared_by_id: $('poPreparedBy').value || null,
       approved_by_id: $('poApprovedBy').value || null
     };
+  }
+
+  // Columns added by later migrations. If the database doesn't have one
+  // yet, save without it rather than failing the whole save.
+  const PO_LATE_COLS = [
+    { col:'discount_terms', mig:'20260924_06_po_discount_terms.sql', note:'the discount was saved as a peso amount' },
+    { col:'fulfilment',     mig:'20260925_02_po_fulfilment.sql',     note:'delivery / pick-up wasn\u2019t saved' },
+    { col:'delivery_when',  mig:'20260925_02_po_fulfilment.sql',     note:'ASAP / To be advised wasn\u2019t saved' }
+  ];
+  function poNoTermsColumn(e){ const m = describeCloudError(e); return PO_LATE_COLS.some(c=> m.includes(c.col)); }
+  function poWarnTermsColumn(header){
+    // Drop every late column the database may lack (one error names only one of them).
+    const hit = PO_LATE_COLS.filter(c=> c.col in header);
+    hit.forEach(c=>{ delete header[c.col]; });
+    if(hit.some(c=> c.col === 'fulfilment') && header.deliver_to === '') header.deliver_to = 'For pick-up';
+    const migs = Array.from(new Set(hit.map(c=> c.mig)));
+    toast('Saved, but ' + hit.map(c=> c.note).join('; ') + ' — run ' + migs.join(' and ') + ' in Supabase');
   }
 
   // Saves header + items. Items are upserted by id, then any removed rows
@@ -639,10 +795,12 @@
       let id = poEditing && poEditing.id;
       if(id){
         purchMarkOwn(id);
-        const { error } = await db.from('purchase_orders').update(header).eq('id', id);
+        let { error } = await db.from('purchase_orders').update(header).eq('id', id);
+        if(error && poNoTermsColumn(error)){ poWarnTermsColumn(header); ({ error } = await db.from('purchase_orders').update(header).eq('id', id)); }
         if(error) throw error;
       }else{
-        const { data, error } = await db.from('purchase_orders').insert(header).select('*').single();
+        let { data, error } = await db.from('purchase_orders').insert(header).select('*').single();
+        if(error && poNoTermsColumn(error)){ poWarnTermsColumn(header); ({ data, error } = await db.from('purchase_orders').insert(header).select('*').single()); }
         if(error) throw error;
         id = data.id; purchMarkOwn(id);
         poEditing = data;
@@ -698,7 +856,7 @@
     if(!$('poSupplier').value){ toast('Choose a supplier before issuing'); return; }
     if(!poCleanItems().filter(it=> it.description.trim()).length){ toast('Add at least one item before issuing'); return; }
     if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
-    const t = poCalc(poCleanItems(), $('poVatMode').value, poNum($('poDiscount').value) || 0, Number($('poEwt').value) || 0);
+    const t = poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), Number($('poEwt').value) || 0);
     const s = poCurrentSupplier();
     if(!confirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
     const saved = await poSave({ quiet:true });
@@ -877,7 +1035,7 @@
       approved && approved.signature_path ? poLoadImage(approved.signature_path) : null
     ]);
     return { header, items, company, supplier, prepared, approved, logo: logo || await poDefaultLogo(style), prepSig, apprSig,
-      totals: poCalc(items, header.vat_mode, header.discount, header.ewt_rate), status: header.status || 'draft',
+      totals: poCalc(items, header.vat_mode, poHeaderDiscount(header), header.ewt_rate), status: header.status || 'draft',
       terms: company.terms || '' };
   }
 
@@ -1010,8 +1168,9 @@
       ['Email', s.contact_email]
     ]);
     const right = block(M + colW + 14, 'Delivery & Terms', [
-      ['Deliver to', h.deliver_to || '—'],
-      ['Delivery', h.delivery_date ? poDateLong(h.delivery_date) : 'As soon as possible'],
+      ...(poFulfilmentOf(h, true) === 'pickup'
+        ? [['Method', 'For pick-up'], ['Pick-up', poWhenText(h)]]
+        : [['Method', 'Delivery'], ['Deliver to', h.deliver_to || '—'], ['Delivery', poWhenText(h)]]),
       ['Terms', h.payment_terms || '—'],
       ['Reference', h.reference]
     ]);
@@ -1069,7 +1228,7 @@
 
     // ---- totals (right) + amount in words (left) ----
     const rows = [['Subtotal', money(t.subtotal)]];
-    if(t.discount) rows.push(['Less: Discount', '(' + money(t.discount) + ')']);
+    t.discountSteps.forEach(x=>{ if(x.amount) rows.push([x.label, '(' + money(x.amount) + ')']); });
     if(h.vat_mode === 'exclusive') rows.push(['Add: VAT 12%', money(t.vat)]);
     else if(h.vat_mode === 'inclusive'){ rows.push(['VATable Sales', money(t.vatable)]); rows.push(['VAT 12% (included)', money(t.vat)]); }
     else rows.push(['VAT', 'Non-VAT']);

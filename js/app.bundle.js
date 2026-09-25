@@ -15486,12 +15486,82 @@
   // Entry point: purchOnShow(key), called by showPurchasingView() in home.js.
   // =====================================================================
 
-  // Shared with the Materials Database (materials.category) — keep in sync.
+  // Material categories (materials.category, suppliers.supplies).
+  // Managed in Purchasing › Materials Database › Manage Categories and kept
+  // in public.material_categories (migration 20260925_01). These start as
+  // the original fixed list and are refilled IN PLACE from the database by
+  // purchLoadCategories(), so every screen reading them stays current:
+  //   PURCH_CATEGORIES — active ones: offered when adding/editing items & suppliers
+  //   PURCH_CAT_ALL    — active + hidden, in display order: filters, list grouping, imports
   const PURCH_CATEGORIES = [
     'Piping', 'Refrigerant', 'Electrical', 'Insulation', 'Consumables',
     'Parts & Components', 'Ducting & Ventilation', 'Plumbing',
     'Fire Protection', 'Hardware', 'Tools & Equipment', 'Others'
   ];
+  const PURCH_CAT_ALL = PURCH_CATEGORIES.slice();
+  let purchCats = [];              // rows of material_categories, in order
+  let purchCatsLoaded = false;
+  let purchCatsMissing = false;    // table not created yet (migration not run)
+  let purchCatsLoading = null;
+
+  async function purchLoadCategories(force){
+    if(purchCatsLoaded && !force) return true;
+    if(purchCatsLoading && !force) return purchCatsLoading;
+    purchCatsLoading = (async ()=>{
+      try{
+        if(!(await ensureCloud())) return false;
+        const { data, error } = await db.from('material_categories').select('*')
+          .order('sort_order').order('name');
+        if(error) throw error;
+        purchCats = (data || []).slice().sort((a, b)=> (a.is_system ? 1 : 0) - (b.is_system ? 1 : 0)
+          || a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+        purchCatsMissing = false;
+        purchCatsLoaded = true;
+        purchSyncCategoryLists();
+        purchApplyCategorySelects();
+        return true;
+      }catch(e){
+        const msg = describeCloudError(e);
+        if(/42P01|PGRST205|does not exist|material_categories/.test(msg)) purchCatsMissing = true;
+        else console.warn('load material categories failed', msg);
+        return false;
+      }finally{ purchCatsLoading = null; }
+    })();
+    return purchCatsLoading;
+  }
+  function purchSyncCategoryLists(){
+    if(!purchCats.length) return;
+    PURCH_CATEGORIES.length = 0; PURCH_CAT_ALL.length = 0;
+    purchCats.forEach(c=>{
+      PURCH_CAT_ALL.push(c.name);
+      if(c.is_active) PURCH_CATEGORIES.push(c.name);
+      MT_CODE_PREFIX[c.name] = c.code_prefix;
+    });
+  }
+  // <option>s for a category picker: active ones, plus `keep` if it's hidden
+  // (so editing an item that sits in a hidden category doesn't lose it).
+  function purchCategoryOptions(keep){
+    const list = PURCH_CATEGORIES.slice();
+    if(keep && !list.includes(keep)) list.push(keep);
+    return list.map(c=> '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + (PURCH_CATEGORIES.includes(c) ? '' : ' (hidden)') + '</option>').join('');
+  }
+  // Refill every category dropdown that has already been built, keeping its selection.
+  function purchApplyCategorySelects(){
+    const refill = (id, allLabel)=>{
+      const el = document.getElementById(id);
+      if(!el || el.options.length <= 1) return;   // not built yet — it fills itself from the lists on first show
+      const keep = el.value;
+      el.innerHTML = '<option value="">' + allLabel + '</option>' + PURCH_CAT_ALL.map(c=> '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
+      el.value = PURCH_CAT_ALL.includes(keep) ? keep : '';
+    };
+    refill('spFilterCategory', 'All categories');
+    refill('mtFilterCategory', 'All categories');
+    refill('invStockCat', 'All categories');
+    refill('rpCat', 'All categories');
+    const mc = document.getElementById('mtCategory');
+    if(mc && mc.options.length){ const keep = mc.value; mc.innerHTML = purchCategoryOptions(keep); mc.value = keep; }
+    if(document.getElementById('spSheetOverlay') && $('spSheetOverlay').classList.contains('open')) spRenderSuppliesPick();
+  }
   const SP_DOC_TYPES = ['BIR 2303', 'DTI / SEC', "Mayor's Permit", 'Quotation', 'Price List', 'Other'];
   const SP_DOC_BUCKET = 'supplier-documents';
   const SP_DOC_MAX_BYTES = 10 * 1024 * 1024;
@@ -15541,6 +15611,7 @@
 
   // ---------- entry ----------
   function purchOnShow(key){
+    purchLoadCategories();   // cached after the first load; realtime keeps it fresh
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
     if(key === 'myStock'){ if(currentUser) invShowMyStock(); return; } // storekeeper screen (quantities only)
     if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
@@ -15568,9 +15639,10 @@
   }
 
   async function spShow(){
+    await purchLoadCategories();
     const sel = $('spFilterCategory');
     if(sel.options.length <= 1){
-      PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+      PURCH_CAT_ALL.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
     }
     if(await spLoad()) spRenderList();
   }
@@ -15709,7 +15781,9 @@
 
   // ---------- sheet ----------
   function spRenderSuppliesPick(){
-    $('spSuppliesPick').innerHTML = PURCH_CATEGORIES.map(c=>
+    // Active categories, plus any hidden one this supplier already has.
+    const list = PURCH_CATEGORIES.concat(spSheetSupplies.filter(c=> !PURCH_CATEGORIES.includes(c)));
+    $('spSuppliesPick').innerHTML = list.map(c=>
       '<button type="button" data-cat="' + escapeHtml(c) + '" class="' + (spSheetSupplies.includes(c) ? 'on' : '') + '">' + escapeHtml(c) + '</button>'
     ).join('');
   }
@@ -16178,7 +16252,7 @@
       const row = { name };
       if(has('trade_name')) row.trade_name = col(r, 'trade_name');
       if(has('supplies')){
-        const lookup = new Map(PURCH_CATEGORIES.map(c=> [c.toLowerCase(), c]));
+        const lookup = new Map(PURCH_CAT_ALL.map(c=> [c.toLowerCase(), c]));
         row.supplies = col(r, 'supplies').split(/[;|]/).map(x=> x.trim()).filter(Boolean)
           .map(x=> lookup.get(x.toLowerCase()) || x);
       }
@@ -16296,13 +16370,31 @@
   function mtSpecText(specs){
     return Object.keys(specs || {}).map(k=> k + ': ' + specs[k]).join(' · ');
   }
+  // Second line of an item suggestion: brand + every spec, so items that
+  // share a name (e.g. several "Copper Tube" sizes) can be told apart.
+  function mtSuggestSub(m){
+    const bits = [];
+    if(m.brand) bits.push('Brand: ' + m.brand);
+    const sp = mtSpecText(m.specs);
+    if(sp) bits.push(sp);
+    return bits.join(' · ');
+  }
+  // One suggestion button (shared by the PO, requisition and inventory pickers).
+  function mtSuggestBtn(m, i, right){
+    const sub = mtSuggestSub(m);
+    return '<button type="button" data-pick="' + escapeHtml(m.id) + '"' + (i === 0 ? ' class="hl"' : '') + '>' +
+      '<span class="s-main"><span class="s-name"><b>' + escapeHtml(m.code) + '</b> ' + escapeHtml(m.name) + '</span>' +
+      (sub ? '<span class="s-specs">' + escapeHtml(sub) + '</span>' : '<span class="s-specs s-none">No specs recorded</span>') + '</span>' +
+      '<span class="s-price">' + right + '</span></button>';
+  }
   function mtNormCode(v){ return String(v || '').trim().toUpperCase().replace(/\s+/g, '-'); }
 
   async function mtShow(){
+    await purchLoadCategories();
     const cat = $('mtFilterCategory');
     if(cat.options.length <= 1){
-      PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
-      $('mtCategory').innerHTML = PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+      PURCH_CAT_ALL.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
+      $('mtCategory').innerHTML = purchCategoryOptions();
     }
     mtShowLimit = MT_PAGE;
     if(await mtLoad()) mtRenderList();
@@ -16369,7 +16461,7 @@
       return;
     }
     // Grouped by category (in the standard category order), then family, then name.
-    const order = new Map(PURCH_CATEGORIES.map((c,i)=> [c, i]));
+    const order = new Map(PURCH_CAT_ALL.map((c,i)=> [c, i]));
     rows.sort((a,b)=> (order.has(a.category) ? order.get(a.category) : 99) - (order.has(b.category) ? order.get(b.category) : 99)
       || (a.family || a.name).localeCompare(b.family || b.name) || a.name.localeCompare(b.name, undefined, { numeric:true }));
     const shown = rows.slice(0, mtShowLimit);
@@ -16490,6 +16582,7 @@
     $('mtSheetTitle').textContent = m ? m.name : (prefill && prefill.duplicateOf ? 'New size of ' + prefill.duplicateOf : 'Add Material');
     $('mtStatusLine').style.display = m ? '' : 'none';
     $('mtStatusLine').textContent = m ? m.code + (m.isActive ? '' : ' · Inactive') : '';
+    $('mtCategory').innerHTML = purchCategoryOptions(src.category);
     $('mtCategory').value = src.category || PURCH_CATEGORIES[0];
     $('mtCode').value = m ? m.code : mtSuggestCodeFor($('mtCategory').value);
     $('mtCode').dataset.auto = m ? '' : '1';
@@ -16908,6 +17001,181 @@
   });
   $('mtSeedClose').addEventListener('click', ()=> $('mtSeedOverlay').classList.remove('open'));
 
+  // ---------- Manage Categories (admin) ----------
+  // Add / rename / reorder / hide / delete material categories.
+  // Renames go through rename_material_category(), which moves every item
+  // and supplier "Supplies" entry to the new name in the same transaction.
+  let mcEditId = null;
+  let mcBusy = false;
+  function mcUsage(name){ return mtCache.filter(m=> m.category === name).length; }
+  function mcSuggestPrefix(name){
+    const words = String(name || '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+    if(!words.length) return '';
+    let base = words.length === 1 ? words[0].slice(0, 3) : (words[0].slice(0, 2) + words[1][0]);
+    if(base.length < 2) base = (base + 'X').slice(0, 2);
+    const used = new Set(purchCats.map(c=> c.code_prefix));
+    if(!used.has(base)) return base;
+    for(let i = 2; i < 100; i++){ const p = base.slice(0, 4) + i; if(!used.has(p)) return p; }
+    return base;
+  }
+  function mcCheck(name, prefix, selfId){
+    if(!name) return 'Enter a category name';
+    if(name.length > 60) return 'Keep the name under 60 characters';
+    if(purchCats.some(c=> c.id !== selfId && c.name.toLowerCase() === name.toLowerCase())) return 'There is already a category called “' + name + '”';
+    if(!/^[A-Z0-9]{2,6}$/.test(prefix)) return 'Code prefix: 2–6 letters or numbers, e.g. WLD';
+    const clash = purchCats.find(c=> c.id !== selfId && c.code_prefix === prefix);
+    if(clash) return 'Prefix ' + prefix + ' is already used by ' + clash.name;
+    return null;
+  }
+  async function mcOpen(){
+    mcEditId = null;
+    $('mcNewName').value = ''; $('mcNewPrefix').value = ''; $('mcNewPrefix').dataset.typed = '';
+    $('mcSheetOverlay').classList.add('open');
+    $('mcList').innerHTML = '<div class="empty-state">Loading…</div>';
+    await purchLoadCategories(true);
+    mcRender();
+  }
+  function mcRender(){
+    const list = $('mcList');
+    $('mcAddRow').style.display = purchCatsMissing ? 'none' : '';
+    if(purchCatsMissing){
+      list.innerHTML = '<div class="empty-state">Categories can\u2019t be managed yet — run migration <b>20260925_01_material_categories.sql</b> in Supabase first. Until then the standard list is used.</div>';
+      return;
+    }
+    if(!purchCats.length){ list.innerHTML = '<div class="empty-state">No categories yet.</div>'; return; }
+    const movable = purchCats.filter(c=> !c.is_system);
+    list.innerHTML = purchCats.map(c=>{
+      const n = mcUsage(c.name);
+      const idx = movable.indexOf(c);
+      if(c.id === mcEditId){
+        return '<div class="mc-row editing" data-id="' + escapeHtml(c.id) + '">' +
+          '<div class="mc-edit"><input type="text" data-mc-f="name" value="' + escapeHtml(c.name) + '" maxlength="60" placeholder="Category name">' +
+          '<input type="text" data-mc-f="prefix" value="' + escapeHtml(c.code_prefix) + '" maxlength="6" placeholder="Code">' +
+          '<div class="mc-edit-note">' + (n ? 'Renaming moves all ' + n + ' item' + (n === 1 ? '' : 's') + ' and any supplier listing to the new name. ' : '') +
+            'A new prefix only affects new item codes — existing codes stay as they are.</div></div>' +
+          '<div class="mc-acts"><button type="button" class="btn btn-primary" data-mc="save">Save</button><button type="button" class="btn btn-secondary" data-mc="cancel">Cancel</button></div></div>';
+      }
+      return '<div class="mc-row' + (c.is_active ? '' : ' off') + '" data-id="' + escapeHtml(c.id) + '">' +
+        '<div class="mc-move">' + (c.is_system ? '' :
+          '<button type="button" data-mc="up" title="Move up"' + (idx <= 0 ? ' disabled' : '') + '>&#9650;</button>' +
+          '<button type="button" data-mc="down" title="Move down"' + (idx >= movable.length - 1 ? ' disabled' : '') + '>&#9660;</button>') + '</div>' +
+        '<div class="mc-main"><div class="mc-name">' + escapeHtml(c.name) + ' <span class="mc-prefix">' + escapeHtml(c.code_prefix) + '</span>' +
+          (c.is_active ? '' : ' <span class="mc-tag">Hidden</span>') + (c.is_system ? ' <span class="mc-tag sys">Fallback</span>' : '') + '</div>' +
+          '<div class="mc-sub">' + (n ? n + ' item' + (n === 1 ? '' : 's') : 'No items') + '</div></div>' +
+        '<div class="mc-acts">' + (c.is_system ? '<button type="button" class="mc-btn" data-mc="edit" title="Change the code prefix">Prefix</button>' :
+          '<button type="button" class="mc-btn" data-mc="edit">Edit</button>' +
+          '<button type="button" class="mc-btn" data-mc="toggle">' + (c.is_active ? 'Hide' : 'Show') + '</button>' +
+          (n ? '' : '<button type="button" class="mc-btn danger" data-mc="del">Delete</button>')) + '</div></div>';
+    }).join('');
+    const ed = list.querySelector('.mc-row.editing');
+    if(ed){
+      const nameEl = ed.querySelector('[data-mc-f="name"]');
+      const isSys = purchCats.some(c=> c.id === mcEditId && c.is_system);
+      if(isSys){ nameEl.readOnly = true; nameEl.title = 'The fallback category can\u2019t be renamed'; }
+      (isSys ? ed.querySelector('[data-mc-f="prefix"]') : nameEl).focus();
+    }
+  }
+  // After a change: reload categories, and items too when a rename moved them.
+  async function mcAfterChange(reloadItems){
+    await purchLoadCategories(true);
+    mcRender();
+    if(reloadItems) await mtLoad({ silent:true });
+    if(purchVisible('materials')) mtRenderList();
+    if(reloadItems && typeof spLoad === 'function' && spCache.length) spLoad({ silent:true });
+  }
+  async function mcRun(fn, fail){
+    if(mcBusy) return;
+    if(!(await ensureCloud())){ toast('Not connected'); return; }
+    if(!(await purchEnsureSession())) return;
+    mcBusy = true; $('mcList').classList.add('busy');
+    try{ await fn(); }
+    catch(e){ purchFail(fail, e); }
+    finally{ mcBusy = false; $('mcList').classList.remove('busy'); }
+  }
+  $('mcNewName').addEventListener('input', ()=>{
+    if($('mcNewPrefix').dataset.typed !== '1') $('mcNewPrefix').value = mcSuggestPrefix($('mcNewName').value.trim());
+  });
+  $('mcNewPrefix').addEventListener('input', (e)=>{ e.target.dataset.typed = e.target.value ? '1' : ''; e.target.value = e.target.value.toUpperCase(); });
+  const mcAdd = ()=> mcRun(async ()=>{
+    const name = $('mcNewName').value.trim().replace(/\s+/g, ' ');
+    const prefix = ($('mcNewPrefix').value || mcSuggestPrefix(name)).trim().toUpperCase();
+    const err = mcCheck(name, prefix, null);
+    if(err){ toast(err); return; }
+    const movable = purchCats.filter(c=> !c.is_system);
+    const sort = (movable.length ? Math.max(...movable.map(c=> c.sort_order)) : 0) + 10;
+    const { error } = await db.from('material_categories').insert({ name, code_prefix: prefix, sort_order: sort });
+    if(error) throw error;
+    $('mcNewName').value = ''; $('mcNewPrefix').value = ''; $('mcNewPrefix').dataset.typed = '';
+    toast('Added “' + name + '”');
+    await mcAfterChange(false);
+    $('mcNewName').focus();
+  }, 'Couldn\u2019t add the category: ');
+  $('mcAddBtn').addEventListener('click', mcAdd);
+  $('mcAddRow').addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); mcAdd(); } });
+
+  $('mcList').addEventListener('keydown', (e)=>{
+    if(!e.target.closest('.mc-row.editing')) return;
+    if(e.key === 'Enter'){ e.preventDefault(); e.target.closest('.mc-row').querySelector('[data-mc="save"]').click(); }
+    if(e.key === 'Escape'){ e.preventDefault(); mcEditId = null; mcRender(); }
+  });
+  $('mcList').addEventListener('input', (e)=>{ if(e.target.dataset.mcF === 'prefix') e.target.value = e.target.value.toUpperCase(); });
+  $('mcList').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-mc]'); if(!b || b.disabled) return;
+    const row = b.closest('.mc-row');
+    const c = purchCats.find(x=> x.id === row.dataset.id); if(!c) return;
+    const act = b.dataset.mc;
+    if(act === 'edit'){ mcEditId = c.id; mcRender(); return; }
+    if(act === 'cancel'){ mcEditId = null; mcRender(); return; }
+    if(act === 'save') return mcRun(async ()=>{
+      const name = row.querySelector('[data-mc-f="name"]').value.trim().replace(/\s+/g, ' ');
+      const prefix = row.querySelector('[data-mc-f="prefix"]').value.trim().toUpperCase();
+      const err = mcCheck(name, prefix, c.id);
+      if(err){ toast(err); return; }
+      const renamed = name !== c.name;
+      if(renamed){
+        const n = mcUsage(c.name);
+        if(n && !confirm('Rename “' + c.name + '” to “' + name + '”?\n\nAll ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, and suppliers that list it, will move to the new name.')) return;
+        const { error } = await db.rpc('rename_material_category', { p_id: c.id, p_name: name });
+        if(error) throw error;
+      }
+      if(prefix !== c.code_prefix){
+        const { error } = await db.from('material_categories').update({ code_prefix: prefix }).eq('id', c.id);
+        if(error) throw error;
+      }
+      mcEditId = null;
+      toast(renamed ? 'Renamed to “' + name + '”' : 'Saved');
+      await mcAfterChange(renamed);
+    }, 'Couldn\u2019t save the category: ');
+    if(act === 'toggle') return mcRun(async ()=>{
+      const { error } = await db.from('material_categories').update({ is_active: !c.is_active }).eq('id', c.id);
+      if(error) throw error;
+      toast(c.is_active ? '“' + c.name + '” hidden — existing items keep it' : '“' + c.name + '” is available again');
+      await mcAfterChange(false);
+    }, 'Couldn\u2019t update the category: ');
+    if(act === 'del'){
+      if(!confirm('Delete the category “' + c.name + '”?')) return;
+      return mcRun(async ()=>{
+        const { error } = await db.from('material_categories').delete().eq('id', c.id);
+        if(error) throw error;
+        toast('Deleted “' + c.name + '”');
+        await mcAfterChange(false);
+      }, 'Couldn\u2019t delete: ');
+    }
+    if(act === 'up' || act === 'down') return mcRun(async ()=>{
+      const movable = purchCats.filter(x=> !x.is_system);
+      const i = movable.indexOf(c), j = act === 'up' ? i - 1 : i + 1;
+      if(j < 0 || j >= movable.length) return;
+      [movable[i], movable[j]] = [movable[j], movable[i]];
+      // Renumber 10, 20, 30… and save only the rows whose position changed.
+      const changes = movable.map((x, k)=> ({ x, sort: (k + 1) * 10 })).filter(o=> o.x.sort_order !== o.sort);
+      const res = await Promise.all(changes.map(o=> db.from('material_categories').update({ sort_order: o.sort }).eq('id', o.x.id)));
+      const bad = res.find(r=> r.error); if(bad) throw bad.error;
+      await mcAfterChange(false);
+    }, 'Couldn\u2019t reorder: ');
+  });
+  $('mcBtn').addEventListener('click', mcOpen);
+  $('mcSheetClose').addEventListener('click', ()=>{ mcEditId = null; $('mcSheetOverlay').classList.remove('open'); });
+
   // ---------- CSV import / export ----------
   const MT_CSV_COLS = ['code','name','family','category','scope','unit','pack_unit','pack_qty','brand','specs','standard_cost','notes','is_active'];
   // specs travel as "Size=3/8""; Gauge=22"
@@ -16948,7 +17216,7 @@
     if(missing.length){ toast('CSV needs columns: ' + missing.join(', ')); return; }
     const col = (r, k)=>{ const i = head.indexOf(k); return i < 0 ? undefined : (r[i] || '').trim(); };
     const has = (k)=> head.includes(k);
-    const catLookup = new Map(PURCH_CATEGORIES.map(c=> [c.toLowerCase(), c]));
+    const catLookup = new Map(PURCH_CAT_ALL.map(c=> [c.toLowerCase(), c]));
     const scopeLookup = new Map(MT_SCOPES.map(s=> [s.toLowerCase(), s]));
     const byCode = new Map(mtCache.map(m=> [m.code, m]));
     const usedCodes = new Set(mtCache.map(m=> m.code));
@@ -17031,7 +17299,7 @@
     'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings',
     'material_requisitions', 'material_requisition_items',
     'warehouses', 'warehouse_storekeepers', 'projects', 'project_job_orders', 'stock_balances', 'stock_movements',
-    'stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers'];
+    'stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers', 'material_categories'];
   let purchChannel = null;
   let purchPending = new Set();
   let purchPendingIds = new Set();
@@ -17118,6 +17386,13 @@
       if(ids.has('suppliers:' + spEditing.id)) $('spStaleNote').style.display = '';
     }
 
+    // Categories: reload the lists (and every dropdown), redraw the manager
+    if(has('material_categories')){
+      jobs.push(purchLoadCategories(true).then(()=>{
+        if($('mcSheetOverlay').classList.contains('open')) mcRender();
+        if(purchVisible('materials')) mtRenderList();
+      }));
+    }
     // Materials Database (its rows also show supplier names, so supplier
     // renames/deactivations refresh it too)
     if(has('materials', 'supplier_materials', 'suppliers') && purchVisible('materials')){
@@ -17306,6 +17581,7 @@
   const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, suppliers(name, trade_name), purchase_order_items(count)';
 
   let poCache = [];
+  let poStatusFilter = '';   // '' = all, else draft / issued / cancelled (status tabs)
   let poEditing = null;      // header row from the DB, or null for a new unsaved PO
   let poItems = [];          // [{key, id, material_id, code, description, specs, unit, qty, unit_price}]
   // Specs text the supplier needs to fill the order (size, rating, brand…),
@@ -17346,18 +17622,74 @@
   }
   function poSupplierName(s){ return s ? (s.trade_name || s.name || '') : ''; }
 
+  // ---- Discounts ----
+  // Typed as percentages, peso amounts, or a mix: "22% + 3%", "less 22% less 3%",
+  // "22% 3%", "500", "10% + 250". Stored as discount_terms, e.g.
+  // [{pct:22},{pct:3}] or [{amt:500}]. Percentages are SUCCESSIVE (trade
+  // discount style): 22% off the subtotal, then 3% off what is left — so
+  // 22% + 3% = 24.34% overall, not 25%. Same math as the database
+  // (po_discount_from_terms), which recomputes the peso discount whenever
+  // items change.
+  function poParseDiscount(text){
+    const t = String(text == null ? '' : text).replace(/[₱,]/g, '').replace(/\s*%/g, '%').trim();
+    if(!t) return { terms: [] };
+    const parts = t.split(/\s*(?:\+|;|&|\/|\band\b|\bless\b)\s*|\s+/i).filter(Boolean);
+    const terms = [];
+    for(const tok of parts){
+      let m = /^(\d+(?:\.\d+)?)%$/.exec(tok);
+      if(m){
+        const v = Number(m[1]);
+        if(!(v > 0 && v < 100)) return { terms, error: 'Discount ' + tok + ' must be more than 0% and less than 100%' };
+        terms.push({ pct: Math.round(v * 10000) / 10000 });
+        continue;
+      }
+      m = /^\d+(?:\.\d+)?$/.exec(tok);
+      if(m){
+        const v = poRound2(Number(tok));
+        if(v > 0) terms.push({ amt: v });
+        continue;
+      }
+      return { terms, error: 'Discount: couldn\u2019t read “' + tok + '”. Use % or a peso amount, e.g. 22% + 3%' };
+    }
+    return { terms };
+  }
+  function poDiscountText(terms){
+    return (terms || []).map(x=> x.pct != null ? x.pct + '%' : poFmt(x.amt)).join(' + ');
+  }
+  // What the discount field currently holds, as terms (bad input counts as none).
+  function poDiscountInput(){
+    const r = poParseDiscount($('poDiscount').value);
+    return r.error ? [] : r.terms;
+  }
+  // discount: terms array, or (older POs) a plain peso number.
+  function poDiscountSteps(subtotal, discount){
+    const terms = Array.isArray(discount) ? discount : (Number(discount) > 0 ? [{ amt: Number(discount) }] : []);
+    let rem = Math.max(subtotal, 0), total = 0;
+    const steps = terms.map(x=>{
+      const a = x.pct != null ? poRound2(rem * Number(x.pct) / 100) : Math.min(poRound2(Number(x.amt) || 0), rem);
+      rem = poRound2(rem - a); total = poRound2(total + a);
+      return { label: x.pct != null ? 'Less: ' + x.pct + '% discount' : 'Less: Discount', amount: a, pct: x.pct != null };
+    });
+    return { total, steps };
+  }
+  // The discount a saved PO header carries (terms when present, else the peso amount).
+  function poHeaderDiscount(h){
+    return h && Array.isArray(h.discount_terms) && h.discount_terms.length ? h.discount_terms : (h ? h.discount : 0);
+  }
+
   // Same math as the database (po_compute_totals) — display only.
   // EWT is computed on the amount net of VAT (vatable) and deducted:
   // net payable = total − EWT.
   function poCalc(items, vatMode, discount, ewtRate){
     const subtotal = poRound2(items.reduce((a, it)=> a + poRound2((Number(it.qty) || 0) * (Number(it.unit_price) || 0)), 0));
-    const net = Math.max(poRound2(subtotal - (Number(discount) || 0)), 0);
+    const disc = poDiscountSteps(subtotal, discount);
+    const net = Math.max(poRound2(subtotal - disc.total), 0);
     let vat = 0, total = net, vatable = net;
     if(vatMode === 'exclusive'){ vat = poRound2(net * PO_VAT_RATE); total = poRound2(net + vat); }
     else if(vatMode === 'inclusive'){ vat = poRound2(net - net / (1 + PO_VAT_RATE)); vatable = poRound2(net - vat); }
     const rate = Number(ewtRate) || 0;
     const ewt = poRound2(vatable * rate);
-    return { subtotal, discount: Number(discount) || 0, net, vat, vatable, total, ewtRate: rate, ewt, netPayable: poRound2(total - ewt) };
+    return { subtotal, discount: disc.total, discountSteps: disc.steps, net, vat, vatable, total, ewtRate: rate, ewt, netPayable: poRound2(total - ewt) };
   }
   function poEwtLabel(rate){
     const pct = Math.round(Number(rate) * 10000) / 100;
@@ -17458,8 +17790,13 @@
   }
   function poRenderList(){
     const q = ($('poSearch').value || '').trim().toLowerCase();
-    const st = $('poFilterStatus').value;
+    const st = poStatusFilter;
     const counts = poCache.reduce((a, r)=>{ a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+    document.querySelectorAll('#poStatusTabs .po-tab-count').forEach(el=>{
+      const k = el.dataset.countFor;
+      const n = k ? (counts[k] || 0) : poCache.length;
+      el.textContent = n ? String(n) : '';
+    });
     $('poCount').textContent = poCache.length
       ? [counts.draft ? counts.draft + ' draft' + (counts.draft > 1 ? 's' : '') : '', counts.issued ? counts.issued + ' issued' : ''].filter(Boolean).join(' · ')
       : '';
@@ -17470,7 +17807,9 @@
     });
     const list = $('poList');
     if(!rows.length){
-      list.innerHTML = '<div class="empty-state">' + (poCache.length ? 'No purchase orders match.'
+      const tabName = { draft:'draft', issued:'issued', cancelled:'cancelled' }[st];
+      list.innerHTML = '<div class="empty-state">' + (poCache.length
+        ? (tabName && !q ? 'No ' + tabName + ' purchase orders.' : 'No purchase orders match.')
         : 'No purchase orders yet. Tap <b>+ New Purchase Order</b> to create one.') + '</div>';
       return;
     }
@@ -17485,7 +17824,17 @@
     }).join('');
   }
   $('poSearch').addEventListener('input', poRenderList);
-  $('poFilterStatus').addEventListener('change', poRenderList);
+  $('poStatusTabs').addEventListener('click', (e)=>{
+    const tab = e.target.closest('.seg-tab');
+    if(!tab || tab.dataset.status === poStatusFilter) return;
+    poStatusFilter = tab.dataset.status || '';
+    document.querySelectorAll('#poStatusTabs .seg-tab').forEach(b=>{
+      const on = b === tab;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    poRenderList();
+  });
   $('poList').addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){
       purchReauth().then(ok=>{ if(ok) poShow(); });
@@ -17551,11 +17900,19 @@
       $('poSupplier').value = src.supplier_id || '';
       $('poReference').value = src.reference || '';
       $('poDate').value = header ? header.po_date : poToday();
-      $('poDeliveryDate').value = src.delivery_date || '';
+      {
+        const f = poFulfilmentOf(src, !!(header || prefill));
+        poSetFulfilment(f);
+        poSetWhen(poWhenOf(src));
+        $('poDeliveryDate').value = src.delivery_date || '';
+      }
       $('poTerms').value = src.payment_terms != null ? src.payment_terms : '';
       $('poVatMode').value = src.vat_mode || set.vat_mode || 'exclusive';
       $('poDeliverTo').value = src.deliver_to != null && (header || prefill) ? src.deliver_to : (set.deliver_to || '');
-      $('poDiscount').value = src.discount ? String(src.discount) : '';
+      // An older PO that typed "For Pickup" as the address is now a pick-up.
+      if(poFulfilment === 'pickup' && poLegacyPickupText(src.deliver_to)) $('poDeliverTo').value = set.deliver_to || '';
+      $('poDiscount').value = Array.isArray(src.discount_terms) && src.discount_terms.length ? poDiscountText(src.discount_terms)
+        : (Number(src.discount) > 0 ? String(src.discount) : '');
       $('poEwt').value = String(Number(src.ewt_rate) || 0);
       if(!$('poEwt').value) $('poEwt').value = '0';
       poFillSignatorySelects(src.prepared_by_id, src.approved_by_id);
@@ -17574,6 +17931,49 @@
       purchFail('Couldn\u2019t open the PO: ', e);
     }
   }
+  // ---- Delivery method & date ----
+  // fulfilment: 'delivery' | 'pickup'; delivery_when: 'date' | 'asap' | 'tba'.
+  // NULL on older POs → delivery, and "date" when it has one, else ASAP.
+  let poFulfilment = 'delivery';
+  function poLegacyPickupText(t){ return /^\s*(for\s+)?pick[\s-]?up\s*\.?\s*$/i.test(String(t || '')); }
+  function poFulfilmentOf(h, saved){
+    if(h && (h.fulfilment === 'pickup' || h.fulfilment === 'delivery')) return h.fulfilment;
+    return saved && h && poLegacyPickupText(h.deliver_to) ? 'pickup' : 'delivery';
+  }
+  function poWhenOf(h){
+    if(h && ['date', 'asap', 'tba'].includes(h.delivery_when)) return h.delivery_when;
+    return h && h.delivery_date ? 'date' : 'asap';
+  }
+  function poWhenText(h){
+    const w = poWhenOf(h);
+    return w === 'date' ? poDateLong(h.delivery_date) : w === 'tba' ? 'To be advised' : 'As soon as possible';
+  }
+  function poSetFulfilment(v){
+    poFulfilment = v === 'pickup' ? 'pickup' : 'delivery';
+    $$('#poFulfilment button').forEach(b=>{ const on = b.dataset.v === poFulfilment; b.classList.toggle('on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); });
+    const pick = poFulfilment === 'pickup';
+    $('poDeliverToField').style.display = pick ? 'none' : '';
+    $('poPickupNote').style.display = pick ? '' : 'none';
+    $('poWhenLabel').textContent = pick ? 'Pick-up Date' : 'Delivery Date';
+    $('poDateLabel').textContent = pick ? 'Pick-up on' : 'Deliver on';
+  }
+  function poSetWhen(v){
+    $('poDeliveryWhen').value = ['date', 'asap', 'tba'].includes(v) ? v : 'asap';
+    $('poDeliveryDateField').style.display = $('poDeliveryWhen').value === 'date' ? '' : 'none';
+  }
+  $('poFulfilment').addEventListener('click', (e)=>{
+    const b = e.target.closest('button[data-v]');
+    if(!b || b.disabled || poReadOnly || b.dataset.v === poFulfilment) return;
+    poSetFulfilment(b.dataset.v);
+    poDirty = true;
+  });
+  $('poDeliveryWhen').addEventListener('change', ()=>{
+    poSetWhen($('poDeliveryWhen').value);
+    if($('poDeliveryWhen').value === 'date' && !$('poDeliveryDate').value){
+      const d = $('poDeliveryDate'); setTimeout(()=>{ d.focus(); if(typeof d.showPicker === 'function'){ try{ d.showPicker(); }catch(_){} } }, 30);
+    }
+  });
+
   function poBlankItem(){ return { key: ++poKeySeq, id: null, material_id: null, code: '', description: '', specs: '', unit: '', qty: '', unit_price: '' }; }
 
   function poApplyMode(){
@@ -17594,7 +17994,7 @@
         (poEditing.cancel_reason ? ' — Reason: ' + poEditing.cancel_reason : '');
       note.style.display = '';
     }else note.style.display = 'none';
-    $$('#poEditorView input, #poEditorView select, #poEditorView textarea').forEach(el=>{ el.disabled = poReadOnly; });
+    $$('#poEditorView input, #poEditorView select, #poEditorView textarea, #poFulfilment button').forEach(el=>{ el.disabled = poReadOnly; });
     $('poAddItem').style.display = poReadOnly ? 'none' : '';
     poRenderActions();
   }
@@ -17772,13 +18172,13 @@
     const hits = mtCache.filter(m=> m.isActive).filter(m=>{
       const hay = [m.code, m.name, m.family, m.brand, mtSpecText(m.specs)].join(' ').toLowerCase();
       return words.every(w=> hay.includes(w));
-    }).slice(0, 8);
+    }).slice(0, 12);
     if(!hits.length){ if(box) box.remove(); return; }
     if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; host.appendChild(box); }
     box.innerHTML = hits.map((m, i)=>{
       const p = poPriceFor(m.id, sup);
-      return '<button type="button" data-pick="' + escapeHtml(m.id) + '"' + (i === 0 ? ' class="hl"' : '') + '><span><b>' + escapeHtml(m.code) + '</b> ' + escapeHtml(m.name) + '</span>' +
-        '<span class="s-price">' + (p ? '₱' + poFmt(p.price) + (p.source === 'supplier' ? '' : p.source === 'standard' ? ' std.' : ' other') : 'no price') + '</span></button>';
+      return mtSuggestBtn(m, i, (p ? '₱' + poFmt(p.price) + (p.source === 'supplier' ? '' : p.source === 'standard' ? ' std.' : ' other') : 'no price') +
+        (m.unit ? '<br><span class="s-unit">per ' + escapeHtml(m.unit) + '</span>' : ''));
     }).join('');
   }
   // Every PO line must be a Materials Database item. A typed line that
@@ -17858,8 +18258,17 @@
 
   function poRenderTotals(){
     const vm = $('poVatMode').value;
-    const t = poCalc(poCleanItems(), vm, poNum($('poDiscount').value) || 0, Number($('poEwt').value) || 0);
+    const dp = poParseDiscount($('poDiscount').value);
+    $('poDiscount').classList.toggle('po-bad', !!dp.error);
+    $('poDiscount').title = dp.error || 'Type % or a peso amount, e.g. 22% + 3%';
+    const t = poCalc(poCleanItems(), vm, dp.error ? [] : dp.terms, Number($('poEwt').value) || 0);
     $('poTotSub').textContent = '₱' + poFmt(t.subtotal);
+    // Show each discount's peso amount when a % is involved or there's more than one.
+    const showSteps = t.discountSteps.length > 1 || t.discountSteps.some(x=> x.pct);
+    $('poTotDiscRows').innerHTML = dp.error ? '<div class="row po-disc-err"><span>' + escapeHtml(dp.error) + '</span></div>'
+      : showSteps ? t.discountSteps.map(x=> '<div class="row po-disc-step"><span>' + escapeHtml(x.label) + '</span><span>(₱' + poFmt(x.amount) + ')</span></div>').join('') +
+          (t.discountSteps.length > 1 ? '<div class="row po-disc-step po-disc-sum"><span>Total discount (' + (Math.round(t.discount / (t.subtotal || 1) * 10000) / 100) + '%)</span><span>(₱' + poFmt(t.discount) + ')</span></div>' : '')
+      : '';
     const row = (l, v)=> '<div class="row"><span>' + l + '</span><span>' + v + '</span></div>';
     $('poTotVatRows').innerHTML = vm === 'exclusive' ? row('Add: VAT 12%', '₱' + poFmt(t.vat))
       : vm === 'inclusive' ? row('VATable sales', '₱' + poFmt(t.vatable)) + row('VAT 12% (included)', '₱' + poFmt(t.vat))
@@ -17892,24 +18301,46 @@
       const p = Number(it.unit_price);
       if(it.unit_price === '' || !isFinite(p) || p < 0) return 'Item ' + n + ' (' + it.description + '): enter a unit price (0 is allowed)';
     }
-    const d = spParseMoney($('poDiscount').value);
-    if(Number.isNaN(d)) return 'Discount must be a number';
+    const d = poParseDiscount($('poDiscount').value);
+    if(d.error) return d.error;
+    if($('poDeliveryWhen').value === 'date' && !$('poDeliveryDate').value)
+      return 'Pick the ' + (poFulfilment === 'pickup' ? 'pick-up' : 'delivery') + ' date, or choose As soon as possible / To be advised';
     return null;
   }
   function poGatherHeader(){
     return {
       supplier_id: $('poSupplier').value || null,
       po_date: $('poDate').value || poToday(),
-      delivery_date: $('poDeliveryDate').value || null,
-      deliver_to: $('poDeliverTo').value.trim(),
+      fulfilment: poFulfilment,
+      delivery_when: $('poDeliveryWhen').value,
+      delivery_date: $('poDeliveryWhen').value === 'date' ? ($('poDeliveryDate').value || null) : null,
+      deliver_to: poFulfilment === 'pickup' ? '' : $('poDeliverTo').value.trim(),
       payment_terms: $('poTerms').value.trim(),
       reference: $('poReference').value.trim(),
       vat_mode: $('poVatMode').value,
-      discount: poNum($('poDiscount').value) || 0,
+      discount: poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), 0).discount,
+      discount_terms: poDiscountInput(),
       ewt_rate: Number($('poEwt').value) || 0,
       prepared_by_id: $('poPreparedBy').value || null,
       approved_by_id: $('poApprovedBy').value || null
     };
+  }
+
+  // Columns added by later migrations. If the database doesn't have one
+  // yet, save without it rather than failing the whole save.
+  const PO_LATE_COLS = [
+    { col:'discount_terms', mig:'20260924_06_po_discount_terms.sql', note:'the discount was saved as a peso amount' },
+    { col:'fulfilment',     mig:'20260925_02_po_fulfilment.sql',     note:'delivery / pick-up wasn\u2019t saved' },
+    { col:'delivery_when',  mig:'20260925_02_po_fulfilment.sql',     note:'ASAP / To be advised wasn\u2019t saved' }
+  ];
+  function poNoTermsColumn(e){ const m = describeCloudError(e); return PO_LATE_COLS.some(c=> m.includes(c.col)); }
+  function poWarnTermsColumn(header){
+    // Drop every late column the database may lack (one error names only one of them).
+    const hit = PO_LATE_COLS.filter(c=> c.col in header);
+    hit.forEach(c=>{ delete header[c.col]; });
+    if(hit.some(c=> c.col === 'fulfilment') && header.deliver_to === '') header.deliver_to = 'For pick-up';
+    const migs = Array.from(new Set(hit.map(c=> c.mig)));
+    toast('Saved, but ' + hit.map(c=> c.note).join('; ') + ' — run ' + migs.join(' and ') + ' in Supabase');
   }
 
   // Saves header + items. Items are upserted by id, then any removed rows
@@ -17926,10 +18357,12 @@
       let id = poEditing && poEditing.id;
       if(id){
         purchMarkOwn(id);
-        const { error } = await db.from('purchase_orders').update(header).eq('id', id);
+        let { error } = await db.from('purchase_orders').update(header).eq('id', id);
+        if(error && poNoTermsColumn(error)){ poWarnTermsColumn(header); ({ error } = await db.from('purchase_orders').update(header).eq('id', id)); }
         if(error) throw error;
       }else{
-        const { data, error } = await db.from('purchase_orders').insert(header).select('*').single();
+        let { data, error } = await db.from('purchase_orders').insert(header).select('*').single();
+        if(error && poNoTermsColumn(error)){ poWarnTermsColumn(header); ({ data, error } = await db.from('purchase_orders').insert(header).select('*').single()); }
         if(error) throw error;
         id = data.id; purchMarkOwn(id);
         poEditing = data;
@@ -17985,7 +18418,7 @@
     if(!$('poSupplier').value){ toast('Choose a supplier before issuing'); return; }
     if(!poCleanItems().filter(it=> it.description.trim()).length){ toast('Add at least one item before issuing'); return; }
     if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
-    const t = poCalc(poCleanItems(), $('poVatMode').value, poNum($('poDiscount').value) || 0, Number($('poEwt').value) || 0);
+    const t = poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), Number($('poEwt').value) || 0);
     const s = poCurrentSupplier();
     if(!confirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
     const saved = await poSave({ quiet:true });
@@ -18164,7 +18597,7 @@
       approved && approved.signature_path ? poLoadImage(approved.signature_path) : null
     ]);
     return { header, items, company, supplier, prepared, approved, logo: logo || await poDefaultLogo(style), prepSig, apprSig,
-      totals: poCalc(items, header.vat_mode, header.discount, header.ewt_rate), status: header.status || 'draft',
+      totals: poCalc(items, header.vat_mode, poHeaderDiscount(header), header.ewt_rate), status: header.status || 'draft',
       terms: company.terms || '' };
   }
 
@@ -18297,8 +18730,9 @@
       ['Email', s.contact_email]
     ]);
     const right = block(M + colW + 14, 'Delivery & Terms', [
-      ['Deliver to', h.deliver_to || '—'],
-      ['Delivery', h.delivery_date ? poDateLong(h.delivery_date) : 'As soon as possible'],
+      ...(poFulfilmentOf(h, true) === 'pickup'
+        ? [['Method', 'For pick-up'], ['Pick-up', poWhenText(h)]]
+        : [['Method', 'Delivery'], ['Deliver to', h.deliver_to || '—'], ['Delivery', poWhenText(h)]]),
       ['Terms', h.payment_terms || '—'],
       ['Reference', h.reference]
     ]);
@@ -18356,7 +18790,7 @@
 
     // ---- totals (right) + amount in words (left) ----
     const rows = [['Subtotal', money(t.subtotal)]];
-    if(t.discount) rows.push(['Less: Discount', '(' + money(t.discount) + ')']);
+    t.discountSteps.forEach(x=>{ if(x.amount) rows.push([x.label, '(' + money(x.amount) + ')']); });
     if(h.vat_mode === 'exclusive') rows.push(['Add: VAT 12%', money(t.vat)]);
     else if(h.vat_mode === 'inclusive'){ rows.push(['VATable Sales', money(t.vatable)]); rows.push(['VAT 12% (included)', money(t.vat)]); }
     else rows.push(['VAT', 'Non-VAT']);
@@ -18771,11 +19205,10 @@
     const hits = mrCatalog.filter(m=>{
       const hay = [m.code, m.name, m.family, m.brand, mtSpecText(m.specs)].join(' ').toLowerCase();
       return words.every(w=> hay.includes(w));
-    }).slice(0, 8);
+    }).slice(0, 12);
     if(!hits.length){ if(box) box.remove(); return; }
     if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; host.appendChild(box); }
-    box.innerHTML = hits.map((m, i)=> '<button type="button" data-pick="' + escapeHtml(m.id) + '"' + (i === 0 ? ' class="hl"' : '') + '><span><b>' +
-      escapeHtml(m.code) + '</b> ' + escapeHtml(m.name) + '</span><span class="s-price">' + escapeHtml(m.unit) + '</span></button>').join('');
+    box.innerHTML = hits.map((m, i)=> mtSuggestBtn(m, i, escapeHtml(m.unit || ''))).join('');
     box.onclick = (e)=>{ const b = e.target.closest('[data-pick]'); if(b) onPick(b.dataset.pick); };
   }
 
@@ -19595,7 +20028,7 @@
       whSel.innerHTML = '<option value="">All warehouses</option>' + invWarehouses.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + (w.is_active ? '' : ' (inactive)') + '</option>').join('');
       whSel.value = keep;
       const cat = $('invStockCat');
-      if(cat.options.length <= 1) PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
+      if(cat.options.length <= 1) PURCH_CAT_ALL.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
       invRenderStock();
       return true;
     }catch(e){
@@ -21019,7 +21452,7 @@
     }
     const whs = invIsAdmin() ? invX.whs : invX.mine;
     $('rpWh').innerHTML = (whs.length > 1 ? '<option value="">All warehouses</option>' : '') + whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + '</option>').join('');
-    if($('rpCat').options.length <= 1) $('rpCat').innerHTML = '<option value="">All categories</option>' + PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+    if($('rpCat').options.length <= 1) $('rpCat').innerHTML = '<option value="">All categories</option>' + PURCH_CAT_ALL.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
     rpSetTab(rpTab === 'project' && !invIsAdmin() ? 'balance' : rpTab);
   }
   function rpSetTab(tab){

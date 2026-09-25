@@ -73,7 +73,7 @@
       whSel.innerHTML = '<option value="">All warehouses</option>' + invWarehouses.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + (w.is_active ? '' : ' (inactive)') + '</option>').join('');
       whSel.value = keep;
       const cat = $('invStockCat');
-      if(cat.options.length <= 1) PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
+      if(cat.options.length <= 1) PURCH_CAT_ALL.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
       invRenderStock();
       return true;
     }catch(e){

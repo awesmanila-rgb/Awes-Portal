@@ -9,12 +9,82 @@
   // Entry point: purchOnShow(key), called by showPurchasingView() in home.js.
   // =====================================================================
 
-  // Shared with the Materials Database (materials.category) — keep in sync.
+  // Material categories (materials.category, suppliers.supplies).
+  // Managed in Purchasing › Materials Database › Manage Categories and kept
+  // in public.material_categories (migration 20260925_01). These start as
+  // the original fixed list and are refilled IN PLACE from the database by
+  // purchLoadCategories(), so every screen reading them stays current:
+  //   PURCH_CATEGORIES — active ones: offered when adding/editing items & suppliers
+  //   PURCH_CAT_ALL    — active + hidden, in display order: filters, list grouping, imports
   const PURCH_CATEGORIES = [
     'Piping', 'Refrigerant', 'Electrical', 'Insulation', 'Consumables',
     'Parts & Components', 'Ducting & Ventilation', 'Plumbing',
     'Fire Protection', 'Hardware', 'Tools & Equipment', 'Others'
   ];
+  const PURCH_CAT_ALL = PURCH_CATEGORIES.slice();
+  let purchCats = [];              // rows of material_categories, in order
+  let purchCatsLoaded = false;
+  let purchCatsMissing = false;    // table not created yet (migration not run)
+  let purchCatsLoading = null;
+
+  async function purchLoadCategories(force){
+    if(purchCatsLoaded && !force) return true;
+    if(purchCatsLoading && !force) return purchCatsLoading;
+    purchCatsLoading = (async ()=>{
+      try{
+        if(!(await ensureCloud())) return false;
+        const { data, error } = await db.from('material_categories').select('*')
+          .order('sort_order').order('name');
+        if(error) throw error;
+        purchCats = (data || []).slice().sort((a, b)=> (a.is_system ? 1 : 0) - (b.is_system ? 1 : 0)
+          || a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+        purchCatsMissing = false;
+        purchCatsLoaded = true;
+        purchSyncCategoryLists();
+        purchApplyCategorySelects();
+        return true;
+      }catch(e){
+        const msg = describeCloudError(e);
+        if(/42P01|PGRST205|does not exist|material_categories/.test(msg)) purchCatsMissing = true;
+        else console.warn('load material categories failed', msg);
+        return false;
+      }finally{ purchCatsLoading = null; }
+    })();
+    return purchCatsLoading;
+  }
+  function purchSyncCategoryLists(){
+    if(!purchCats.length) return;
+    PURCH_CATEGORIES.length = 0; PURCH_CAT_ALL.length = 0;
+    purchCats.forEach(c=>{
+      PURCH_CAT_ALL.push(c.name);
+      if(c.is_active) PURCH_CATEGORIES.push(c.name);
+      MT_CODE_PREFIX[c.name] = c.code_prefix;
+    });
+  }
+  // <option>s for a category picker: active ones, plus `keep` if it's hidden
+  // (so editing an item that sits in a hidden category doesn't lose it).
+  function purchCategoryOptions(keep){
+    const list = PURCH_CATEGORIES.slice();
+    if(keep && !list.includes(keep)) list.push(keep);
+    return list.map(c=> '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + (PURCH_CATEGORIES.includes(c) ? '' : ' (hidden)') + '</option>').join('');
+  }
+  // Refill every category dropdown that has already been built, keeping its selection.
+  function purchApplyCategorySelects(){
+    const refill = (id, allLabel)=>{
+      const el = document.getElementById(id);
+      if(!el || el.options.length <= 1) return;   // not built yet — it fills itself from the lists on first show
+      const keep = el.value;
+      el.innerHTML = '<option value="">' + allLabel + '</option>' + PURCH_CAT_ALL.map(c=> '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
+      el.value = PURCH_CAT_ALL.includes(keep) ? keep : '';
+    };
+    refill('spFilterCategory', 'All categories');
+    refill('mtFilterCategory', 'All categories');
+    refill('invStockCat', 'All categories');
+    refill('rpCat', 'All categories');
+    const mc = document.getElementById('mtCategory');
+    if(mc && mc.options.length){ const keep = mc.value; mc.innerHTML = purchCategoryOptions(keep); mc.value = keep; }
+    if(document.getElementById('spSheetOverlay') && $('spSheetOverlay').classList.contains('open')) spRenderSuppliesPick();
+  }
   const SP_DOC_TYPES = ['BIR 2303', 'DTI / SEC', "Mayor's Permit", 'Quotation', 'Price List', 'Other'];
   const SP_DOC_BUCKET = 'supplier-documents';
   const SP_DOC_MAX_BYTES = 10 * 1024 * 1024;
@@ -64,6 +134,7 @@
 
   // ---------- entry ----------
   function purchOnShow(key){
+    purchLoadCategories();   // cached after the first load; realtime keeps it fresh
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
     if(key === 'myStock'){ if(currentUser) invShowMyStock(); return; } // storekeeper screen (quantities only)
     if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
@@ -91,9 +162,10 @@
   }
 
   async function spShow(){
+    await purchLoadCategories();
     const sel = $('spFilterCategory');
     if(sel.options.length <= 1){
-      PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+      PURCH_CAT_ALL.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
     }
     if(await spLoad()) spRenderList();
   }
@@ -232,7 +304,9 @@
 
   // ---------- sheet ----------
   function spRenderSuppliesPick(){
-    $('spSuppliesPick').innerHTML = PURCH_CATEGORIES.map(c=>
+    // Active categories, plus any hidden one this supplier already has.
+    const list = PURCH_CATEGORIES.concat(spSheetSupplies.filter(c=> !PURCH_CATEGORIES.includes(c)));
+    $('spSuppliesPick').innerHTML = list.map(c=>
       '<button type="button" data-cat="' + escapeHtml(c) + '" class="' + (spSheetSupplies.includes(c) ? 'on' : '') + '">' + escapeHtml(c) + '</button>'
     ).join('');
   }
@@ -701,7 +775,7 @@
       const row = { name };
       if(has('trade_name')) row.trade_name = col(r, 'trade_name');
       if(has('supplies')){
-        const lookup = new Map(PURCH_CATEGORIES.map(c=> [c.toLowerCase(), c]));
+        const lookup = new Map(PURCH_CAT_ALL.map(c=> [c.toLowerCase(), c]));
         row.supplies = col(r, 'supplies').split(/[;|]/).map(x=> x.trim()).filter(Boolean)
           .map(x=> lookup.get(x.toLowerCase()) || x);
       }
@@ -819,13 +893,31 @@
   function mtSpecText(specs){
     return Object.keys(specs || {}).map(k=> k + ': ' + specs[k]).join(' · ');
   }
+  // Second line of an item suggestion: brand + every spec, so items that
+  // share a name (e.g. several "Copper Tube" sizes) can be told apart.
+  function mtSuggestSub(m){
+    const bits = [];
+    if(m.brand) bits.push('Brand: ' + m.brand);
+    const sp = mtSpecText(m.specs);
+    if(sp) bits.push(sp);
+    return bits.join(' · ');
+  }
+  // One suggestion button (shared by the PO, requisition and inventory pickers).
+  function mtSuggestBtn(m, i, right){
+    const sub = mtSuggestSub(m);
+    return '<button type="button" data-pick="' + escapeHtml(m.id) + '"' + (i === 0 ? ' class="hl"' : '') + '>' +
+      '<span class="s-main"><span class="s-name"><b>' + escapeHtml(m.code) + '</b> ' + escapeHtml(m.name) + '</span>' +
+      (sub ? '<span class="s-specs">' + escapeHtml(sub) + '</span>' : '<span class="s-specs s-none">No specs recorded</span>') + '</span>' +
+      '<span class="s-price">' + right + '</span></button>';
+  }
   function mtNormCode(v){ return String(v || '').trim().toUpperCase().replace(/\s+/g, '-'); }
 
   async function mtShow(){
+    await purchLoadCategories();
     const cat = $('mtFilterCategory');
     if(cat.options.length <= 1){
-      PURCH_CATEGORIES.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
-      $('mtCategory').innerHTML = PURCH_CATEGORIES.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
+      PURCH_CAT_ALL.forEach(c=>{ const o = document.createElement('option'); o.value = c; o.textContent = c; cat.appendChild(o); });
+      $('mtCategory').innerHTML = purchCategoryOptions();
     }
     mtShowLimit = MT_PAGE;
     if(await mtLoad()) mtRenderList();
@@ -892,7 +984,7 @@
       return;
     }
     // Grouped by category (in the standard category order), then family, then name.
-    const order = new Map(PURCH_CATEGORIES.map((c,i)=> [c, i]));
+    const order = new Map(PURCH_CAT_ALL.map((c,i)=> [c, i]));
     rows.sort((a,b)=> (order.has(a.category) ? order.get(a.category) : 99) - (order.has(b.category) ? order.get(b.category) : 99)
       || (a.family || a.name).localeCompare(b.family || b.name) || a.name.localeCompare(b.name, undefined, { numeric:true }));
     const shown = rows.slice(0, mtShowLimit);
@@ -1013,6 +1105,7 @@
     $('mtSheetTitle').textContent = m ? m.name : (prefill && prefill.duplicateOf ? 'New size of ' + prefill.duplicateOf : 'Add Material');
     $('mtStatusLine').style.display = m ? '' : 'none';
     $('mtStatusLine').textContent = m ? m.code + (m.isActive ? '' : ' · Inactive') : '';
+    $('mtCategory').innerHTML = purchCategoryOptions(src.category);
     $('mtCategory').value = src.category || PURCH_CATEGORIES[0];
     $('mtCode').value = m ? m.code : mtSuggestCodeFor($('mtCategory').value);
     $('mtCode').dataset.auto = m ? '' : '1';
@@ -1431,6 +1524,181 @@
   });
   $('mtSeedClose').addEventListener('click', ()=> $('mtSeedOverlay').classList.remove('open'));
 
+  // ---------- Manage Categories (admin) ----------
+  // Add / rename / reorder / hide / delete material categories.
+  // Renames go through rename_material_category(), which moves every item
+  // and supplier "Supplies" entry to the new name in the same transaction.
+  let mcEditId = null;
+  let mcBusy = false;
+  function mcUsage(name){ return mtCache.filter(m=> m.category === name).length; }
+  function mcSuggestPrefix(name){
+    const words = String(name || '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+    if(!words.length) return '';
+    let base = words.length === 1 ? words[0].slice(0, 3) : (words[0].slice(0, 2) + words[1][0]);
+    if(base.length < 2) base = (base + 'X').slice(0, 2);
+    const used = new Set(purchCats.map(c=> c.code_prefix));
+    if(!used.has(base)) return base;
+    for(let i = 2; i < 100; i++){ const p = base.slice(0, 4) + i; if(!used.has(p)) return p; }
+    return base;
+  }
+  function mcCheck(name, prefix, selfId){
+    if(!name) return 'Enter a category name';
+    if(name.length > 60) return 'Keep the name under 60 characters';
+    if(purchCats.some(c=> c.id !== selfId && c.name.toLowerCase() === name.toLowerCase())) return 'There is already a category called “' + name + '”';
+    if(!/^[A-Z0-9]{2,6}$/.test(prefix)) return 'Code prefix: 2–6 letters or numbers, e.g. WLD';
+    const clash = purchCats.find(c=> c.id !== selfId && c.code_prefix === prefix);
+    if(clash) return 'Prefix ' + prefix + ' is already used by ' + clash.name;
+    return null;
+  }
+  async function mcOpen(){
+    mcEditId = null;
+    $('mcNewName').value = ''; $('mcNewPrefix').value = ''; $('mcNewPrefix').dataset.typed = '';
+    $('mcSheetOverlay').classList.add('open');
+    $('mcList').innerHTML = '<div class="empty-state">Loading…</div>';
+    await purchLoadCategories(true);
+    mcRender();
+  }
+  function mcRender(){
+    const list = $('mcList');
+    $('mcAddRow').style.display = purchCatsMissing ? 'none' : '';
+    if(purchCatsMissing){
+      list.innerHTML = '<div class="empty-state">Categories can\u2019t be managed yet — run migration <b>20260925_01_material_categories.sql</b> in Supabase first. Until then the standard list is used.</div>';
+      return;
+    }
+    if(!purchCats.length){ list.innerHTML = '<div class="empty-state">No categories yet.</div>'; return; }
+    const movable = purchCats.filter(c=> !c.is_system);
+    list.innerHTML = purchCats.map(c=>{
+      const n = mcUsage(c.name);
+      const idx = movable.indexOf(c);
+      if(c.id === mcEditId){
+        return '<div class="mc-row editing" data-id="' + escapeHtml(c.id) + '">' +
+          '<div class="mc-edit"><input type="text" data-mc-f="name" value="' + escapeHtml(c.name) + '" maxlength="60" placeholder="Category name">' +
+          '<input type="text" data-mc-f="prefix" value="' + escapeHtml(c.code_prefix) + '" maxlength="6" placeholder="Code">' +
+          '<div class="mc-edit-note">' + (n ? 'Renaming moves all ' + n + ' item' + (n === 1 ? '' : 's') + ' and any supplier listing to the new name. ' : '') +
+            'A new prefix only affects new item codes — existing codes stay as they are.</div></div>' +
+          '<div class="mc-acts"><button type="button" class="btn btn-primary" data-mc="save">Save</button><button type="button" class="btn btn-secondary" data-mc="cancel">Cancel</button></div></div>';
+      }
+      return '<div class="mc-row' + (c.is_active ? '' : ' off') + '" data-id="' + escapeHtml(c.id) + '">' +
+        '<div class="mc-move">' + (c.is_system ? '' :
+          '<button type="button" data-mc="up" title="Move up"' + (idx <= 0 ? ' disabled' : '') + '>&#9650;</button>' +
+          '<button type="button" data-mc="down" title="Move down"' + (idx >= movable.length - 1 ? ' disabled' : '') + '>&#9660;</button>') + '</div>' +
+        '<div class="mc-main"><div class="mc-name">' + escapeHtml(c.name) + ' <span class="mc-prefix">' + escapeHtml(c.code_prefix) + '</span>' +
+          (c.is_active ? '' : ' <span class="mc-tag">Hidden</span>') + (c.is_system ? ' <span class="mc-tag sys">Fallback</span>' : '') + '</div>' +
+          '<div class="mc-sub">' + (n ? n + ' item' + (n === 1 ? '' : 's') : 'No items') + '</div></div>' +
+        '<div class="mc-acts">' + (c.is_system ? '<button type="button" class="mc-btn" data-mc="edit" title="Change the code prefix">Prefix</button>' :
+          '<button type="button" class="mc-btn" data-mc="edit">Edit</button>' +
+          '<button type="button" class="mc-btn" data-mc="toggle">' + (c.is_active ? 'Hide' : 'Show') + '</button>' +
+          (n ? '' : '<button type="button" class="mc-btn danger" data-mc="del">Delete</button>')) + '</div></div>';
+    }).join('');
+    const ed = list.querySelector('.mc-row.editing');
+    if(ed){
+      const nameEl = ed.querySelector('[data-mc-f="name"]');
+      const isSys = purchCats.some(c=> c.id === mcEditId && c.is_system);
+      if(isSys){ nameEl.readOnly = true; nameEl.title = 'The fallback category can\u2019t be renamed'; }
+      (isSys ? ed.querySelector('[data-mc-f="prefix"]') : nameEl).focus();
+    }
+  }
+  // After a change: reload categories, and items too when a rename moved them.
+  async function mcAfterChange(reloadItems){
+    await purchLoadCategories(true);
+    mcRender();
+    if(reloadItems) await mtLoad({ silent:true });
+    if(purchVisible('materials')) mtRenderList();
+    if(reloadItems && typeof spLoad === 'function' && spCache.length) spLoad({ silent:true });
+  }
+  async function mcRun(fn, fail){
+    if(mcBusy) return;
+    if(!(await ensureCloud())){ toast('Not connected'); return; }
+    if(!(await purchEnsureSession())) return;
+    mcBusy = true; $('mcList').classList.add('busy');
+    try{ await fn(); }
+    catch(e){ purchFail(fail, e); }
+    finally{ mcBusy = false; $('mcList').classList.remove('busy'); }
+  }
+  $('mcNewName').addEventListener('input', ()=>{
+    if($('mcNewPrefix').dataset.typed !== '1') $('mcNewPrefix').value = mcSuggestPrefix($('mcNewName').value.trim());
+  });
+  $('mcNewPrefix').addEventListener('input', (e)=>{ e.target.dataset.typed = e.target.value ? '1' : ''; e.target.value = e.target.value.toUpperCase(); });
+  const mcAdd = ()=> mcRun(async ()=>{
+    const name = $('mcNewName').value.trim().replace(/\s+/g, ' ');
+    const prefix = ($('mcNewPrefix').value || mcSuggestPrefix(name)).trim().toUpperCase();
+    const err = mcCheck(name, prefix, null);
+    if(err){ toast(err); return; }
+    const movable = purchCats.filter(c=> !c.is_system);
+    const sort = (movable.length ? Math.max(...movable.map(c=> c.sort_order)) : 0) + 10;
+    const { error } = await db.from('material_categories').insert({ name, code_prefix: prefix, sort_order: sort });
+    if(error) throw error;
+    $('mcNewName').value = ''; $('mcNewPrefix').value = ''; $('mcNewPrefix').dataset.typed = '';
+    toast('Added “' + name + '”');
+    await mcAfterChange(false);
+    $('mcNewName').focus();
+  }, 'Couldn\u2019t add the category: ');
+  $('mcAddBtn').addEventListener('click', mcAdd);
+  $('mcAddRow').addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); mcAdd(); } });
+
+  $('mcList').addEventListener('keydown', (e)=>{
+    if(!e.target.closest('.mc-row.editing')) return;
+    if(e.key === 'Enter'){ e.preventDefault(); e.target.closest('.mc-row').querySelector('[data-mc="save"]').click(); }
+    if(e.key === 'Escape'){ e.preventDefault(); mcEditId = null; mcRender(); }
+  });
+  $('mcList').addEventListener('input', (e)=>{ if(e.target.dataset.mcF === 'prefix') e.target.value = e.target.value.toUpperCase(); });
+  $('mcList').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-mc]'); if(!b || b.disabled) return;
+    const row = b.closest('.mc-row');
+    const c = purchCats.find(x=> x.id === row.dataset.id); if(!c) return;
+    const act = b.dataset.mc;
+    if(act === 'edit'){ mcEditId = c.id; mcRender(); return; }
+    if(act === 'cancel'){ mcEditId = null; mcRender(); return; }
+    if(act === 'save') return mcRun(async ()=>{
+      const name = row.querySelector('[data-mc-f="name"]').value.trim().replace(/\s+/g, ' ');
+      const prefix = row.querySelector('[data-mc-f="prefix"]').value.trim().toUpperCase();
+      const err = mcCheck(name, prefix, c.id);
+      if(err){ toast(err); return; }
+      const renamed = name !== c.name;
+      if(renamed){
+        const n = mcUsage(c.name);
+        if(n && !confirm('Rename “' + c.name + '” to “' + name + '”?\n\nAll ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, and suppliers that list it, will move to the new name.')) return;
+        const { error } = await db.rpc('rename_material_category', { p_id: c.id, p_name: name });
+        if(error) throw error;
+      }
+      if(prefix !== c.code_prefix){
+        const { error } = await db.from('material_categories').update({ code_prefix: prefix }).eq('id', c.id);
+        if(error) throw error;
+      }
+      mcEditId = null;
+      toast(renamed ? 'Renamed to “' + name + '”' : 'Saved');
+      await mcAfterChange(renamed);
+    }, 'Couldn\u2019t save the category: ');
+    if(act === 'toggle') return mcRun(async ()=>{
+      const { error } = await db.from('material_categories').update({ is_active: !c.is_active }).eq('id', c.id);
+      if(error) throw error;
+      toast(c.is_active ? '“' + c.name + '” hidden — existing items keep it' : '“' + c.name + '” is available again');
+      await mcAfterChange(false);
+    }, 'Couldn\u2019t update the category: ');
+    if(act === 'del'){
+      if(!confirm('Delete the category “' + c.name + '”?')) return;
+      return mcRun(async ()=>{
+        const { error } = await db.from('material_categories').delete().eq('id', c.id);
+        if(error) throw error;
+        toast('Deleted “' + c.name + '”');
+        await mcAfterChange(false);
+      }, 'Couldn\u2019t delete: ');
+    }
+    if(act === 'up' || act === 'down') return mcRun(async ()=>{
+      const movable = purchCats.filter(x=> !x.is_system);
+      const i = movable.indexOf(c), j = act === 'up' ? i - 1 : i + 1;
+      if(j < 0 || j >= movable.length) return;
+      [movable[i], movable[j]] = [movable[j], movable[i]];
+      // Renumber 10, 20, 30… and save only the rows whose position changed.
+      const changes = movable.map((x, k)=> ({ x, sort: (k + 1) * 10 })).filter(o=> o.x.sort_order !== o.sort);
+      const res = await Promise.all(changes.map(o=> db.from('material_categories').update({ sort_order: o.sort }).eq('id', o.x.id)));
+      const bad = res.find(r=> r.error); if(bad) throw bad.error;
+      await mcAfterChange(false);
+    }, 'Couldn\u2019t reorder: ');
+  });
+  $('mcBtn').addEventListener('click', mcOpen);
+  $('mcSheetClose').addEventListener('click', ()=>{ mcEditId = null; $('mcSheetOverlay').classList.remove('open'); });
+
   // ---------- CSV import / export ----------
   const MT_CSV_COLS = ['code','name','family','category','scope','unit','pack_unit','pack_qty','brand','specs','standard_cost','notes','is_active'];
   // specs travel as "Size=3/8""; Gauge=22"
@@ -1471,7 +1739,7 @@
     if(missing.length){ toast('CSV needs columns: ' + missing.join(', ')); return; }
     const col = (r, k)=>{ const i = head.indexOf(k); return i < 0 ? undefined : (r[i] || '').trim(); };
     const has = (k)=> head.includes(k);
-    const catLookup = new Map(PURCH_CATEGORIES.map(c=> [c.toLowerCase(), c]));
+    const catLookup = new Map(PURCH_CAT_ALL.map(c=> [c.toLowerCase(), c]));
     const scopeLookup = new Map(MT_SCOPES.map(s=> [s.toLowerCase(), s]));
     const byCode = new Map(mtCache.map(m=> [m.code, m]));
     const usedCodes = new Set(mtCache.map(m=> m.code));
@@ -1554,7 +1822,7 @@
     'purchase_orders', 'purchase_order_items', 'po_signatories', 'po_settings',
     'material_requisitions', 'material_requisition_items',
     'warehouses', 'warehouse_storekeepers', 'projects', 'project_job_orders', 'stock_balances', 'stock_movements',
-    'stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers'];
+    'stock_receipts', 'issue_slips', 'return_slips', 'stock_transfers', 'material_categories'];
   let purchChannel = null;
   let purchPending = new Set();
   let purchPendingIds = new Set();
@@ -1641,6 +1909,13 @@
       if(ids.has('suppliers:' + spEditing.id)) $('spStaleNote').style.display = '';
     }
 
+    // Categories: reload the lists (and every dropdown), redraw the manager
+    if(has('material_categories')){
+      jobs.push(purchLoadCategories(true).then(()=>{
+        if($('mcSheetOverlay').classList.contains('open')) mcRender();
+        if(purchVisible('materials')) mtRenderList();
+      }));
+    }
     // Materials Database (its rows also show supplier names, so supplier
     // renames/deactivations refresh it too)
     if(has('materials', 'supplier_materials', 'suppliers') && purchVisible('materials')){

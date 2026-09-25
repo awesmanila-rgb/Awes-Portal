@@ -41,11 +41,10 @@
     const hits = mrCatalog.filter(m=>{
       const hay = [m.code, m.name, m.family, m.brand, mtSpecText(m.specs)].join(' ').toLowerCase();
       return words.every(w=> hay.includes(w));
-    }).slice(0, 8);
+    }).slice(0, 12);
     if(!hits.length){ if(box) box.remove(); return; }
     if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; host.appendChild(box); }
-    box.innerHTML = hits.map((m, i)=> '<button type="button" data-pick="' + escapeHtml(m.id) + '"' + (i === 0 ? ' class="hl"' : '') + '><span><b>' +
-      escapeHtml(m.code) + '</b> ' + escapeHtml(m.name) + '</span><span class="s-price">' + escapeHtml(m.unit) + '</span></button>').join('');
+    box.innerHTML = hits.map((m, i)=> mtSuggestBtn(m, i, escapeHtml(m.unit || ''))).join('');
     box.onclick = (e)=>{ const b = e.target.closest('[data-pick]'); if(b) onPick(b.dataset.pick); };
   }
 
