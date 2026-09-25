@@ -2966,7 +2966,15 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .purch-stale button{ margin-left:auto; border:1px solid #C98A12; background:#fff; color:#7A4E0E; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; }
 
 /* ---------- Purchasing › Purchase Orders ---------- */
-.po-toolbar{ grid-template-columns:1fr 180px; }
+.po-toolbar{ grid-template-columns:1fr; }
+/* PO status filter tabs (replaced the "All statuses" dropdown) */
+.po-status-tabs{ margin-bottom:10px; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.po-status-tabs::-webkit-scrollbar{ display:none; }
+.po-status-tabs .seg-tab{ flex:1 0 auto; display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; padding:9px 14px; }
+.po-status-tabs .seg-tab:not(.active):hover{ border-color:var(--green); color:var(--green); }
+.po-tab-count{ min-width:20px; padding:1px 6px; border-radius:999px; font-size:11px; font-weight:700; line-height:16px; background:var(--bg); color:var(--text-muted); }
+.po-tab-count:empty{ display:none; }
+.po-status-tabs .seg-tab.active .po-tab-count{ background:rgba(255,255,255,.22); color:#fff; }
 .po-sheet{ max-width:980px; }
 .po-status{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; vertical-align:middle; margin-left:6px; text-transform:uppercase; letter-spacing:.3px; }
 .po-status.draft{ background:#EEF1ED; color:var(--text-muted); }
@@ -2993,7 +3001,15 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .po-suggest{ position:absolute; left:0; right:0; top:39px; z-index:5; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:260px; overflow-y:auto; }
 .po-suggest button{ display:flex; width:100%; justify-content:space-between; gap:10px; padding:8px 10px; border:none; background:#fff; cursor:pointer; text-align:left; font:inherit; font-size:13px; }
 .po-suggest button:hover, .po-suggest button.hl{ background:var(--green-light); }
-.po-suggest .s-price{ color:var(--text-muted); font-size:12px; white-space:nowrap; }
+.po-suggest .s-price{ color:var(--text-muted); font-size:12px; white-space:nowrap; text-align:right; }
+/* item suggestions: name on top, brand + specs underneath (tells same-name items apart) */
+.po-suggest{ max-height:340px; }
+.po-suggest button{ align-items:flex-start; border-bottom:1px solid #F0F2EF; }
+.po-suggest button:last-child{ border-bottom:none; }
+.po-suggest .s-main{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.po-suggest .s-specs{ font-size:11.5px; line-height:1.35; color:var(--green-dark); white-space:normal; }
+.po-suggest .s-specs.s-none{ color:var(--text-muted); font-style:italic; }
+.po-suggest .s-unit{ font-size:11px; }
 .po-hint{ font-size:12px; color:var(--text-muted); margin:6px 0 4px; }
 .po-totals{ display:flex; justify-content:space-between; gap:16px; margin:14px 0; align-items:flex-start; flex-wrap:wrap; }
 .po-discount{ width:180px; }
@@ -3040,6 +3056,12 @@ body.role-admin #homeScheduleCalendarCard .cal-month-label{ min-width:0; }
 .po-totals-box .row.po-in{ align-items:center; }
 .po-totals-box .row.po-in input, .po-totals-box .row.po-in select{ width:150px; padding:6px 8px; font-size:13.5px; text-align:right; }
 .po-totals-box .row.po-in select{ text-align:left; }
+/* PO discount: accepts "22% + 3%" / peso amounts; each step listed below */
+.po-disc-hint{ display:block; font-size:11px; color:var(--text-muted); font-weight:400; }
+.po-totals-box .row.po-in input.po-bad{ border-color:var(--danger); background:#FFF6F5; }
+.po-totals-box .row.po-disc-step{ font-size:12px; color:var(--text-muted); padding:1px 0 1px 10px; }
+.po-totals-box .row.po-disc-sum{ color:var(--text); font-weight:600; }
+.po-totals-box .row.po-disc-err{ font-size:11.5px; color:var(--danger); padding-top:0; }
 .po-totals-box .row.strong{ font-weight:700; border-top:1px solid var(--border); margin-top:4px; padding-top:6px; }
 .po-terms-note{ font-size:12px; color:var(--text-muted); margin-top:14px; padding:9px 11px; background:#F6F8F6; border-radius:8px; }
 .po-link{ background:none; border:none; color:var(--green-dark); font-weight:700; text-decoration:underline; cursor:pointer; padding:0; font-size:12px; }
@@ -3833,3 +3855,47 @@ body.role-customer .cp-screen{ margin:0; }
   #cpNav .cp-nav-btn svg{ width:22px; height:22px; }
   #cpNav .cp-nav-btn.active{ font-weight:700; }
 }
+
+/* ---------- Manage Categories (Purchasing › Materials Database) ---------- */
+.mc-add{ display:grid; grid-template-columns:1fr 90px auto; gap:8px; margin-bottom:12px; }
+.mc-add input{ min-width:0; }
+.mc-add #mcNewPrefix, .mc-edit [data-mc-f="prefix"]{ text-transform:uppercase; letter-spacing:.5px; }
+#mcList.busy{ opacity:.55; pointer-events:none; }
+.mc-row{ display:flex; align-items:center; gap:10px; padding:9px 10px; border:1px solid var(--border); border-radius:10px; margin-bottom:6px; background:#fff; }
+.mc-row.off{ background:#F6F7F5; }
+.mc-row.off .mc-name{ color:var(--text-muted); }
+.mc-row.editing{ flex-wrap:wrap; border-color:var(--green); background:var(--green-light); }
+.mc-move{ display:flex; flex-direction:column; gap:2px; width:26px; flex:none; }
+.mc-move button{ border:1px solid var(--border); background:#fff; border-radius:5px; font-size:9px; line-height:1; padding:3px 0; cursor:pointer; color:var(--text-muted); }
+.mc-move button:hover:not([disabled]){ border-color:var(--green); color:var(--green); }
+.mc-move button[disabled]{ opacity:.35; cursor:default; }
+.mc-main{ flex:1; min-width:0; }
+.mc-name{ font-weight:700; font-size:13.5px; }
+.mc-prefix{ display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.5px; padding:1px 6px; border-radius:5px; background:var(--green-light); color:var(--green-dark); margin-left:4px; vertical-align:1px; }
+.mc-tag{ display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; padding:1px 6px; border-radius:999px; background:#EDEFEC; color:var(--text-muted); vertical-align:1px; }
+.mc-tag.sys{ background:#EEF1F8; color:#4A5A80; }
+.mc-sub{ font-size:12px; color:var(--text-muted); margin-top:2px; }
+.mc-acts{ display:flex; gap:6px; flex:none; }
+.mc-btn{ border:1px solid var(--border); background:#fff; border-radius:7px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; color:var(--text); }
+.mc-btn:hover{ border-color:var(--green); color:var(--green-dark); }
+.mc-btn.danger{ color:var(--danger); }
+.mc-btn.danger:hover{ border-color:var(--danger); color:var(--danger); }
+.mc-edit{ flex:1 1 100%; display:grid; grid-template-columns:1fr 90px; gap:8px; }
+.mc-edit-note{ grid-column:1 / -1; font-size:11.5px; color:var(--text-muted); }
+.mc-row.editing .mc-acts{ margin-left:auto; }
+.mc-row.editing .mc-acts .btn{ padding:7px 14px; font-size:12.5px; }
+@media (max-width:520px){
+  .mc-add{ grid-template-columns:1fr 80px; }
+  .mc-add .btn{ grid-column:1 / -1; }
+  .mc-row{ flex-wrap:wrap; }
+  .mc-acts{ flex:1 1 100%; justify-content:flex-end; }
+}
+
+/* PO: Delivery / Pick-up switch + pick-up note */
+.po-seg{ display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#fff; }
+.po-seg button{ flex:1; border:none; background:#fff; padding:9px 6px; font:inherit; font-size:13px; font-weight:700; color:var(--text-muted); cursor:pointer; }
+.po-seg button + button{ border-left:1px solid var(--border); }
+.po-seg button.on{ background:var(--green); color:#fff; }
+.po-seg button:disabled{ cursor:default; }
+.po-seg button:disabled:not(.on){ background:#F6F7F5; }
+.po-pickup-note{ font-size:12.5px; color:var(--text-muted); background:#F6F8F6; border:1px dashed var(--border); border-radius:8px; padding:9px 11px; }
