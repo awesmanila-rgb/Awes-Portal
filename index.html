@@ -2417,6 +2417,8 @@ window.awesCss = {
         Every material and part you buy — one entry per size (3/8" and 1/2" copper are separate items).
         Tap an item to edit it or manage its supplier prices. Items are never deleted, only deactivated.
       </p>
+      <!-- Summary: item counts per scope. Tap a card to filter the list. -->
+      <div class="mt-summary" id="mtSummary" aria-label="Materials summary"></div>
       <div class="sp-toolbar mt-toolbar">
         <input type="text" id="mtSearch" placeholder="Search code, name, size, brand…">
         <select id="mtFilterCategory"><option value="">All categories</option></select>
@@ -2441,6 +2443,8 @@ window.awesCss = {
         Everyone you buy materials from. Suppliers are never deleted — deactivate one you
         no longer use so old requisitions and purchase orders still point to it.
       </p>
+      <!-- Summary: supplier counts. Tap a card to filter the list. -->
+      <div class="mt-summary" id="spSummary" aria-label="Suppliers summary"></div>
       <div class="sp-toolbar">
         <input type="text" id="spSearch" placeholder="Search name, code, city, contact…">
         <select id="spFilterCategory"><option value="">All categories</option></select>

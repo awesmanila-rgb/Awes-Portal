@@ -3929,3 +3929,20 @@ html.ui-dlg-lock, html.ui-dlg-lock body{ overflow:hidden; }
   .ui-dlg-btns{ flex-direction:column-reverse; }
   .ui-dlg-btn{ width:100%; padding:12px; }
 }
+
+/* ---------- Materials Database: summary cards ---------- */
+.mt-summary{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:4px 0 14px; }
+.mt-sum-card{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:12px 14px; border:1px solid var(--border);
+  border-radius:12px; background:#fff; cursor:pointer; text-align:left; font:inherit; transition:border-color .12s, box-shadow .12s; }
+.mt-sum-card:hover{ border-color:var(--green); }
+.mt-sum-card.on{ border-color:var(--green); box-shadow:0 0 0 2px rgba(31, 122, 76, .18); background:var(--green-light); }
+.mt-sum-card.total{ background:var(--green-dark); border-color:var(--green-dark); }
+.mt-sum-card.total .mt-sum-n, .mt-sum-card.total .mt-sum-l{ color:#fff; }
+.mt-sum-card.total.on{ box-shadow:0 0 0 2px rgba(21, 77, 52, .3); }
+.mt-sum-n{ font-size:24px; font-weight:800; line-height:1.1; color:var(--green-dark); font-variant-numeric:tabular-nums; }
+.mt-sum-l{ font-size:12px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; color:var(--text-muted); }
+.mt-sum-note{ grid-column:1 / -1; font-size:11.5px; color:var(--text-muted); margin-top:-2px; }
+@media (max-width:600px){
+  .mt-summary{ grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
+  .mt-sum-n{ font-size:20px; }
+}

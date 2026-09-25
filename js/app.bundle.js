@@ -15785,6 +15785,13 @@
     }
   }
 
+  // Quick filter set by the summary cards: '' | 'delivers' | 'pickup' | 'vat'.
+  let spQuick = '';
+  const SP_QUICK = {
+    delivers: s=> s.delivers,
+    pickup:   s=> !s.delivers,
+    vat:      s=> s.vatRegistered === true
+  };
   function spFiltered(){
     const q = ($('spSearch').value || '').trim().toLowerCase();
     const cat = $('spFilterCategory').value;
@@ -15792,6 +15799,7 @@
     return spCache.filter(s=>{
       if(!showInactive && !s.isActive) return false;
       if(cat && !s.supplies.includes(cat)) return false;
+      if(spQuick && !SP_QUICK[spQuick](s)) return false;
       if(!q) return true;
       const hay = [s.code, s.name, s.tradeName, s.city, s.address, s.tin]
         .concat((s.contacts || []).map(c=> c.name + ' ' + c.mobile + ' ' + c.email))
@@ -15800,7 +15808,35 @@
     });
   }
 
+  // Summary cards above the list: total, delivers, pickup only, VAT-registered.
+  // Counts active suppliers (all when "Show inactive" is ticked).
+  function spRenderSummary(){
+    const box = $('spSummary'); if(!box) return;
+    if(!spCache.length){ box.innerHTML = ''; box.style.display = 'none'; return; }
+    box.style.display = '';
+    const pool = $('spShowInactive').checked ? spCache : spCache.filter(s=> s.isActive);
+    const cards = [
+      { key:'',         label:'Total suppliers', n: pool.length, cls:'total' },
+      { key:'delivers', label:'Delivers',        n: pool.filter(SP_QUICK.delivers).length },
+      { key:'pickup',   label:'Pickup only',     n: pool.filter(SP_QUICK.pickup).length },
+      { key:'vat',      label:'VAT registered',  n: pool.filter(SP_QUICK.vat).length }
+    ];
+    const noCat = pool.filter(s=> !s.supplies.length).length;
+    box.innerHTML = cards.map(c=>
+      '<button type="button" class="mt-sum-card' + (c.cls ? ' ' + c.cls : '') + (c.key === spQuick ? ' on' : '') + '" data-sp-quick="' + c.key + '"' +
+        ' title="' + (c.key ? 'Show only ' + escapeHtml(c.label.toLowerCase()) + ' suppliers' : 'Show all suppliers') + '">' +
+        '<span class="mt-sum-n">' + c.n.toLocaleString() + '</span><span class="mt-sum-l">' + escapeHtml(c.label) + '</span></button>').join('') +
+      (noCat ? '<div class="mt-sum-note">' + noCat + ' supplier' + (noCat === 1 ? ' has' : 's have') + ' no category set</div>' : '');
+  }
+  $('spSummary').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-sp-quick]'); if(!b) return;
+    const v = b.dataset.spQuick;
+    spQuick = spQuick === v ? '' : v;
+    spRenderList();
+  });
+
   function spRenderList(){
+    spRenderSummary();
     const list = $('spList');
     const active = spCache.filter(s=> s.isActive).length;
     $('spCount').textContent = spCache.length ? (active + ' active' + (spCache.length > active ? ' · ' + (spCache.length - active) + ' inactive' : '')) : '';
@@ -16559,7 +16595,36 @@
     });
   }
 
+  // Summary cards above the list: total items and items per scope.
+  // Counts active items (all items when "Show inactive" is ticked). An item
+  // can belong to more than one scope, so the scopes may add up to more
+  // than the total. Tapping a card filters the list by that scope.
+  function mtRenderSummary(){
+    const box = $('mtSummary'); if(!box) return;
+    if(!mtCache.length){ box.innerHTML = ''; box.style.display = 'none'; return; }
+    box.style.display = '';
+    const pool = $('mtShowInactive').checked ? mtCache : mtCache.filter(m=> m.isActive);
+    const cur = $('mtFilterScope').value;
+    const noScope = pool.filter(m=> !m.scope.length).length;
+    const cards = [{ key:'', label:'Total items', n: pool.length, cls:'total' }]
+      .concat(MT_SCOPES.map(s=> ({ key:s, label:s, n: pool.filter(m=> m.scope.includes(s)).length })));
+    box.innerHTML = cards.map(c=>
+      '<button type="button" class="mt-sum-card' + (c.cls ? ' ' + c.cls : '') + (c.key === cur ? ' on' : '') + '" data-scope-filter="' + escapeHtml(c.key) + '"' +
+        ' title="' + (c.key ? 'Show only ' + escapeHtml(c.label) + ' items' : 'Show all scopes') + '">' +
+        '<span class="mt-sum-n">' + c.n.toLocaleString() + '</span>' +
+        '<span class="mt-sum-l">' + escapeHtml(c.label) + '</span></button>').join('') +
+      (noScope ? '<div class="mt-sum-note">' + noScope + ' item' + (noScope === 1 ? ' has' : 's have') + ' no scope set · items can be in more than one scope</div>'
+        : '<div class="mt-sum-note">Items can be in more than one scope</div>');
+  }
+  $('mtSummary').addEventListener('click', (e)=>{
+    const b = e.target.closest('[data-scope-filter]'); if(!b) return;
+    const v = b.dataset.scopeFilter;
+    $('mtFilterScope').value = $('mtFilterScope').value === v && v ? '' : v;
+    mtShowLimit = MT_PAGE; mtRenderList();
+  });
+
   function mtRenderList(){
+    mtRenderSummary();
     const list = $('mtList');
     const active = mtCache.filter(m=> m.isActive).length;
     $('mtCount').textContent = mtCache.length ? (active + ' active' + (mtCache.length > active ? ' · ' + (mtCache.length - active) + ' inactive' : '')) : '';
