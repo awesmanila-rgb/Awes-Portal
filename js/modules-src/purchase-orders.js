@@ -193,7 +193,7 @@
     // Sidebar "Purchase Orders" while a PO is open: back to the list,
     // unless there are unsaved changes the admin wants to keep.
     if(poEditorVisible()){
-      if(!poConfirmLeave()) return;
+      if(!(await poConfirmLeave())) return;
       poShowListView();
     }
     if(await poLoadList()) poRenderList();
@@ -300,12 +300,12 @@
     window.scrollTo({ top: 0 });
   }
   // Leaving an edited draft asks first.
-  function poConfirmLeave(){
-    return !poDirty || poReadOnly || confirm('Discard the changes you haven\u2019t saved?');
+  async function poConfirmLeave(){
+    return !poDirty || poReadOnly || await uiConfirm('Discard the changes you haven\u2019t saved?');
   }
   $('poEditorView').addEventListener('input', (e)=>{ if(!e.target.closest('.po-actions')) poDirty = true; });
   $('poEditorView').addEventListener('change', (e)=>{ if(!e.target.closest('.po-actions')) poDirty = true; });
-  $('poBackBtn').addEventListener('click', ()=>{ if(poConfirmLeave()) poClose(); });
+  $('poBackBtn').addEventListener('click', async ()=>{ if(await poConfirmLeave()) poClose(); });
   $('poEditTermsBtn').addEventListener('click', ()=> $('poSettingsBtn').click());
 
   // ---------- editor ----------
@@ -489,7 +489,7 @@
   }
   let poLastSupplierTerms = '';
   $('poSupplier').addEventListener('focus', ()=>{ const s = poCurrentSupplier(); poLastSupplierTerms = s ? (s.payment_terms || '') : ''; });
-  $('poSupplier').addEventListener('change', ()=>{
+  $('poSupplier').addEventListener('change', async ()=>{
     const s = poCurrentSupplier();
     poRenderSupplierInfo();
     // Take the supplier's usual terms unless the admin typed their own.
@@ -502,7 +502,7 @@
       const p = poPriceFor(it.material_id, s.id);
       return p && p.price != null && Number(p.price) !== Number(it.unit_price) ? { it, p } : null;
     }).filter(Boolean);
-    if(changes.length && confirm('Update ' + changes.length + ' item price' + (changes.length > 1 ? 's' : '') + ' from ' + poSupplierName(s) + '\u2019s price list?')){
+    if(changes.length && await uiConfirm('Update ' + changes.length + ' item price' + (changes.length > 1 ? 's' : '') + ' from ' + poSupplierName(s) + '\u2019s price list?')){
       changes.forEach(({ it, p })=>{ it.unit_price = p.price; if(p.unitFromPrice) it.unit = p.unitFromPrice; });
       poRenderItems(); poRenderTotals();
     }
@@ -662,7 +662,7 @@
     const clash = mtCache.find(x=> x.code === row.code);
     if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); return; }
     const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && x.isActive);
-    if(twin && confirm('“' + twin.name + '” is already in the catalog as ' + twin.code + '. Use that one instead?')){ box.remove(); poPickMaterial(it, twin.id); return; }
+    if(twin && await uiConfirm('“' + twin.name + '” is already in the catalog as ' + twin.code + '. Use that one instead?')){ box.remove(); poPickMaterial(it, twin.id); return; }
     if(!(await purchEnsureSession())) return;
     const btn = e.target.closest('[data-q-save]'); btn.disabled = true;
     try{
@@ -858,7 +858,7 @@
     if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
     const t = poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), Number($('poEwt').value) || 0);
     const s = poCurrentSupplier();
-    if(!confirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
+    if(!await uiConfirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
     const saved = await poSave({ quiet:true });
     if(!saved) return;
     try{
@@ -876,7 +876,7 @@
   }
   async function poCancel(){
     if(!poEditing) return;
-    const reason = prompt('Cancel ' + poEditing.po_no + '?\n\nThe PO stays on record, marked CANCELLED. Enter the reason:');
+    const reason = await uiPrompt('Cancel ' + poEditing.po_no + '?\n\nThe PO stays on record, marked CANCELLED. Enter the reason:');
     if(reason === null) return;
     if(!reason.trim()){ toast('A reason is required to cancel'); return; }
     if(!(await purchEnsureSession())) return;
@@ -894,7 +894,7 @@
   }
   async function poDeleteDraft(){
     if(!poEditing) return;
-    if(!confirm('Delete draft ' + poEditing.po_no + '? This can\u2019t be undone.')) return;
+    if(!await uiConfirm('Delete draft ' + poEditing.po_no + '? This can\u2019t be undone.')) return;
     poDirty = false;
     if(!(await purchEnsureSession())) return;
     try{
@@ -905,8 +905,8 @@
       poClose();
     }catch(e){ purchFail('Couldn\u2019t delete the draft: ', e); }
   }
-  function poDuplicate(){
-    if(!poConfirmLeave()) return;
+  async function poDuplicate(){
+    if(!(await poConfirmLeave())) return;
     const header = poGatherHeader();
     const items = poCleanItems().filter(it=> it.description.trim());
     poEditing = null;
@@ -1462,7 +1462,7 @@
     finally{ btn.disabled = false; btn.textContent = 'Upload logo'; }
   });
   $('poLogoResetBtn').addEventListener('click', async ()=>{
-    if(!confirm('Go back to the default AWES logo? (Issued POs keep the logo they were issued with.)')) return;
+    if(!await uiConfirm('Go back to the default AWES logo? (Issued POs keep the logo they were issued with.)')) return;
     if(await poSaveSettings({ logo_path: '' }, 'Using the default AWES logo')) poRenderLogoPreview();
   });
 
@@ -1582,7 +1582,7 @@
     const name = $('poSigName').value.trim();
     if(!name){ toast('Enter the signatory\u2019s name'); $('poSigName').focus(); return; }
     const id = $('poSigId').value;
-    if(!id && !poSigCanvas && !confirm('Save ' + name + ' without a signature? The PDF will show a blank line until one is uploaded.')) return;
+    if(!id && !poSigCanvas && !await uiConfirm('Save ' + name + ' without a signature? The PDF will show a blank line until one is uploaded.')) return;
     if(!(await purchEnsureSession())) return;
     const btn = $('poSigSaveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
     try{

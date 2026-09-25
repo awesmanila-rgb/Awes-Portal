@@ -470,7 +470,7 @@
     if(!picked.length){ toast('Tick the items to order'); return; }
     const groups = new Map();
     picked.forEach(x=>{ const k = x.supplier_id || ''; if(!groups.has(k)) groups.set(k, []); groups.get(k).push(x); });
-    if(!confirm('Create ' + groups.size + ' draft PO' + (groups.size === 1 ? '' : 's') + ' for ' + picked.length + ' item' + (picked.length === 1 ? '' : 's') + '?\n\n' +
+    if(!await uiConfirm('Create ' + groups.size + ' draft PO' + (groups.size === 1 ? '' : 's') + ' for ' + picked.length + ' item' + (picked.length === 1 ? '' : 's') + '?\n\n' +
       Array.from(groups.entries()).map(([k, xs])=> (xs[0].supplier || 'No preferred supplier (choose in the PO)') + ': ' + xs.length).join('\n') + '\n\nThey open as drafts — check quantities and prices before issuing.')) return;
     if(!(await purchEnsureSession())) return;
     try{

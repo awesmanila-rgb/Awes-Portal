@@ -60,7 +60,7 @@
         });
         row.querySelector('[data-act="delete"]').addEventListener('click', async (e)=>{
           e.stopPropagation();
-          if(!confirm('Delete this draft? "'+(d.custName||'Untitled')+'" ('+(d.srNo||'')+') cannot be recovered.')) return;
+          if(!await uiConfirm('Delete this draft? "'+(d.custName||'Untitled')+'" ('+(d.srNo||'')+') cannot be recovered.')) return;
           try{
             // The local storage shim reports success even for a key that was
             // never there (e.g. a draft that only exists in the cloud), so it

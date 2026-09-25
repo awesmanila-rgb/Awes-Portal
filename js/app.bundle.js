@@ -628,6 +628,116 @@
     }catch(e){ console.error('cloud SR counter failed', describeCloudError(e)); return null; }
   }
 
+  // ---------- in-page confirm / prompt dialogs ----------
+  // Replace window.confirm() / window.prompt() everywhere. The browser's own
+  // boxes show the site address ("awesmanila-rgb.github.io says"), can't be
+  // styled, and some in-app browsers block them. These look like the app,
+  // and resolve like the originals:
+  //   await uiConfirm(msg, opts)   → true / false
+  //   await uiPrompt(msg, def, opts) → the text, '' on an empty OK, null on Cancel
+  // A message with a blank line shows its first part as the heading.
+  // opts: { title, ok, cancel, danger, placeholder, multiline }
+  const UI_DLG_VERBS = ['Delete','Remove','Discard','Deactivate','Disapprove','Reject','Issue','Approve','Submit',
+    'Receive','Post','Transfer','Import','Create','Accept','Replace','Rename','Unlock','Print','Mark','Close',
+    'Update','Save','Add','Record','Start','Use','Return','Continue'];
+  const UI_DLG_DANGER = ['Delete','Remove','Discard','Deactivate','Disapprove','Reject','Cancel'];
+  let uiDlgQueue = Promise.resolve();
+  let uiDlgEl = null;
+  function uiDlgBuild(){
+    if(uiDlgEl) return uiDlgEl;
+    const o = document.createElement('div');
+    o.className = 'ui-dlg-overlay';
+    o.innerHTML = '<div class="ui-dlg" role="alertdialog" aria-modal="true" aria-labelledby="uiDlgTitle" aria-describedby="uiDlgMsg">' +
+      '<div class="ui-dlg-title" id="uiDlgTitle"></div><div class="ui-dlg-msg" id="uiDlgMsg"></div>' +
+      '<div class="ui-dlg-field"></div><div class="ui-dlg-err"></div>' +
+      '<div class="ui-dlg-btns"><button type="button" class="ui-dlg-btn ui-dlg-cancel"></button><button type="button" class="ui-dlg-btn ui-dlg-ok"></button></div></div>';
+    document.body.appendChild(o);
+    uiDlgEl = o;
+    return o;
+  }
+  function uiDlgLabels(msg, opts){
+    const first = (String(msg).trim().match(/^[A-Za-z]+/) || [''])[0];
+    const cap = first.charAt(0).toUpperCase() + first.slice(1);
+    let ok = 'OK', cancel = 'Cancel', danger = UI_DLG_DANGER.includes(cap);
+    if(cap === 'Cancel'){ ok = 'Yes, cancel'; cancel = 'Go back'; }
+    else if(UI_DLG_VERBS.includes(cap)) ok = cap;
+    return {
+      ok: opts.ok || ok, cancel: opts.cancel || cancel,
+      danger: opts.danger != null ? !!opts.danger : danger
+    };
+  }
+  function uiDlgOpen(kind, msg, def, opts){
+    opts = opts || {};
+    const run = ()=> new Promise(resolve=>{
+      const o = uiDlgBuild();
+      const text = String(msg == null ? '' : msg).replace(/\r\n/g, '\n').trim();
+      const cut = text.indexOf('\n\n');
+      let title = opts.title || '', body = text;
+      if(!title){
+        if(cut > 0){ title = text.slice(0, cut).trim(); body = text.slice(cut + 2).trim(); }
+        else if(text.length <= 90){ title = text; body = ''; }
+      }
+      o.querySelector('.ui-dlg-title').textContent = title;
+      o.querySelector('.ui-dlg-title').style.display = title ? '' : 'none';
+      o.querySelector('.ui-dlg-msg').textContent = body;
+      o.querySelector('.ui-dlg-msg').style.display = body ? '' : 'none';
+      const lab = kind === 'prompt' ? { ok: opts.ok || 'OK', cancel: opts.cancel || 'Cancel', danger: !!opts.danger } : uiDlgLabels(text, opts);
+      const okB = o.querySelector('.ui-dlg-ok'), noB = o.querySelector('.ui-dlg-cancel');
+      okB.textContent = lab.ok; noB.textContent = lab.cancel;
+      okB.classList.toggle('danger', lab.danger);
+      const field = o.querySelector('.ui-dlg-field'), err = o.querySelector('.ui-dlg-err');
+      field.innerHTML = ''; err.textContent = '';
+      let input = null;
+      if(kind === 'prompt'){
+        const multi = opts.multiline != null ? opts.multiline : /\b(reason|why|what should)\b/i.test(text);
+        input = document.createElement(multi ? 'textarea' : 'input');
+        if(multi) input.rows = 3; else input.type = 'text';
+        input.className = 'ui-dlg-input';
+        input.value = def == null ? '' : String(def);
+        input.placeholder = opts.placeholder || '';
+        input.autocomplete = 'off';
+        field.appendChild(input);
+      }
+      field.style.display = input ? '' : 'none';
+      const prevFocus = document.activeElement;
+      o.classList.add('open');
+      document.documentElement.classList.add('ui-dlg-lock');
+      setTimeout(()=>{
+        try{
+          if(input){ input.focus(); if(input.value) input.select(); }
+          else okB.focus();
+        }catch(_){}
+      }, 40);
+      const finish = (val)=>{
+        o.classList.remove('open');
+        document.documentElement.classList.remove('ui-dlg-lock');
+        okB.onclick = noB.onclick = null;
+        o.onkeydown = null;
+        try{ if(prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus({ preventScroll:true }); }catch(_){}
+        resolve(val);
+      };
+      okB.onclick = ()=> finish(kind === 'prompt' ? input.value : true);
+      noB.onclick = ()=> finish(kind === 'prompt' ? null : false);
+      o.onkeydown = (e)=>{
+        if(e.key === 'Escape'){ e.preventDefault(); noB.onclick(); }
+        else if(e.key === 'Enter' && !(input && input.tagName === 'TEXTAREA' && e.shiftKey)
+                && !(document.activeElement === noB)){ e.preventDefault(); okB.onclick(); }
+        else if(e.key === 'Tab'){   // keep focus inside the dialog
+          const f = [input, noB, okB].filter(Boolean);
+          const i = f.indexOf(document.activeElement);
+          e.preventDefault();
+          f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+        }
+      };
+    });
+    // One dialog at a time, in the order they were asked for.
+    const p = uiDlgQueue.then(run, run);
+    uiDlgQueue = p.catch(()=>{});
+    return p;
+  }
+  function uiConfirm(msg, opts){ return uiDlgOpen('confirm', msg, null, opts); }
+  function uiPrompt(msg, def, opts){ return uiDlgOpen('prompt', msg, def, opts); }
+
   // ---------- password prompt ----------
   // window.prompt() was used for every admin-password gate. On iOS Safari that
   // dialog shows the typed password in clear text (and in screenshots), it can't
@@ -994,7 +1104,7 @@
     }
     const btn = e.target.closest('.pendingSyncDeleteBtn');
     if(!btn) return;
-    if(!confirm('Discard this item? It will NOT be uploaded and cannot be recovered.')) return;
+    if(!await uiConfirm('Discard this item? It will NOT be uploaded and cannot be recovered.')) return;
     try{ await window.storage.delete(btn.dataset.key); }catch(err){}
     await renderPendingSyncList();
     updateOutboxBadge();
@@ -1003,7 +1113,7 @@
   if(pendingSyncClearAllBtn) pendingSyncClearAllBtn.addEventListener('click', async ()=>{
     const items = await outboxList();
     if(!items.length) return;
-    if(!confirm('Discard all '+items.length+' pending item'+(items.length===1?'':'s')+'? None of it will be uploaded, and this cannot be undone.')) return;
+    if(!await uiConfirm('Discard all '+items.length+' pending item'+(items.length===1?'':'s')+'? None of it will be uploaded, and this cannot be undone.')) return;
     for(const item of items){ try{ await window.storage.delete(item.storageKey); }catch(err){} }
     await renderPendingSyncList();
     updateOutboxBadge();
@@ -3717,7 +3827,7 @@
           edit.addEventListener('click', async ()=>{
             const idx = list.indexOf(item);
             if(idx===-1) return;
-            const next = prompt('Rename "'+item+'" to:', item); // plain text, not a secret
+            const next = await uiPrompt('Rename "'+item+'" to:', item); // plain text, not a secret
             if(next===null) return;
             const trimmed = next.trim();
             if(!trimmed) return;
@@ -3913,12 +4023,12 @@
         else toast('Could not update');
       });
       card.querySelector('[data-act="resetDevice"]').addEventListener('click', async ()=>{
-        if(!confirm('Unlock '+u.name+"'s DTR from their current device? Use this if they lost or replaced their phone — the next device they time in from will become the new locked device.")) return;
+        if(!await uiConfirm('Unlock '+u.name+"'s DTR from their current device? Use this if they lost or replaced their phone — the next device they time in from will become the new locked device.")) return;
         const ok = await clearDeviceLock(u.id);
         toast(ok ? "Device lock cleared for "+u.name : 'Could not clear device lock');
       });
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!confirm('Remove '+u.name+' completely? Their past reports stay saved, but they will no longer appear anywhere.')) return;
+        if(!await uiConfirm('Remove '+u.name+' completely? Their past reports stay saved, but they will no longer appear anywhere.')) return;
         const ok = await cloudDeleteUser(u.id);
         if(ok){ toast('Removed '+u.name); renderUsersList(); }
         else toast('Could not remove');
@@ -4049,7 +4159,7 @@
         else toast('Could not update');
       });
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!confirm('Remove '+u.name+"'s customer portal login completely? They will no longer be able to sign in.")) return;
+        if(!await uiConfirm('Remove '+u.name+"'s customer portal login completely? They will no longer be able to sign in.")) return;
         const ok = await cloudDeleteUser(u.id);
         if(ok){ toast('Removed '+u.name); renderUsersList(); }
         else toast('Could not remove');
@@ -4115,7 +4225,7 @@
       card.querySelector('[data-act="history"]').addEventListener('click', (e)=>{ e.stopPropagation(); showCustomerHistoryView(c); });
       card.querySelector('[data-act="remove"]').addEventListener('click', async (e)=>{
         e.stopPropagation();
-        if(!confirm('Remove '+c.name+' from the customer list? This does not affect past reports.')) return;
+        if(!await uiConfirm('Remove '+c.name+' from the customer list? This does not affect past reports.')) return;
         const ok = await cloudDeleteCustomer(c.id);
         if(ok){ toast('Removed '+c.name); renderCustomersList($('customerSearch').value); }
         else toast('Could not remove');
@@ -4162,7 +4272,7 @@
           '<button data-act="remove" class="danger">Remove</button>'+
         '</div>';
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!confirm('Remove this equipment record? This does not affect past reports.')) return;
+        if(!await uiConfirm('Remove this equipment record? This does not affect past reports.')) return;
         const ok = await cloudDeleteCustomerEquipment(e.id);
         if(ok){ toast('Removed'); renderCustomerEquipmentList(customerId); }
         else toast('Could not remove');
@@ -4404,7 +4514,7 @@
       }
       if(equipListTab==='delete'){
         card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-          if(!confirm('Remove this equipment record for '+e.customerName+'? This does not affect past reports.')) return;
+          if(!await uiConfirm('Remove this equipment record for '+e.customerName+'? This does not affect past reports.')) return;
           const ok = await cloudDeleteCustomerEquipment(e.id);
           if(ok){ toast('Removed'); renderEquipmentMasterList(); }
           else toast('Could not remove');
@@ -4580,7 +4690,7 @@
     $$('[data-act="rename-folder"]', grid).forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const oldFolder = btn.dataset.folder;
-        const next = prompt('Rename folder "'+oldFolder+'" to:', oldFolder); // plain text, not a secret
+        const next = await uiPrompt('Rename folder "'+oldFolder+'" to:', oldFolder); // plain text, not a secret
         if(next===null) return;
         const trimmed = next.trim();
         if(!trimmed || trimmed===oldFolder) return;
@@ -4608,7 +4718,7 @@
       });
       const delBtn = card.querySelector('[data-act="delete"]');
       if(delBtn) delBtn.addEventListener('click', async ()=>{
-        if(!confirm('Delete this photo? This cannot be undone.')) return;
+        if(!await uiConfirm('Delete this photo? This cannot be undone.')) return;
         delBtn.disabled = true;
         const ok = await cloudDeleteEquipmentPhoto(photo);
         if(ok){ renderEquipmentPhotosSection(record); renderEquipmentMasterList(); }
@@ -5117,7 +5227,7 @@
     finally{ $('tpAddViolationBtn').disabled = false; }
   });
   async function tpDeleteViolation(id){
-    if(!confirm('Remove this violation record?')) return;
+    if(!await uiConfirm('Remove this violation record?')) return;
     try{
       const { error } = await db.from('technician_violations').delete().eq('id', id);
       if(error) throw error;
@@ -5187,7 +5297,7 @@
     finally{ $('tpAddDocBtn').disabled = false; }
   });
   async function tpDeleteDocument(id){
-    if(!confirm('Remove this document?')) return;
+    if(!await uiConfirm('Remove this document?')) return;
     try{
       const { error } = await db.from('technician_documents').delete().eq('id', id);
       if(error) throw error;
@@ -6913,8 +7023,8 @@
   });
 
   // ---------- new report ----------
-  $('newBtn').addEventListener('click', ()=>{
-    if(confirm('Start a new blank report? Unsaved changes will be lost.')) resetForm();
+  $('newBtn').addEventListener('click', async ()=>{
+    if(await uiConfirm('Start a new blank report? Unsaved changes will be lost.')) resetForm();
   });
 
 
@@ -6980,7 +7090,7 @@
         });
         row.querySelector('[data-act="delete"]').addEventListener('click', async (e)=>{
           e.stopPropagation();
-          if(!confirm('Delete this draft? "'+(d.custName||'Untitled')+'" ('+(d.srNo||'')+') cannot be recovered.')) return;
+          if(!await uiConfirm('Delete this draft? "'+(d.custName||'Untitled')+'" ('+(d.srNo||'')+') cannot be recovered.')) return;
           try{
             // The local storage shim reports success even for a key that was
             // never there (e.g. a draft that only exists in the cloud), so it
@@ -8009,7 +8119,7 @@
   }
   async function leaveDecide(id, status, comment){
     if(status==='disapproved' && !comment){
-      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+      if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
     if(!currentUser || currentUser.role!=='admin'){ toast('Admin only'); return; }
     if(!(await ensureCloud())){ toast('Decisions need a connection — try again when online'); return; }
@@ -9836,7 +9946,7 @@
     const caret = head.querySelector('.jo-caret');
     if(caret) caret.innerHTML = icon('caretDown', willOpen ? 'style="transform:rotate(180deg);"' : '');
   }
-  function dtHandleEquipRowClick(e){
+  async function dtHandleEquipRowClick(e){
     // Checked before the toggle header below: "Open Job Order" now lives
     // inside the same header element that carries data-jo-toggle (it sits to
     // the right of the title), so without this ordering a tap on the button
@@ -9875,7 +9985,7 @@
     const notDoneBtn = e.target.closest('.dt-equip-notdone');
     if(notDoneBtn){
       e.stopPropagation();
-      const reason = prompt('Why can\'t this unit be serviced today?\n\nAdmin sees this when reviewing the job order, so be specific — "customer locked the plant room", "needs a part we don\'t carry".');
+      const reason = await uiPrompt('Why can\'t this unit be serviced today?\n\nAdmin sees this when reviewing the job order, so be specific — "customer locked the plant room", "needs a part we don\'t carry".');
       // prompt returns null on Cancel and '' on an empty OK. Only the
       // second deserves a complaint; cancelling is not an error.
       if(reason === null) return;
@@ -10641,7 +10751,7 @@
         const incomingName = pick.options[pick.selectedIndex].dataset.name;
         const reason = row.querySelector('.dt-reassign-reason').value;
         const outgoingName = row.querySelector('b').textContent;
-        if(!confirm('Replace '+outgoingName+' with '+incomingName+' on this job order?')) return;
+        if(!await uiConfirm('Replace '+outgoingName+' with '+incomingName+' on this job order?')) return;
         btn.disabled = true; btn.textContent = 'Replacing…';
         const ok = await dtReassignWorker(rec.id, outgoingId, { id: incomingId, name: incomingName }, reason);
         btn.disabled = false; btn.textContent = 'Confirm Replacement';
@@ -11186,7 +11296,7 @@
             if(!other){ toast('Please specify a reason'); dtCancelOther.focus(); return; }
             reason = 'Other: '+other;
           }
-          if(!confirm('Cancel this dispatch? The customer will be notified and this cannot be undone.')) return;
+          if(!await uiConfirm('Cancel this dispatch? The customer will be notified and this cannot be undone.')) return;
           const ok = await dtCancelTicket(rec.id, reason);
           if(ok){
             if(typeof srCancelByTicket==='function') srCancelByTicket(rec.id, reason).catch(()=>{});
@@ -11515,7 +11625,7 @@
     const confirmMsg = exceptionCount>0
       ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed? The customer\'s service request will stay in progress — you can open the next visit for the remaining unit(s) with Continue Tomorrow once this closes.')
       : 'Close this Job Order? This marks it — and the customer\'s service request — as fully done.';
-    if(!confirm(confirmMsg)) return;
+    if(!await uiConfirm(confirmMsg)) return;
     // Scoped lookup, NOT $(): dtCloseSection's innerHTML is rebuilt every
     // time a ticket overlay opens, and $() caches a node by id forever —
     // so from the second ticket onward it returns a detached element and
@@ -12755,7 +12865,7 @@
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
       if(adminEl.querySelector('#srAdminAcceptCancelReqBtn')) adminEl.querySelector('#srAdminAcceptCancelReqBtn').onclick = async ()=>{
-        if(!confirm('Accept this cancellation? This also cancels the dispatch ticket.')) return;
+        if(!await uiConfirm('Accept this cancellation? This also cancels the dispatch ticket.')) return;
         const ok = await srAdminAcceptCancelRequest(request);
         if(ok){ toast('Cancellation accepted'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
@@ -12774,7 +12884,7 @@
           if(!other){ toast('Please specify a reason'); otherEl.focus(); return; }
           reason = 'Other: '+other;
         }
-        if(!confirm('Cancel this dispatch? This also cancels the dispatch ticket and cannot be undone.')) return;
+        if(!await uiConfirm('Cancel this dispatch? This also cancels the dispatch ticket and cannot be undone.')) return;
         const ok = await srAdminCancelActive(request, reason);
         if(ok){ toast('Dispatch cancelled'); srCloseDetail(); srRenderQueueList(); } else toast('Could not cancel — try again');
       };
@@ -13415,7 +13525,7 @@
   // enforces that, not just the UI.
   async function caCancelRequest(id){
     if(!currentUser || currentUser.role==='admin') return;
-    if(!confirm('Cancel this cash advance request? This cannot be undone.')) return;
+    if(!await uiConfirm('Cancel this cash advance request? This cannot be undone.')) return;
     const btn = $('caCancelRequestBtn');
     if(btn) btn.disabled = true;
     if(!(await ensureCloud())){
@@ -14778,7 +14888,7 @@
   async function caDecideLiquidation(id, status, comment){
     if(!caAdminGuard()) return;
     if(status==='disapproved' && !comment){
-      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+      if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
     let liqRec = null;
     const liqOk = await caApplyAdminChange(id, (rec)=>{
@@ -14840,7 +14950,7 @@
   async function caDecide(id, status, comment){
     if(!caAdminGuard()) return;
     if(status==='disapproved' && !comment){
-      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+      if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
     let decRec = null;
     const decOk = await caApplyAdminChange(id, (rec)=>(decRec = rec, {
@@ -15762,7 +15872,7 @@
     if(act === 'contacts' || act === 'docs' || act === 'prices') return spOpenSheet(s, act);
     if(act === 'deactivate' || act === 'reactivate'){
       const on = act === 'reactivate';
-      if(!on && !confirm('Deactivate ' + spDisplayName(s) + '? It will be hidden from pickers but kept for existing records. You can reactivate it any time.')) return;
+      if(!on && !await uiConfirm('Deactivate ' + spDisplayName(s) + '? It will be hidden from pickers but kept for existing records. You can reactivate it any time.')) return;
       if(!(await purchEnsureSession())) return;
       btn.disabled = true;
       try{
@@ -15861,7 +15971,7 @@
     const credit = spParseMoney($('spCreditLimit').value);
     if(Number.isNaN(credit)){ toast('Credit limit must be a number'); $('spCreditLimit').focus(); return; }
     const dup = spCache.find(x=> x.name.trim().toLowerCase() === name.toLowerCase() && (!spEditing || x.id !== spEditing.id));
-    if(dup && !confirm('A supplier named "' + dup.name + '" (' + dup.code + ') already exists. Save anyway?')) return;
+    if(dup && !await uiConfirm('A supplier named "' + dup.name + '" (' + dup.code + ') already exists. Save anyway?')) return;
     const vat = $('spVat').value;
     const row = {
       name, trade_name: $('spTradeName').value.trim(), supplies: spSheetSupplies.slice(),
@@ -15975,7 +16085,7 @@
         if(error) throw error;
         toast(c.name + ' is now the primary contact');
       }else if(act === 'remove'){
-        if(!confirm('Remove ' + c.name + ' from this supplier?')){ b.disabled = false; return; }
+        if(!await uiConfirm('Remove ' + c.name + ' from this supplier?')){ b.disabled = false; return; }
         const { error } = await db.from('supplier_contacts').delete().eq('id', c.id);
         if(error) throw error;
         toast('Contact removed');
@@ -16086,7 +16196,7 @@
       }
       return;
     }
-    if(!confirm('Delete "' + (d.title || d.file_name || d.doc_type) + '"? This cannot be undone.')) return;
+    if(!await uiConfirm('Delete "' + (d.title || d.file_name || d.doc_type) + '"? This cannot be undone.')) return;
     if(!(await purchEnsureSession())) return;
     b.disabled = true;
     try{
@@ -16283,7 +16393,7 @@
       }
     });
     if(!inserts.length && !updates.length){ toast('Nothing to import' + (skipped.length ? ' — ' + skipped[0] : '')); return; }
-    if(!confirm('Import ' + file.name + '?\n\n' +
+    if(!await uiConfirm('Import ' + file.name + '?\n\n' +
       inserts.length + ' new supplier' + (inserts.length === 1 ? '' : 's') + '\n' +
       updates.length + ' existing supplier' + (updates.length === 1 ? '' : 's') + ' updated (matched by code, then name)\n' +
       (skipped.length ? skipped.length + ' row' + (skipped.length === 1 ? '' : 's') + ' skipped\n' : '') +
@@ -16658,7 +16768,7 @@
     const clash = mtCache.find(x=> x.code === row.code && (!mtEditing || x.id !== mtEditing.id));
     if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); $('mtCode').focus(); return; }
     const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && (!mtEditing || x.id !== mtEditing.id));
-    if(twin && !confirm('"' + twin.name + '" already exists as ' + twin.code + '. Save another item with the same name?')) return;
+    if(twin && !await uiConfirm('"' + twin.name + '" already exists as ' + twin.code + '. Save another item with the same name?')) return;
     if(!(await ensureCloud())){ toast('Not connected — can\u2019t save'); return; }
     if(!(await purchEnsureSession())) return;
     const btn = $('mtSaveBtn'); btn.disabled = true;
@@ -16710,7 +16820,7 @@
     const m = mtEditing;
     if(!m) return;
     const on = !m.isActive;
-    if(!on && !confirm('Deactivate ' + m.code + ' ' + m.name + '? Technicians won\u2019t be able to pick it; existing records keep it.')) return;
+    if(!on && !await uiConfirm('Deactivate ' + m.code + ' ' + m.name + '? Technicians won\u2019t be able to pick it; existing records keep it.')) return;
     if(!(await purchEnsureSession())) return;
     const btn = $('mtToggleActiveBtn'); btn.disabled = true;
     try{
@@ -16852,7 +16962,7 @@
         const { error } = await db.from('supplier_materials').update({ is_preferred:false }).eq('id', p.id);
         if(error) throw error;
       }else if(act === 'remove'){
-        if(!confirm('Remove ' + mtSupplierLabel(p.suppliers) + '\u2019s price for this item? Its price history is kept.')){ b.disabled = false; return; }
+        if(!await uiConfirm('Remove ' + mtSupplierLabel(p.suppliers) + '\u2019s price for this item? Its price history is kept.')){ b.disabled = false; return; }
         const { error } = await db.from('supplier_materials').update({ is_active:false, is_preferred:false }).eq('id', p.id);
         if(error) throw error;
         toast('Price removed');
@@ -17119,7 +17229,7 @@
     if(e.key === 'Escape'){ e.preventDefault(); mcEditId = null; mcRender(); }
   });
   $('mcList').addEventListener('input', (e)=>{ if(e.target.dataset.mcF === 'prefix') e.target.value = e.target.value.toUpperCase(); });
-  $('mcList').addEventListener('click', (e)=>{
+  $('mcList').addEventListener('click', async (e)=>{
     const b = e.target.closest('[data-mc]'); if(!b || b.disabled) return;
     const row = b.closest('.mc-row');
     const c = purchCats.find(x=> x.id === row.dataset.id); if(!c) return;
@@ -17134,7 +17244,7 @@
       const renamed = name !== c.name;
       if(renamed){
         const n = mcUsage(c.name);
-        if(n && !confirm('Rename “' + c.name + '” to “' + name + '”?\n\nAll ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, and suppliers that list it, will move to the new name.')) return;
+        if(n && !await uiConfirm('Rename “' + c.name + '” to “' + name + '”?\n\nAll ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, and suppliers that list it, will move to the new name.')) return;
         const { error } = await db.rpc('rename_material_category', { p_id: c.id, p_name: name });
         if(error) throw error;
       }
@@ -17153,7 +17263,7 @@
       await mcAfterChange(false);
     }, 'Couldn\u2019t update the category: ');
     if(act === 'del'){
-      if(!confirm('Delete the category “' + c.name + '”?')) return;
+      if(!await uiConfirm('Delete the category “' + c.name + '”?')) return;
       return mcRun(async ()=>{
         const { error } = await db.from('material_categories').delete().eq('id', c.id);
         if(error) throw error;
@@ -17249,7 +17359,7 @@
       else{ row.code = code || nextCode(category); usedCodes.add(row.code); inserts.push(row); }
     });
     if(!inserts.length && !updates.length){ toast('Nothing to import' + (skipped.length ? ' — ' + skipped[0] : '')); return; }
-    if(!confirm('Import ' + file.name + '?\n\n' +
+    if(!await uiConfirm('Import ' + file.name + '?\n\n' +
       inserts.length + ' new item' + (inserts.length === 1 ? '' : 's') + ' (rows without a code get one automatically)\n' +
       updates.length + ' existing item' + (updates.length === 1 ? '' : 's') + ' updated (matched by code)\n' +
       (skipped.length ? skipped.length + ' row' + (skipped.length === 1 ? '' : 's') + ' skipped — ' + skipped.slice(0, 3).join('; ') + '\n' : '') +
@@ -17755,7 +17865,7 @@
     // Sidebar "Purchase Orders" while a PO is open: back to the list,
     // unless there are unsaved changes the admin wants to keep.
     if(poEditorVisible()){
-      if(!poConfirmLeave()) return;
+      if(!(await poConfirmLeave())) return;
       poShowListView();
     }
     if(await poLoadList()) poRenderList();
@@ -17862,12 +17972,12 @@
     window.scrollTo({ top: 0 });
   }
   // Leaving an edited draft asks first.
-  function poConfirmLeave(){
-    return !poDirty || poReadOnly || confirm('Discard the changes you haven\u2019t saved?');
+  async function poConfirmLeave(){
+    return !poDirty || poReadOnly || await uiConfirm('Discard the changes you haven\u2019t saved?');
   }
   $('poEditorView').addEventListener('input', (e)=>{ if(!e.target.closest('.po-actions')) poDirty = true; });
   $('poEditorView').addEventListener('change', (e)=>{ if(!e.target.closest('.po-actions')) poDirty = true; });
-  $('poBackBtn').addEventListener('click', ()=>{ if(poConfirmLeave()) poClose(); });
+  $('poBackBtn').addEventListener('click', async ()=>{ if(await poConfirmLeave()) poClose(); });
   $('poEditTermsBtn').addEventListener('click', ()=> $('poSettingsBtn').click());
 
   // ---------- editor ----------
@@ -18051,7 +18161,7 @@
   }
   let poLastSupplierTerms = '';
   $('poSupplier').addEventListener('focus', ()=>{ const s = poCurrentSupplier(); poLastSupplierTerms = s ? (s.payment_terms || '') : ''; });
-  $('poSupplier').addEventListener('change', ()=>{
+  $('poSupplier').addEventListener('change', async ()=>{
     const s = poCurrentSupplier();
     poRenderSupplierInfo();
     // Take the supplier's usual terms unless the admin typed their own.
@@ -18064,7 +18174,7 @@
       const p = poPriceFor(it.material_id, s.id);
       return p && p.price != null && Number(p.price) !== Number(it.unit_price) ? { it, p } : null;
     }).filter(Boolean);
-    if(changes.length && confirm('Update ' + changes.length + ' item price' + (changes.length > 1 ? 's' : '') + ' from ' + poSupplierName(s) + '\u2019s price list?')){
+    if(changes.length && await uiConfirm('Update ' + changes.length + ' item price' + (changes.length > 1 ? 's' : '') + ' from ' + poSupplierName(s) + '\u2019s price list?')){
       changes.forEach(({ it, p })=>{ it.unit_price = p.price; if(p.unitFromPrice) it.unit = p.unitFromPrice; });
       poRenderItems(); poRenderTotals();
     }
@@ -18224,7 +18334,7 @@
     const clash = mtCache.find(x=> x.code === row.code);
     if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); return; }
     const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && x.isActive);
-    if(twin && confirm('“' + twin.name + '” is already in the catalog as ' + twin.code + '. Use that one instead?')){ box.remove(); poPickMaterial(it, twin.id); return; }
+    if(twin && await uiConfirm('“' + twin.name + '” is already in the catalog as ' + twin.code + '. Use that one instead?')){ box.remove(); poPickMaterial(it, twin.id); return; }
     if(!(await purchEnsureSession())) return;
     const btn = e.target.closest('[data-q-save]'); btn.disabled = true;
     try{
@@ -18420,7 +18530,7 @@
     if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
     const t = poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), Number($('poEwt').value) || 0);
     const s = poCurrentSupplier();
-    if(!confirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
+    if(!await uiConfirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
     const saved = await poSave({ quiet:true });
     if(!saved) return;
     try{
@@ -18438,7 +18548,7 @@
   }
   async function poCancel(){
     if(!poEditing) return;
-    const reason = prompt('Cancel ' + poEditing.po_no + '?\n\nThe PO stays on record, marked CANCELLED. Enter the reason:');
+    const reason = await uiPrompt('Cancel ' + poEditing.po_no + '?\n\nThe PO stays on record, marked CANCELLED. Enter the reason:');
     if(reason === null) return;
     if(!reason.trim()){ toast('A reason is required to cancel'); return; }
     if(!(await purchEnsureSession())) return;
@@ -18456,7 +18566,7 @@
   }
   async function poDeleteDraft(){
     if(!poEditing) return;
-    if(!confirm('Delete draft ' + poEditing.po_no + '? This can\u2019t be undone.')) return;
+    if(!await uiConfirm('Delete draft ' + poEditing.po_no + '? This can\u2019t be undone.')) return;
     poDirty = false;
     if(!(await purchEnsureSession())) return;
     try{
@@ -18467,8 +18577,8 @@
       poClose();
     }catch(e){ purchFail('Couldn\u2019t delete the draft: ', e); }
   }
-  function poDuplicate(){
-    if(!poConfirmLeave()) return;
+  async function poDuplicate(){
+    if(!(await poConfirmLeave())) return;
     const header = poGatherHeader();
     const items = poCleanItems().filter(it=> it.description.trim());
     poEditing = null;
@@ -19024,7 +19134,7 @@
     finally{ btn.disabled = false; btn.textContent = 'Upload logo'; }
   });
   $('poLogoResetBtn').addEventListener('click', async ()=>{
-    if(!confirm('Go back to the default AWES logo? (Issued POs keep the logo they were issued with.)')) return;
+    if(!await uiConfirm('Go back to the default AWES logo? (Issued POs keep the logo they were issued with.)')) return;
     if(await poSaveSettings({ logo_path: '' }, 'Using the default AWES logo')) poRenderLogoPreview();
   });
 
@@ -19144,7 +19254,7 @@
     const name = $('poSigName').value.trim();
     if(!name){ toast('Enter the signatory\u2019s name'); $('poSigName').focus(); return; }
     const id = $('poSigId').value;
-    if(!id && !poSigCanvas && !confirm('Save ' + name + ' without a signature? The PDF will show a blank line until one is uploaded.')) return;
+    if(!id && !poSigCanvas && !await uiConfirm('Save ' + name + ' without a signature? The PDF will show a blank line until one is uploaded.')) return;
     if(!(await purchEnsureSession())) return;
     const btn = $('poSigSaveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
     try{
@@ -19227,7 +19337,7 @@
 
   async function mrtShow(){
     if(mrtFormVisible()){
-      if(mrtDirty && !confirm('Discard the changes you haven\u2019t saved?')) return;
+      if(mrtDirty && !await uiConfirm('Discard the changes you haven\u2019t saved?')) return;
       mrtShowList();
     }
     mrtRealtimeStart();
@@ -19275,8 +19385,8 @@
     const row = e.target.closest('.mt-row'); if(row) mrtOpen(row.dataset.id);
   });
   $('mrtNewBtn').addEventListener('click', ()=> mrtOpen(null));
-  $('mrtBackBtn').addEventListener('click', ()=>{
-    if(mrtDirty && !confirm('Discard the changes you haven\u2019t saved?')) return;
+  $('mrtBackBtn').addEventListener('click', async ()=>{
+    if(mrtDirty && !await uiConfirm('Discard the changes you haven\u2019t saved?')) return;
     mrtShowList(); mrtLoadList();
   });
 
@@ -19507,9 +19617,9 @@
     $$('#mrtActions .btn').forEach(x=>{ x.disabled = true; });
     try{
       if(act === 'save') await mrtSave(false);
-      else if(act === 'submit'){ if(confirm('Submit this request to the admin? You can\u2019t edit it after submitting unless it\u2019s returned to you.')) await mrtSave(true); }
+      else if(act === 'submit'){ if(await uiConfirm('Submit this request to the admin? You can\u2019t edit it after submitting unless it\u2019s returned to you.')) await mrtSave(true); }
       else if(act === 'cancel' || act === 'delete'){
-        if(!confirm(act === 'delete' ? 'Delete this draft?' : 'Cancel ' + mrtEditing.mrf_no + '?')) return;
+        if(!await uiConfirm(act === 'delete' ? 'Delete this draft?' : 'Cancel ' + mrtEditing.mrf_no + '?')) return;
         if(!(await purchEnsureSession())) return;
         purchMarkOwn(mrtEditing.id);
         const q = act === 'delete' ? db.from('material_requisitions').delete().eq('id', mrtEditing.id)
@@ -19752,7 +19862,7 @@
       else if(act === 'createpo') await mrCreatePos();
       else if(act === 'pdf') await mrShowPdf();
       else if(act === 'cancel'){
-        if(!confirm('Cancel ' + mrOpenRow.mrf_no + '? Lines already on Purchase Orders stay on them.')) return;
+        if(!await uiConfirm('Cancel ' + mrOpenRow.mrf_no + '? Lines already on Purchase Orders stay on them.')) return;
         await mrSetStatus({ status:'cancelled' }, 'Request cancelled');
       }
     }finally{ $$('#mrActions .btn').forEach(x=>{ x.disabled = false; }); }
@@ -19781,7 +19891,7 @@
       if(n !== Number(it.qty_approved != null ? it.qty_approved : it.qty_requested)) updates.push({ id: it.id, qty_approved: n });
     }
     const reduced = updates.filter(u=> u.qty_approved < Number(mrOpenItems.find(x=> x.id === u.id).qty_requested)).length;
-    if(!confirm('Approve ' + mrOpenRow.mrf_no + (reduced ? ' with ' + reduced + ' reduced quantit' + (reduced === 1 ? 'y' : 'ies') : ' as requested') + '? The technician will be notified.')) return;
+    if(!await uiConfirm('Approve ' + mrOpenRow.mrf_no + (reduced ? ' with ' + reduced + ' reduced quantit' + (reduced === 1 ? 'y' : 'ies') : ' as requested') + '? The technician will be notified.')) return;
     if(!(await purchEnsureSession())) return;
     try{
       for(const u of updates){
@@ -19794,7 +19904,7 @@
     }
   }
   async function mrReturnOrReject(kind){
-    const reason = prompt(kind === 'reject' ? 'Reject ' + mrOpenRow.mrf_no + '. Reason (the technician will see this):' : 'Return ' + mrOpenRow.mrf_no + ' to the technician for changes. What should they change?');
+    const reason = await uiPrompt(kind === 'reject' ? 'Reject ' + mrOpenRow.mrf_no + '. Reason (the technician will see this):' : 'Return ' + mrOpenRow.mrf_no + ' to the technician for changes. What should they change?');
     if(reason === null) return;
     if(!reason.trim()){ toast('Please give a reason'); return; }
     const ok = await mrSetStatus({ status: kind === 'reject' ? 'rejected' : 'returned', review_note: reason.trim() }, mrOpenRow.mrf_no + (kind === 'reject' ? ' rejected' : ' returned to the technician'));
@@ -19804,7 +19914,7 @@
   async function mrMarkTechBuy(){
     const sel = mrSelectedOpen();
     if(!sel.length){ toast('Tick the lines the technician will buy'); return; }
-    if(!confirm('Mark ' + sel.length + ' line' + (sel.length === 1 ? '' : 's') + ' as bought by ' + (mrOpenRow.requester_name || 'the technician') + ' (cash advance)?')) return;
+    if(!await uiConfirm('Mark ' + sel.length + ' line' + (sel.length === 1 ? '' : 's') + ' as bought by ' + (mrOpenRow.requester_name || 'the technician') + ' (cash advance)?')) return;
     if(!(await purchEnsureSession())) return;
     try{
       purchMarkOwn(mrOpenRow.id);
@@ -19836,7 +19946,7 @@
       groups.get(key).push(it);
     });
     const names = Array.from(groups.keys()).map(k=> (k ? poSupplierName(poSuppliers.find(s=> s.id === k)) : 'No preferred supplier (choose in the PO)') + ': ' + groups.get(k).length + ' line' + (groups.get(k).length === 1 ? '' : 's'));
-    if(!confirm('Create ' + groups.size + ' draft Purchase Order' + (groups.size === 1 ? '' : 's') + '?\n\n' + names.join('\n') + '\n\nThey open as drafts so you can check prices before issuing.')) return;
+    if(!await uiConfirm('Create ' + groups.size + ' draft Purchase Order' + (groups.size === 1 ? '' : 's') + '?\n\n' + names.join('\n') + '\n\nThey open as drafts so you can check prices before issuing.')) return;
     if(!(await purchEnsureSession())) return;
     const set = poSettingsData || {};
     const jo = mrOpenRow.job_order;
@@ -20147,13 +20257,13 @@
     const w = invWh(b.dataset.adjust), m = invItemOpen;
     const bal = invBalances.find(x=> x.material_id === m.id && x.warehouse_id === w.id);
     const cur = bal ? Number(bal.qty_on_hand) : 0;
-    const raw = prompt('Physical count of ' + m.name + ' in ' + w.code + '\n\nSystem shows ' + invQty(cur) + ' ' + m.unit + '. Enter the actual quantity counted:', String(cur));
+    const raw = await uiPrompt('Physical count of ' + m.name + ' in ' + w.code + '\n\nSystem shows ' + invQty(cur) + ' ' + m.unit + '. Enter the actual quantity counted:', String(cur));
     if(raw === null) return;
     const counted = spParseMoney(raw);
     if(counted == null || Number.isNaN(counted)){ toast('Enter a number'); return; }
     const diff = Math.round((counted - cur) * 1000) / 1000;
     if(diff === 0){ toast('No change — count matches'); return; }
-    const reason = prompt('Reason for the ' + (diff > 0 ? '+' : '−') + invQty(Math.abs(diff)) + ' ' + m.unit + ' adjustment (e.g. recount, damaged, found):');
+    const reason = await uiPrompt('Reason for the ' + (diff > 0 ? '+' : '−') + invQty(Math.abs(diff)) + ' ' + m.unit + ' adjustment (e.g. recount, damaged, found):');
     if(reason === null) return;
     if(!reason.trim()){ toast('A reason is required'); return; }
     if(!(await purchEnsureSession())) return;
@@ -20178,8 +20288,8 @@
     invRenderOpLines();
     invStockView('opening');
   });
-  $('invOpeningBack').addEventListener('click', ()=>{
-    if(invOpLines.some(l=> l.material_id) && !confirm('Discard this opening balance?')) return;
+  $('invOpeningBack').addEventListener('click', async ()=>{
+    if(invOpLines.some(l=> l.material_id) && !await uiConfirm('Discard this opening balance?')) return;
     invStockView('list'); invRenderStock();
   });
   function invRenderOpLines(){
@@ -20283,7 +20393,7 @@
       if(c == null || Number.isNaN(c)){ toast(l.code + ': enter the unit cost (0 is allowed)'); return; }
     }
     const total = lines.reduce((a, l)=> a + poRound2(spParseMoney(l.qty) * spParseMoney(l.unit_cost)), 0);
-    if(!confirm('Post opening balance to ' + wh.code + ' · ' + wh.name + '?\n\n' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', total value ' + invMoney(total) +
+    if(!await uiConfirm('Post opening balance to ' + wh.code + ' · ' + wh.name + '?\n\n' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', total value ' + invMoney(total) +
       '\n\nStock movements can\u2019t be edited afterwards — mistakes are corrected with an adjustment.')) return;
     if(!(await purchEnsureSession())) return;
     const btn = $('invOpPost'); btn.disabled = true;
@@ -20484,7 +20594,7 @@
   $('invPrjJobs').addEventListener('click', async (e)=>{
     if(!e.target.closest('[data-jo-rm]') || !invPrjOpen) return;
     const jo = e.target.closest('[data-jo]').dataset.jo;
-    if(!confirm('Remove ' + jo + ' from ' + invPrjOpen.project_no + '? Its material cost will no longer count toward this project.')) return;
+    if(!await uiConfirm('Remove ' + jo + ' from ' + invPrjOpen.project_no + '? Its material cost will no longer count toward this project.')) return;
     try{
       const { error } = await db.from('project_job_orders').delete().eq('project_id', invPrjOpen.id).eq('job_order_id', jo);
       if(error) throw error;
@@ -20929,7 +21039,7 @@
       payload.direct_project_id = $('invRcvProject').value || null; payload.direct_job_order_id = $('invRcvJob').value || null;
       if(!payload.direct_project_id && !payload.direct_job_order_id){ toast('Choose the project or job order it was delivered to'); return; }
     }
-    if(!confirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
+    if(!await uiConfirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
     const btn = $('invRcvPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_receipt', payload); if(!r) return;
@@ -20991,7 +21101,7 @@
     if(short.length){ toast('Not enough stock in ' + wh.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
     const mr = invIssMode === 'mrf' ? invIssMrs.find(x=> x.id === $('invIssMr').value) : null;
     if(invIssMode === 'mrf' && !mr){ toast('Choose the request'); return; }
-    if(!confirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
+    if(!await uiConfirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
     const btn = $('invIssPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_issue', { warehouse_id: wh.id, worker_id: worker.id, mr_id: mr ? mr.id : null,
@@ -21060,7 +21170,7 @@
     const groups = new Map();
     picked.forEach(h=>{ const k = (h.project_id || '') + '|' + (h.job_order_id || ''); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(h); });
     const dmg = picked.filter(h=> h.cond === 'damaged').length;
-    if(!confirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
+    if(!await uiConfirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
     const btn = $('invRetPost'); btn.disabled = true;
     const done = [];
     try{
@@ -21101,7 +21211,7 @@
     if(typeof lines === 'string'){ toast(lines); return; }
     const short = lines.filter(l=> l.qty > invAvail(from.id, l.material_id));
     if(short.length){ toast('Not enough stock in ' + from.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
-    if(!confirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
+    if(!await uiConfirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
     const btn = $('invTrfPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_transfer', { from_warehouse_id: from.id, to_warehouse_id: to.id, note: $('invTrfNote').value.trim(), lines });
@@ -21872,7 +21982,7 @@
     if(!picked.length){ toast('Tick the items to order'); return; }
     const groups = new Map();
     picked.forEach(x=>{ const k = x.supplier_id || ''; if(!groups.has(k)) groups.set(k, []); groups.get(k).push(x); });
-    if(!confirm('Create ' + groups.size + ' draft PO' + (groups.size === 1 ? '' : 's') + ' for ' + picked.length + ' item' + (picked.length === 1 ? '' : 's') + '?\n\n' +
+    if(!await uiConfirm('Create ' + groups.size + ' draft PO' + (groups.size === 1 ? '' : 's') + ' for ' + picked.length + ' item' + (picked.length === 1 ? '' : 's') + '?\n\n' +
       Array.from(groups.entries()).map(([k, xs])=> (xs[0].supplier || 'No preferred supplier (choose in the PO)') + ': ' + xs.length).join('\n') + '\n\nThey open as drafts — check quantities and prices before issuing.')) return;
     if(!(await purchEnsureSession())) return;
     try{
@@ -22117,9 +22227,9 @@
     const t = tl.tools.find(x=> x.asset_tag === tag);
     if(t) tlOpenDetail(t.id); else toast(tag + ' isn\u2019t in the register' + (tl.isAdmin ? '' : ' (or not your warehouse)'));
   });
-  $('tlLabelsBtn').addEventListener('click', ()=>{
+  $('tlLabelsBtn').addEventListener('click', async ()=>{
     const rows = tlRegFiltered();
-    if(rows.length > 1 && !confirm('Print QR labels for the ' + rows.length + ' tools shown? (Filter the list first to print fewer.)')) return;
+    if(rows.length > 1 && !await uiConfirm('Print QR labels for the ' + rows.length + ' tools shown? (Filter the list first to print fewer.)')) return;
     tlLabelsPdf(rows).catch(e=> toast('Couldn\u2019t make labels: ' + e.message));
   });
 
@@ -22186,7 +22296,7 @@
         if(error) throw error;
         toast('Added ' + data.map(x=> x.asset_tag).join(', '));
         await tlLoad(); tlRegView('list'); tlRenderRegister();
-        if(confirm('Print QR labels for the new ' + (data.length === 1 ? 'tool' : data.length + ' tools') + ' now?')) tlLabelsPdf(tl.tools.filter(t=> data.some(d=> d.id === t.id)));
+        if(await uiConfirm('Print QR labels for the new ' + (data.length === 1 ? 'tool' : data.length + ' tools') + ' now?')) tlLabelsPdf(tl.tools.filter(t=> data.some(d=> d.id === t.id)));
       }
     }catch(e){ purchFail('Couldn\u2019t save: ', e); }
   });
@@ -22208,7 +22318,7 @@
         maint_interval_days: mt && parseInt(col(r, 'maint_interval_days'), 10) > 0 ? parseInt(col(r, 'maint_interval_days'), 10) : null, next_maint_due: mt ? (col(r, 'next_maint_due') || null) : null });
     });
     if(!out.length){ toast('Nothing to import' + (bad.length ? ' — check rows ' + bad.slice(0, 5).join(', ') : '')); return; }
-    if(!confirm('Add ' + out.length + ' tool' + (out.length === 1 ? '' : 's') + (bad.length ? ' (skipping ' + bad.length + ' row(s) with no name or unknown warehouse)' : '') + '?')) return;
+    if(!await uiConfirm('Add ' + out.length + ' tool' + (out.length === 1 ? '' : 's') + (bad.length ? ' (skipping ' + bad.length + ' row(s) with no name or unknown warehouse)' : '') + '?')) return;
     const { data, error } = await db.from('tools').insert(out).select('id');
     if(error){ purchFail('Import failed: ', error); return; }
     toast('Imported ' + data.length + ' tools'); await tlLoad(); tlRenderRegister();
@@ -22243,7 +22353,7 @@
     if(a === 'label') return tlLabelsPdf([t]);
     if(a === 'edit') return tlOpenForm(t);
     if(a === 'maint'){ showPurchasingView('tlMaint'); setTimeout(()=> tlMaintOpenForm(t.id), 300); return; }
-    const reason = prompt(a === 'found' ? 'Where was ' + t.asset_tag + ' found?' : 'Why is ' + t.asset_tag + ' being retired?');
+    const reason = await uiPrompt(a === 'found' ? 'Where was ' + t.asset_tag + ' found?' : 'Why is ' + t.asset_tag + ' being retired?');
     if(!reason || !reason.trim()) return;
     if(!(await purchEnsureSession())) return;
     const { error } = await db.rpc('tl_admin_status', { p_tool: t.id, p_status: a === 'found' ? 'available' : 'retired', p_note: reason.trim() });
@@ -22303,7 +22413,7 @@
     if(st === 'closed' && dec === 'pending'){ toast('Choose a decision before closing'); return; }
     if(st === 'in_repair' && dec !== 'repair'){ toast('Set the decision to Repair first'); return; }
     if(Number.isNaN(cost)){ toast('Repair cost must be a number'); return; }
-    if(st === 'closed' && !confirm('Close ' + tlDefOpen.defect_no + ' as "' + dec.replace('_', ' ') + '"? ' + (['replace', 'write_off'].includes(dec) ? 'The tool will be retired.' : 'The tool goes back into service.'))) return;
+    if(st === 'closed' && !await uiConfirm('Close ' + tlDefOpen.defect_no + ' as "' + dec.replace('_', ' ') + '"? ' + (['replace', 'write_off'].includes(dec) ? 'The tool will be retired.' : 'The tool goes back into service.'))) return;
     if(!(await purchEnsureSession())) return;
     const { error } = await db.rpc('tl_decide_defect', { p: { defect_id: tlDefOpen.id, decision: dec, status: st, cause: $('tlDCause').value,
       repair_vendor: $('tlDVendor').value.trim(), repair_cost: cost, chargeable_to_worker: $('tlDCharge').checked, note: $('tlDNote').value.trim() } });
@@ -22494,7 +22604,7 @@
     for(const l of lines){ const t = tlTool(l.tool_id);
       if(l.cond !== 'good' && l.cond !== 'lost' && !l.photo && !l.note.trim() && !l.missing.length){ toast(t.asset_tag + ': add a photo or a note about the problem'); return; } }
     const bad = lines.filter(l=> l.cond !== 'good' || l.missing.length).length;
-    if(bad && !confirm(bad + ' tool(s) not in good condition — a defect report opens for each and they go out of service. Continue?')) return;
+    if(bad && !await uiConfirm(bad + ' tool(s) not in good condition — a defect report opens for each and they go out of service. Continue?')) return;
     const mode = tlMode('tlRtMode');
     if(!(await purchEnsureSession())) return;
     const btn = $('tlRtPost'); btn.disabled = true;
@@ -24113,13 +24223,13 @@
     if(!el) return;
     const act = el.dataset.thAct, id = el.dataset.id, jo = el.dataset.jo || 'this job order';
     if(act==='ack'){
-      if(!confirm('Accept '+jo+'?\n\nThis tells admin you are taking this job.')) return;
+      if(!await uiConfirm('Accept '+jo+'?\n\nThis tells admin you are taking this job.')) return;
       el.disabled = true; el.textContent = 'Saving…';
       try{ await dtAcknowledge(id); } finally { await renderHomeTechOverview().catch(()=>{}); }
       return;
     }
     if(act==='arrived'){
-      if(!confirm('Record that you arrived at the site for '+jo+'?\n\nThe customer will be told work has started.')) return;
+      if(!await uiConfirm('Record that you arrived at the site for '+jo+'?\n\nThe customer will be told work has started.')) return;
       try{ await dtMarkArrived(id, el); } finally { await renderHomeTechOverview().catch(()=>{}); }
       return;
     }
@@ -25563,7 +25673,7 @@
   $('announcementsAdminList').addEventListener('click', async (e)=>{
     const btn = e.target.closest('[data-ann-delete]');
     if(!btn) return;
-    if(!confirm('Delete this announcement?')) return;
+    if(!await uiConfirm('Delete this announcement?')) return;
     if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return; }
     try{
       const { error } = await db.from('announcements').delete().eq('id', btn.dataset.annDelete);

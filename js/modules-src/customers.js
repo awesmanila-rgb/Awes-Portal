@@ -799,7 +799,7 @@
           edit.addEventListener('click', async ()=>{
             const idx = list.indexOf(item);
             if(idx===-1) return;
-            const next = prompt('Rename "'+item+'" to:', item); // plain text, not a secret
+            const next = await uiPrompt('Rename "'+item+'" to:', item); // plain text, not a secret
             if(next===null) return;
             const trimmed = next.trim();
             if(!trimmed) return;

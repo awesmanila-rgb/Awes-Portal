@@ -63,7 +63,7 @@
 
   async function mrtShow(){
     if(mrtFormVisible()){
-      if(mrtDirty && !confirm('Discard the changes you haven\u2019t saved?')) return;
+      if(mrtDirty && !await uiConfirm('Discard the changes you haven\u2019t saved?')) return;
       mrtShowList();
     }
     mrtRealtimeStart();
@@ -111,8 +111,8 @@
     const row = e.target.closest('.mt-row'); if(row) mrtOpen(row.dataset.id);
   });
   $('mrtNewBtn').addEventListener('click', ()=> mrtOpen(null));
-  $('mrtBackBtn').addEventListener('click', ()=>{
-    if(mrtDirty && !confirm('Discard the changes you haven\u2019t saved?')) return;
+  $('mrtBackBtn').addEventListener('click', async ()=>{
+    if(mrtDirty && !await uiConfirm('Discard the changes you haven\u2019t saved?')) return;
     mrtShowList(); mrtLoadList();
   });
 
@@ -343,9 +343,9 @@
     $$('#mrtActions .btn').forEach(x=>{ x.disabled = true; });
     try{
       if(act === 'save') await mrtSave(false);
-      else if(act === 'submit'){ if(confirm('Submit this request to the admin? You can\u2019t edit it after submitting unless it\u2019s returned to you.')) await mrtSave(true); }
+      else if(act === 'submit'){ if(await uiConfirm('Submit this request to the admin? You can\u2019t edit it after submitting unless it\u2019s returned to you.')) await mrtSave(true); }
       else if(act === 'cancel' || act === 'delete'){
-        if(!confirm(act === 'delete' ? 'Delete this draft?' : 'Cancel ' + mrtEditing.mrf_no + '?')) return;
+        if(!await uiConfirm(act === 'delete' ? 'Delete this draft?' : 'Cancel ' + mrtEditing.mrf_no + '?')) return;
         if(!(await purchEnsureSession())) return;
         purchMarkOwn(mrtEditing.id);
         const q = act === 'delete' ? db.from('material_requisitions').delete().eq('id', mrtEditing.id)
@@ -588,7 +588,7 @@
       else if(act === 'createpo') await mrCreatePos();
       else if(act === 'pdf') await mrShowPdf();
       else if(act === 'cancel'){
-        if(!confirm('Cancel ' + mrOpenRow.mrf_no + '? Lines already on Purchase Orders stay on them.')) return;
+        if(!await uiConfirm('Cancel ' + mrOpenRow.mrf_no + '? Lines already on Purchase Orders stay on them.')) return;
         await mrSetStatus({ status:'cancelled' }, 'Request cancelled');
       }
     }finally{ $$('#mrActions .btn').forEach(x=>{ x.disabled = false; }); }
@@ -617,7 +617,7 @@
       if(n !== Number(it.qty_approved != null ? it.qty_approved : it.qty_requested)) updates.push({ id: it.id, qty_approved: n });
     }
     const reduced = updates.filter(u=> u.qty_approved < Number(mrOpenItems.find(x=> x.id === u.id).qty_requested)).length;
-    if(!confirm('Approve ' + mrOpenRow.mrf_no + (reduced ? ' with ' + reduced + ' reduced quantit' + (reduced === 1 ? 'y' : 'ies') : ' as requested') + '? The technician will be notified.')) return;
+    if(!await uiConfirm('Approve ' + mrOpenRow.mrf_no + (reduced ? ' with ' + reduced + ' reduced quantit' + (reduced === 1 ? 'y' : 'ies') : ' as requested') + '? The technician will be notified.')) return;
     if(!(await purchEnsureSession())) return;
     try{
       for(const u of updates){
@@ -630,7 +630,7 @@
     }
   }
   async function mrReturnOrReject(kind){
-    const reason = prompt(kind === 'reject' ? 'Reject ' + mrOpenRow.mrf_no + '. Reason (the technician will see this):' : 'Return ' + mrOpenRow.mrf_no + ' to the technician for changes. What should they change?');
+    const reason = await uiPrompt(kind === 'reject' ? 'Reject ' + mrOpenRow.mrf_no + '. Reason (the technician will see this):' : 'Return ' + mrOpenRow.mrf_no + ' to the technician for changes. What should they change?');
     if(reason === null) return;
     if(!reason.trim()){ toast('Please give a reason'); return; }
     const ok = await mrSetStatus({ status: kind === 'reject' ? 'rejected' : 'returned', review_note: reason.trim() }, mrOpenRow.mrf_no + (kind === 'reject' ? ' rejected' : ' returned to the technician'));
@@ -640,7 +640,7 @@
   async function mrMarkTechBuy(){
     const sel = mrSelectedOpen();
     if(!sel.length){ toast('Tick the lines the technician will buy'); return; }
-    if(!confirm('Mark ' + sel.length + ' line' + (sel.length === 1 ? '' : 's') + ' as bought by ' + (mrOpenRow.requester_name || 'the technician') + ' (cash advance)?')) return;
+    if(!await uiConfirm('Mark ' + sel.length + ' line' + (sel.length === 1 ? '' : 's') + ' as bought by ' + (mrOpenRow.requester_name || 'the technician') + ' (cash advance)?')) return;
     if(!(await purchEnsureSession())) return;
     try{
       purchMarkOwn(mrOpenRow.id);
@@ -672,7 +672,7 @@
       groups.get(key).push(it);
     });
     const names = Array.from(groups.keys()).map(k=> (k ? poSupplierName(poSuppliers.find(s=> s.id === k)) : 'No preferred supplier (choose in the PO)') + ': ' + groups.get(k).length + ' line' + (groups.get(k).length === 1 ? '' : 's'));
-    if(!confirm('Create ' + groups.size + ' draft Purchase Order' + (groups.size === 1 ? '' : 's') + '?\n\n' + names.join('\n') + '\n\nThey open as drafts so you can check prices before issuing.')) return;
+    if(!await uiConfirm('Create ' + groups.size + ' draft Purchase Order' + (groups.size === 1 ? '' : 's') + '?\n\n' + names.join('\n') + '\n\nThey open as drafts so you can check prices before issuing.')) return;
     if(!(await purchEnsureSession())) return;
     const set = poSettingsData || {};
     const jo = mrOpenRow.job_order;

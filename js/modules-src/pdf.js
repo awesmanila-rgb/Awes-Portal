@@ -741,6 +741,6 @@
   });
 
   // ---------- new report ----------
-  $('newBtn').addEventListener('click', ()=>{
-    if(confirm('Start a new blank report? Unsaved changes will be lost.')) resetForm();
+  $('newBtn').addEventListener('click', async ()=>{
+    if(await uiConfirm('Start a new blank report? Unsaved changes will be lost.')) resetForm();
   });

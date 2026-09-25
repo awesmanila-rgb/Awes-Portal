@@ -626,6 +626,116 @@
     }catch(e){ console.error('cloud SR counter failed', describeCloudError(e)); return null; }
   }
 
+  // ---------- in-page confirm / prompt dialogs ----------
+  // Replace window.confirm() / window.prompt() everywhere. The browser's own
+  // boxes show the site address ("awesmanila-rgb.github.io says"), can't be
+  // styled, and some in-app browsers block them. These look like the app,
+  // and resolve like the originals:
+  //   await uiConfirm(msg, opts)   → true / false
+  //   await uiPrompt(msg, def, opts) → the text, '' on an empty OK, null on Cancel
+  // A message with a blank line shows its first part as the heading.
+  // opts: { title, ok, cancel, danger, placeholder, multiline }
+  const UI_DLG_VERBS = ['Delete','Remove','Discard','Deactivate','Disapprove','Reject','Issue','Approve','Submit',
+    'Receive','Post','Transfer','Import','Create','Accept','Replace','Rename','Unlock','Print','Mark','Close',
+    'Update','Save','Add','Record','Start','Use','Return','Continue'];
+  const UI_DLG_DANGER = ['Delete','Remove','Discard','Deactivate','Disapprove','Reject','Cancel'];
+  let uiDlgQueue = Promise.resolve();
+  let uiDlgEl = null;
+  function uiDlgBuild(){
+    if(uiDlgEl) return uiDlgEl;
+    const o = document.createElement('div');
+    o.className = 'ui-dlg-overlay';
+    o.innerHTML = '<div class="ui-dlg" role="alertdialog" aria-modal="true" aria-labelledby="uiDlgTitle" aria-describedby="uiDlgMsg">' +
+      '<div class="ui-dlg-title" id="uiDlgTitle"></div><div class="ui-dlg-msg" id="uiDlgMsg"></div>' +
+      '<div class="ui-dlg-field"></div><div class="ui-dlg-err"></div>' +
+      '<div class="ui-dlg-btns"><button type="button" class="ui-dlg-btn ui-dlg-cancel"></button><button type="button" class="ui-dlg-btn ui-dlg-ok"></button></div></div>';
+    document.body.appendChild(o);
+    uiDlgEl = o;
+    return o;
+  }
+  function uiDlgLabels(msg, opts){
+    const first = (String(msg).trim().match(/^[A-Za-z]+/) || [''])[0];
+    const cap = first.charAt(0).toUpperCase() + first.slice(1);
+    let ok = 'OK', cancel = 'Cancel', danger = UI_DLG_DANGER.includes(cap);
+    if(cap === 'Cancel'){ ok = 'Yes, cancel'; cancel = 'Go back'; }
+    else if(UI_DLG_VERBS.includes(cap)) ok = cap;
+    return {
+      ok: opts.ok || ok, cancel: opts.cancel || cancel,
+      danger: opts.danger != null ? !!opts.danger : danger
+    };
+  }
+  function uiDlgOpen(kind, msg, def, opts){
+    opts = opts || {};
+    const run = ()=> new Promise(resolve=>{
+      const o = uiDlgBuild();
+      const text = String(msg == null ? '' : msg).replace(/\r\n/g, '\n').trim();
+      const cut = text.indexOf('\n\n');
+      let title = opts.title || '', body = text;
+      if(!title){
+        if(cut > 0){ title = text.slice(0, cut).trim(); body = text.slice(cut + 2).trim(); }
+        else if(text.length <= 90){ title = text; body = ''; }
+      }
+      o.querySelector('.ui-dlg-title').textContent = title;
+      o.querySelector('.ui-dlg-title').style.display = title ? '' : 'none';
+      o.querySelector('.ui-dlg-msg').textContent = body;
+      o.querySelector('.ui-dlg-msg').style.display = body ? '' : 'none';
+      const lab = kind === 'prompt' ? { ok: opts.ok || 'OK', cancel: opts.cancel || 'Cancel', danger: !!opts.danger } : uiDlgLabels(text, opts);
+      const okB = o.querySelector('.ui-dlg-ok'), noB = o.querySelector('.ui-dlg-cancel');
+      okB.textContent = lab.ok; noB.textContent = lab.cancel;
+      okB.classList.toggle('danger', lab.danger);
+      const field = o.querySelector('.ui-dlg-field'), err = o.querySelector('.ui-dlg-err');
+      field.innerHTML = ''; err.textContent = '';
+      let input = null;
+      if(kind === 'prompt'){
+        const multi = opts.multiline != null ? opts.multiline : /\b(reason|why|what should)\b/i.test(text);
+        input = document.createElement(multi ? 'textarea' : 'input');
+        if(multi) input.rows = 3; else input.type = 'text';
+        input.className = 'ui-dlg-input';
+        input.value = def == null ? '' : String(def);
+        input.placeholder = opts.placeholder || '';
+        input.autocomplete = 'off';
+        field.appendChild(input);
+      }
+      field.style.display = input ? '' : 'none';
+      const prevFocus = document.activeElement;
+      o.classList.add('open');
+      document.documentElement.classList.add('ui-dlg-lock');
+      setTimeout(()=>{
+        try{
+          if(input){ input.focus(); if(input.value) input.select(); }
+          else okB.focus();
+        }catch(_){}
+      }, 40);
+      const finish = (val)=>{
+        o.classList.remove('open');
+        document.documentElement.classList.remove('ui-dlg-lock');
+        okB.onclick = noB.onclick = null;
+        o.onkeydown = null;
+        try{ if(prevFocus && prevFocus.focus && document.contains(prevFocus)) prevFocus.focus({ preventScroll:true }); }catch(_){}
+        resolve(val);
+      };
+      okB.onclick = ()=> finish(kind === 'prompt' ? input.value : true);
+      noB.onclick = ()=> finish(kind === 'prompt' ? null : false);
+      o.onkeydown = (e)=>{
+        if(e.key === 'Escape'){ e.preventDefault(); noB.onclick(); }
+        else if(e.key === 'Enter' && !(input && input.tagName === 'TEXTAREA' && e.shiftKey)
+                && !(document.activeElement === noB)){ e.preventDefault(); okB.onclick(); }
+        else if(e.key === 'Tab'){   // keep focus inside the dialog
+          const f = [input, noB, okB].filter(Boolean);
+          const i = f.indexOf(document.activeElement);
+          e.preventDefault();
+          f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+        }
+      };
+    });
+    // One dialog at a time, in the order they were asked for.
+    const p = uiDlgQueue.then(run, run);
+    uiDlgQueue = p.catch(()=>{});
+    return p;
+  }
+  function uiConfirm(msg, opts){ return uiDlgOpen('confirm', msg, null, opts); }
+  function uiPrompt(msg, def, opts){ return uiDlgOpen('prompt', msg, def, opts); }
+
   // ---------- password prompt ----------
   // window.prompt() was used for every admin-password gate. On iOS Safari that
   // dialog shows the typed password in clear text (and in screenshots), it can't
@@ -992,7 +1102,7 @@
     }
     const btn = e.target.closest('.pendingSyncDeleteBtn');
     if(!btn) return;
-    if(!confirm('Discard this item? It will NOT be uploaded and cannot be recovered.')) return;
+    if(!await uiConfirm('Discard this item? It will NOT be uploaded and cannot be recovered.')) return;
     try{ await window.storage.delete(btn.dataset.key); }catch(err){}
     await renderPendingSyncList();
     updateOutboxBadge();
@@ -1001,7 +1111,7 @@
   if(pendingSyncClearAllBtn) pendingSyncClearAllBtn.addEventListener('click', async ()=>{
     const items = await outboxList();
     if(!items.length) return;
-    if(!confirm('Discard all '+items.length+' pending item'+(items.length===1?'':'s')+'? None of it will be uploaded, and this cannot be undone.')) return;
+    if(!await uiConfirm('Discard all '+items.length+' pending item'+(items.length===1?'':'s')+'? None of it will be uploaded, and this cannot be undone.')) return;
     for(const item of items){ try{ await window.storage.delete(item.storageKey); }catch(err){} }
     await renderPendingSyncList();
     updateOutboxBadge();

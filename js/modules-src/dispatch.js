@@ -1773,7 +1773,7 @@
     const caret = head.querySelector('.jo-caret');
     if(caret) caret.innerHTML = icon('caretDown', willOpen ? 'style="transform:rotate(180deg);"' : '');
   }
-  function dtHandleEquipRowClick(e){
+  async function dtHandleEquipRowClick(e){
     // Checked before the toggle header below: "Open Job Order" now lives
     // inside the same header element that carries data-jo-toggle (it sits to
     // the right of the title), so without this ordering a tap on the button
@@ -1812,7 +1812,7 @@
     const notDoneBtn = e.target.closest('.dt-equip-notdone');
     if(notDoneBtn){
       e.stopPropagation();
-      const reason = prompt('Why can\'t this unit be serviced today?\n\nAdmin sees this when reviewing the job order, so be specific — "customer locked the plant room", "needs a part we don\'t carry".');
+      const reason = await uiPrompt('Why can\'t this unit be serviced today?\n\nAdmin sees this when reviewing the job order, so be specific — "customer locked the plant room", "needs a part we don\'t carry".');
       // prompt returns null on Cancel and '' on an empty OK. Only the
       // second deserves a complaint; cancelling is not an error.
       if(reason === null) return;
@@ -2578,7 +2578,7 @@
         const incomingName = pick.options[pick.selectedIndex].dataset.name;
         const reason = row.querySelector('.dt-reassign-reason').value;
         const outgoingName = row.querySelector('b').textContent;
-        if(!confirm('Replace '+outgoingName+' with '+incomingName+' on this job order?')) return;
+        if(!await uiConfirm('Replace '+outgoingName+' with '+incomingName+' on this job order?')) return;
         btn.disabled = true; btn.textContent = 'Replacing…';
         const ok = await dtReassignWorker(rec.id, outgoingId, { id: incomingId, name: incomingName }, reason);
         btn.disabled = false; btn.textContent = 'Confirm Replacement';
@@ -3123,7 +3123,7 @@
             if(!other){ toast('Please specify a reason'); dtCancelOther.focus(); return; }
             reason = 'Other: '+other;
           }
-          if(!confirm('Cancel this dispatch? The customer will be notified and this cannot be undone.')) return;
+          if(!await uiConfirm('Cancel this dispatch? The customer will be notified and this cannot be undone.')) return;
           const ok = await dtCancelTicket(rec.id, reason);
           if(ok){
             if(typeof srCancelByTicket==='function') srCancelByTicket(rec.id, reason).catch(()=>{});
@@ -3452,7 +3452,7 @@
     const confirmMsg = exceptionCount>0
       ? ('Close this Job Order with '+exceptionCount+' unit'+(exceptionCount===1?'':'s')+' marked as not completed? The customer\'s service request will stay in progress — you can open the next visit for the remaining unit(s) with Continue Tomorrow once this closes.')
       : 'Close this Job Order? This marks it — and the customer\'s service request — as fully done.';
-    if(!confirm(confirmMsg)) return;
+    if(!await uiConfirm(confirmMsg)) return;
     // Scoped lookup, NOT $(): dtCloseSection's innerHTML is rebuilt every
     // time a ticket overlay opens, and $() caches a node by id forever —
     // so from the second ticket onward it returns a detached element and

@@ -585,13 +585,13 @@
     if(!el) return;
     const act = el.dataset.thAct, id = el.dataset.id, jo = el.dataset.jo || 'this job order';
     if(act==='ack'){
-      if(!confirm('Accept '+jo+'?\n\nThis tells admin you are taking this job.')) return;
+      if(!await uiConfirm('Accept '+jo+'?\n\nThis tells admin you are taking this job.')) return;
       el.disabled = true; el.textContent = 'Saving…';
       try{ await dtAcknowledge(id); } finally { await renderHomeTechOverview().catch(()=>{}); }
       return;
     }
     if(act==='arrived'){
-      if(!confirm('Record that you arrived at the site for '+jo+'?\n\nThe customer will be told work has started.')) return;
+      if(!await uiConfirm('Record that you arrived at the site for '+jo+'?\n\nThe customer will be told work has started.')) return;
       try{ await dtMarkArrived(id, el); } finally { await renderHomeTechOverview().catch(()=>{}); }
       return;
     }

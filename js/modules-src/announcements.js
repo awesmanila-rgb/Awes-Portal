@@ -126,7 +126,7 @@
   $('announcementsAdminList').addEventListener('click', async (e)=>{
     const btn = e.target.closest('[data-ann-delete]');
     if(!btn) return;
-    if(!confirm('Delete this announcement?')) return;
+    if(!await uiConfirm('Delete this announcement?')) return;
     if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return; }
     try{
       const { error } = await db.from('announcements').delete().eq('id', btn.dataset.annDelete);

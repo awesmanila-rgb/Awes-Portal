@@ -333,7 +333,7 @@
   // enforces that, not just the UI.
   async function caCancelRequest(id){
     if(!currentUser || currentUser.role==='admin') return;
-    if(!confirm('Cancel this cash advance request? This cannot be undone.')) return;
+    if(!await uiConfirm('Cancel this cash advance request? This cannot be undone.')) return;
     const btn = $('caCancelRequestBtn');
     if(btn) btn.disabled = true;
     if(!(await ensureCloud())){
@@ -1696,7 +1696,7 @@
   async function caDecideLiquidation(id, status, comment){
     if(!caAdminGuard()) return;
     if(status==='disapproved' && !comment){
-      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+      if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
     let liqRec = null;
     const liqOk = await caApplyAdminChange(id, (rec)=>{
@@ -1758,7 +1758,7 @@
   async function caDecide(id, status, comment){
     if(!caAdminGuard()) return;
     if(status==='disapproved' && !comment){
-      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+      if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
     let decRec = null;
     const decOk = await caApplyAdminChange(id, (rec)=>(decRec = rec, {

@@ -137,12 +137,12 @@
         else toast('Could not update');
       });
       card.querySelector('[data-act="resetDevice"]').addEventListener('click', async ()=>{
-        if(!confirm('Unlock '+u.name+"'s DTR from their current device? Use this if they lost or replaced their phone — the next device they time in from will become the new locked device.")) return;
+        if(!await uiConfirm('Unlock '+u.name+"'s DTR from their current device? Use this if they lost or replaced their phone — the next device they time in from will become the new locked device.")) return;
         const ok = await clearDeviceLock(u.id);
         toast(ok ? "Device lock cleared for "+u.name : 'Could not clear device lock');
       });
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!confirm('Remove '+u.name+' completely? Their past reports stay saved, but they will no longer appear anywhere.')) return;
+        if(!await uiConfirm('Remove '+u.name+' completely? Their past reports stay saved, but they will no longer appear anywhere.')) return;
         const ok = await cloudDeleteUser(u.id);
         if(ok){ toast('Removed '+u.name); renderUsersList(); }
         else toast('Could not remove');
@@ -273,7 +273,7 @@
         else toast('Could not update');
       });
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!confirm('Remove '+u.name+"'s customer portal login completely? They will no longer be able to sign in.")) return;
+        if(!await uiConfirm('Remove '+u.name+"'s customer portal login completely? They will no longer be able to sign in.")) return;
         const ok = await cloudDeleteUser(u.id);
         if(ok){ toast('Removed '+u.name); renderUsersList(); }
         else toast('Could not remove');
@@ -339,7 +339,7 @@
       card.querySelector('[data-act="history"]').addEventListener('click', (e)=>{ e.stopPropagation(); showCustomerHistoryView(c); });
       card.querySelector('[data-act="remove"]').addEventListener('click', async (e)=>{
         e.stopPropagation();
-        if(!confirm('Remove '+c.name+' from the customer list? This does not affect past reports.')) return;
+        if(!await uiConfirm('Remove '+c.name+' from the customer list? This does not affect past reports.')) return;
         const ok = await cloudDeleteCustomer(c.id);
         if(ok){ toast('Removed '+c.name); renderCustomersList($('customerSearch').value); }
         else toast('Could not remove');
@@ -386,7 +386,7 @@
           '<button data-act="remove" class="danger">Remove</button>'+
         '</div>';
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!confirm('Remove this equipment record? This does not affect past reports.')) return;
+        if(!await uiConfirm('Remove this equipment record? This does not affect past reports.')) return;
         const ok = await cloudDeleteCustomerEquipment(e.id);
         if(ok){ toast('Removed'); renderCustomerEquipmentList(customerId); }
         else toast('Could not remove');
@@ -628,7 +628,7 @@
       }
       if(equipListTab==='delete'){
         card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-          if(!confirm('Remove this equipment record for '+e.customerName+'? This does not affect past reports.')) return;
+          if(!await uiConfirm('Remove this equipment record for '+e.customerName+'? This does not affect past reports.')) return;
           const ok = await cloudDeleteCustomerEquipment(e.id);
           if(ok){ toast('Removed'); renderEquipmentMasterList(); }
           else toast('Could not remove');
@@ -804,7 +804,7 @@
     $$('[data-act="rename-folder"]', grid).forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const oldFolder = btn.dataset.folder;
-        const next = prompt('Rename folder "'+oldFolder+'" to:', oldFolder); // plain text, not a secret
+        const next = await uiPrompt('Rename folder "'+oldFolder+'" to:', oldFolder); // plain text, not a secret
         if(next===null) return;
         const trimmed = next.trim();
         if(!trimmed || trimmed===oldFolder) return;
@@ -832,7 +832,7 @@
       });
       const delBtn = card.querySelector('[data-act="delete"]');
       if(delBtn) delBtn.addEventListener('click', async ()=>{
-        if(!confirm('Delete this photo? This cannot be undone.')) return;
+        if(!await uiConfirm('Delete this photo? This cannot be undone.')) return;
         delBtn.disabled = true;
         const ok = await cloudDeleteEquipmentPhoto(photo);
         if(ok){ renderEquipmentPhotosSection(record); renderEquipmentMasterList(); }
@@ -1341,7 +1341,7 @@
     finally{ $('tpAddViolationBtn').disabled = false; }
   });
   async function tpDeleteViolation(id){
-    if(!confirm('Remove this violation record?')) return;
+    if(!await uiConfirm('Remove this violation record?')) return;
     try{
       const { error } = await db.from('technician_violations').delete().eq('id', id);
       if(error) throw error;
@@ -1411,7 +1411,7 @@
     finally{ $('tpAddDocBtn').disabled = false; }
   });
   async function tpDeleteDocument(id){
-    if(!confirm('Remove this document?')) return;
+    if(!await uiConfirm('Remove this document?')) return;
     try{
       const { error } = await db.from('technician_documents').delete().eq('id', id);
       if(error) throw error;

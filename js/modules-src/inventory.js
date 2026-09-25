@@ -192,13 +192,13 @@
     const w = invWh(b.dataset.adjust), m = invItemOpen;
     const bal = invBalances.find(x=> x.material_id === m.id && x.warehouse_id === w.id);
     const cur = bal ? Number(bal.qty_on_hand) : 0;
-    const raw = prompt('Physical count of ' + m.name + ' in ' + w.code + '\n\nSystem shows ' + invQty(cur) + ' ' + m.unit + '. Enter the actual quantity counted:', String(cur));
+    const raw = await uiPrompt('Physical count of ' + m.name + ' in ' + w.code + '\n\nSystem shows ' + invQty(cur) + ' ' + m.unit + '. Enter the actual quantity counted:', String(cur));
     if(raw === null) return;
     const counted = spParseMoney(raw);
     if(counted == null || Number.isNaN(counted)){ toast('Enter a number'); return; }
     const diff = Math.round((counted - cur) * 1000) / 1000;
     if(diff === 0){ toast('No change — count matches'); return; }
-    const reason = prompt('Reason for the ' + (diff > 0 ? '+' : '−') + invQty(Math.abs(diff)) + ' ' + m.unit + ' adjustment (e.g. recount, damaged, found):');
+    const reason = await uiPrompt('Reason for the ' + (diff > 0 ? '+' : '−') + invQty(Math.abs(diff)) + ' ' + m.unit + ' adjustment (e.g. recount, damaged, found):');
     if(reason === null) return;
     if(!reason.trim()){ toast('A reason is required'); return; }
     if(!(await purchEnsureSession())) return;
@@ -223,8 +223,8 @@
     invRenderOpLines();
     invStockView('opening');
   });
-  $('invOpeningBack').addEventListener('click', ()=>{
-    if(invOpLines.some(l=> l.material_id) && !confirm('Discard this opening balance?')) return;
+  $('invOpeningBack').addEventListener('click', async ()=>{
+    if(invOpLines.some(l=> l.material_id) && !await uiConfirm('Discard this opening balance?')) return;
     invStockView('list'); invRenderStock();
   });
   function invRenderOpLines(){
@@ -328,7 +328,7 @@
       if(c == null || Number.isNaN(c)){ toast(l.code + ': enter the unit cost (0 is allowed)'); return; }
     }
     const total = lines.reduce((a, l)=> a + poRound2(spParseMoney(l.qty) * spParseMoney(l.unit_cost)), 0);
-    if(!confirm('Post opening balance to ' + wh.code + ' · ' + wh.name + '?\n\n' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', total value ' + invMoney(total) +
+    if(!await uiConfirm('Post opening balance to ' + wh.code + ' · ' + wh.name + '?\n\n' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ', total value ' + invMoney(total) +
       '\n\nStock movements can\u2019t be edited afterwards — mistakes are corrected with an adjustment.')) return;
     if(!(await purchEnsureSession())) return;
     const btn = $('invOpPost'); btn.disabled = true;
@@ -529,7 +529,7 @@
   $('invPrjJobs').addEventListener('click', async (e)=>{
     if(!e.target.closest('[data-jo-rm]') || !invPrjOpen) return;
     const jo = e.target.closest('[data-jo]').dataset.jo;
-    if(!confirm('Remove ' + jo + ' from ' + invPrjOpen.project_no + '? Its material cost will no longer count toward this project.')) return;
+    if(!await uiConfirm('Remove ' + jo + ' from ' + invPrjOpen.project_no + '? Its material cost will no longer count toward this project.')) return;
     try{
       const { error } = await db.from('project_job_orders').delete().eq('project_id', invPrjOpen.id).eq('job_order_id', jo);
       if(error) throw error;

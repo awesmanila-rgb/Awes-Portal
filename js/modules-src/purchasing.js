@@ -285,7 +285,7 @@
     if(act === 'contacts' || act === 'docs' || act === 'prices') return spOpenSheet(s, act);
     if(act === 'deactivate' || act === 'reactivate'){
       const on = act === 'reactivate';
-      if(!on && !confirm('Deactivate ' + spDisplayName(s) + '? It will be hidden from pickers but kept for existing records. You can reactivate it any time.')) return;
+      if(!on && !await uiConfirm('Deactivate ' + spDisplayName(s) + '? It will be hidden from pickers but kept for existing records. You can reactivate it any time.')) return;
       if(!(await purchEnsureSession())) return;
       btn.disabled = true;
       try{
@@ -384,7 +384,7 @@
     const credit = spParseMoney($('spCreditLimit').value);
     if(Number.isNaN(credit)){ toast('Credit limit must be a number'); $('spCreditLimit').focus(); return; }
     const dup = spCache.find(x=> x.name.trim().toLowerCase() === name.toLowerCase() && (!spEditing || x.id !== spEditing.id));
-    if(dup && !confirm('A supplier named "' + dup.name + '" (' + dup.code + ') already exists. Save anyway?')) return;
+    if(dup && !await uiConfirm('A supplier named "' + dup.name + '" (' + dup.code + ') already exists. Save anyway?')) return;
     const vat = $('spVat').value;
     const row = {
       name, trade_name: $('spTradeName').value.trim(), supplies: spSheetSupplies.slice(),
@@ -498,7 +498,7 @@
         if(error) throw error;
         toast(c.name + ' is now the primary contact');
       }else if(act === 'remove'){
-        if(!confirm('Remove ' + c.name + ' from this supplier?')){ b.disabled = false; return; }
+        if(!await uiConfirm('Remove ' + c.name + ' from this supplier?')){ b.disabled = false; return; }
         const { error } = await db.from('supplier_contacts').delete().eq('id', c.id);
         if(error) throw error;
         toast('Contact removed');
@@ -609,7 +609,7 @@
       }
       return;
     }
-    if(!confirm('Delete "' + (d.title || d.file_name || d.doc_type) + '"? This cannot be undone.')) return;
+    if(!await uiConfirm('Delete "' + (d.title || d.file_name || d.doc_type) + '"? This cannot be undone.')) return;
     if(!(await purchEnsureSession())) return;
     b.disabled = true;
     try{
@@ -806,7 +806,7 @@
       }
     });
     if(!inserts.length && !updates.length){ toast('Nothing to import' + (skipped.length ? ' — ' + skipped[0] : '')); return; }
-    if(!confirm('Import ' + file.name + '?\n\n' +
+    if(!await uiConfirm('Import ' + file.name + '?\n\n' +
       inserts.length + ' new supplier' + (inserts.length === 1 ? '' : 's') + '\n' +
       updates.length + ' existing supplier' + (updates.length === 1 ? '' : 's') + ' updated (matched by code, then name)\n' +
       (skipped.length ? skipped.length + ' row' + (skipped.length === 1 ? '' : 's') + ' skipped\n' : '') +
@@ -1181,7 +1181,7 @@
     const clash = mtCache.find(x=> x.code === row.code && (!mtEditing || x.id !== mtEditing.id));
     if(clash){ toast('Code ' + row.code + ' is already used by ' + clash.name); $('mtCode').focus(); return; }
     const twin = mtCache.find(x=> x.name.trim().toLowerCase() === row.name.toLowerCase() && (!mtEditing || x.id !== mtEditing.id));
-    if(twin && !confirm('"' + twin.name + '" already exists as ' + twin.code + '. Save another item with the same name?')) return;
+    if(twin && !await uiConfirm('"' + twin.name + '" already exists as ' + twin.code + '. Save another item with the same name?')) return;
     if(!(await ensureCloud())){ toast('Not connected — can\u2019t save'); return; }
     if(!(await purchEnsureSession())) return;
     const btn = $('mtSaveBtn'); btn.disabled = true;
@@ -1233,7 +1233,7 @@
     const m = mtEditing;
     if(!m) return;
     const on = !m.isActive;
-    if(!on && !confirm('Deactivate ' + m.code + ' ' + m.name + '? Technicians won\u2019t be able to pick it; existing records keep it.')) return;
+    if(!on && !await uiConfirm('Deactivate ' + m.code + ' ' + m.name + '? Technicians won\u2019t be able to pick it; existing records keep it.')) return;
     if(!(await purchEnsureSession())) return;
     const btn = $('mtToggleActiveBtn'); btn.disabled = true;
     try{
@@ -1375,7 +1375,7 @@
         const { error } = await db.from('supplier_materials').update({ is_preferred:false }).eq('id', p.id);
         if(error) throw error;
       }else if(act === 'remove'){
-        if(!confirm('Remove ' + mtSupplierLabel(p.suppliers) + '\u2019s price for this item? Its price history is kept.')){ b.disabled = false; return; }
+        if(!await uiConfirm('Remove ' + mtSupplierLabel(p.suppliers) + '\u2019s price for this item? Its price history is kept.')){ b.disabled = false; return; }
         const { error } = await db.from('supplier_materials').update({ is_active:false, is_preferred:false }).eq('id', p.id);
         if(error) throw error;
         toast('Price removed');
@@ -1642,7 +1642,7 @@
     if(e.key === 'Escape'){ e.preventDefault(); mcEditId = null; mcRender(); }
   });
   $('mcList').addEventListener('input', (e)=>{ if(e.target.dataset.mcF === 'prefix') e.target.value = e.target.value.toUpperCase(); });
-  $('mcList').addEventListener('click', (e)=>{
+  $('mcList').addEventListener('click', async (e)=>{
     const b = e.target.closest('[data-mc]'); if(!b || b.disabled) return;
     const row = b.closest('.mc-row');
     const c = purchCats.find(x=> x.id === row.dataset.id); if(!c) return;
@@ -1657,7 +1657,7 @@
       const renamed = name !== c.name;
       if(renamed){
         const n = mcUsage(c.name);
-        if(n && !confirm('Rename “' + c.name + '” to “' + name + '”?\n\nAll ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, and suppliers that list it, will move to the new name.')) return;
+        if(n && !await uiConfirm('Rename “' + c.name + '” to “' + name + '”?\n\nAll ' + n + ' item' + (n === 1 ? '' : 's') + ' in it, and suppliers that list it, will move to the new name.')) return;
         const { error } = await db.rpc('rename_material_category', { p_id: c.id, p_name: name });
         if(error) throw error;
       }
@@ -1676,7 +1676,7 @@
       await mcAfterChange(false);
     }, 'Couldn\u2019t update the category: ');
     if(act === 'del'){
-      if(!confirm('Delete the category “' + c.name + '”?')) return;
+      if(!await uiConfirm('Delete the category “' + c.name + '”?')) return;
       return mcRun(async ()=>{
         const { error } = await db.from('material_categories').delete().eq('id', c.id);
         if(error) throw error;
@@ -1772,7 +1772,7 @@
       else{ row.code = code || nextCode(category); usedCodes.add(row.code); inserts.push(row); }
     });
     if(!inserts.length && !updates.length){ toast('Nothing to import' + (skipped.length ? ' — ' + skipped[0] : '')); return; }
-    if(!confirm('Import ' + file.name + '?\n\n' +
+    if(!await uiConfirm('Import ' + file.name + '?\n\n' +
       inserts.length + ' new item' + (inserts.length === 1 ? '' : 's') + ' (rows without a code get one automatically)\n' +
       updates.length + ' existing item' + (updates.length === 1 ? '' : 's') + ' updated (matched by code)\n' +
       (skipped.length ? skipped.length + ' row' + (skipped.length === 1 ? '' : 's') + ' skipped — ' + skipped.slice(0, 3).join('; ') + '\n' : '') +

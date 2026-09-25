@@ -287,7 +287,7 @@
       payload.direct_project_id = $('invRcvProject').value || null; payload.direct_job_order_id = $('invRcvJob').value || null;
       if(!payload.direct_project_id && !payload.direct_job_order_id){ toast('Choose the project or job order it was delivered to'); return; }
     }
-    if(!confirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
+    if(!await uiConfirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
     const btn = $('invRcvPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_receipt', payload); if(!r) return;
@@ -349,7 +349,7 @@
     if(short.length){ toast('Not enough stock in ' + wh.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
     const mr = invIssMode === 'mrf' ? invIssMrs.find(x=> x.id === $('invIssMr').value) : null;
     if(invIssMode === 'mrf' && !mr){ toast('Choose the request'); return; }
-    if(!confirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
+    if(!await uiConfirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
     const btn = $('invIssPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_issue', { warehouse_id: wh.id, worker_id: worker.id, mr_id: mr ? mr.id : null,
@@ -418,7 +418,7 @@
     const groups = new Map();
     picked.forEach(h=>{ const k = (h.project_id || '') + '|' + (h.job_order_id || ''); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(h); });
     const dmg = picked.filter(h=> h.cond === 'damaged').length;
-    if(!confirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
+    if(!await uiConfirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
     const btn = $('invRetPost'); btn.disabled = true;
     const done = [];
     try{
@@ -459,7 +459,7 @@
     if(typeof lines === 'string'){ toast(lines); return; }
     const short = lines.filter(l=> l.qty > invAvail(from.id, l.material_id));
     if(short.length){ toast('Not enough stock in ' + from.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
-    if(!confirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
+    if(!await uiConfirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
     const btn = $('invTrfPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_transfer', { from_warehouse_id: from.id, to_warehouse_id: to.id, note: $('invTrfNote').value.trim(), lines });

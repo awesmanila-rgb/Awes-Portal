@@ -221,9 +221,9 @@
     const t = tl.tools.find(x=> x.asset_tag === tag);
     if(t) tlOpenDetail(t.id); else toast(tag + ' isn\u2019t in the register' + (tl.isAdmin ? '' : ' (or not your warehouse)'));
   });
-  $('tlLabelsBtn').addEventListener('click', ()=>{
+  $('tlLabelsBtn').addEventListener('click', async ()=>{
     const rows = tlRegFiltered();
-    if(rows.length > 1 && !confirm('Print QR labels for the ' + rows.length + ' tools shown? (Filter the list first to print fewer.)')) return;
+    if(rows.length > 1 && !await uiConfirm('Print QR labels for the ' + rows.length + ' tools shown? (Filter the list first to print fewer.)')) return;
     tlLabelsPdf(rows).catch(e=> toast('Couldn\u2019t make labels: ' + e.message));
   });
 
@@ -290,7 +290,7 @@
         if(error) throw error;
         toast('Added ' + data.map(x=> x.asset_tag).join(', '));
         await tlLoad(); tlRegView('list'); tlRenderRegister();
-        if(confirm('Print QR labels for the new ' + (data.length === 1 ? 'tool' : data.length + ' tools') + ' now?')) tlLabelsPdf(tl.tools.filter(t=> data.some(d=> d.id === t.id)));
+        if(await uiConfirm('Print QR labels for the new ' + (data.length === 1 ? 'tool' : data.length + ' tools') + ' now?')) tlLabelsPdf(tl.tools.filter(t=> data.some(d=> d.id === t.id)));
       }
     }catch(e){ purchFail('Couldn\u2019t save: ', e); }
   });
@@ -312,7 +312,7 @@
         maint_interval_days: mt && parseInt(col(r, 'maint_interval_days'), 10) > 0 ? parseInt(col(r, 'maint_interval_days'), 10) : null, next_maint_due: mt ? (col(r, 'next_maint_due') || null) : null });
     });
     if(!out.length){ toast('Nothing to import' + (bad.length ? ' — check rows ' + bad.slice(0, 5).join(', ') : '')); return; }
-    if(!confirm('Add ' + out.length + ' tool' + (out.length === 1 ? '' : 's') + (bad.length ? ' (skipping ' + bad.length + ' row(s) with no name or unknown warehouse)' : '') + '?')) return;
+    if(!await uiConfirm('Add ' + out.length + ' tool' + (out.length === 1 ? '' : 's') + (bad.length ? ' (skipping ' + bad.length + ' row(s) with no name or unknown warehouse)' : '') + '?')) return;
     const { data, error } = await db.from('tools').insert(out).select('id');
     if(error){ purchFail('Import failed: ', error); return; }
     toast('Imported ' + data.length + ' tools'); await tlLoad(); tlRenderRegister();
@@ -347,7 +347,7 @@
     if(a === 'label') return tlLabelsPdf([t]);
     if(a === 'edit') return tlOpenForm(t);
     if(a === 'maint'){ showPurchasingView('tlMaint'); setTimeout(()=> tlMaintOpenForm(t.id), 300); return; }
-    const reason = prompt(a === 'found' ? 'Where was ' + t.asset_tag + ' found?' : 'Why is ' + t.asset_tag + ' being retired?');
+    const reason = await uiPrompt(a === 'found' ? 'Where was ' + t.asset_tag + ' found?' : 'Why is ' + t.asset_tag + ' being retired?');
     if(!reason || !reason.trim()) return;
     if(!(await purchEnsureSession())) return;
     const { error } = await db.rpc('tl_admin_status', { p_tool: t.id, p_status: a === 'found' ? 'available' : 'retired', p_note: reason.trim() });
@@ -407,7 +407,7 @@
     if(st === 'closed' && dec === 'pending'){ toast('Choose a decision before closing'); return; }
     if(st === 'in_repair' && dec !== 'repair'){ toast('Set the decision to Repair first'); return; }
     if(Number.isNaN(cost)){ toast('Repair cost must be a number'); return; }
-    if(st === 'closed' && !confirm('Close ' + tlDefOpen.defect_no + ' as "' + dec.replace('_', ' ') + '"? ' + (['replace', 'write_off'].includes(dec) ? 'The tool will be retired.' : 'The tool goes back into service.'))) return;
+    if(st === 'closed' && !await uiConfirm('Close ' + tlDefOpen.defect_no + ' as "' + dec.replace('_', ' ') + '"? ' + (['replace', 'write_off'].includes(dec) ? 'The tool will be retired.' : 'The tool goes back into service.'))) return;
     if(!(await purchEnsureSession())) return;
     const { error } = await db.rpc('tl_decide_defect', { p: { defect_id: tlDefOpen.id, decision: dec, status: st, cause: $('tlDCause').value,
       repair_vendor: $('tlDVendor').value.trim(), repair_cost: cost, chargeable_to_worker: $('tlDCharge').checked, note: $('tlDNote').value.trim() } });
@@ -598,7 +598,7 @@
     for(const l of lines){ const t = tlTool(l.tool_id);
       if(l.cond !== 'good' && l.cond !== 'lost' && !l.photo && !l.note.trim() && !l.missing.length){ toast(t.asset_tag + ': add a photo or a note about the problem'); return; } }
     const bad = lines.filter(l=> l.cond !== 'good' || l.missing.length).length;
-    if(bad && !confirm(bad + ' tool(s) not in good condition — a defect report opens for each and they go out of service. Continue?')) return;
+    if(bad && !await uiConfirm(bad + ' tool(s) not in good condition — a defect report opens for each and they go out of service. Continue?')) return;
     const mode = tlMode('tlRtMode');
     if(!(await purchEnsureSession())) return;
     const btn = $('tlRtPost'); btn.disabled = true;

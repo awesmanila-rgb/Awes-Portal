@@ -250,7 +250,7 @@
   }
   async function leaveDecide(id, status, comment){
     if(status==='disapproved' && !comment){
-      if(!confirm('Disapprove without a comment? The technician won\'t know why.')) return;
+      if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
     if(!currentUser || currentUser.role!=='admin'){ toast('Admin only'); return; }
     if(!(await ensureCloud())){ toast('Decisions need a connection — try again when online'); return; }

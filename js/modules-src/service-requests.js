@@ -837,7 +837,7 @@
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
       if(adminEl.querySelector('#srAdminAcceptCancelReqBtn')) adminEl.querySelector('#srAdminAcceptCancelReqBtn').onclick = async ()=>{
-        if(!confirm('Accept this cancellation? This also cancels the dispatch ticket.')) return;
+        if(!await uiConfirm('Accept this cancellation? This also cancels the dispatch ticket.')) return;
         const ok = await srAdminAcceptCancelRequest(request);
         if(ok){ toast('Cancellation accepted'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
@@ -856,7 +856,7 @@
           if(!other){ toast('Please specify a reason'); otherEl.focus(); return; }
           reason = 'Other: '+other;
         }
-        if(!confirm('Cancel this dispatch? This also cancels the dispatch ticket and cannot be undone.')) return;
+        if(!await uiConfirm('Cancel this dispatch? This also cancels the dispatch ticket and cannot be undone.')) return;
         const ok = await srAdminCancelActive(request, reason);
         if(ok){ toast('Dispatch cancelled'); srCloseDetail(); srRenderQueueList(); } else toast('Could not cancel — try again');
       };
