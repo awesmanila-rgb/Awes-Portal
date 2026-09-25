@@ -2425,6 +2425,7 @@ window.awesCss = {
       </div>
       <div class="sp-actions-row">
         <button type="button" class="btn btn-primary" id="mtAddBtn">+ Add Material</button>
+        <button type="button" class="btn btn-secondary" id="mcBtn">Manage Categories</button>
         <button type="button" class="btn btn-secondary" id="mtSeedBtn">Seed from Service Reports</button>
         <button type="button" class="btn btn-secondary" id="mtImportBtn">Import CSV</button>
         <button type="button" class="btn btn-secondary" id="mtExportBtn">Export CSV</button>
@@ -2546,9 +2547,14 @@ window.awesCss = {
           Create a PO as a draft, then <b>Issue</b> it to lock it and get the signed PDF.
           Issued POs can't be edited — only cancelled — so what the supplier received never changes.
         </p>
+        <div class="seg-tabs po-status-tabs" id="poStatusTabs" role="tablist" aria-label="Filter by status">
+          <button type="button" class="seg-tab active" role="tab" aria-selected="true" data-status="">All <span class="po-tab-count" data-count-for=""></span></button>
+          <button type="button" class="seg-tab" role="tab" aria-selected="false" data-status="draft">Drafts <span class="po-tab-count" data-count-for="draft"></span></button>
+          <button type="button" class="seg-tab" role="tab" aria-selected="false" data-status="issued">Issued <span class="po-tab-count" data-count-for="issued"></span></button>
+          <button type="button" class="seg-tab" role="tab" aria-selected="false" data-status="cancelled">Cancelled <span class="po-tab-count" data-count-for="cancelled"></span></button>
+        </div>
         <div class="sp-toolbar po-toolbar">
           <input type="text" id="poSearch" placeholder="Search PO no., supplier, reference…">
-          <select id="poFilterStatus"><option value="">All statuses</option><option value="draft">Drafts</option><option value="issued">Issued</option><option value="cancelled">Cancelled</option></select>
         </div>
         <div class="sp-actions-row">
           <button type="button" class="btn btn-primary" id="poAddBtn">+ New Purchase Order</button>
@@ -2574,11 +2580,19 @@ window.awesCss = {
               <div class="po-supplier-info" id="poSupplierInfo"></div></div>
             <div class="field po-c6"><label>Reference <span class="mt-hint">job order, project, requisition</span></label><input type="text" id="poReference" placeholder="e.g. JO-2026-0142 / SM Megamall"></div>
             <div class="field po-c3"><label>PO Date</label><input type="date" id="poDate"></div>
-            <div class="field po-c3"><label>Delivery Date</label><input type="date" id="poDeliveryDate"></div>
             <div class="field po-c3"><label>Payment Terms</label><input type="text" id="poTerms" list="spTermsList" placeholder="COD"></div>
-            <div class="field po-c3"><label>VAT</label>
+            <div class="field po-c6"><label>VAT</label>
               <select id="poVatMode"><option value="exclusive">Exclusive — add 12%</option><option value="inclusive">Inclusive — prices include 12%</option><option value="none">No VAT</option></select></div>
-            <div class="field po-c12"><label>Deliver To</label><textarea id="poDeliverTo" rows="2" placeholder="Delivery address / site"></textarea></div>
+            <div class="field po-c3"><label>Delivery Method</label>
+              <div class="po-seg" id="poFulfilment" role="radiogroup" aria-label="Delivery method">
+                <button type="button" data-v="delivery" role="radio">Delivery</button>
+                <button type="button" data-v="pickup" role="radio">Pick-up</button>
+              </div></div>
+            <div class="field po-c3"><label id="poWhenLabel">Delivery Date</label>
+              <select id="poDeliveryWhen"><option value="asap">As soon as possible</option><option value="tba">To be advised</option><option value="date">On a specific date…</option></select></div>
+            <div class="field po-c3" id="poDeliveryDateField" style="display:none;"><label id="poDateLabel">Date</label><input type="date" id="poDeliveryDate"></div>
+            <div class="field po-c12" id="poDeliverToField"><label>Deliver To</label><textarea id="poDeliverTo" rows="2" placeholder="Delivery address / site"></textarea></div>
+            <div class="field po-c12" id="poPickupNote" style="display:none;"><div class="po-pickup-note">We'll collect the items from the supplier — the PO prints <b>For pick-up</b> instead of a delivery address.</div></div>
           </div>
         </section>
 
@@ -2602,7 +2616,8 @@ window.awesCss = {
             <div class="po-sec-title">Summary</div>
             <div class="po-totals-box">
               <div class="row"><span>Subtotal</span><span id="poTotSub">₱0.00</span></div>
-              <div class="row po-in"><span>Less: Discount (₱)</span><input type="text" id="poDiscount" inputmode="decimal" placeholder="0.00"></div>
+              <div class="row po-in"><span>Less: Discount <span class="po-disc-hint">% or ₱</span></span><input type="text" id="poDiscount" autocomplete="off" placeholder="e.g. 22% + 3%"></div>
+              <div id="poTotDiscRows"></div>
               <div id="poTotVatRows"></div>
               <div class="row strong"><span>Total Amount</span><span id="poTotTotal">₱0.00</span></div>
               <div class="row po-in"><span>Less: EWT</span>
@@ -3400,6 +3415,28 @@ window.awesCss = {
 <!-- Seed helper: distinct materials already typed on Service Reports that
      aren't in the catalog yet, most-used first. "Add" opens the material
      sheet pre-filled. Wired in purchasing.js (mtSeed*). -->
+<!-- Manage Categories sheet (admin, Purchasing › Materials Database).
+     Wired in purchasing.js (mc* functions). -->
+<div class="overlay" id="mcSheetOverlay" style="z-index:84;">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3>Manage Categories</h3>
+      <button class="sheet-close" id="mcSheetClose" type="button">&times;</button>
+    </div>
+    <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+      Categories group the Materials Database and the suppliers' <b>Supplies</b> list.
+      The <b>code</b> starts new item codes (e.g. WLD &rarr; WLD-001). <b>Hide</b> a category to stop using it —
+      its items keep it. A category can only be deleted when no item uses it.
+    </p>
+    <div class="mc-add" id="mcAddRow">
+      <input type="text" id="mcNewName" maxlength="60" placeholder="New category, e.g. Welding" autocomplete="off">
+      <input type="text" id="mcNewPrefix" maxlength="6" placeholder="Code" autocomplete="off">
+      <button type="button" class="btn btn-primary" id="mcAddBtn">+ Add</button>
+    </div>
+    <div id="mcList"><div class="empty-state">Loading…</div></div>
+  </div>
+</div>
+
 <div class="overlay" id="mtSeedOverlay" style="z-index:82;">
   <div class="sheet">
     <div class="sheet-head">
