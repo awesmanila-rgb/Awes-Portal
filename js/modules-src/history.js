@@ -586,11 +586,11 @@
     }
   }
 
-  async function dtrRenderHistory(){
+  async function dtrRenderHistory(opts){
     const list = $('dtrHistoryList');
     const target = dtrViewingUser || (currentUser && currentUser.role!=='admin' ? {id:currentUser.id, name:currentUser.name} : null);
     if(!target){ list.innerHTML = '<div class="empty-state">Select a technician to view their DTR.</div>'; return; }
-    list.innerHTML = '<div class="empty-state">Loading…</div>';
+    if(!(opts && opts.quiet)) list.innerHTML = '<div class="empty-state">Loading…</div>';
     const since = new Date(); since.setDate(since.getDate()-30);
     const sinceY = since.getFullYear(), sinceM = String(since.getMonth()+1).padStart(2,'0'), sinceD = String(since.getDate()).padStart(2,'0');
     const sinceISO = sinceY+'-'+sinceM+'-'+sinceD;
@@ -747,16 +747,74 @@
     const h = Math.floor(mins/60), m = mins%60;
     return h+'h '+String(m).padStart(2,'0')+'m';
   }
-  async function dtrRenderAdminTable(){
+  // ---- live attendance (admin) ----
+  // The table used to load once when the page opened. Now it refreshes:
+  //   * instantly when any technician times in/out (realtime on dtr_records —
+  //     needs migration 20260925_03_dtr_realtime.sql to publish the table),
+  //   * every 30 s while visible, so running Hours / OT Hours keep counting
+  //     and the date rolls over at midnight (also a fallback if realtime drops),
+  //   * when the tab/app comes back to the foreground.
+  // Live refreshes are quiet: no "Loading…" flash, rows swap in place.
+  let dtrAdminRt = null, dtrAdminRtTimer = null, dtrAdminRenderSeq = 0, dtrAdminTickStarted = false;
+  function dtrAdminTableVisible(){
+    return !!(currentUser && currentUser.role === 'admin' && $('dtrView') && $('dtrView').style.display !== 'none'
+      && $('dtrAdminTableCard').style.display !== 'none') && !document.hidden;
+  }
+  function dtrAdminDetailVisible(){
+    return !!(currentUser && currentUser.role === 'admin' && dtrViewingUser && $('dtrView') && $('dtrView').style.display !== 'none'
+      && $('dtrHistoryCard').style.display !== 'none') && !document.hidden;
+  }
+  function dtrAdminRefreshSoon(payload){
+    clearTimeout(dtrAdminRtTimer);
+    dtrAdminRtTimer = setTimeout(()=>{
+      if(dtrAdminTableVisible()) dtrRenderAdminTable({ quiet:true });
+      // A technician's DTR is open: refresh it if the change was theirs.
+      if(dtrAdminDetailVisible()){
+        const row = payload && (payload.new || payload.old);
+        const tid = row && row.technician_id;
+        if(!tid || tid === dtrViewingUser.id) dtrRenderHistory({ quiet:true });
+      }
+    }, 700);   // a burst of changes → one refresh
+  }
+  function dtrAdminLiveStart(){
+    if(!dtrAdminTickStarted){
+      dtrAdminTickStarted = true;
+      setInterval(()=>{ if(dtrAdminTableVisible()) dtrRenderAdminTable({ quiet:true }); }, 30000);
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) dtrAdminRefreshSoon(); });
+      window.addEventListener('online', ()=> dtrAdminRefreshSoon());
+    }
+    if(dtrAdminRt || typeof db === 'undefined' || !db || !db.channel) return;
+    try{
+      dtrAdminRt = db.channel('dtr-admin-live-' + (currentUser && currentUser.id || 'x'))
+        .on('postgres_changes', { event:'*', schema:'public', table:'dtr_records' }, dtrAdminRefreshSoon)
+        .subscribe((status)=>{
+          const dot = $('dtrLiveBadge');
+          if(dot) dot.classList.toggle('on', status === 'SUBSCRIBED');
+          // Dropped (network change, sleep): rebuild the channel on the next refresh.
+          if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+            try{ db.removeChannel(dtrAdminRt); }catch(_){}
+            dtrAdminRt = null;
+            setTimeout(()=>{ if(currentUser && currentUser.role === 'admin') dtrAdminLiveStart(); }, 5000);
+          }
+        });
+    }catch(e){ dtrAdminRt = null; }
+  }
+
+  async function dtrRenderAdminTable(opts){
+    const quiet = !!(opts && opts.quiet);
+    const seq = ++dtrAdminRenderSeq;
     const body = $('dtrAttendanceTableBody');
     const dateISO = todayISO();
     const dateEl = $('dtrAttendanceDate');
     if(dateEl) dateEl.textContent = dtrFmtDateLabel(dateISO);
-    body.innerHTML = '<tr><td colspan="9"><div class="empty-state">Loading…</div></td></tr>';
+    if(!quiet || !body.children.length) body.innerHTML = '<tr><td colspan="9"><div class="empty-state">Loading…</div></td></tr>';
+    if(currentUser && currentUser.role === 'admin') dtrAdminLiveStart();
     const [users, records] = await Promise.all([
-      cloudListUsers().catch(()=>[]),
-      dtrListAllForDate(dateISO).catch(()=>[])
+      cloudListUsers().catch(()=>null),
+      dtrListAllForDate(dateISO).catch(()=>null)
     ]);
+    if(seq !== dtrAdminRenderSeq) return;            // a newer refresh already started
+    if(quiet && (users === null || records === null)) return;   // keep what's shown on a failed live refresh
     const active = (users||[]).filter(u=> u.active!==false)
       .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
     const summaryEl = $('dtrAttendanceSummary');
@@ -770,7 +828,7 @@
 
     const now = new Date();
     let presentCount = 0, completedCount = 0, absentCount = 0, otCount = 0;
-    body.innerHTML = '';
+    const frag = document.createDocumentFragment();
     active.forEach(u=>{
       const rec = recByTech[u.id];
       let statusLabel, inTxt = '—', outTxt = '—', hoursTxt = '—';
@@ -814,8 +872,10 @@
       const [viewDtrBtn, viewProfileBtn] = row.querySelectorAll('.att-view-btn');
       viewDtrBtn.addEventListener('click', ()=> dtrShowTechnicianDetail({id:u.id, name:u.name}));
       viewProfileBtn.addEventListener('click', ()=> techOpenProfile({id:u.id, name:u.name}));
-      body.appendChild(row);
+      frag.appendChild(row);
     });
+    body.innerHTML = '';
+    body.appendChild(frag);            // swap all rows at once — no flicker on live refresh
     if(summaryEl) summaryEl.textContent = presentCount+' Present · '+completedCount+' Completed · '+otCount+' On Overtime · '+absentCount+' Absent · '+active.length+' Total';
   }
   function dtrShowTechnicianDetail(u){
