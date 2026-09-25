@@ -234,6 +234,16 @@
   // field in admin.js's equipment detail overlay) → the unit's location
   // (e.g. "Living Room") → equipShortId() as a last resort, so every list
   // row still shows *some* stable identifier rather than nothing.
+  // Inverter yes/no, read from the unit's Compressor Type field (options
+  // "Inverter" / "Non-Inverter", filled from service reports or by admin).
+  // true = inverter, false = non-inverter, null = not recorded / unclear.
+  function equipIsInverter(value){
+    const t = String(value||'').toLowerCase();
+    if(!t.trim()) return null;
+    if(/non[\s-]*inverter|fixed[\s-]*speed|conventional/.test(t)) return false;
+    if(/inverter|\bdc\b|variable[\s-]*speed/.test(t)) return true;
+    return null;
+  }
   function equipDisplayName(eq){
     if(!eq) return '';
     const label = (eq.label||'').trim();

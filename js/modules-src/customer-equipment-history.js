@@ -148,6 +148,7 @@
 
     const specs = [
       ['Brand', eq.brand], ['Mount type', eq.mountType], ['Cooling capacity', eq.coolCap],
+      ['Inverter', eq.inverter===true ? 'Yes' : eq.inverter===false ? 'No' : ''],
       ['Model (CU)', eq.modelCU], ['Serial (CU)', eq.serialCU],
       ['Model (FCU)', eq.modelFCU], ['Serial (FCU)', eq.serialFCU],
     ].filter(([,v]) => v);

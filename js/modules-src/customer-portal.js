@@ -71,6 +71,10 @@
         brand: row.brand, mountType: row.mount_type, coolCap: row.cool_cap,
         modelCU: row.model_cu, serialCU: row.serial_cu, modelFCU: row.model_fcu, serialFCU: row.serial_fcu,
         nextPmDate: row.next_pm_date || '',
+        // Inverter yes/no from the unit's Compressor Type (see
+        // equipIsInverter, core.js) — used by the Tools calculators.
+        compressorType: row.compressor_type || '',
+        inverter: equipIsInverter(row.compressor_type),
         // Admin-set display name for this unit (see
         // 20260909_02_customer_equipment_label.sql) — equipDisplayName()
         // (core.js) shows this instead of the raw id once it's set.
@@ -225,6 +229,10 @@
     // Booking/"no active service" icon — a card-like tile with a horizontal
     // band, matching the reference mock's rounded booking icon.
     card:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg>',
+    bulb:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2h5c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg>',
+    clipboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9z"/><path d="M9 12h6M9 16h4"/></svg>',
+    flame:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c4 0 7-2.7 7-6.8 0-3.2-2-5.5-3.6-7.3-.4 2-1.5 3.2-2.9 3.6C13 8 12.2 5 9.5 2.5 9.6 6.2 5 9 5 15.2 5 19.3 8 22 12 22z"/></svg>',
+    calculator:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8"/><path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/></svg>',
     download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>',
     plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
     // Swap/exchange arrows — cpQuickAccounts tile (switching between this
@@ -1192,8 +1200,8 @@
   const CP_NAV_ITEMS = [
     { screen:'Home', id:'cpNavHome', icon:'home' },
     { screen:'Units', id:'cpNavUnits', icon:'grid' },
-    { screen:'Requests', id:'cpNavRequests', icon:'tools' },
-    { screen:'History', id:'cpNavHistory', icon:'clock' },
+    { screen:'Requests', id:'cpNavRequests', icon:'clipboard' },
+    { screen:'Tools', id:'cpNavTools', icon:'bulb' },
     { screen:'Profile', id:'cpNavProfile', icon:'person', label:'Account' }
   ];
   function cpInitNav(){
@@ -1440,233 +1448,533 @@
     chip.addEventListener('click', ()=> cpHistShowFilter(chip.dataset.cat));
   });
 
-  // ---------- Tools & learning ----------
-  // Kept intentionally simple v1 calculators — real formulas, no account
-  // data required — plus a short reference-guide article list. Both lists
-  // are static content owned here; extend CP_CALCULATORS/CP_ARTICLES to add
-  // more without touching the screen-rendering code below.
-  const CP_CALCULATORS = [
-    { id:'electricity', icon:'bolt', title:'Electricity cost', desc:'Estimate monthly running cost from your unit\'s capacity and hours used.' },
-    { id:'capacity', icon:'ruler', title:'Capacity guide', desc:'How many HP/kW you need for a room of a given size.' },
-    { id:'savings', icon:'piggy', title:'Maintenance savings', desc:'What regular PM saves you vs. reactive repairs over a year.' }
-  ];
-  const CP_ARTICLES = [
-    { id:'filter', icon:'leaf', title:'Cleaning your air filter', desc:'A simple monthly habit that keeps your unit efficient.', body:[
-      'The air filter is the mesh screen just behind the front panel of the indoor unit. Its job is to catch dust and lint before air passes over the evaporator coil. When it clogs, less air moves through the unit — it cools less, runs longer to hit your set temperature, and uses more electricity in the process. A dirty filter is also one of the most common causes of a coil icing up.',
-      '<b>How often:</b> every 2–4 weeks with regular daily use, more often if the unit runs constantly, if the room is dusty, or if there\'s ongoing construction or pets nearby. Once a month is a safe default for most households.',
-      '<b>How to clean it:</b>',
-      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
-        '<li>Turn off the unit at the remote and, if possible, at the breaker.</li>'+
-        '<li>Open the front panel and slide the filter(s) out — most split-type indoor units have one or two.</li>'+
-        '<li>Vacuum off loose dust first, then rinse with running water. A soft brush helps with caked-on grime.</li>'+
-        '<li>Let it air-dry completely out of direct sunlight before reinserting — sunlight can warp the plastic frame, and reinserting it wet encourages mold.</li>'+
-        '<li>Close the panel and power the unit back on.</li>'+
-      '</ul>',
-      'If the filter looks torn, brittle, or won\'t come clean after washing, it\'s time to replace it rather than keep reusing it.'
-    ]},
-    { id:'signs', icon:'alert', title:'Signs your unit needs service', desc:'What to watch and listen for between PM visits.', body:[
-      'Most breakdowns give some warning first. If you notice any of the following, it\'s worth requesting a visit rather than waiting for the next scheduled PM:',
-      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
-        '<li><b>Weaker airflow or warm air</b> blowing even with the unit set to cool — can point to a dirty filter/coil, a fan issue, or low refrigerant.</li>'+
-        '<li><b>Unusual noises</b> — rattling or buzzing often means a loose part; a hissing sound can indicate a refrigerant leak and is worth flagging promptly.</li>'+
-        '<li><b>Water dripping or pooling</b> from the indoor unit — usually a clogged condensate drain line.</li>'+
-        '<li><b>Musty or foul odor</b> when the unit runs — often mold or mildew buildup inside the unit.</li>'+
-        '<li><b>Ice forming</b> on the indoor coil or outdoor pipes — a sign of restricted airflow or a refrigerant problem, and running it further in that state can damage the compressor.</li>'+
-        '<li><b>Short cycling</b> — the unit turns on and off in short bursts instead of running a normal cycle.</li>'+
-        '<li><b>A noticeably higher bill</b> without a change in how much you\'re using the unit.</li>'+
-      '</ul>',
-      'None of these are emergencies on their own, but they\'re cheaper to fix early than after they cause a bigger failure — a stuck-open drain line, for instance, is a quick fix; the water damage it eventually causes isn\'t.'
-    ]},
-    { id:'pm', icon:'calendar', title:'Why preventive maintenance matters', desc:'What a PM visit actually covers, and how often you need one.', body:[
-      'A preventive maintenance (PM) visit is a scheduled check-up rather than a repair — the goal is to catch small issues and keep the unit running efficiently before something forces a breakdown.',
-      '<b>What\'s typically covered:</b>',
-      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
-        '<li>Cleaning/washing the indoor evaporator coil and outdoor condenser coil</li>'+
-        '<li>Cleaning or replacing air filters</li>'+
-        '<li>Checking refrigerant pressure and topping up if needed</li>'+
-        '<li>Clearing the condensate drain line</li>'+
-        '<li>Inspecting electrical connections, the capacitor, and the fan motor</li>'+
-        '<li>Checking overall airflow and cooling performance</li>'+
-      '</ul>',
-      '<b>How often:</b> as a general guide, every 3 months for units that run heavily or continuously (e.g. commercial or always-on residential use), and every 4–6 months for typical household use. Units in dusty areas, near construction, or with visible performance dips benefit from more frequent visits — your technician can recommend an interval based on how the unit is actually used.',
-      'Regular PM matters because dust buildup on the coils is one of the biggest, most avoidable drags on efficiency, and because most manufacturers require documented maintenance to honor a compressor warranty. It also tends to extend how long the unit lasts before a major repair or replacement is needed.'
-    ]},
-    { id:'inverter', icon:'bolt', title:'Inverter vs. non-inverter: what it means for your bill', desc:'The one spec that changes your electricity cost the most.', body:[
-      'Both types cool the room the same way — the difference is how the compressor runs.',
-      '<b>Non-inverter:</b> the compressor runs at a fixed speed. To hold your set temperature, it switches fully on and off in cycles. It\'s cheaper to buy, but running at full power every time it kicks in uses more electricity over the course of a day.',
-      '<b>Inverter:</b> the compressor speed adjusts continuously to match how much cooling the room actually needs, instead of switching fully off. Once the room reaches temperature, it idles at a low speed rather than cycling — which is why inverter units commonly use meaningfully less electricity than a non-inverter unit of the same HP rating, especially when it runs for long stretches. They cost more upfront, and that gap is usually made up over a few years of regular use through lower bills.',
-      'When comparing units, the Philippine Energy Label on the box or spec sheet lists the CSPF/EER rating — a higher number means more cooling per watt, which is a more precise gauge than "inverter" alone since efficiency also varies by brand and model.'
-    ]},
-    { id:'repair-replace', icon:'piggy', title:'When to repair vs. replace your unit', desc:'How to decide once a repair estimate is on the table.', body:[
-      'A few practical factors, together, usually make the decision clearer than any single rule:',
-      '<ul style="margin:6px 0 0; padding-left:18px; font-size:13px; line-height:1.7;">'+
-        '<li><b>Age.</b> A well-maintained split-type unit typically lasts around 10–15 years before efficiency drops off and parts get harder to source. A costly repair on a unit already near or past that range is worth weighing against a new, more efficient replacement.</li>'+
-        '<li><b>Repair cost relative to a new unit.</b> If a single repair runs close to a large fraction of what a new comparable unit costs, replacement often makes more sense, especially on an older unit.</li>'+
-        '<li><b>Repair frequency.</b> A unit needing repeat service calls within a year is usually cheaper to replace than to keep patching.</li>'+
-        '<li><b>Refrigerant type.</b> Older units using phased-out refrigerants (like R-22) can be more expensive to service since the refrigerant itself is costlier and less available.</li>'+
-      '</ul>',
-      'If you\'re unsure where a specific repair estimate falls, it\'s worth asking your technician directly — they can tell you what shape the rest of the unit is in, not just the part that failed.'
-    ]}
-  ];
-  function renderCustomerToolsScreen(){
-    $('cpCalcGrid').innerHTML = CP_CALCULATORS.map(c=>
-      '<button type="button" class="cp-tool-card" data-calc="'+c.id+'">'+
-        '<div class="ic">'+CP_ICON[c.icon]+'</div>'+
-        '<p class="t">'+c.title+'</p><p class="d">'+c.desc+'</p>'+
-      '</button>'
-    ).join('');
-    $$('.cp-tool-card', $('cpCalcGrid')).forEach(btn=> btn.onclick = ()=> cpOpenCalc(btn.dataset.calc));
-    $('cpArticleList').innerHTML = CP_ARTICLES.map(a=>
-      '<button type="button" class="cp-article-row" data-article="'+a.id+'">'+
-        '<div class="ic">'+CP_ICON[a.icon]+'</div>'+
-        '<div><p class="t">'+a.title+'</p><p class="d">'+a.desc+'</p></div>'+
-        '<span class="chev">'+CP_ICON.chevron+'</span>'+
-      '</button>'
-    ).join('');
-    $$('.cp-article-row', $('cpArticleList')).forEach(btn=> btn.onclick = ()=> cpOpenArticle(btn.dataset.article));
+  // ---------- Tools: calculators + tips ----------
+  // Every calculator screen has the same shape: a live result card on top,
+  // large inputs below, a "How this is calculated" section that lists every
+  // assumption, and one next-step button. Figures are estimates and say so;
+  // every assumption is visible and most are editable.
+
+  // Electricity rate default — Meralco's overall rate for a typical
+  // household, September 2026 (₱14.7424/kWh). Update when rates move; the
+  // customer can always type the rate from their own bill (remembered on
+  // their device).
+  const CP_DEFAULT_RATE = 14.74;
+  // Rated efficiency assumed when a unit's own label figure isn't known.
+  // EER 10 BTU/h per watt ≈ a typical non-inverter split/window unit.
+  const CP_EER_DEFAULT = 10;
+  // Share of running hours the compressor is actually on (non-inverter
+  // units cycle on and off to hold the set temperature).
+  const CP_DUTY = 0.8;
+  // Inverter units use roughly 30–50% less energy than non-inverter units
+  // of the same capacity; 35% less is used as a middle, conservative value.
+  const CP_INVERTER_FACTOR = 0.65;
+
+  // Philippine aircon "HP" is a trade size, not true horsepower: 1 HP is
+  // about 9,000 BTU/h and the common sizes don't scale exactly by HP.
+  const CP_HP_BTU = { 0.5:5000, 0.75:7000, 1:9000, 1.5:12000, 2:18000, 2.5:22000, 3:27000, 4:36000, 5:45000 };
+  const CP_BTU_PER_TR = 12000, CP_BTU_PER_KW = 3412;
+  function cpHpToBtu(hp){ return CP_HP_BTU[hp] || hp * 9000; }
+  function cpToBtu(value, unit){
+    const v = Number(value) || 0;
+    if(unit==='tr') return v * CP_BTU_PER_TR;
+    if(unit==='kw') return v * CP_BTU_PER_KW;
+    if(unit==='btu') return v;
+    return cpHpToBtu(v);
   }
-  $('cpToolsSearch').addEventListener('input', function(){
-    const q = this.value.trim().toLowerCase();
-    $$('.cp-tool-card', $('cpCalcGrid')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
-    $$('.cp-article-row', $('cpArticleList')).forEach(el=> el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none');
+  // Reads a unit's capacity from its record ("5.0TR", "1.5 HP", "24000 BTU",
+  // "7.1 kW"). Returns BTU/h, or 0 when it can't tell.
+  function cpParseCapacity(text){
+    const t = String(text||'').toLowerCase().replace(/,/g,'');
+    const m = /([\d.]+)\s*(tr|ton|tons|hp|btu|kbtu|kw)?/.exec(t);
+    if(!m) return 0;
+    const v = parseFloat(m[1]); if(!(v>0)) return 0;
+    const u = m[2] || (v >= 1000 ? 'btu' : '');
+    if(u==='tr' || u==='ton' || u==='tons') return v * CP_BTU_PER_TR;
+    if(u==='kbtu') return v * 1000;
+    if(u==='btu') return v;
+    if(u==='kw') return v * CP_BTU_PER_KW;
+    if(u==='hp') return cpHpToBtu(v);
+    return 0;
+  }
+  function cpFmtCap(btu){
+    if(btu >= 24000) return (Math.round(btu/CP_BTU_PER_TR*10)/10)+' TR';
+    const hp = Object.keys(CP_HP_BTU).map(Number).find(h=> CP_HP_BTU[h]===btu);
+    return hp ? hp+' HP' : Math.round(btu).toLocaleString('en-PH')+' BTU/h';
+  }
+  const cpPeso = (n)=> '₱'+Math.round(n).toLocaleString('en-PH');
+  const cpNum = (id)=>{ const el = $live(id); return el ? (parseFloat(el.value)||0) : 0; };
+  // Small device-local memory for inputs the customer typed (rate, hours,
+  // inverter yes/no per unit), so they don't re-enter them every visit.
+  function cpPref(key, fallback){ try{ const v = localStorage.getItem('cp-tools:'+key); return v===null ? fallback : JSON.parse(v); }catch(e){ return fallback; } }
+  function cpSetPref(key, val){ try{ localStorage.setItem('cp-tools:'+key, JSON.stringify(val)); }catch(e){} }
+
+  // Monthly kWh for one unit.
+  function cpUnitKwh(btu, inverter, hours, days, watts){
+    const kw = watts > 0 ? watts/1000 : btu / CP_EER_DEFAULT / 1000;
+    const base = kw * CP_DUTY * hours * days;
+    return inverter ? base * CP_INVERTER_FACTOR : base;
+  }
+  // Each of the customer's units with its capacity and inverter status.
+  // `recorded` = the inverter yes/no came from the unit record (set by
+  // admin or a technician); otherwise the customer's own choice on this
+  // device is used, defaulting to non-inverter.
+  function cpMyUnits(){
+    return cpEquipment.map(eq=>{
+      const recorded = eq.inverter === true || eq.inverter === false;
+      return { eq, btu: cpParseCapacity(eq.coolCap), recorded,
+        inverter: recorded ? eq.inverter : !!cpPref('inv:'+eq.id, false) };
+    });
+  }
+
+  // ---- shared calculator screen parts ----
+  function cpCalcShell(id, o){
+    $live('cpCalcTitle').textContent = o.title;
+    $live('cpCalcBody').innerHTML =
+      '<div class="ct-result" id="ctResult"></div>'+
+      '<div class="ct-card ct-form">'+o.form+'</div>'+
+      (o.extra || '')+
+      '<details class="ct-how"><summary>How this is calculated</summary><div>'+o.how+'</div></details>'+
+      (o.cta ? '<button type="button" class="ct-cta" id="ctCta">'+o.cta+'</button>' : '');
+    if(o.cta && o.onCta) $live('ctCta').onclick = o.onCta;
+    const run = ()=>{ try{ o.calc(); }catch(e){ console.error('calc failed', e); } };
+    $live('cpCalcBody').oninput = run;
+    $live('cpCalcBody').onchange = run;
+    $live('cpCalcBody').onclick = (e)=>{
+      const seg = e.target.closest('[data-seg]');
+      if(seg){
+        const group = seg.parentElement;
+        $$('[data-seg]', group).forEach(b=> b.classList.toggle('on', b===seg));
+        group.dataset.value = seg.dataset.seg;
+        if(o.onSeg) o.onSeg(group.id, seg.dataset.seg);
+        run();
+      }
+    };
+    run();
+    cpShowCalcScreen();
+  }
+  function cpSeg(id, options, value){
+    return '<div class="ct-seg" id="'+id+'" data-value="'+value+'">'+options.map(([v,l])=>
+      '<button type="button" data-seg="'+v+'" class="'+(v===value ? 'on' : '')+'">'+l+'</button>').join('')+'</div>';
+  }
+  function cpSegVal(id){ const el = $live(id); return el ? el.dataset.value : ''; }
+  function cpField(label, input, hint){
+    return '<div class="ct-field"><label>'+label+'</label>'+input+(hint ? '<p class="ct-hint">'+hint+'</p>' : '')+'</div>';
+  }
+  function cpInput(id, value, suffix, attrs){
+    return '<div class="ct-input"><input type="number" inputmode="decimal" id="'+id+'" value="'+value+'" '+(attrs||'min="0"')+'>'+(suffix ? '<span>'+suffix+'</span>' : '')+'</div>';
+  }
+  function cpResult(main, label, rows, tone){
+    $live('ctResult').className = 'ct-result'+(tone ? ' ct-result-'+tone : '');
+    $live('ctResult').innerHTML = '<p class="ct-result-l">'+label+'</p><p class="ct-result-n">'+main+'</p>'+
+      (rows && rows.length ? '<div class="ct-result-rows">'+rows.map(r=> '<span>'+r+'</span>').join('')+'</div>' : '');
+  }
+  const cpCapUnitSel = (id, val)=> '<select id="'+id+'">'+[['hp','HP'],['tr','TR (tons)'],['btu','BTU/h'],['kw','kW']].map(([v,l])=>
+    '<option value="'+v+'"'+(v===val?' selected':'')+'>'+l+'</option>').join('')+'</select>';
+
+  // ---- 1. Electricity cost ----
+  function cpCalcElectricity(){
+    const mine = cpMyUnits().filter(u=> u.btu>0);
+    const mode0 = mine.length ? 'mine' : 'manual';
+    const unknown = mine.filter(u=> !u.recorded).length;
+    const rows = mine.map((u,i)=>
+      '<div class="ct-unit"><div class="ct-unit-t"><b>'+cpEquipLabel(u.eq)+'</b><span>'+escapeHtml(cpFmtCap(u.btu))+
+        (u.recorded ? ' · '+(u.inverter ? 'Inverter' : 'Non-inverter')+' (on record)' : ' · type not on record')+'</span></div>'+
+        cpSeg('ceInv'+i, [['0','Non-inverter'],['1','Inverter']], u.inverter ? '1' : '0')+
+        '<span class="ct-unit-cost" id="ceCost'+i+'">—</span></div>'
+    ).join('')+(unknown ? '<p class="ct-hint">Not sure which type you have? It\u2019s usually printed on the unit\u2019s label or remote. We record it on your next service visit.</p>' : '');
+    const skipped = cpEquipment.length - mine.length;
+    cpCalcShell('electricity', {
+      title:'Electricity cost',
+      form:
+        (mine.length ? cpField('Which units', cpSeg('ceMode', [['mine','My units ('+mine.length+')'],['manual','Enter manually']], mode0)) : '')+
+        '<div id="ceMine"'+(mode0==='mine' ? '' : ' style="display:none"')+'>'+rows+
+          (skipped ? '<p class="ct-hint">'+skipped+' unit'+(skipped===1?' has':'s have')+' no capacity on record, so '+(skipped===1?'it is':'they are')+' left out.</p>' : '')+'</div>'+
+        '<div id="ceManual"'+(mode0==='manual' ? '' : ' style="display:none"')+'>'+
+          '<div class="ct-row2">'+cpField('Capacity', cpInput('ceCap', cpPref('ceCap', 1.5), '', 'min="0" step="0.5"'))+cpField('Unit', cpCapUnitSel('ceCapUnit', cpPref('ceCapUnit','hp')))+'</div>'+
+          '<div class="ct-row2">'+cpField('Type', cpSeg('ceType', [['0','Non-inverter'],['1','Inverter']], '0'))+cpField('How many', cpInput('ceQty', 1, 'units', 'min="1" step="1"'))+'</div>'+
+          cpField('Rated power (optional)', cpInput('ceWatts', '', 'watts'), 'From the label or spec sheet ("Power input"). Leave blank if you don\u2019t have it.')+
+        '</div>'+
+        '<div class="ct-row2">'+cpField('Hours per day', cpInput('ceHours', cpPref('ceHours', 8), 'hrs', 'min="0" max="24"'))+cpField('Days per month', cpInput('ceDays', cpPref('ceDays', 30), 'days', 'min="0" max="31"'))+'</div>'+
+        cpField('Electricity rate', cpInput('ceRate', cpPref('ceRate', CP_DEFAULT_RATE), '₱ per kWh', 'min="0" step="0.01"'), 'Use the rate on your latest bill. Default is Meralco\u2019s typical household rate for September 2026.'),
+      extra:'<div class="ct-card ct-note" id="ceInvNote" style="display:none"></div>',
+      how:
+        '<p>Power used = cooling capacity ÷ efficiency. Without a rated power figure we assume <b>EER 10</b> (10 BTU/h per watt), typical of a non-inverter unit, so a 5 TR unit (60,000 BTU/h) draws about 6 kW.</p>'+
+        '<p>The compressor is assumed to run <b>80%</b> of the hours you enter, since it cycles off once the room is cool.</p>'+
+        '<p>Inverter units are counted at <b>35% less</b> energy than non-inverter units of the same size; real savings are usually 30–50%.</p>'+
+        '<p>Monthly cost = kWh × your rate. Actual bills vary with the set temperature, outdoor heat, how well the room is sealed, and how clean the unit is.</p>',
+      cta:'Book maintenance', onCta:()=> cpOpenNewRequest({ description:'Preventive maintenance' }),
+      onSeg:(gid, v)=>{
+        if(gid==='ceMode'){ $live('ceMine').style.display = v==='mine' ? '' : 'none'; $live('ceManual').style.display = v==='manual' ? '' : 'none'; }
+        // Only remember the customer's pick for units with no type on
+        // record — a recorded type stays the default, a switch there is
+        // just a "what if".
+        const m = /^ceInv(\d+)$/.exec(gid);
+        if(m && !mine[Number(m[1])].recorded) cpSetPref('inv:'+mine[Number(m[1])].eq.id, v==='1');
+      },
+      calc:()=>{
+        const hours = Math.min(24, cpNum('ceHours')), days = Math.min(31, cpNum('ceDays')), rate = cpNum('ceRate');
+        cpSetPref('ceHours', hours); cpSetPref('ceDays', days); cpSetPref('ceRate', rate);
+        let kwh = 0, kwhAllInv = 0, nonInv = 0;
+        if((cpSegVal('ceMode') || mode0) === 'mine' && mine.length){
+          mine.forEach((u,i)=>{
+            const inv = cpSegVal('ceInv'+i) === '1';
+            const k = cpUnitKwh(u.btu, inv, hours, days, 0);
+            kwh += k; kwhAllInv += cpUnitKwh(u.btu, true, hours, days, 0); if(!inv) nonInv++;
+            const c = $live('ceCost'+i); if(c) c.textContent = cpPeso(k*rate)+'/mo';
+          });
+        } else {
+          const btu = cpToBtu(cpNum('ceCap'), $live('ceCapUnit').value), qty = Math.max(1, Math.round(cpNum('ceQty')));
+          cpSetPref('ceCap', cpNum('ceCap')); cpSetPref('ceCapUnit', $live('ceCapUnit').value);
+          const inv = cpSegVal('ceType') === '1', watts = cpNum('ceWatts');
+          kwh = cpUnitKwh(btu, inv, hours, days, watts) * qty;
+          kwhAllInv = inv ? kwh : cpUnitKwh(btu, false, hours, days, watts) * CP_INVERTER_FACTOR * qty;
+          nonInv = inv ? 0 : qty;
+        }
+        const cost = kwh * rate;
+        cpResult(cpPeso(cost), 'Estimated per month', [
+          Math.round(kwh).toLocaleString('en-PH')+' kWh',
+          cpPeso(days ? cost/days : 0)+' a day',
+          cpPeso(cost*12)+' a year'
+        ]);
+        const note = $live('ceInvNote');
+        const save = (kwh - kwhAllInv) * rate;
+        if(nonInv && save > 0){
+          note.style.display = '';
+          note.innerHTML = '<b>Switching '+(nonInv===1 ? 'this unit' : 'these '+nonInv+' units')+' to inverter</b><span>could save about '+cpPeso(save)+' a month ('+cpPeso(save*12)+' a year). See the Inverter upgrade calculator for payback.</span>';
+        } else note.style.display = 'none';
+      }
+    });
+  }
+
+  // ---- 2. Right size for a room ----
+  const CP_SIZES = [[9000,'1 HP'],[12000,'1.5 HP'],[18000,'2 HP'],[22000,'2.5 HP'],[27000,'3 HP']];
+  function cpCalcCapacity(){
+    cpCalcShell('capacity', {
+      title:'Right size for a room',
+      form:
+        '<div class="ct-row2">'+cpField('Floor area', cpInput('ccArea', 20, 'sqm'))+cpField('Ceiling height', cpInput('ccHeight', 2.7, 'm', 'min="2" step="0.1"'))+'</div>'+
+        cpField('Sun on the room', cpSeg('ccSun', [['shade','Mostly shaded'],['normal','Normal'],['hot','Afternoon sun / top floor']], 'normal'))+
+        '<div class="ct-row2">'+cpField('People usually inside', cpInput('ccPeople', 2, '', 'min="0" step="1"'))+cpField('Equipment heat', cpInput('ccWatts', 0, 'watts'))+'</div>'+
+        '<p class="ct-hint">Equipment heat: add up the wattage of things that run in the room — computers, lights, dental chairs, sterilizers, fridges. A desktop PC is about 150 W.</p>',
+      how:
+        '<p>Base: <b>600 BTU/h per square meter</b> for a typical Philippine room with a 2.7 m ceiling.</p>'+
+        '<p>Taller ceilings scale it up by height. Mostly shaded rooms take 10% less; afternoon sun or a top floor adds 15%.</p>'+
+        '<p>Each person beyond two adds <b>600 BTU/h</b>. Equipment adds <b>3.41 BTU/h per watt</b> — every watt used in the room ends up as heat.</p>'+
+        '<p>Aircon sizes: 1 HP ≈ 9,000 BTU/h, 1.5 HP ≈ 12,000, 2 HP ≈ 18,000, 2.5 HP ≈ 22,000, 3 HP ≈ 27,000. 1 TR = 12,000 BTU/h. This is a starting point, not a full heat-load survey.</p>',
+      cta:'Ask for a site survey', onCta:()=> cpOpenNewRequest({ description:'Site survey / aircon sizing for a room of '+cpNum('ccArea')+' sqm' }),
+      calc:()=>{
+        const area = cpNum('ccArea'), h = Math.max(2, cpNum('ccHeight')||2.7);
+        const sun = { shade:0.9, normal:1, hot:1.15 }[cpSegVal('ccSun')] || 1;
+        const btu = area * 600 * Math.max(1, h/2.7) * sun + Math.max(0, cpNum('ccPeople')-2) * 600 + cpNum('ccWatts') * 3.412;
+        if(area <= 0){ cpResult('—', 'Suggested size', []); return; }
+        const kw = btu / CP_BTU_PER_KW, tr = btu / CP_BTU_PER_TR;
+        const fit = CP_SIZES.find(s=> s[0] >= btu * 0.95);
+        if(fit){
+          cpResult(fit[1], 'Suggested size', [Math.round(btu).toLocaleString('en-PH')+' BTU/h needed', (Math.round(tr*10)/10)+' TR', (Math.round(kw*10)/10)+' kW']);
+        } else {
+          const trNeed = Math.ceil(tr*2)/2;
+          cpResult(trNeed+' TR total', 'More than one wall unit can cover', [Math.round(btu).toLocaleString('en-PH')+' BTU/h', (Math.round(kw*10)/10)+' kW',
+            'e.g. '+Math.ceil(btu/27000)+' × 3 HP units, or a ducted / floor-mounted system']);
+        }
+      }
+    });
+  }
+
+  // ---- 3. Maintenance value ----
+  function cpCalcSavings(){
+    const mine = cpMyUnits().filter(u=> u.btu>0);
+    const avgKwh = mine.length ? mine.reduce((s,u)=> s + cpUnitKwh(u.btu, u.inverter, cpPref('ceHours',8), cpPref('ceDays',30), 0), 0) / mine.length : cpUnitKwh(12000, false, 8, 30, 0);
+    const energy0 = Math.round(avgKwh * cpPref('ceRate', CP_DEFAULT_RATE) / 10) * 10;
+    cpCalcShell('savings', {
+      title:'Maintenance value',
+      form:
+        '<div class="ct-row2">'+cpField('Number of units', cpInput('csUnits', cpEquipment.length||1, '', 'min="1" step="1"'))+cpField('PM visits a year', cpInput('csVisits', 4, 'per unit', 'min="0" step="1"'))+'</div>'+
+        '<div class="ct-row2">'+cpField('PM cost per visit', cpInput('csPmCost', 1500, '₱'))+cpField('Typical repair cost', cpInput('csRepair', 8000, '₱'))+'</div>'+
+        cpField('Electricity cost per unit', cpInput('csEnergy', energy0, '₱ a month'), mine.length ? 'Estimated from your units in the Electricity cost calculator.' : 'Use the Electricity cost calculator, or your bill.')+
+        '<p class="ct-sub">Assumptions — change them if you know better</p>'+
+        '<div class="ct-row2">'+cpField('Breakdown chance without PM', cpInput('csPNo', 30, '% a year'))+cpField('Breakdown chance with PM', cpInput('csPYes', 10, '% a year'))+'</div>'+
+        cpField('Extra energy used by a dirty unit', cpInput('csLoss', 10, '%')),
+      how:
+        '<p><b>Repairs avoided</b> = units × (breakdown chance without PM − with PM) × repair cost. The defaults (30% vs 10% a year) are an illustration, not a guarantee — adjust them to what you\u2019ve seen.</p>'+
+        '<p><b>Energy saved</b> = units × monthly electricity × 12 × the extra energy a dirty unit uses. Dust on the filter and coils makes the unit work harder; 5–15% is commonly seen, 10% is used here.</p>'+
+        '<p><b>Net</b> = repairs avoided + energy saved − PM cost. If the net is negative, PM still buys fewer surprise breakdowns, cleaner air, a longer unit life, and the service records most warranties require.</p>',
+      cta:'Book maintenance', onCta:()=> cpOpenNewRequest({ description:'Preventive maintenance' }),
+      calc:()=>{
+        const n = Math.max(0, cpNum('csUnits'));
+        const pm = n * cpNum('csVisits') * cpNum('csPmCost');
+        const repairs = n * Math.max(0, cpNum('csPNo') - cpNum('csPYes')) / 100 * cpNum('csRepair');
+        const energy = n * cpNum('csEnergy') * 12 * cpNum('csLoss') / 100;
+        const net = repairs + energy - pm;
+        cpResult((net < 0 ? '−' : '')+cpPeso(Math.abs(net)), net >= 0 ? 'Estimated net savings a year' : 'PM costs more than it saves in money', [
+          'Repairs avoided '+cpPeso(repairs), 'Energy saved '+cpPeso(energy), 'PM cost '+cpPeso(pm)
+        ], net >= 0 ? '' : 'warn');
+      }
+    });
+  }
+
+  // ---- 4. Inverter upgrade payback ----
+  function cpCalcInverter(){
+    const mine = cpMyUnits().filter(u=> u.btu>0 && !u.inverter);
+    const cap0 = mine.length ? mine.reduce((s,u)=> s+u.btu, 0) / mine.length : 12000;
+    cpCalcShell('inverter', {
+      title:'Inverter upgrade',
+      form:
+        (mine.length ? '<p class="ct-hint" style="margin-top:0">Filled in from your '+mine.length+' non-inverter unit'+(mine.length===1?'':'s')+'.</p>' : '')+
+        '<div class="ct-row2">'+cpField('Capacity per unit', cpInput('ciCap', Math.round(cap0), 'BTU/h', 'min="0" step="1000"'))+cpField('How many units', cpInput('ciQty', mine.length || 1, '', 'min="1" step="1"'))+'</div>'+
+        '<div class="ct-row2">'+cpField('Hours per day', cpInput('ciHours', cpPref('ceHours', 8), 'hrs'))+cpField('Days per month', cpInput('ciDays', cpPref('ceDays', 30), 'days'))+'</div>'+
+        cpField('Electricity rate', cpInput('ciRate', cpPref('ceRate', CP_DEFAULT_RATE), '₱ per kWh', 'min="0" step="0.01"'))+
+        cpField('Price of a new inverter unit', cpInput('ciPrice', 45000, '₱ per unit, installed'), 'Use the quotation you received. Ask us for one if you don\u2019t have it.')+
+        cpField('Energy saved by inverter', cpInput('ciSave', 35, '%'), 'Typically 30–50% compared with a non-inverter unit.'),
+      how:
+        '<p>Current use: capacity ÷ EER 10 × 80% running × hours × days (same as the Electricity cost calculator).</p>'+
+        '<p>Inverter use: the same, minus the energy saved (35% by default).</p>'+
+        '<p><b>Payback</b> = total price of the new units ÷ money saved each month. It doesn\u2019t count repair costs avoided on an ageing unit, which usually shortens the payback.</p>',
+      cta:'Request a quote', onCta:()=> cpOpenNewRequest({ description:'Quotation request: inverter aircon replacement ('+Math.max(1,Math.round(cpNum('ciQty')))+' unit/s)' }),
+      calc:()=>{
+        const qty = Math.max(1, Math.round(cpNum('ciQty')));
+        const kwhNow = cpUnitKwh(cpNum('ciCap'), false, cpNum('ciHours'), cpNum('ciDays'), 0) * qty;
+        const monthly = kwhNow * cpNum('ciSave') / 100 * cpNum('ciRate');
+        const price = cpNum('ciPrice') * qty;
+        if(monthly <= 0){ cpResult('—', 'Payback time', []); return; }
+        const months = price / monthly;
+        const txt = months < 1 ? 'Under a month' : months < 24 ? Math.round(months)+' months' : (Math.round(months/12*10)/10)+' years';
+        cpResult(txt, 'Payback time', [cpPeso(monthly)+' saved a month', cpPeso(monthly*12)+' a year', cpPeso(price)+' total price']);
+      }
+    });
+  }
+
+  // ---- 5. Unit converter ----
+  function cpCalcConvert(){
+    cpCalcShell('convert', {
+      title:'Unit converter',
+      form: '<div class="ct-row2">'+cpField('Value', cpInput('cvVal', 1, '', 'min="0" step="any"'))+cpField('From', cpCapUnitSel('cvUnit','tr'))+'</div>'+
+        '<div class="ct-conv" id="cvOut"></div>',
+      how:
+        '<p>1 TR (ton of refrigeration) = 12,000 BTU/h = 3.52 kW of cooling.</p>'+
+        '<p>Aircon "HP" in the Philippines is a trade size, not engine horsepower: 1 HP ≈ 9,000 BTU/h, 1.5 HP ≈ 12,000, 2 HP ≈ 18,000, 2.5 HP ≈ 22,000, 3 HP ≈ 27,000. Brands differ slightly — check the BTU/h or kW on the spec sheet when comparing quotations.</p>'+
+        '<p>kW here means cooling output, not electricity used.</p>',
+      calc:()=>{
+        const btu = cpToBtu(cpNum('cvVal'), $live('cvUnit').value);
+        const hp = btu / 9000;
+        const near = CP_SIZES.slice().sort((a,b)=> Math.abs(a[0]-btu) - Math.abs(b[0]-btu))[0];
+        cpResult(Math.round(btu).toLocaleString('en-PH')+' BTU/h', 'Cooling capacity', []);
+        $live('cvOut').innerHTML = [
+          ['TR', (Math.round(btu/CP_BTU_PER_TR*100)/100)],
+          ['kW', (Math.round(btu/CP_BTU_PER_KW*100)/100)],
+          ['HP (approx.)', (Math.round(hp*100)/100)+(btu<=30000 && near ? ' · nearest size '+near[1] : '')]
+        ].map(([l,v])=> '<div><span>'+l+'</span><b>'+v+'</b></div>').join('');
+      }
+    });
+  }
+
+  // ---- 6. Maintenance schedule ----
+  function cpCalcSchedule(){
+    const lastDates = cpEquipment.map(eq=> eq.lastReport && eq.lastReport.date).filter(Boolean).sort();
+    const last = lastDates.length ? lastDates[lastDates.length-1] : '';
+    cpCalcShell('schedule', {
+      title:'Maintenance schedule',
+      form:
+        cpField('Type of place', cpSeg('smPlace', [['home','Home'],['office','Office / shop'],['clinic','Clinic'],['food','Restaurant']], cpEquipment.length > 2 ? 'office' : 'home'))+
+        cpField('Hours used a day', cpSeg('smHours', [['low','Under 6'],['mid','6 to 12'],['high','Over 12']], 'mid'))+
+        cpField('Surroundings', cpSeg('smDust', [['clean','Clean'],['dusty','Dusty / near a road'],['build','Construction nearby']], 'clean'))+
+        cpField('Last service', '<div class="ct-input"><input type="date" id="smLast" value="'+escapeHtml(String(last).slice(0,10))+'"></div>', last ? 'From your latest service report.' : ''),
+      how:
+        '<p>Starting points: homes every 6 months, offices and shops every 4, clinics every 3 (cleaner air matters more), restaurants every 2 (grease and smoke clog coils quickly).</p>'+
+        '<p>Use over 12 hours a day, or a dusty site, brings it forward by a month; construction nearby by two. Never more often than monthly or less often than every 6 months.</p>'+
+        '<p>Clean the filters yourself in between — every 2 to 4 weeks.</p>',
+      cta:'Book maintenance', onCta:()=> cpOpenNewRequest({ description:'Preventive maintenance' }),
+      calc:()=>{
+        let m = { home:6, office:4, clinic:3, food:2 }[cpSegVal('smPlace')] || 4;
+        if(cpSegVal('smHours')==='high') m -= 1;
+        if(cpSegVal('smHours')==='low' && cpSegVal('smPlace')==='home') m = 6;
+        if(cpSegVal('smDust')==='dusty') m -= 1;
+        if(cpSegVal('smDust')==='build') m -= 2;
+        m = Math.max(1, Math.min(6, m));
+        const lastV = ($live('smLast') && $live('smLast').value) || '';
+        const rows = ['About '+Math.round(12/m)+' visits a year'];
+        if(lastV){
+          const d = new Date(lastV+'T00:00:00'); d.setMonth(d.getMonth()+m);
+          const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          const du = daysUntil(iso);
+          rows.push('Next due '+d.toLocaleDateString('en-PH',{month:'long', day:'numeric', year:'numeric'})+(du < 0 ? ' (overdue)' : ''));
+        }
+        cpResult('Every '+m+' month'+(m===1?'':'s'), 'Recommended PM', rows);
+      }
+    });
+  }
+
+  const CP_CALCULATORS = [
+    { id:'electricity', icon:'bolt', tone:'amber', title:'Electricity cost', desc:'Monthly bill for your units', run:cpCalcElectricity },
+    { id:'capacity', icon:'ruler', tone:'teal', title:'Right size for a room', desc:'HP or TR for your space', run:cpCalcCapacity },
+    { id:'savings', icon:'tools', tone:'green', title:'Maintenance value', desc:'PM cost vs. what it saves', run:cpCalcSavings },
+    { id:'inverter', icon:'swap', tone:'blue', title:'Inverter upgrade', desc:'How fast it pays back', run:cpCalcInverter },
+    { id:'convert', icon:'calculator', tone:'violet', title:'Unit converter', desc:'HP · TR · BTU/h · kW', run:cpCalcConvert },
+    { id:'schedule', icon:'calendar', tone:'rose', title:'Maintenance schedule', desc:'How often to book PM', run:cpCalcSchedule }
+  ];
+  function cpOpenCalc(id){ const c = CP_CALCULATORS.find(x=> x.id===id); if(c) c.run(); }
+
+  // ---- Tips ----
+  const CP_TIP_CATS = [['all','All'],['energy','Save energy'],['care','Care'],['signs','Warning signs'],['buying','Buying guide'],['fire','Fire safety']];
+  const CP_TIP_ICON = { energy:'bolt', care:'leaf', signs:'alert', buying:'book', fire:'flame' };
+  const UL = (items)=> '<ul>'+items.map(i=> '<li>'+i+'</li>').join('')+'</ul>';
+  const CP_TIPS = [
+    { id:'temp', cat:'energy', title:'Set it to 24–26°C, not 18°C', short:'A lower setting doesn\u2019t cool the room faster — it only keeps the compressor running longer.', body:[
+      'The unit cools at the same speed whatever number you set; a lower setting just means it runs longer before it stops. 24–26°C is comfortable for most people and uses noticeably less power.',
+      'Use <b>Auto</b> fan speed, and <b>Sleep</b> mode at night — it raises the setting slowly while you sleep.',
+      'If the room never gets cool even at a low setting, the unit likely needs cleaning or a check — not a lower number.' ]},
+    { id:'fan', cat:'energy', title:'Use an electric fan with the aircon', short:'Moving air feels 2–3°C cooler, so you can set the aircon higher.', body:[
+      'A fan uses a small fraction of an aircon\u2019s power. Air moving over your skin feels cooler, so the room is just as comfortable at a higher setting.',
+      'Point the fan to spread the cool air across the room rather than straight at the aircon.' ]},
+    { id:'sun', cat:'energy', title:'Block the afternoon sun', short:'Close curtains or blinds on west-facing windows before 1 PM.', body:[
+      'Sun through glass is one of the biggest heat loads in a room. Closing curtains, blinds or tinting on west- and south-facing windows keeps that heat out before the aircon has to remove it.',
+      'Light-colored curtains reflect more heat than dark ones.' ]},
+    { id:'doors', cat:'energy', title:'Keep doors and windows closed', short:'Every open door lets cool air out and hot, humid air in.', body:[
+      'In shops and clinics, doors propped open are a common reason units run all day without keeping up. A door closer helps.',
+      'Seal gaps under doors and around window-type units. Turn off the aircon if a room will stay open for a long time.' ]},
+    { id:'outdoor', cat:'energy', title:'Give the outdoor unit room to breathe', short:'Keep plants, boxes and walls away from it.', body:[
+      'The outdoor unit pushes the room\u2019s heat out. If the air around it is blocked or hot, it works harder and uses more power.',
+      UL(['Keep the sides and back clear — check the manual for the exact spacing, usually at least 30 cm.','Don\u2019t store things on top of it or cover it while it runs.','Shade from a roof overhang helps, but don\u2019t enclose it in a box or cabinet.','Keep it level and firmly mounted.']) ]},
+    { id:'filter', cat:'care', title:'Clean your air filter every month', short:'The easiest way to keep a unit cold and efficient.', body:[
+      'The filter is the mesh just behind the front panel. When it clogs, less air passes through: the unit cools less, runs longer and works harder.',
+      '<b>How often:</b> every 2–4 weeks with daily use; more often in dusty areas, with pets, or near construction.',
+      UL(['Turn the unit off, and off at the breaker if you can.','Open the front panel and slide the filter out.','Vacuum the dust, then rinse with running water. Use a soft brush for stuck dirt.','Let it dry completely out of direct sun, then put it back.']),
+      'Replace a filter that is torn, brittle or won\u2019t come clean.' ]},
+    { id:'typhoon', cat:'care', title:'Before and after a typhoon', short:'Switch off, secure the outdoor unit, and don\u2019t restart a flooded unit.', body:[
+      UL(['<b>Before:</b> turn units off at the breaker. Check that the outdoor unit\u2019s bracket and bolts are tight.','Don\u2019t wrap the outdoor unit tightly in plastic — trapped moisture can do more harm than rain.','<b>After:</b> if the outdoor unit was underwater or has debris inside, <b>don\u2019t switch it on</b>. Water in the electrical parts can cause a short. Request a check first.','Clear leaves and debris from around the unit before using it again.']) ]},
+    { id:'brownout', cat:'care', title:'During brownouts and power fluctuations', short:'Switch off at the unit, and wait a few minutes before turning it back on.', body:[
+      'Power that flickers or comes back in surges is hard on the compressor and the control board.',
+      UL(['When power goes out, turn the aircon off with the remote and at the breaker.','When power returns, wait 3–5 minutes before switching it on, so the pressure in the system settles.','If brownouts are frequent in your area, ask us about a voltage protector for your units.']) ]},
+    { id:'smell', cat:'care', title:'Stop musty smells', short:'Run Fan mode for 10–15 minutes before switching off.', body:[
+      'Cooling leaves the inside of the unit damp. Switched off right away, that moisture can grow mold and smell musty.',
+      'Running <b>Fan</b> mode (or the unit\u2019s drying or self-clean function) for 10–15 minutes before turning it off dries the coil.',
+      'If the smell stays after cleaning the filter, the coil or drain needs a professional cleaning.' ]},
+    { id:'signs', cat:'signs', title:'Signs your unit needs service', short:'What to watch and listen for between PM visits.', body:[
+      'Most breakdowns give a warning first. Request a visit if you notice:',
+      UL(['<b>Weak airflow or warm air</b> — a dirty filter or coil, a fan problem, or low refrigerant.','<b>Unusual noises</b> — rattling from a loose part; hissing can mean a refrigerant leak.','<b>Water dripping</b> from the indoor unit — usually a blocked drain line.','<b>Ice</b> on the indoor coil or outdoor pipes — keep running it and the compressor can be damaged.','<b>Short cycling</b> — turning on and off in quick bursts.','<b>A higher bill</b> with no change in use.']),
+      'These are cheaper to fix early: a blocked drain is quick to clear, the water damage it causes later isn\u2019t.' ]},
+    { id:'danger', cat:'signs', title:'When to switch off right away', short:'Burning smell, sparks, or a breaker that keeps tripping.', body:[
+      'Turn the unit off <b>at the breaker</b> and request a visit if you notice:',
+      UL(['A burning or electrical smell','Sparks, smoke, or scorch marks at the unit, plug or outlet','A breaker that trips again after you reset it','Wires or the power cord getting hot']),
+      'Don\u2019t keep resetting a breaker that trips — it is protecting the wiring from a fault.' ]},
+    { id:'pm', cat:'buying', title:'What a PM visit covers', short:'A check-up that catches small problems before they become repairs.', body:[
+      'A preventive maintenance visit is a scheduled check-up, not a repair. It usually covers:',
+      UL(['Washing the indoor and outdoor coils','Cleaning or replacing filters','Checking refrigerant pressure','Clearing the drain line','Checking electrical connections, the capacitor and fan motors','Checking airflow and cooling performance']),
+      '<b>How often:</b> every 3 months for heavy or all-day use, 4–6 months for a typical home. The Maintenance schedule calculator gives a suggestion for your place.',
+      'Most manufacturers ask for maintenance records to honor the compressor warranty — your service reports here are those records.' ]},
+    { id:'inverter', cat:'buying', title:'Inverter vs. non-inverter', short:'The one spec that changes your electricity bill the most.', body:[
+      '<b>Non-inverter:</b> the compressor runs at full speed, then switches off, then on again. Cheaper to buy, costlier to run.',
+      '<b>Inverter:</b> the compressor slows down once the room is cool instead of switching off. It typically uses 30–50% less electricity, and the room temperature stays steadier.',
+      'On the Philippine Energy Label, a higher EER or CSPF means more cooling per peso of electricity. Compare those numbers across brands.' ]},
+    { id:'bigger', cat:'buying', title:'Bigger isn\u2019t better', short:'An oversized unit cools fast but leaves the room damp and clammy.', body:[
+      'An aircon removes humidity as well as heat — but only while it runs. A unit that is too big cools the room in short bursts and switches off before it has dried the air, so the room feels cold and clammy.',
+      'Too small is a problem too: it runs non-stop and never quite gets there. Use the Right size calculator as a guide, and ask for a site survey for large or unusual spaces.' ]},
+    { id:'replace', cat:'buying', title:'Repair or replace?', short:'How to decide once a repair estimate is on the table.', body:[
+      UL(['<b>Age:</b> a well-maintained split unit usually lasts 10–15 years. A big repair on an old unit is worth weighing against a new, more efficient one.','<b>Repair cost:</b> if one repair is a large share of a new unit\u2019s price, replacing is often better.','<b>How often it breaks:</b> repeat calls within a year usually mean replacing costs less.','<b>Refrigerant:</b> units using phased-out refrigerant (R-22) cost more to service.']),
+      'Ask your technician — they can tell you the condition of the whole unit, not just the part that failed. The Inverter upgrade calculator shows how fast a new unit pays back.' ]},
+    { id:'extinguisher', cat:'fire', title:'Check your fire extinguisher monthly', short:'Gauge in the green, pin in place, easy to reach.', body:[
+      'A quick look once a month:',
+      UL(['The pressure gauge needle is in the <b>green</b>.','The safety pin and seal are in place.','No dents, rust, or a cracked hose.','It is mounted where people can see and reach it — not behind boxes.']),
+      '<b>Using it — P.A.S.S.:</b> <b>P</b>ull the pin, <b>A</b>im at the base of the fire, <b>S</b>queeze the handle, <b>S</b>weep side to side.',
+      'Have extinguishers serviced and refilled on schedule, and right away after any use.' ]},
+    { id:'smoke', cat:'fire', title:'Test smoke detectors and alarms', short:'Press the test button once a month.', body:[
+      UL(['Press and hold the test button on battery-type detectors monthly; replace batteries at least once a year or when they chirp.','Never paint over, cover, or tape a detector — including during renovations.','For a building fire alarm system (FDAS), don\u2019t silence a trouble signal and forget it. A trouble light or beeping on the panel means something needs checking — request a visit.']) ]},
+    { id:'sprinkler', cat:'fire', title:'Keep sprinklers clear', short:'Leave space under every sprinkler head. Never hang things on it.', body:[
+      UL(['Keep storage at least <b>45 cm (18 in)</b> below sprinkler heads so the water can spread.','Never hang things from sprinkler heads or pipes, and never paint them — paint can stop a head from opening.','Report heads that are leaking, corroded, bent or damaged.','Keep the fire alarm panel, sprinkler valves and exits unblocked.']) ]},
+    { id:'fsic', cat:'fire', title:'Fire safety inspection (FSIC)', short:'Establishments renew their Fire Safety Inspection Certificate every year.', body:[
+      'Under the Fire Code of the Philippines, businesses need a Fire Safety Inspection Certificate from the Bureau of Fire Protection, renewed yearly with the business permit.',
+      'Inspectors look for working extinguishers, alarms, sprinklers and exits. Having your fire protection systems tested and maintained before the inspection — with records to show — avoids delays.',
+      'We can inspect and test your sprinkler (AFSS) and fire alarm (FDAS) systems and give you the service report.' ]}
+  ];
+  let cpTipCat = 'all';
+  function cpTipOfDay(){
+    const d = new Date(); const n = Math.floor((d - new Date(d.getFullYear(),0,0)) / 864e5);
+    return CP_TIPS[n % CP_TIPS.length];
+  }
+  function renderCustomerToolsScreen(){
+    $live('cpToolsSearchIc').innerHTML = CP_ICON.search;
+    const tod = cpTipOfDay();
+    $live('cpTipOfDay').innerHTML =
+      '<p class="ct-tod-l">'+CP_ICON.bulb+' Tip of the day</p>'+
+      '<p class="ct-tod-t">'+escapeHtml(tod.title)+'</p><p class="ct-tod-d">'+escapeHtml(tod.short)+'</p>'+
+      '<button type="button" class="ct-link" data-tip="'+tod.id+'">Read more</button>';
+    $live('cpCalcGrid').innerHTML = CP_CALCULATORS.map(c=>
+      '<button type="button" class="ct-calc" data-calc="'+c.id+'">'+
+        '<span class="ct-ic ct-'+c.tone+'">'+(CP_ICON[c.icon]||'')+'</span>'+
+        '<span class="ct-calc-t">'+c.title+'</span><span class="ct-calc-d">'+c.desc+'</span>'+
+      '</button>').join('');
+    $live('cpTipChips').innerHTML = CP_TIP_CATS.map(([k,l])=> '<button type="button" class="ct-chip'+(k===cpTipCat?' on':'')+'" data-cat="'+k+'">'+l+'</button>').join('');
+    $live('cpArticleList').innerHTML = CP_TIPS.map(t=>
+      '<button type="button" class="ct-tip" data-tip="'+t.id+'" data-cat="'+t.cat+'">'+
+        '<span class="ct-ic ct-sm ct-cat-'+t.cat+'">'+(CP_ICON[CP_TIP_ICON[t.cat]]||'')+'</span>'+
+        '<span class="ct-text"><span class="ct-tip-t">'+escapeHtml(t.title)+'</span><span class="ct-tip-d">'+escapeHtml(t.short)+'</span></span>'+
+        '<span class="ct-chev">›</span></button>').join('');
+    const phone = String(CP_SUPPORT.phone||'').trim();
+    $live('cpToolsHelp').innerHTML = '<span class="ct-ic ct-green">'+CP_ICON.chat+'</span><span class="ct-text"><span class="ct-tip-t">Not sure what your unit needs?</span><span class="ct-tip-d">Ask us — we\u2019ll check it for you.</span></span>'+
+      (phone ? '<a class="ct-mini" href="tel:'+escapeHtml(phone.replace(/[^\d+]/g,''))+'">Call</a>' : '<button type="button" class="ct-mini" data-help="1">Message us</button>');
+    cpToolsFilter();
+  }
+  function cpToolsFilter(){
+    const q = ($live('cpToolsSearch').value||'').trim().toLowerCase();
+    let calcs = 0, tips = 0;
+    $$('.ct-calc', $live('cpCalcGrid')).forEach(el=>{ const ok = !q || el.textContent.toLowerCase().includes(q); el.style.display = ok ? '' : 'none'; if(ok) calcs++; });
+    $$('.ct-tip', $live('cpArticleList')).forEach(el=>{
+      const t = CP_TIPS.find(x=> x.id===el.dataset.tip);
+      const hay = (t.title+' '+t.short+' '+t.body.join(' ')).replace(/<[^>]+>/g,' ').toLowerCase();
+      const ok = (cpTipCat==='all' || el.dataset.cat===cpTipCat) && (!q || hay.includes(q));
+      el.style.display = ok ? '' : 'none'; if(ok) tips++;
+    });
+    $live('cpTipCount').textContent = tips+' tip'+(tips===1?'':'s');
+    $live('cpArticleList').style.display = tips ? '' : 'none';
+    $live('cpToolsEmpty').style.display = (!calcs && !tips) || (!tips && cpTipCat!=='all') ? '' : 'none';
+    $live('cpToolsEmpty').textContent = !tips && cpTipCat!=='all' && !q ? 'No tips in this category yet.' : 'Nothing matches your search.';
+    $live('cpTipOfDay').style.display = q ? 'none' : '';
+  }
+  $live('cpToolsSearch').addEventListener('input', cpToolsFilter);
+  $live('customerToolsScreen').addEventListener('click', (e)=>{
+    const c = e.target.closest('[data-calc]'); if(c){ cpOpenCalc(c.dataset.calc); return; }
+    const t = e.target.closest('[data-tip]'); if(t){ cpOpenArticle(t.dataset.tip); return; }
+    const ch = e.target.closest('[data-cat]');
+    if(ch && ch.classList.contains('ct-chip')){
+      cpTipCat = ch.dataset.cat;
+      $$('.ct-chip', $live('cpTipChips')).forEach(b=> b.classList.toggle('on', b===ch));
+      cpToolsFilter(); return;
+    }
+    if(e.target.closest('[data-help]')) cpOpenCentralChat();
   });
 
   function cpShowCalcScreen(){
-    $('customerToolsScreen').style.display = 'none';
-    $('customerCalcScreen').style.display = '';
+    $live('customerToolsScreen').style.display = 'none';
+    $live('customerCalcScreen').style.display = '';
+    if(typeof cpSetNavActive === 'function') cpSetNavActive('Tools');
     window.scrollTo({top:0});
   }
-  $('cpCalcBackBtn').addEventListener('click', ()=>{
-    $('customerCalcScreen').style.display = 'none';
-    $('customerToolsScreen').style.display = '';
+  $live('cpCalcBackBtn').addEventListener('click', ()=>{
+    $live('customerCalcScreen').style.display = 'none';
+    $live('customerToolsScreen').style.display = '';
+    window.scrollTo({top:0});
   });
 
   function cpOpenArticle(id){
-    const a = CP_ARTICLES.find(x=> x.id===id);
-    if(!a) return;
-    const bodyHtml = (a.body||[]).map(block=>
-      block.trim().startsWith('<ul') ? block : '<p style="font-size:13px; line-height:1.7; margin:0 0 12px;">'+block+'</p>'
-    ).join('');
-    $('cpCalcBody').innerHTML =
-      '<h2 style="font-size:15px; margin:0 0 10px;">'+a.title+'</h2>'+
-      '<p style="font-size:13px; color:var(--text-muted); line-height:1.6; margin:0 0 14px;">'+a.desc+'</p>'+
-      bodyHtml+
-      '<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">General guidance for typical split-type units — your unit\'s manual may have model-specific instructions. If anything is unclear or your unit needs attention, request a visit and a technician can take a look on-site.</p>';
-    cpShowCalcScreen();
-  }
-
-  // Every calculator follows the same shape: render inputs + a live
-  // result, recompute on any input change. Kept as one function per tool
-  // rather than a generic config-driven form, since each one's inputs and
-  // formula are different enough that a generic version would be harder
-  // to read than just writing the three out.
-  function cpOpenCalc(id){
-    if(id==='electricity') return cpCalcElectricity();
-    if(id==='capacity') return cpCalcCapacity();
-    if(id==='savings') return cpCalcSavings();
-  }
-  function cpCalcElectricity(){
-    // Previous v1 formula multiplied HP by 0.746 (the pure mechanical
-    // HP→kW conversion) and treated that as the electrical draw. That
-    // understates real consumption — a compressor's electrical input is
-    // higher than its mechanical output — and it ignored the single
-    // biggest factor in real bills: inverter units modulate compressor
-    // speed instead of running at full rated draw the whole time, so
-    // they use meaningfully less power than a non-inverter unit of the
-    // same HP. This version uses typical input-wattage-per-HP figures
-    // for each type instead of the mechanical conversion, and lets the
-    // person pick which kind of unit they have.
-    $('cpCalcBody').innerHTML =
-      '<h2 style="font-size:15px; margin:0 0 12px;">Electricity cost</h2>'+
-      '<div class="field"><label>Unit capacity (HP)</label><input type="number" id="ceHp" value="1.5" step="0.5" min="0.5"></div>'+
-      '<div class="field"><label>Unit type</label><select id="ceType"><option value="inverter" selected>Inverter</option><option value="noninverter">Non-inverter (window/standard split)</option></select></div>'+
-      '<div class="field"><label>Hours used per day</label><input type="number" id="ceHours" value="8" min="0"></div>'+
-      '<div class="field"><label>Your rate (₱ per kWh, from your bill)</label><input type="number" id="ceRate" value="12" step="0.5" min="0"></div>'+
-      '<div class="cp-calc-result"><p class="n" id="ceResult">—</p><p class="l">Estimated cost per month</p></div>'+
-      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Estimate based on typical input wattage per HP for each unit type, assuming it runs continuously at that load for the hours entered. Actual draw varies by brand, EER/CSPF rating, set temperature, insulation, and how often the compressor cycles or idles once the room is cool — so real bills are often lower than this, especially for inverter units in a well-sized room.</p>';
-    const calc = ()=>{
-      const hp = parseFloat($live('ceHp').value)||0, hours = parseFloat($live('ceHours').value)||0, rate = parseFloat($live('ceRate').value)||0;
-      const type = $live('ceType').value;
-      // Typical full-load electrical input for a non-inverter unit runs
-      // roughly 750-900W per HP (not the ~746W mechanical-only figure);
-      // 800W/HP is the midpoint. Inverter units modulate and average
-      // roughly 55-65% of that once steady, vs the 30-50% savings
-      // commonly cited for inverter over non-inverter — 60% is used here.
-      const wattsPerHp = 800;
-      const watts = hp * wattsPerHp * (type === 'inverter' ? 0.6 : 1);
-      const monthly = (watts/1000) * hours * 30 * rate;
-      $live('ceResult').textContent = '₱'+monthly.toLocaleString(undefined,{maximumFractionDigits:0});
+    const t = CP_TIPS.find(x=> x.id===id);
+    if(!t) return;
+    const cat = (CP_TIP_CATS.find(c=> c[0]===t.cat)||[])[1] || '';
+    $live('cpCalcTitle').textContent = t.title;
+    const more = CP_TIPS.filter(x=> x.cat===t.cat && x.id!==t.id).slice(0,3);
+    $live('cpCalcBody').oninput = null; $live('cpCalcBody').onchange = null;
+    $live('cpCalcBody').innerHTML =
+      '<div class="ct-card ct-article">'+
+        '<span class="ct-badge ct-cat-'+t.cat+'">'+(CP_ICON[CP_TIP_ICON[t.cat]]||'')+escapeHtml(cat)+'</span>'+
+        '<p class="ct-lead">'+escapeHtml(t.short)+'</p>'+
+        t.body.map(b=> b.trim().startsWith('<ul') ? b : '<p>'+b+'</p>').join('')+
+        '<p class="ct-fine">General guidance for typical units — your unit\u2019s manual may say otherwise for your model. When in doubt, ask us.</p>'+
+      '</div>'+
+      (more.length ? '<div class="ct-sec"><h2>More on '+escapeHtml(cat.toLowerCase())+'</h2></div><div class="ct-card ct-list">'+more.map(x=>
+        '<button type="button" class="ct-tip" data-tip="'+x.id+'"><span class="ct-text"><span class="ct-tip-t">'+escapeHtml(x.title)+'</span><span class="ct-tip-d">'+escapeHtml(x.short)+'</span></span><span class="ct-chev">›</span></button>').join('')+'</div>' : '')+
+      '<button type="button" class="ct-cta" data-cta="1">'+(t.cat==='fire' ? 'Ask about fire protection' : 'Request a visit')+'</button>';
+    $live('cpCalcBody').onclick = (e)=>{
+      const x = e.target.closest('[data-tip]'); if(x){ cpOpenArticle(x.dataset.tip); return; }
+      if(e.target.closest('[data-cta]')) cpOpenNewRequest({ description: t.cat==='fire' ? 'Inquiry: fire protection (AFSS / FDAS) service' : '' });
     };
-    ['ceHp','ceHours','ceRate'].forEach(id=> $(id).addEventListener('input', calc));
-    $live('ceType').addEventListener('change', calc);
-    calc();
-    cpShowCalcScreen();
-  }
-  function cpCalcCapacity(){
-    // Rule-of-thumb sizing: ~600 BTU/hr of cooling per sqm for a
-    // standard Philippine room (moderate ceiling height, typical sun
-    // exposure), rounded up to the nearest standard aircon HP rating
-    // (1 HP ≈ 9,000 BTU/hr). This is a starting point, not a load
-    // calculation — a proper one accounts for ceiling height, window
-    // area/orientation, insulation, and occupancy/heat-generating
-    // equipment, which is why the guide below still points to a
-    // technician for anything borderline or unusual.
-    $('cpCalcBody').innerHTML =
-      '<h2 style="font-size:15px; margin:0 0 12px;">Capacity guide</h2>'+
-      '<div class="field"><label>Room floor area (sqm)</label><input type="number" id="ccArea" value="15" min="1"></div>'+
-      '<div class="cp-calc-result"><p class="n" id="ccResult">—</p><p class="l" id="ccResultLabel">Suggested capacity</p></div>'+
-      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Based on roughly 600 BTU/hr per sqm, rounded to the nearest standard HP size. Higher ceilings, west/afternoon sun exposure, more occupants, or heat-generating equipment in the room push the real requirement higher — a technician can confirm the right size on-site.</p>';
-    const calc = ()=>{
-      const area = parseFloat($live('ccArea').value)||0;
-      const btu = area * 600;
-      // Table only covers sizes a single split-type indoor unit actually
-      // ships as. The old version had no upper bound, so anything past
-      // ~35 sqm silently kept returning "3 HP" no matter how large the
-      // area got (e.g. 1500 sqm also came back as "3 HP" — off by
-      // roughly two orders of magnitude, since no single unit that size
-      // exists). Past the largest common single-unit tier, this now
-      // switches to a total-load figure and a rough unit count instead
-      // of pretending one unit covers it.
-      const TIERS = [[6500,0.75],[9500,1.0],[13500,1.5],[18500,2.0],[22500,2.5],[27000,3.0]];
-      const tier = area>0 ? TIERS.find(t=> btu<=t[0]) : null;
-      if(area<=0){
-        $live('ccResult').textContent = '—';
-        $live('ccResultLabel').textContent = 'Suggested capacity';
-      } else if(tier){
-        $live('ccResult').textContent = tier[1]+' HP';
-        $live('ccResultLabel').textContent = 'Suggested capacity (~'+Math.round(btu).toLocaleString()+' BTU/hr)';
-      } else {
-        // Beyond one unit's range: give the total load and a ballpark
-        // unit count using a common per-zone size (2.0 HP ≈ 18,000
-        // BTU/hr) rather than one oversized HP number.
-        const zones = Math.ceil(btu/18000);
-        $live('ccResult').textContent = '~'+Math.round(btu).toLocaleString()+' BTU/hr total';
-        $live('ccResultLabel').textContent = 'Too large for one unit — plan for roughly '+zones+' × 2.0 HP units (or fewer, larger/ducted units) across zones';
-      }
-    };
-    $live('ccArea').addEventListener('input', calc);
-    calc();
-    cpShowCalcScreen();
-  }
-  function cpCalcSavings(){
-    $('cpCalcBody').innerHTML =
-      '<h2 style="font-size:15px; margin:0 0 12px;">Maintenance savings</h2>'+
-      '<div class="field"><label>Number of units</label><input type="number" id="csUnits" value="'+(cpEquipment.length||1)+'" min="1"></div>'+
-      '<div class="field"><label>PM visits per year, per unit</label><input type="number" id="csVisits" value="2" min="1"></div>'+
-      '<div class="field"><label>Typical PM cost per visit (₱)</label><input type="number" id="csPmCost" value="1500" min="0"></div>'+
-      '<div class="field"><label>Typical reactive repair cost (₱)</label><input type="number" id="csRepairCost" value="8000" min="0"></div>'+
-      '<div class="cp-calc-result"><p class="n" id="csResult">—</p><p class="l">Estimated yearly savings vs. skipping PM</p></div>'+
-      '<p style="font-size:11px; color:var(--text-muted); margin-top:10px;">Assumes one avoided major repair per unit per year without regular PM — a common, conservative rule of thumb, not a guarantee.</p>';
-    const calc = ()=>{
-      const units = parseFloat($live('csUnits').value)||0, visits = parseFloat($live('csVisits').value)||0;
-      const pmCost = parseFloat($live('csPmCost').value)||0, repairCost = parseFloat($live('csRepairCost').value)||0;
-      const pmTotal = units * visits * pmCost;
-      const avoidedRepairs = units * repairCost;
-      const savings = avoidedRepairs - pmTotal;
-      $live('csResult').textContent = '₱'+Math.max(0,savings).toLocaleString(undefined,{maximumFractionDigits:0});
-    };
-    ['csUnits','csVisits','csPmCost','csRepairCost'].forEach(id=> $(id).addEventListener('input', calc));
-    calc();
     cpShowCalcScreen();
   }
 
@@ -1775,7 +2083,7 @@
   // note on top — it lands in admin's urgent tier after 60 min unanswered.
   $('cpReportProblemBtn').addEventListener('click', ()=> cpOpenNewRequest({ urgent:true, focus:true }));
   $('cpMessageUsBtn').addEventListener('click', ()=> cpOpenCentralChat());
-  $('cpProfileRowTools').addEventListener('click', ()=>{ cpShowScreen('Tools'); cpSetNavActive('Profile'); });
+  $('cpProfileRowHistory').addEventListener('click', ()=>{ cpShowScreen('History'); cpSetNavActive('Profile'); });
   $('cpUnitsViewAllLink').addEventListener('click', (e)=>{ e.preventDefault(); cpShowScreen('Units'); });
   cpInitNav();
 

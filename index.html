@@ -949,33 +949,46 @@ window.awesCss = {
 
 <!-- Tools & learning — calculators + guides, kept separate from Home so it
      never competes with service status. -->
-<div id="customerToolsScreen" class="home-screen cp-screen" style="display:none;">
-  <div class="cp-tools-head cp-tools-head-aligned">
-    <div class="cp-tools-head-inner">
-      <h1>Tools &amp; learning</h1>
-      <p>Calculators and guides to help you get the most from your units</p>
+<!-- Tools (redesign) — calculators and tips. Same white header and 20px
+     gutter as Home; one column on phones, calculators | tips on desktop.
+     Content lives in CP_CALCULATORS / CP_TIPS (customer-portal.js). -->
+<div id="customerToolsScreen" class="home-screen cp-screen ct" style="display:none;">
+  <div class="ct-head">
+    <div class="ct-head-inner">
+      <h1>Tools</h1>
+      <p>Calculators and care tips for your units</p>
+      <label class="ct-search"><span id="cpToolsSearchIc"></span><input type="search" id="cpToolsSearch" placeholder="Search calculators and tips" autocomplete="off"></label>
     </div>
   </div>
-  <div class="cp-page-content">
-    <div class="cp-search"><span></span><input type="text" id="cpToolsSearch" placeholder="Search tools and articles"></div>
-    <div class="cp-tools-section">
-      <h2>Calculators</h2>
-      <div class="cp-tool-grid" id="cpCalcGrid"></div>
-    </div>
-    <div class="cp-tools-section" style="padding-bottom:18px;">
-      <h2>Guides &amp; tips</h2>
-      <div id="cpArticleList"></div>
+  <div class="ct-body">
+    <div class="ct-grid">
+      <div class="ct-col">
+        <div class="ct-tod" id="cpTipOfDay"></div>
+        <div class="ct-sec"><h2>Calculators</h2></div>
+        <div class="ct-calcs" id="cpCalcGrid"></div>
+      </div>
+      <div class="ct-col">
+        <div class="ct-sec"><h2>Tips</h2><span class="ct-sec-note" id="cpTipCount"></span></div>
+        <div class="ct-chips" id="cpTipChips"></div>
+        <div class="ct-card ct-list" id="cpArticleList"></div>
+        <p class="ct-empty" id="cpToolsEmpty" style="display:none;">Nothing matches your search.</p>
+        <div class="ct-card ct-help" id="cpToolsHelp"></div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- A single calculator sub-screen whose body swaps per tool (see
-     cpOpenCalc() in customer-portal.js) rather than one screen per tool —
-     content stays easy to extend without adding a new screen each time. -->
-<div id="customerCalcScreen" class="home-screen cp-screen" style="display:none;">
-  <div class="cp-calc-wrap">
-    <button type="button" class="cp-calc-back" id="cpCalcBackBtn">‹ Back to Tools</button>
-    <div class="cp-calc-card" id="cpCalcBody"></div>
+<!-- One sub-screen for every calculator and tip; its body swaps per item
+     (cpOpenCalc / cpOpenArticle). -->
+<div id="customerCalcScreen" class="home-screen cp-screen ct" style="display:none;">
+  <div class="ct-head ct-head-sub">
+    <div class="ct-head-inner">
+      <button type="button" class="ct-back" id="cpCalcBackBtn">‹ Tools</button>
+      <h1 id="cpCalcTitle">&nbsp;</h1>
+    </div>
+  </div>
+  <div class="ct-body ct-body-narrow">
+    <div id="cpCalcBody"></div>
   </div>
 </div>
 
@@ -1016,8 +1029,8 @@ window.awesCss = {
       <p style="font-size:11.5px; color:var(--text-muted); margin:8px 0 0;">Get updates about your service even when the app is closed.</p>
     </div>
 
-    <div class="cp-profile-row" id="cpProfileRowTools">
-      <div><p class="t">Tools and calculators</p><p class="s">Aircon sizing, energy savings, and care guides</p></div>
+    <div class="cp-profile-row" id="cpProfileRowHistory">
+      <div><p class="t">Service history</p><p class="s">Visits, requests and quotations</p></div>
       <span>›</span>
     </div>
     <div class="cp-profile-row" id="cpProfileRowRequests">
@@ -1059,11 +1072,11 @@ window.awesCss = {
 <!-- Shared bottom-tab-bar (mobile) / top-nav-bar (desktop) for every
      customer screen — see cpShowScreen() in customer-portal.js. -->
 <nav class="cp-nav" id="cpNav" style="display:none;">
-  <div class="cp-nav-brand"><img src="logo.png" alt=""><span>AWES Portal</span></div>
+  <div class="cp-nav-brand"><img src="logo.png" alt=""><span>AWES Customer Portal</span></div>
   <button type="button" class="cp-nav-btn active" data-screen="Home" id="cpNavHome"></button>
   <button type="button" class="cp-nav-btn" data-screen="Units" id="cpNavUnits"></button>
   <button type="button" class="cp-nav-btn" data-screen="Requests" id="cpNavRequests"></button>
-  <button type="button" class="cp-nav-btn" data-screen="History" id="cpNavHistory"></button>
+  <button type="button" class="cp-nav-btn" data-screen="Tools" id="cpNavTools"></button>
   <button type="button" class="cp-nav-btn" data-screen="Profile" id="cpNavProfile"></button>
   <div class="cp-nav-spacer"></div>
 </nav>

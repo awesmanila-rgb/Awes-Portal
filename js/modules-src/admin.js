@@ -673,6 +673,21 @@
       const label = EQUIP_DETAIL_EXTRA_LABELS[k] || (FIELD_META[k] && FIELD_META[k].label) || k;
       const isDate = k === 'nextPmDate';
       const val = (record[k]||'').toString();
+      // Compressor Type is the unit's inverter yes/no — a fixed choice here
+      // (the customer portal's electricity calculators read it), keeping
+      // any older free-text value selectable so saving doesn't lose it.
+      if(k === 'compressorType'){
+        const inv = equipIsInverter(val);
+        const cur = inv===true ? 'Inverter' : inv===false ? 'Non-Inverter' : val.trim();
+        const opts = [['','Not known'],['Inverter','Inverter'],['Non-Inverter','Non-inverter']];
+        if(cur && !opts.some(o=> o[0]===cur)) opts.push([cur, cur]);
+        return '<div class="equip-detail-row"><span class="equip-detail-label">Inverter</span>'+
+          (editing
+            ? '<select data-f="'+k+'" style="border:1px solid var(--border); border-radius:6px; padding:4px 6px; font-size:13px; flex:1; max-width:60%;">'+
+                opts.map(([v,l])=> '<option value="'+escapeHtml(v)+'"'+(v===cur?' selected':'')+'>'+escapeHtml(l)+'</option>').join('')+'</select>'
+            : '<span>'+(inv===true ? 'Yes (inverter)' : inv===false ? 'No (non-inverter)' : (val.trim() ? escapeHtml(val) : '<span style="color:var(--text-muted);">Not known</span>'))+'</span>')+
+        '</div>';
+      }
       return '<div class="equip-detail-row"><span class="equip-detail-label">'+escapeHtml(label)+'</span>'+
         (editing
           ? '<input type="'+(isDate?'date':'text')+'" data-f="'+k+'" value="'+escapeHtml(val)+'" style="text-align:right; border:1px solid var(--border); border-radius:6px; padding:4px 6px; font-size:13px; flex:1; max-width:60%;">'
@@ -878,7 +893,7 @@
   $('equipmentDetailSaveBtn').addEventListener('click', async ()=>{
     if(!equipDetailRecord) return;
     const fields = {};
-    Array.from($('equipmentDetailBody').querySelectorAll('input[data-f]')).forEach(inp=> fields[inp.dataset.f] = inp.value.trim());
+    Array.from($('equipmentDetailBody').querySelectorAll('input[data-f], select[data-f]')).forEach(inp=> fields[inp.dataset.f] = inp.value.trim());
     const ok = await cloudUpdateCustomerEquipment(equipDetailRecord.id, fields);
     if(ok){
       toast('Saved');

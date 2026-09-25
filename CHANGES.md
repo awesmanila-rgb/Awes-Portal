@@ -272,3 +272,14 @@ the `list-technicians` Edge Function, then apply Part 2.
 - PM reminders: new pm-reminders Edge Function + migration 20260924_05_pm_reminders.sql + setup/pm_reminders_cron.sql (daily 8:00 AM). One push per account for units due within 7 days, once per PM date, skipped when a request is already open.
 - Fix (in the same migration): push_subscriptions.customer_id was bigint while customer ids are uuid, which blocked customer devices from registering for push. Converted to uuid, only if still bigint.
 - Support card: set CP_SUPPORT.phone / hours in customer-portal.js; a Call button shows only when a phone number is set.
+
+## Customer portal — Tools redesign + inverter field (2026-09-25)
+- Bottom bar: Home, Units, Requests, **Tools**, Account (History moved to Account → Service history; the Home "Full history" link stays). Five equal tabs, same icon size.
+- Tools page redesigned to match Home: white header, search, tip of the day, 6 calculators in an even 2-column grid, 19 tips with category chips (Save energy, Care, Warning signs, Buying guide, Fire safety), help card. Two columns on desktop.
+- Calculators — result card on top, large inputs, "How this is calculated", one next-step button:
+  - Electricity cost: reads the customer's units (HP / TR / BTU / kW), per-unit inverter toggle, hours + days, rate default ₱14.74 (Meralco Sept 2026), optional rated watts; monthly / daily / yearly and inverter savings. Fixes: old ₱12 rate, HP-only input (5 TR units undercounted by a third), 30-day full-load assumption.
+  - Right size for a room: adds ceiling height, sun exposure, people, equipment watts; answers in HP, TR and kW; large spaces get a TR total.
+  - Maintenance value: rebuilt — adjustable breakdown chance with/without PM, energy lost to dirty coils; shows a negative net honestly (old version assumed one avoided repair per unit per year and hid losses as ₱0).
+  - New: Inverter upgrade payback, Unit converter (HP · TR · BTU/h · kW), Maintenance schedule (interval + next due date).
+- Inverter yes/no: uses the existing Compressor Type field (Inverter / Non-Inverter). Admin equipment detail now edits it as Inverter / Non-inverter / Not known; the customer portal loads it, shows it on the unit detail, and the calculators use it (customer can still set it for units with no type on record). No migration.
+- Desktop top bar brand: "AWES Customer Portal".
