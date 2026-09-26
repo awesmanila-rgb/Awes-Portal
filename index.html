@@ -226,6 +226,19 @@ window.awesCss = {
       <button type="button" class="sidebar-link" id="techNavReimbursement"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span>Reimbursement</button>
     </div>
 
+    <!-- Office staff nav — shown by staffRenderSidebar() (staff.js) for
+         role 'staff' only. #staffNavPages lists the department pages that
+         are both granted and opened; Home is the shared Dashboard link. -->
+    <div id="sidebarStaffGroup" style="display:none;">
+      <div class="sidebar-section-label">My Work</div>
+      <button type="button" class="sidebar-link" id="staffNavInbox"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>Inbox</button>
+      <div id="staffNavPages"></div>
+      <button type="button" class="sidebar-link" id="staffNavTeam" style="display:none;"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14a5.5 5.5 0 0 1 3.5 6"/></svg></span>My Team</button>
+      <button type="button" class="sidebar-link" id="staffNavActivity"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><path d="M3.05 11a9 9 0 1 1 .5 4"/><path d="M3 4v5h5"/></svg></span>Activity</button>
+      <button type="button" class="sidebar-link" id="staffNavMyLeave"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span>My Leave</button>
+      <button type="button" class="sidebar-link" id="staffNavPassword"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2"/><path d="m17 6 3 3"/><path d="m14 9 2 2"/></svg></span>Change Password</button>
+    </div>
+
     <!-- Admin-only nav — hidden for technicians via setVis('sidebarAdminGroup', isAdmin). -->
     <div id="sidebarAdminGroup">
       <!-- Collapsible sections (admin only). Each .sb-section opens while the
@@ -307,6 +320,9 @@ window.awesCss = {
         <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_management"><span class="sb-title">Management</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
         <div class="sb-section-body" id="sbSec_management"><div class="sb-section-inner">
           <button type="button" class="sidebar-link" id="menuManageUsers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>Users &amp; Roles</button>
+          <button type="button" class="sidebar-link" id="menuInbox"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>Inbox</button>
+          <button type="button" class="sidebar-link" id="menuManageStaff"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14a5.5 5.5 0 0 1 3.5 6"/></svg></span>Department Staff</button>
+          <button type="button" class="sidebar-link" id="menuActivityLog"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><path d="M3.05 11a9 9 0 1 1 .5 4"/><path d="M3 4v5h5"/></svg></span>Activity Log</button>
           <button type="button" class="sidebar-link" id="menuManageAnnouncements"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/></svg></span>Announcements</button>
           <button type="button" class="sidebar-link" id="settingsBtn"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</button>
           <button type="button" class="sidebar-link" id="menuManageDropdowns"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg></span>Dropdown Lists</button>
@@ -3044,7 +3060,7 @@ window.awesCss = {
             <div class="field po-c3"><label>Next due</label><input type="date" id="tlFNext"></div>
           </div>
           <div class="po-hint">A tool that’s overdue can’t be issued until it’s recorded as passed.</div></section>
-        <section class="po-sec inv-admin-only"><div class="po-sec-title">Purchase</div>
+        <section class="po-sec inv-admin-only" id="tlFPurchaseSec"><div class="po-sec-title">Purchase</div>
           <div class="po-grid">
             <div class="field po-c3"><label>Purchase date</label><input type="date" id="tlFPDate"></div>
             <div class="field po-c3"><label>Cost per unit (₱)</label><input type="text" id="tlFCost" inputmode="decimal"></div>
@@ -3322,6 +3338,8 @@ window.awesCss = {
         <div class="field"><label>Full Name <span class="req">*</span></label><input type="text" id="poSigName"></div>
         <div class="field"><label>Position</label><input type="text" id="poSigPosition" placeholder="e.g. Purchasing Officer"></div>
       </div>
+      <div class="field"><label>Staff login <span class="mt-hint">a department staff member whose approvals print this signature</span></label>
+        <select id="poSigUser"><option value="">— not linked —</option></select></div>
       <div class="field"><label>E-Signature <span class="mt-hint">photo or scan of the signature</span></label>
         <input type="file" id="poSigFile" accept="image/png,image/jpeg,image/webp">
         <label class="sp-check" style="margin-top:8px;"><input type="checkbox" id="poSigClean" checked> Remove paper background (recommended for photos)</label>
@@ -4449,6 +4467,19 @@ window.awesCss = {
      "Service Reports" sidebar nav item. Was previously the "Saved Reports"
      popup sheet; now its own dedicated page with All / Draft / Completed
      tabs and a search bar, same pattern as the other full-page views. -->
+<!-- Department staff (staff.js): staff home, Department Staff / My Team,
+     account editor, preview and Activity Log. Panels are rendered by JS. -->
+<main id="staffView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
+  <section class="stf-panel" id="staffPanel_home"></section>
+  <section class="stf-panel" id="staffPanel_team" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_edit" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_preview" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_activity" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_tracker" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_templates" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_inbox" style="display:none;"></section>
+</main>
+
 <main id="serviceReportsManagerView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">
   <div class="card">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg> Saved Reports</span></div>
