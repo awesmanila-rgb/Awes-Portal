@@ -366,7 +366,7 @@
           '<div class="sp-row-title"><span class="mt-code">' + escapeHtml(w.code) + '</span> ' + escapeHtml(w.name) + (w.is_active ? '' : ' <span class="sp-tag danger">Inactive</span>') + '</div>' +
           '<div class="sp-row-sub">' + escapeHtml(w.address || 'No address') + '</div>' +
           '<div class="sp-row-sub">Storekeeper' + (keepers.length === 1 ? '' : 's') + ': ' + (keepers.length ? escapeHtml(keepers.join(', ')) : '<span style="color:#9A6212;">none assigned</span>') + '</div></div>' +
-          '<div class="mt-row-price">' + invMoney(val) + '<div class="sp-row-sub">' + bs.length + ' item' + (bs.length === 1 ? '' : 's') + ' in stock</div></div></div>' +
+          '<div class="mt-row-price">' + (staffSeesCosts() ? invMoney(val) : '') + '<div class="sp-row-sub">' + bs.length + ' item' + (bs.length === 1 ? '' : 's') + ' in stock</div></div></div>' +
           '<div class="user-card-actions"><button type="button" class="primary" data-wh-edit="1">Edit</button></div></div>';
       }).join('');
     }catch(e){
@@ -583,9 +583,14 @@
     list.innerHTML = '<div class="empty-state">Loading…</div>';
     if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
     try{
-      const k = await db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id);
+      // Department staff with Stock on Hand see every active warehouse;
+      // storekeepers only the ones they keep.
+      const k = isStaffUser()
+        ? await db.from('warehouses').select('id').eq('is_active', true).then(r=> ({ data:(r.data || []).map(w=> ({ warehouse_id:w.id })), error:r.error }))
+        : await db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id);
       if(k.error) throw k.error;
       const ids = (k.data || []).map(x=> x.warehouse_id);
+      if(!ids.length && isStaffUser()){ list.innerHTML = '<div class="empty-state">No active warehouses yet.</div>'; return; }
       if(!ids.length){ list.innerHTML = '<div class="empty-state">You aren\u2019t assigned to a warehouse. Ask the admin to set you as a Storekeeper in Users &amp; Roles.</div>'; return; }
       const [w, s, m] = await Promise.all([
         db.from('warehouses').select('*').in('id', ids).order('code'),

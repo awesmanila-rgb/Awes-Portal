@@ -545,7 +545,8 @@
     try{
       const { error } = await db.from('service_request_messages').insert({
         request_id: srOverlayRequest.id, sender_id: currentUser.id,
-        sender_name: currentUser.name, sender_role: currentUser.role==='admin' ? 'admin' : 'customer',
+        // Office replies (Super Admin or Service Requests staff) go out as the company
+        sender_name: currentUser.name, sender_role: srIsOffice() ? 'admin' : 'customer',
         body
       });
       if(error) throw error;
@@ -553,7 +554,7 @@
       // Push to the other side: admin's message reaches the customer's
       // phones, a customer's message reaches admins. Best-effort.
       const preview = body.length > 80 ? body.slice(0,80)+'\u2026' : body;
-      if(currentUser.role==='admin'){
+      if(srIsOffice()){
         if(srOverlayRequest.customerId && typeof notifyCustomer === 'function'){
           notifyCustomer(srOverlayRequest.customerId, 'New message about your service', preview, 'sr-msg-'+srOverlayRequest.id);
         }
@@ -659,7 +660,7 @@
     const overlay = $('srDetailOverlay');
     if(!overlay) return;
     srOverlayRequest = request;
-    const isAdmin = currentUser && currentUser.role==='admin';
+    const isAdmin = srIsOffice();
     const custName = custNameHint || (isAdmin && typeof customersCache!=='undefined'
       ? (customersCache.find(c=>String(c.id)===String(request.customerId))||{}).name : null);
     // Equipment label needs a different source per role — see the two
@@ -753,7 +754,7 @@
 
     // Admin actions
     const adminEl = $('srDetailAdminActions');
-    if(isAdmin){
+    if(isAdmin && srCanManage()){
       // Build just the action content first (no wrapper yet) so we can
       // tell afterward whether any status branch actually matched. Some
       // statuses (dispatched, in_progress, completed, or an already-
@@ -1108,7 +1109,8 @@
   let srPollTimer = null;
 
   async function srRefreshAdminCounts(){
-    if(!currentUser || currentUser.role !== 'admin') return;
+    // Super Admin, or staff with Service Requests (their queue refreshes live too)
+    if(!currentUser || !srIsOffice()) return;
     const openCount = await srCountOpen();
     // Sidebar badge (admin-only nav item — see index.html sbNavServiceRequests).
     const badge = $('sbServiceRequestsBadge');
@@ -1136,7 +1138,7 @@
   // Called once when the admin dashboard is shown (renderHomeOverview in
   // home.js). Cheap to call repeatedly — channel/poll are only set up once.
   async function srAdminInit(){
-    if(!currentUser || currentUser.role !== 'admin') return 0;
+    if(!currentUser || !srIsOffice()) return 0;
     const openCount = await srRefreshAdminCounts();
     if(!srRealtimeChannel && db){
       srRealtimeChannel = db.channel('service-requests-admin')

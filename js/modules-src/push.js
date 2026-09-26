@@ -59,6 +59,8 @@
   // the row upserts on endpoint, so re-running never creates duplicates.
   async function pushSubscribe(){
     if(!pushSupported() || !currentUser) return false;
+    // Staff devices register as 'staff' (Round 3 inbox escalations —
+    // 20260928_01 allows the role).
     if(Notification.permission !== 'granted') return false;
     if(!(await ensureCloud())) return false;
     try{
@@ -85,7 +87,7 @@
       const { error } = await db.from('push_subscriptions').upsert({
         user_id: currentUser.id,
         customer_id: currentUser.role==='customer' ? (currentUser.customerId || null) : null,
-        role: currentUser.role==='admin' ? 'admin' : (currentUser.role==='customer' ? 'customer' : 'tech'),
+        role: currentUser.role==='admin' ? 'admin' : currentUser.role==='customer' ? 'customer' : currentUser.role==='staff' ? 'staff' : 'tech',
         endpoint: json.endpoint,
         p256dh: json.keys.p256dh,
         auth: json.keys.auth,
@@ -204,7 +206,7 @@
     }catch(e){ return false; }
   }
   function pushRenderPrompts(){
-    const show = !!currentUser && currentUser.role !== 'admin'
+    const show = !!currentUser && currentUser.role !== 'admin' && currentUser.role !== 'staff'
       && pushSupported() && Notification.permission === 'default' && !pushPromptSnoozed();
     const msg = (currentUser && currentUser.role==='customer')
       ? 'Get alerts when your technician is on the way, arrives, or sends you a message.'

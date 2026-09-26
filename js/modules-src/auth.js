@@ -237,7 +237,8 @@
       };
       $('cpSaveBtn').onclick = async ()=>{
         const p1 = $('cpNew').value, p2 = $('cpConfirm').value;
-        if(!p1 || p1.length < 4){ toast('Password must be at least 4 characters'); return; }
+        const minLen = (currentUser && currentUser.role==='staff') ? 6 : 4;
+        if(!p1 || p1.length < minLen){ toast('Password must be at least '+minLen+' characters'); return; }
         if(p1 !== p2){ toast('Passwords do not match'); return; }
         if(!(await ensureCloud())){ toast('Not connected to the cloud'); return; }
         $('cpSaveBtn').disabled = true;
@@ -276,6 +277,7 @@
     if(!el) return;
     if(currentUser && currentUser.role==='admin'){ el.style.display=''; el.textContent = 'Admin'; }
     else if(currentUser && currentUser.role==='customer'){ el.style.display=''; el.textContent = 'Customer: '+currentUser.name; }
+    else if(currentUser && currentUser.role==='staff'){ el.style.display=''; el.textContent = 'Staff: '+currentUser.name; }
     else if(currentUser){ el.style.display=''; el.textContent = 'Tech: '+currentUser.name; }
     else{ el.style.display='none'; }
     const menuLogoutEl = $('menuLogout');
@@ -451,12 +453,16 @@
     const isTech = !!(currentUser && currentUser.role==='tech');
     const isAdmin = !!(currentUser && currentUser.role==='admin');
     const isCustomer = !!(currentUser && currentUser.role==='customer');
+    // Department staff use the same sidebar shell as the admin (role-admin
+    // layout CSS) but never the admin's links — see sidebarStaffGroup.
+    const isStaff = !!(currentUser && currentUser.role==='staff');
     // Switches on the desktop/tablet sidebar dashboard shell (see the
     // admin-sidebar / dashboard-topbar rules in css/app.css) — off before
     // login, and now shared by all three roles (role-customer mirrors
     // role-admin/role-tech; the shell layout itself is identical, only its
     // contents differ).
-    document.body.classList.toggle('role-admin', isAdmin);
+    document.body.classList.toggle('role-admin', isAdmin || isStaff);
+    document.body.classList.toggle('role-staff', isStaff);
     document.body.classList.toggle('role-tech', isTech);
     document.body.classList.toggle('role-customer', isCustomer);
     // Mirrored onto <html> because the overscroll-behavior rule that
@@ -480,15 +486,16 @@
     // #sidebarAdminGroup / #sidebarCustomerGroup wrappers in index.html.
     setVis('sidebarTechGroup', isTech);
     setVis('sidebarAdminGroup', isAdmin);
+    if(typeof staffRenderSidebar === 'function') staffRenderSidebar();
     setVis('sidebarCustomerGroup', isCustomer);
     fitSidebarNav();
     if(currentUser){
-      const brandNameEl = $('sidebarBrandName'); if(brandNameEl) brandNameEl.textContent = isAdmin ? 'Field Operations Portal' : isCustomer ? 'Customer Portal' : "Technician's Homepage";
-      const brandSubEl = $('sidebarBrandSub'); if(brandSubEl) brandSubEl.textContent = isAdmin ? 'Management & Administration' : isCustomer ? 'Your equipment & service history' : 'Field digital form';
+      const brandNameEl = $('sidebarBrandName'); if(brandNameEl) brandNameEl.textContent = isAdmin ? 'Field Operations Portal' : isStaff ? 'Office Portal' : isCustomer ? 'Customer Portal' : "Technician's Homepage";
+      const brandSubEl = $('sidebarBrandSub'); if(brandSubEl) brandSubEl.textContent = isAdmin ? 'Management & Administration' : isStaff ? 'Department staff' : isCustomer ? 'Your equipment & service history' : 'Field digital form';
       const initial = (currentUser.name||'?').trim().charAt(0).toUpperCase() || '?';
       const avatarEl = $('sidebarAvatar'); if(avatarEl) avatarEl.textContent = initial;
       const acctNameEl = $('sidebarAccountName'); if(acctNameEl) acctNameEl.textContent = currentUser.name || '—';
-      const acctRoleEl = $('sidebarAccountRole'); if(acctRoleEl) acctRoleEl.textContent = isAdmin ? 'Super Administrator' : isCustomer ? 'Customer' : 'Technician';
+      const acctRoleEl = $('sidebarAccountRole'); if(acctRoleEl) acctRoleEl.textContent = isAdmin ? 'Super Administrator' : isStaff ? (currentUser.position || (currentUser.access && currentUser.access.is_head ? 'Department Head' : 'Staff')) : isCustomer ? 'Customer' : 'Technician';
       // The dashboard top bar's greeting was left as static placeholder HTML
       // ("Good day, Admin! 👋") — nothing ever wrote the real signed-in
       // name into it, so every role (including technicians and customers)
@@ -506,7 +513,7 @@
     setVis('newBtn', false);
     setVis('srTabNewBtn', isTech);
     // Admin's way to file work a technician already did (back-entry.js).
-    setVis('srTabBackEntryBtn', isAdmin);
+    setVis('srTabBackEntryBtn', isAdmin || (isStaff && typeof can === 'function' && can('ops.past_service', 'edit')));
     // Logout is now a direct, always-visible top-right button for EVERY
     // logged-in role, not just technicians — admin's only path used to be
     // buried inside "☰ Menu", which read as "there's no logout button in
@@ -784,6 +791,13 @@
     adminBtn.innerHTML = icon('key')+' Admin';
     adminBtn.addEventListener('click', ()=> renderAdminLoginForm());
     container.appendChild(adminBtn);
+    // Department staff (Purchasing, Finance, HR, Administration,
+    // Operations) — username + password, see renderStaffLoginForm in staff.js.
+    const staffBtn = document.createElement('button');
+    staffBtn.type='button'; staffBtn.className='login-user-btn';
+    staffBtn.innerHTML = icon('people')+' Office Staff';
+    staffBtn.addEventListener('click', ()=> renderStaffLoginForm());
+    container.appendChild(staffBtn);
   }
 
   // Technician sign-in: username + password in a single step. The username is
@@ -931,6 +945,12 @@
       // fails or the row isn't a customer, so nothing changes for tech.
       try{
         const { data: prof } = await db.from('profiles').select('role, active').eq('id', user.id).maybeSingle();
+        // Department staff: staffRestoreSession() (staff.js) loads their
+        // access and handles deactivation. Must come before the 'tech'
+        // fallback below, or a staff session would restore as a technician.
+        if(prof && prof.role === 'staff'){
+          return { id: user.id, email, role: 'staff' };
+        }
         if(prof && prof.role === 'customer' && prof.active !== false){
           // Which specific customers this login can see is fetched by the
           // caller (checkLoginGate) once it commits to restoring this as a
@@ -978,6 +998,27 @@
       if(verified===null){
         currentUser = {id: saved.id, name: saved.name||'Admin', role: 'admin'};
         enterAdminMode();
+        updateUserBadge();
+        applyUserRestrictions();
+        $('loginOverlay').classList.remove('open');
+        enterApp();
+        return;
+      }
+      localStorage.removeItem('current-user');
+      currentUser = null;
+      await showLoginScreen('Please sign in again.');
+      return;
+    }
+    // ---- Department staff session restore ----
+    if(verified && verified.role==='staff'){
+      await staffRestoreSession(verified, saved);
+      return;
+    }
+    if(saved && saved.role==='staff'){
+      if(verified===null){
+        // Couldn't reach the cloud — keep the cached session (a refresh
+        // must never sign anyone out); access re-checks on the next load.
+        currentUser = saved;
         updateUserBadge();
         applyUserRestrictions();
         $('loginOverlay').classList.remove('open');
@@ -1100,7 +1141,7 @@
 
   // returns false (and re-shows login) if this technician was deactivated mid-session
   async function verifyStillActive(){
-    if(!currentUser || currentUser.role==='admin' || currentUser.role==='customer') return true; // admin/customer sessions aren't gated this way
+    if(!currentUser || currentUser.role==='admin' || currentUser.role==='customer' || currentUser.role==='staff') return true; // admin/customer sessions aren't gated this way
     const fresh = await cloudGetUser(currentUser.id);
     if(fresh && fresh.active===false){
       trackerStopBroadcasting();
@@ -1159,6 +1200,14 @@
     // order alone to keep the previous account's screen out of view.
     const homeScreenEl = $('homeScreen');
     if(homeScreenEl) homeScreenEl.style.display = 'none';
+    // Staff screens hold account/access data — clear, not just hide, so the
+    // next person on this device never sees the previous user's panels.
+    if(typeof staffResetCache === 'function') staffResetCache();
+    const staffViewEl = $('staffView');
+    if(staffViewEl){
+      staffViewEl.style.display = 'none';
+      staffViewEl.querySelectorAll('.stf-panel').forEach(el=>{ el.innerHTML = ''; });
+    }
     // Same belt-and-suspenders treatment for a customer session: without
     // this, logging out mid-way through viewing one customer's equipment
     // detail (specs + photos) left that screen sitting fully rendered but

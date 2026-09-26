@@ -253,9 +253,13 @@
   $('menuManageDropdowns').addEventListener('click', async ()=>{
     closeMainMenu();
     if(!(await ensureAdminAuthenticated())) return;
+    openManageLists();
+  });
+  // Also opened by department staff with Dropdown Lists (staff.js)
+  function openManageLists(){
     renderManageLists();
     $('adminOverlay').classList.add('open');
-  });
+  }
   $('menuChangePin').addEventListener('click', ()=>{
     closeMainMenu();
     doChangeAdminPin();
@@ -757,11 +761,11 @@
   // Live refreshes are quiet: no "Loading…" flash, rows swap in place.
   let dtrAdminRt = null, dtrAdminRtTimer = null, dtrAdminRenderSeq = 0, dtrAdminTickStarted = false;
   function dtrAdminTableVisible(){
-    return !!(currentUser && currentUser.role === 'admin' && $('dtrView') && $('dtrView').style.display !== 'none'
+    return !!(currentUser && hrIsReviewer() && $('dtrView') && $('dtrView').style.display !== 'none'
       && $('dtrAdminTableCard').style.display !== 'none') && !document.hidden;
   }
   function dtrAdminDetailVisible(){
-    return !!(currentUser && currentUser.role === 'admin' && dtrViewingUser && $('dtrView') && $('dtrView').style.display !== 'none'
+    return !!(currentUser && hrIsReviewer() && dtrViewingUser && $('dtrView') && $('dtrView').style.display !== 'none'
       && $('dtrHistoryCard').style.display !== 'none') && !document.hidden;
   }
   function dtrAdminRefreshSoon(payload){
@@ -794,7 +798,7 @@
           if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
             try{ db.removeChannel(dtrAdminRt); }catch(_){}
             dtrAdminRt = null;
-            setTimeout(()=>{ if(currentUser && currentUser.role === 'admin') dtrAdminLiveStart(); }, 5000);
+            setTimeout(()=>{ if(currentUser && hrIsReviewer()) dtrAdminLiveStart(); }, 5000);
           }
         });
     }catch(e){ dtrAdminRt = null; }
@@ -808,10 +812,14 @@
     const dateEl = $('dtrAttendanceDate');
     if(dateEl) dateEl.textContent = dtrFmtDateLabel(dateISO);
     if(!quiet || !body.children.length) body.innerHTML = '<tr><td colspan="9"><div class="empty-state">Loading…</div></td></tr>';
-    if(currentUser && currentUser.role === 'admin') dtrAdminLiveStart();
+    if(currentUser && hrIsReviewer()) dtrAdminLiveStart();
+    // Staff with Technician Profiles but not Attendance get the technician
+    // list without DTR figures (the database wouldn't return them anyway —
+    // showing everyone as "Absent" would be wrong).
+    const seeDtr = hrIsReviewer('hr.attendance');
     const [users, records] = await Promise.all([
       cloudListUsers().catch(()=>null),
-      dtrListAllForDate(dateISO).catch(()=>null)
+      seeDtr ? dtrListAllForDate(dateISO).catch(()=>null) : Promise.resolve([])
     ]);
     if(seq !== dtrAdminRenderSeq) return;            // a newer refresh already started
     if(quiet && (users === null || records === null)) return;   // keep what's shown on a failed live refresh
@@ -855,6 +863,8 @@
         statusLabel = dotIcon('var(--green)')+' Present'; presentCount++;
         inTxt = dtrFmtTime(rec.timeIn);
         hoursTxt = dtrHoursLabel(Math.max(0, Math.round((now-new Date(rec.timeIn))/60000)));
+      }else if(!seeDtr){
+        statusLabel = '\u2014';
       }else{
         statusLabel = dotIcon('var(--danger)')+' Absent'; absentCount++;
       }
@@ -876,7 +886,9 @@
     });
     body.innerHTML = '';
     body.appendChild(frag);            // swap all rows at once — no flicker on live refresh
-    if(summaryEl) summaryEl.textContent = presentCount+' Present · '+completedCount+' Completed · '+otCount+' On Overtime · '+absentCount+' Absent · '+active.length+' Total';
+    if(summaryEl) summaryEl.textContent = seeDtr
+      ? presentCount+' Present · '+completedCount+' Completed · '+otCount+' On Overtime · '+absentCount+' Absent · '+active.length+' Total'
+      : active.length+' technicians';
   }
   function dtrShowTechnicianDetail(u){
     dtrViewingUser = u;

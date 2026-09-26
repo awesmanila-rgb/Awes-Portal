@@ -1085,7 +1085,17 @@
         // Carry every past report filed under the old name forward to the new
         // one, so this customer's History stays complete after a rename.
         if(oldName && oldName.trim().toLowerCase() !== name.toLowerCase()){
-          renamedCount = await cloudRenameReportsCustomer(oldName, name);
+          if(isStaffUser()){
+            // Staff can't update reports directly — one narrow database
+            // function renames the customer on its reports instead.
+            try{
+              const { data: n, error: rnErr } = await db.rpc('rename_customer_on_reports', { p_old: oldName, p_new: name });
+              if(rnErr) throw rnErr;
+              renamedCount = n || 0;
+            }catch(e){ console.error('rename reports customer failed', describeCloudError(e)); }
+          }else{
+            renamedCount = await cloudRenameReportsCustomer(oldName, name);
+          }
         }
       }else{
         await cloudUpsertCustomer(payload);
@@ -1422,7 +1432,12 @@
   function techOpenProfile(u){
     tpCurrentUser = u;
     $('techProfileName').textContent = u.name;
-    tpSwitchTab('Attendance');
+    // Staff see only the tabs their HR pages allow (Super Admin: all)
+    const tabOk = { Attendance: hrIsReviewer('hr.attendance'), Leaves: hrIsReviewer('hr.leaves'),
+                    Violations: hrIsReviewer('hr.tech_profiles'), Documents: hrIsReviewer('hr.tech_profiles') };
+    Object.keys(tabOk).forEach(t=>{ $('tpTab'+t).style.display = tabOk[t] ? '' : 'none'; });
+    if(typeof hrApplyStaffMode === 'function') hrApplyStaffMode();
+    tpSwitchTab(Object.keys(tabOk).find(t=> tabOk[t]) || 'Attendance');
     tpLoadPhoto();
     $('techProfileOverlay').classList.add('open');
   }

@@ -13,7 +13,11 @@
   const TL_COND = { good:'Good', needs_repair:'Needs repair', defective:'Defective', missing_parts:'Missing parts', lost:'Lost' };
   const TL_SLIP = { issue:{ label:'Issue', title:'TOOL ISSUE SLIP' }, 'return':{ label:'Return', title:'TOOL RETURN SLIP' }, handover:{ label:'Handover', title:'TOOL HANDOVER SLIP' } };
   const TL_BUCKET = 'tool-files';
-  const tl = { tools:[], whs:[], mine:[], workers:[], jobs:[], projects:[], suppliers:[], isAdmin:false };
+  // isAdmin: Super Admin. allWh: every warehouse (admin or department staff).
+  // money: purchase / repair costs (admin, or staff with "See peso values").
+  // canRegister / canDecide: Tool Register Edit / Defect Reports Edit.
+  const tl = { tools:[], whs:[], mine:[], workers:[], jobs:[], projects:[], suppliers:[], isAdmin:false,
+               allWh:false, money:false, canRegister:false, canDecide:false };
 
   const tlToday = ()=> poToday();
   const tlTool = (id)=> tl.tools.find(t=> t.id === id);
@@ -26,10 +30,14 @@
 
   async function tlLoad(){
     tl.isAdmin = invIsAdmin();
+    tl.allWh = tl.isAdmin || isStaffUser();
+    tl.money = staffSeesCosts();
+    tl.canRegister = tl.isAdmin || (isStaffUser() && can('tools.register', 'edit'));
+    tl.canDecide = tl.isAdmin || (isStaffUser() && can('tools.defects', 'edit'));
     const [tools, whs, keep, wk, jobs, pr] = await Promise.all([
-      db.from(tl.isAdmin ? 'tools' : 'tools_view').select('*').order('asset_tag'),
+      db.from(tl.money ? 'tools' : 'tools_view').select('*').order('asset_tag'),
       db.from('warehouses').select('*').order('code'),
-      tl.isAdmin ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
+      tl.allWh ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
       db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'),
       db.rpc('inv_open_job_orders'),
       db.from('projects').select('id, project_no, name, status').order('project_no', { ascending:false })
@@ -47,7 +55,7 @@
     if(!(await ensureCloud())){ toast('Not connected'); return false; }
     try{ await tlLoad(); }
     catch(e){ purchFail(invMissingTables(e) ? 'Run migration 20260923_10_tools_equipment.sql first: ' : 'Couldn\u2019t load tools: ', e); return false; }
-    if(needWh && !tl.mine.length){ toast(tl.isAdmin ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
+    if(needWh && !tl.mine.length){ toast(tl.allWh ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
     $('purchasingView').classList.add('po-wide');
     return true;
   }
@@ -211,7 +219,7 @@
       '<div class="sp-row-sub">' + escapeHtml([t.category, [t.brand, t.model].filter(Boolean).join(' '), t.serial_no ? 'S/N ' + t.serial_no : '', tlWh(t.home_warehouse_id)].filter(Boolean).join(' · ')) + '</div>' +
       (t.status === 'issued' ? '<div class="sp-row-sub' + (tlOverdue(t) ? '" style="color:var(--danger);font-weight:700;' : '') + '">With ' + escapeHtml(t.holder_name) + (t.due_back ? ' · due ' + escapeHtml(poDateLong(t.due_back)) + (tlOverdue(t) ? ' — OVERDUE' : '') : '') + '</div>' : '') +
       (t.next_maint_due ? '<div class="sp-row-sub" style="' + (tlMaintLate(t) ? 'color:var(--danger);font-weight:700;' : tlMaintSoon(t) ? 'color:#9A6212;font-weight:700;' : '') + '">' + escapeHtml(t.maint_type === 'inspection' ? 'Inspection' : 'Calibration') + ' due ' + escapeHtml(poDateLong(t.next_maint_due)) + (tlMaintLate(t) ? ' — OVERDUE (can\u2019t be issued)' : '') + '</div>' : '') +
-      '</div></button>').join('') : '<div class="empty-state">' + (all.length ? 'Nothing matches.' : 'No tools yet.' + (tl.isAdmin ? ' Tap <b>+ Add Tool / Kit</b> or import a CSV.' : '')) + '</div>';
+      '</div></button>').join('') : '<div class="empty-state">' + (all.length ? 'Nothing matches.' : 'No tools yet.' + (tl.canRegister ? ' Tap <b>+ Add Tool / Kit</b> or import a CSV.' : '')) + '</div>';
   }
   ['tlRegSearch'].forEach(id=> $(id).addEventListener('input', tlRenderRegister));
   ['tlRegStatus', 'tlRegWh', 'tlRegKind'].forEach(id=> $(id).addEventListener('change', tlRenderRegister));
@@ -219,7 +227,7 @@
   $('tlScanBtn').addEventListener('click', async ()=>{
     const tag = await tlScan(); if(!tag) return;
     const t = tl.tools.find(x=> x.asset_tag === tag);
-    if(t) tlOpenDetail(t.id); else toast(tag + ' isn\u2019t in the register' + (tl.isAdmin ? '' : ' (or not your warehouse)'));
+    if(t) tlOpenDetail(t.id); else toast(tag + ' isn\u2019t in the register' + (tl.allWh ? '' : ' (or not your warehouse)'));
   });
   $('tlLabelsBtn').addEventListener('click', async ()=>{
     const rows = tlRegFiltered();
@@ -278,7 +286,12 @@
     if(!(await purchEnsureSession())) return;
     try{
       if(tlEditTool){
-        const { error } = await db.from('tools').update(Object.assign(row, { serial_no: $('tlFSerial').value.trim() })).eq('id', tlEditTool.id);
+        const upd = Object.assign(row, { serial_no: $('tlFSerial').value.trim() });
+        // Staff save through the database (purchase fields only with "See
+        // peso values" — never blanked by a form that didn't show them).
+        const { error } = isStaffUser()
+          ? await db.rpc('tl_staff_save_tools', { p_id: tlEditTool.id, p_rows: [upd] })
+          : await db.from('tools').update(upd).eq('id', tlEditTool.id);
         if(error) throw error;
         toast(tlEditTool.asset_tag + ' saved');
         await tlLoad(); tlOpenDetail(tlEditTool.id);
@@ -286,7 +299,9 @@
         const qty = Math.max(1, Math.min(200, parseInt($('tlFQty').value, 10) || 1));
         const serials = $('tlFSerials').value.split(/\r?\n/).map(x=> x.trim());
         const rows = Array.from({ length: qty }, (_, i)=> Object.assign({}, row, { serial_no: qty === 1 ? $('tlFSerial').value.trim() : (serials[i] || '') }));
-        const { data, error } = await db.from('tools').insert(rows).select('id, asset_tag');
+        const { data, error } = isStaffUser()
+          ? await db.rpc('tl_staff_save_tools', { p_id: null, p_rows: rows })
+          : await db.from('tools').insert(rows).select('id, asset_tag');
         if(error) throw error;
         toast('Added ' + data.map(x=> x.asset_tag).join(', '));
         await tlLoad(); tlRegView('list'); tlRenderRegister();
@@ -313,7 +328,9 @@
     });
     if(!out.length){ toast('Nothing to import' + (bad.length ? ' — check rows ' + bad.slice(0, 5).join(', ') : '')); return; }
     if(!await uiConfirm('Add ' + out.length + ' tool' + (out.length === 1 ? '' : 's') + (bad.length ? ' (skipping ' + bad.length + ' row(s) with no name or unknown warehouse)' : '') + '?')) return;
-    const { data, error } = await db.from('tools').insert(out).select('id');
+    const { data, error } = isStaffUser()
+      ? await db.rpc('tl_staff_save_tools', { p_id: null, p_rows: out })
+      : await db.from('tools').insert(out).select('id');
     if(error){ purchFail('Import failed: ', error); return; }
     toast('Imported ' + data.length + ' tools'); await tlLoad(); tlRenderRegister();
   });
@@ -329,11 +346,11 @@
       (t.status === 'issued' ? kv('With', escapeHtml(t.holder_name) + (t.due_back ? ' · due ' + escapeHtml(poDateLong(t.due_back)) : '') + (tlOverdue(t) ? ' <b style="color:var(--danger)">OVERDUE</b>' : '')) + kv('For', escapeHtml(tlPrj(t.project_id, t.job_order_id))) : '') +
       (t.maint_type ? kv(t.maint_type === 'inspection' ? 'Inspection' : 'Calibration', 'every ' + t.maint_interval_days + ' days · next ' + escapeHtml(poDateLong(t.next_maint_due)) + (tlMaintLate(t) ? ' <b style="color:var(--danger)">OVERDUE</b>' : '')) : '') +
       (t.kind === 'kit' ? '<div class="wide"><div class="k">Kit contents</div><div class="v">' + escapeHtml((t.kit_contents || []).map(k=> k.name + (k.qty > 1 ? ' ×' + k.qty : '')).join(', ')) + '</div></div>' : '') +
-      kv('Purchased', escapeHtml([t.purchase_date ? poDateLong(t.purchase_date) : '', t.po_no, t.purchase_cost != null && tl.isAdmin ? '₱' + poFmt(t.purchase_cost) : ''].filter(Boolean).join(' · '))) +
+      kv('Purchased', escapeHtml([t.purchase_date ? poDateLong(t.purchase_date) : '', t.po_no, t.purchase_cost != null && tl.money ? '₱' + poFmt(t.purchase_cost) : ''].filter(Boolean).join(' · '))) +
       kv('Warranty until', t.warranty_until ? escapeHtml(poDateLong(t.warranty_until)) + (t.warranty_until < tlToday() ? ' (expired)' : '') : '');
     const b = (a, l, c)=> '<button type="button" class="btn ' + (c || 'btn-secondary') + '" data-da="' + a + '">' + l + '</button>';
     $('tlDetActions').innerHTML = b('label', 'Print QR Label') + (t.maint_type && t.status !== 'issued' ? b('maint', 'Record ' + (t.maint_type === 'inspection' ? 'Inspection' : 'Calibration')) : '') +
-      (tl.isAdmin ? b('edit', 'Edit') + (t.status === 'lost' ? b('found', 'Mark Found') : '') + (['available', 'lost', 'defective'].includes(t.status) ? b('retire', 'Retire', 'danger') : '') : '');
+      (tl.canRegister ? b('edit', 'Edit') + (t.status === 'lost' ? b('found', 'Mark Found') : '') + (['available', 'lost', 'defective'].includes(t.status) ? b('retire', 'Retire', 'danger') : '') : '');
     tlRegView('detail');
     const h = await db.from('tool_events').select('*').eq('tool_id', t.id).order('at', { ascending:false }).limit(200);
     $('tlDetHist').innerHTML = (h.data || []).length ? '<thead><tr><th>When</th><th>Event</th><th>Ref.</th><th>Details</th><th>By</th></tr></thead><tbody>' +
@@ -390,14 +407,14 @@
     $('tlDefInfo').innerHTML = kv('Condition', escapeHtml(TL_COND[d.condition] || d.condition)) + kv('Returned by', escapeHtml(d.worker_name)) + kv('Job / project', escapeHtml(tlPrj(d.project_id, d.job_order_id))) +
       kv('Reported', escapeHtml(mrWhen(d.created_at) + ' by ' + d.reported_by_name)) + kv('Warranty', d.under_warranty ? '<b>Still under warranty</b> — claim from the supplier' : 'Not under warranty') +
       kv('Status', escapeHtml(d.status.replace('_', ' ') + (d.decision !== 'pending' ? ' · ' + d.decision.replace('_', ' ') : ''))) +
-      (d.repair_cost != null && tl.isAdmin ? kv('Repair cost', '₱' + poFmt(d.repair_cost) + (d.repair_vendor ? ' · ' + escapeHtml(d.repair_vendor) : '')) : '') +
+      (d.repair_cost != null && tl.money ? kv('Repair cost', '₱' + poFmt(d.repair_cost) + (d.repair_vendor ? ' · ' + escapeHtml(d.repair_vendor) : '')) : '') +
       (d.chargeable_to_worker ? kv('Chargeable to worker', 'Yes (per company policy)') : '') +
       '<div class="wide"><div class="k">Description</div><div class="v">' + escapeHtml(d.description || '—') + '</div></div>' +
       (d.photo_path ? '<div class="wide"><div class="k">Photo</div><div class="v mr-photo" id="tlDefPhoto">Loading…</div></div>' : '');
     if(d.photo_path) tlDownloadUrl(d.photo_path).then(u=>{ const el = document.getElementById('tlDefPhoto'); if(el) el.innerHTML = u ? '<img src="' + u + '">' : 'Photo unavailable'; });
     $('tlDCause').value = d.cause; $('tlDDec').value = d.decision; $('tlDVendor').value = d.repair_vendor || '';
     $('tlDCost').value = d.repair_cost != null ? String(d.repair_cost) : ''; $('tlDCharge').checked = !!d.chargeable_to_worker; $('tlDNote').value = '';
-    $('tlDefDecideSec').style.display = tl.isAdmin && d.status !== 'closed' ? '' : 'none';
+    $('tlDefDecideSec').style.display = tl.canDecide && d.status !== 'closed' ? '' : 'none';
     $('tlDefList').style.display = 'none'; $('tlDefDetail').style.display = '';
     window.scrollTo({ top:0 });
   }
@@ -860,7 +877,7 @@
   async function tlShowReports(){
     if(!(await tlEnter(false))) return;
     if(!$('trFrom').value){ $('trFrom').value = tlToday().slice(0, 7); $('trTo').value = tlToday().slice(0, 7); }
-    $('trWh').innerHTML = '<option value="">All warehouses</option>' + (tl.isAdmin ? tl.whs : tl.mine).map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code) + '</option>').join('');
+    $('trWh').innerHTML = '<option value="">All warehouses</option>' + (tl.allWh ? tl.whs : tl.mine).map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code) + '</option>').join('');
     trSetTab(trTab);
   }
   function trSetTab(t){
@@ -889,7 +906,7 @@
     const [sl, df] = await Promise.all([db.from('tool_slips').select('*, tool_slip_lines(*)').gte('created_at', r.first + 'T00:00:00+08:00').lte('created_at', r.last + 'T23:59:59+08:00'),
       db.from('tool_defects').select('*').gte('created_at', r.first + 'T00:00:00+08:00').lte('created_at', r.last + 'T23:59:59+08:00')]);
     const months = []; for(let d = new Date(r.first + 'T00:00:00Z'); d.toISOString().slice(0, 10) <= r.last; d.setUTCMonth(d.getUTCMonth() + 1)) months.push(d.toISOString().slice(0, 7));
-    const money = tl.isAdmin;
+    const money = tl.money;
     const rows = months.map(mo=>{
       const bought = tl.tools.filter(t=> t.purchase_date && t.purchase_date.slice(0, 7) === mo && trWhOk(t.home_warehouse_id));
       const inM = (s)=> trLocal(s.created_at).slice(0, 7) === mo && (s.type === 'handover' || trWhOk(s.warehouse_id));
@@ -918,7 +935,7 @@
     const r = trRange();
     const q = await db.from('tool_defects').select('*').gte('created_at', r.first + 'T00:00:00+08:00').lte('created_at', r.last + 'T23:59:59+08:00').order('created_at');
     const ds = (q.data || []).filter(d=>{ const t = tlTool(d.tool_id); return !t || trWhOk(t.home_warehouse_id); });
-    const money = tl.isAdmin;
+    const money = tl.money;
     const grp = (key)=>{ const m = new Map(); ds.forEach(d=>{ const k = key(d) || '—'; const e = m.get(k) || [k, 0, 0]; e[1]++; e[2] += Number(d.repair_cost || 0); m.set(k, e); }); return Array.from(m.values()).sort((a, b)=> b[1] - a[1]); };
     const model = (d)=>{ const t = tlTool(d.tool_id) || {}; return [t.name, t.brand, t.model].filter(Boolean).join(' '); };
     const cut = (rows)=> money ? rows : rows.map(x=> x.slice(0, 2));
@@ -934,7 +951,7 @@
   }
   async function trRegister(){
     const rows = tl.tools.filter(t=> trWhOk(t.home_warehouse_id)).sort((a, b)=> a.category.localeCompare(b.category) || a.asset_tag.localeCompare(b.asset_tag));
-    const money = tl.isAdmin, val = (f)=> rows.filter(f).reduce((a, t)=> a + Number(t.purchase_cost || 0), 0);
+    const money = tl.money, val = (f)=> rows.filter(f).reduce((a, t)=> a + Number(t.purchase_cost || 0), 0);
     return { title:'Tool & Equipment Register', subtitle:'As of ' + poDateLong(tlToday()) + ' · ' + ($('trWh').value ? tlWh($('trWh').value) : 'All warehouses'),
       summary:[['Tools & kits', String(rows.length)], ['In service', String(rows.filter(t=> ['available', 'issued'].includes(t.status)).length)], ['Out of service', String(rows.filter(t=> ['defective', 'repair'].includes(t.status)).length)], ['Lost', String(rows.filter(t=> t.status === 'lost').length)]]
         .concat(money ? [['Value in service', invMoney(val(t=> ['available', 'issued'].includes(t.status)))], ['Value lost', invMoney(val(t=> t.status === 'lost'))]] : []),

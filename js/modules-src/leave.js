@@ -252,7 +252,13 @@
     if(status==='disapproved' && !comment){
       if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
-    if(!currentUser || currentUser.role!=='admin'){ toast('Admin only'); return; }
+    if(!hrIsReviewer('hr.leaves')){ toast('Admin only'); return; }
+    if(isStaffUser()){
+      if(!can('hr.leaves', 'approve')){ toast('You need Approve access for Leave Requests'); return; }
+      let owner = null;
+      try{ const r0 = await db.from('leave_requests').select('technician_id').eq('id', id).maybeSingle(); owner = r0.data && r0.data.technician_id; }catch(e){}
+      if(!(await staffApprovalPrecheck('hr.leaves', null, owner))) return;
+    }
     if(!(await ensureCloud())){ toast('Decisions need a connection — try again when online'); return; }
     // Targeted update rather than re-uploading the whole record. The old
     // read-modify-write raced with the technician editing their request (either

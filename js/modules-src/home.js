@@ -26,7 +26,8 @@
     $('homeBtn').style.display = '';
     setHeaderTitle('Online DTR', 'Daily Time Record');
     window.scrollTo({top:0});
-    if(currentUser && currentUser.role==='admin'){
+    if(hrIsReviewer()){
+      hrApplyStaffMode();
       // Admin has no DTR of their own — DTR is per-technician. Land on the
       // attendance table (today's status for everyone); "View DTR" on a
       // row drills into that one technician's read-only history below.
@@ -1083,6 +1084,15 @@
     // out here before anything below (which assumes admin/tech-only
     // elements) runs. See showCustomerHome() in customer-equipment-history.js.
     if(currentUser && currentUser.role==='customer'){ showCustomerHome(); return; }
+    // Department staff get their own home (staff.js) — the admin dashboard
+    // below reads admin-only data.
+    if(currentUser && currentUser.role==='staff'){ showStaffHome(); return; }
+    // Round 3: a notification tap (…?inbox=1) opens the Inbox; otherwise
+    // just refresh the Inbox count in the sidebar
+    if(currentUser && currentUser.role==='admin' && typeof staffMaybeOpenInboxFromUrl === 'function'){
+      if(staffMaybeOpenInboxFromUrl()) return;
+      staffLoadInbox();
+    }
     if(typeof invRefreshStorekeeperTile === 'function') invRefreshStorekeeperTile();   // storekeepers get a Warehouse Stock tile
     if(typeof invRefreshMineBadge === 'function') invRefreshMineBadge();               // "N to sign" on My Materials
     if(typeof tlRefreshMineBadge === 'function') tlRefreshMineBadge();                 // tools to sign / overdue on My Tools

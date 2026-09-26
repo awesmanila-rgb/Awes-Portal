@@ -168,6 +168,19 @@
     poSettingsData = (data && data[0] && data[0].data) || {};
     return poSettingsData;
   }
+  // Department staff logins, for linking a signatory to the person whose
+  // approvals print that signature (Super Admin screen).
+  let poStaffLogins = [];
+  async function poLoadStaffLogins(){
+    const sel = $('poSigUser');
+    if(!sel) return;
+    const { data, error } = await db.from('profiles').select('id, name, username, active').eq('role', 'staff').order('name');
+    if(error) throw error;
+    poStaffLogins = data || [];
+    sel.innerHTML = '<option value="">\u2014 not linked \u2014</option>' + poStaffLogins.filter(p=> p.active).map(p=>
+      '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + ' (@' + escapeHtml(p.username || '') + ')</option>').join('');
+  }
+  function poStaffName(id){ const p = poStaffLogins.find(x=> x.id === id); return p ? p.name : 'staff login'; }
   async function poLoadSignatories(){
     const { data, error } = await db.from('po_signatories').select('*').order('name');
     if(error) throw error;
@@ -416,7 +429,8 @@
 
   function poApplyMode(){
     const st = poEditing ? poEditing.status : 'draft';
-    poReadOnly = st !== 'draft';
+    // Staff without Edit see drafts read-only too (the database refuses the write anyway)
+    poReadOnly = st !== 'draft' || !can('pur.purchase_orders', 'edit');
     $('poSheetTitle').textContent = poEditing ? poEditing.po_no : 'New Purchase Order';
     $('poSheetStatus').className = 'po-status ' + st;
     $('poSheetStatus').textContent = poEditing ? st : 'unsaved';
@@ -434,6 +448,14 @@
     }else note.style.display = 'none';
     $$('#poEditorView input, #poEditorView select, #poEditorView textarea, #poFulfilment button').forEach(el=>{ el.disabled = poReadOnly; });
     $('poAddItem').style.display = poReadOnly ? 'none' : '';
+    // Staff: the approver printed on a PO is always whoever issues it — their
+    // own linked signatory (set by the database at issue). Show that, locked.
+    if(isStaffUser() && st === 'draft'){
+      const mine = poMySignatory();
+      $('poApprovedBy').value = mine && can('pur.purchase_orders', 'approve') ? mine.id : '';
+      $('poApprovedBy').disabled = true;
+      $('poApprovedBy').title = 'Set automatically to whoever issues this PO';
+    }else $('poApprovedBy').title = '';
     poRenderActions();
   }
   function poRenderActions(){
@@ -447,7 +469,21 @@
       html = b('preview', 'View PDF', 'btn-primary') + b('duplicate', 'Duplicate');
       if(st === 'issued') html += b('cancel', 'Cancel PO', 'danger');
     }
+    // Staff: Edit for save/duplicate/delete, Approve for issue/cancel.
+    if(isStaffUser()){
+      const tmp = document.createElement('div'); tmp.innerHTML = html;
+      const need = { save:'edit', duplicate:'edit', delete:'edit', issue:'approve', cancel:'approve' };
+      tmp.querySelectorAll('[data-po-act]').forEach(el=>{
+        const lv = need[el.dataset.poAct];
+        if(lv && !can('pur.purchase_orders', lv)) el.remove();
+      });
+      html = tmp.innerHTML;
+    }
     $('poActions').innerHTML = html;
+  }
+  function poMySignatory(){
+    if(!currentUser) return null;
+    return poSignatories.find(s=> s.user_id === currentUser.id && s.is_active) || null;
   }
 
   function poFillSupplierSelect(keepId){
@@ -855,8 +891,12 @@
     if(err){ toast(err); return; }
     if(!$('poSupplier').value){ toast('Choose a supplier before issuing'); return; }
     if(!poCleanItems().filter(it=> it.description.trim()).length){ toast('Add at least one item before issuing'); return; }
-    if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
+    if(isStaffUser()){
+      if(!poMySignatory()){ toast('Your account isn\u2019t linked to a PO signatory yet \u2014 ask the admin to link you in PO Settings \u2192 Signatories'); return; }
+    }else if(!$('poApprovedBy').value){ toast('Choose who approves this PO before issuing'); $('poApprovedBy').focus(); return; }
     const t = poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), Number($('poEwt').value) || 0);
+    // Staff approvals: Approve level, peso limit, not your own draft, password
+    if(!(await staffApprovalPrecheck('pur.purchase_orders', t.total, poEditing && poEditing.created_by))) return;
     const s = poCurrentSupplier();
     if(!await uiConfirm('Issue this PO to ' + poSupplierName(s) + ' for ₱' + poFmt(t.total) + (t.ewt ? ' (net payable ₱' + poFmt(t.netPayable) + ' after EWT)' : '') + '?\n\nOnce issued it is locked: it can be viewed, downloaded or cancelled, but not edited.')) return;
     const saved = await poSave({ quiet:true });
@@ -879,6 +919,7 @@
     const reason = await uiPrompt('Cancel ' + poEditing.po_no + '?\n\nThe PO stays on record, marked CANCELLED. Enter the reason:');
     if(reason === null) return;
     if(!reason.trim()){ toast('A reason is required to cancel'); return; }
+    if(!(await staffEnsureReauth())) return;
     if(!(await purchEnsureSession())) return;
     try{
       purchMarkOwn(poEditing.id);
@@ -1363,7 +1404,7 @@
   $('poSetTabs').addEventListener('click', (e)=>{ const b = e.target.closest('[data-po-tab]'); if(b) poSetTab(b.dataset.poTab); });
   $('poSettingsBtn').addEventListener('click', async ()=>{
     if(!(await ensureCloud())){ toast('Not connected'); return; }
-    try{ await Promise.all([poLoadSettings(), poLoadSignatories()]); }
+    try{ await Promise.all([poLoadSettings(), poLoadSignatories(), poLoadStaffLogins()]); }
     catch(e){ purchFail('Couldn\u2019t load PO settings: ', e); return; }
     poFillSettingsForm();
     poResetSigForm();
@@ -1532,6 +1573,7 @@
   }
   function poResetSigForm(){
     $('poSigId').value = ''; $('poSigName').value = ''; $('poSigPosition').value = '';
+    if($('poSigUser')) $('poSigUser').value = '';
     $('poSigFile').value = ''; poSigCanvas = null; poShowSigPreview(null);
     $('poSigFormTitle').textContent = 'Add a signatory';
     $('poSigCancelBtn').style.display = 'none';
@@ -1542,7 +1584,7 @@
     list.innerHTML = poSignatories.map(s=>
       '<div class="sp-row" data-id="' + escapeHtml(s.id) + '"' + (s.is_active ? '' : ' style="opacity:.55;"') + '><div class="sp-row-top"><div style="min-width:0;">' +
         '<div class="sp-row-title">' + escapeHtml(s.name) + (s.is_active ? '' : ' <span class="sp-tag danger">Inactive</span>') + (s.signature_path ? '' : ' <span class="sp-tag warn">No signature</span>') + '</div>' +
-        '<div class="sp-row-sub">' + escapeHtml(s.position || '') + '</div></div>' +
+        '<div class="sp-row-sub">' + escapeHtml(s.position || '') + (s.user_id ? ' \u00B7 Login: ' + escapeHtml(poStaffName(s.user_id)) : '') + '</div></div>' +
         '<div data-thumb="' + escapeHtml(s.signature_path || '') + '"></div></div>' +
       '<div class="user-card-actions"><button type="button" data-sact="edit" class="primary">Edit / New signature</button>' +
         '<button type="button" data-sact="toggle">' + (s.is_active ? 'Deactivate' : 'Reactivate') + '</button></div></div>'
@@ -1561,6 +1603,7 @@
     if(!s) return;
     if(b.dataset.sact === 'edit'){
       $('poSigId').value = s.id; $('poSigName').value = s.name; $('poSigPosition').value = s.position || '';
+      if($('poSigUser')) $('poSigUser').value = s.user_id || '';
       $('poSigFile').value = ''; poSigCanvas = null;
       const img = s.signature_path ? await poLoadImage(s.signature_path) : null;
       poShowSigPreview(img ? img.dataUrl : null);
@@ -1587,6 +1630,12 @@
     const btn = $('poSigSaveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
     try{
       const row = { name, position: $('poSigPosition').value.trim() };
+      if($('poSigUser')){
+        const uid = $('poSigUser').value || null;
+        const taken = uid && poSignatories.find(x=> x.user_id === uid && x.id !== id);
+        if(taken){ toast('That login is already linked to ' + taken.name); return; }
+        row.user_id = uid;
+      }
       // A new file always gets a new path — issued POs keep pointing at the old one.
       if(poSigCanvas) row.signature_path = await poUploadPng(poSigCanvas, 'signatures');
       const res = id ? await db.from('po_signatories').update(row).eq('id', id)

@@ -1663,8 +1663,39 @@
   //     record back, and
   //   * guard against acting twice on the same record.
   function caAdminGuard(){
-    if(!currentUser || currentUser.role!=='admin'){ toast('Admin only'); return false; }
+    if(!caIsReviewer()){ toast('Admin only'); return false; }
     return true;
+  }
+  // Super Admin, or department staff with any Finance page. Staff may only
+  // do what their level allows — checked here for a clear message, and
+  // again by the database (guard_cash_decision).
+  function caIsReviewer(){
+    if(!currentUser) return false;
+    if(currentUser.role === 'admin') return true;
+    return isStaffUser() && (can('fin.cash_advance', 'view') || can('fin.liquidation', 'view') || can('fin.reimbursement', 'view'));
+  }
+  function caModuleOf(rec){ return rec && rec.kind === 'reimbursement' ? 'fin.reimbursement' : 'fin.cash_advance'; }
+  function caStaffNeeds(module, level){
+    if(!isStaffUser() || can(module, level)) return true;
+    const m = typeof stfModule === 'function' ? stfModule(module) : null;
+    toast('You need ' + (level === 'approve' ? 'Approve' : 'Edit') + ' access for ' + (m ? m.label : 'this page'));
+    return false;
+  }
+  // Which parts of the reviewer screen this staff member may act on (CSS)
+  function caApplyStaffMode(){
+    const staff = isStaffUser(), cls = document.body.classList;
+    cls.toggle('stf-na-ca',  staff && !can('fin.cash_advance', 'approve'));
+    cls.toggle('stf-ne-ca',  staff && !can('fin.cash_advance', 'edit'));
+    cls.toggle('stf-nv-liq', staff && !can('fin.liquidation', 'view'));
+    cls.toggle('stf-na-liq', staff && !can('fin.liquidation', 'approve'));
+    cls.toggle('stf-ne-liq', staff && !can('fin.liquidation', 'edit'));
+    cls.toggle('stf-na-rb',  staff && !can('fin.reimbursement', 'approve'));
+    cls.toggle('stf-ne-rb',  staff && !can('fin.reimbursement', 'edit'));
+    const reqOk = !staff || can('fin.cash_advance', 'view') || can('fin.liquidation', 'view');
+    const rbOk  = !staff || can('fin.reimbursement', 'view');
+    if($('caAdminSecRequests')) $('caAdminSecRequests').style.display = reqOk ? '' : 'none';
+    if($('caAdminSecReimb')) $('caAdminSecReimb').style.display = rbOk ? '' : 'none';
+    return { reqOk, rbOk };
   }
   async function caApplyAdminChange(id, mutate, okMsg){
     if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
@@ -1695,6 +1726,12 @@
 
   async function caDecideLiquidation(id, status, comment){
     if(!caAdminGuard()) return;
+    if(isStaffUser()){
+      if(!caStaffNeeds('fin.liquidation', 'approve')) return;
+      const rec0 = await caGetRequest(id);
+      if(!rec0 || !rec0.liquidation){ toast('Liquidation not found'); return; }
+      if(!(await staffApprovalPrecheck('fin.liquidation', rec0.liquidation.totalAmount, rec0.userId || null))) return;
+    }
     if(status==='disapproved' && !comment){
       if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
@@ -1737,6 +1774,7 @@
   // untracked forever.
   async function caMarkSettled(id, method){
     if(!caAdminGuard()) return;
+    if(isStaffUser() && !caStaffNeeds('fin.liquidation', 'edit')) return;
     let setRec = null;
     const setOk = await caApplyAdminChange(id, (rec)=>{
       setRec = rec;
@@ -1757,6 +1795,13 @@
 
   async function caDecide(id, status, comment){
     if(!caAdminGuard()) return;
+    if(isStaffUser()){
+      const rec0 = await caGetRequest(id);
+      if(!rec0){ toast('Request not found'); return; }
+      const mod = caModuleOf(rec0);
+      if(!caStaffNeeds(mod, 'approve')) return;
+      if(!(await staffApprovalPrecheck(mod, rec0.amount, rec0.userId || null))) return;
+    }
     if(status==='disapproved' && !comment){
       if(!await uiConfirm('Disapprove without a comment? The technician won\'t know why.')) return;
     }
@@ -1781,6 +1826,10 @@
   // the date and amount actually given (which can differ from what was requested).
   async function caRecordDisbursement(id, dateGiven, amountGiven){
     if(!caAdminGuard()) return;
+    if(isStaffUser()){
+      const rec0 = await caGetRequest(id);
+      if(!rec0 || !caStaffNeeds(caModuleOf(rec0), 'edit')) return;
+    }
     if(!dateGiven){ toast('Set the date the cash was given'); return; }
     if(!amountGiven || amountGiven<=0){ toast('Enter a valid amount given'); return; }
     let disRec = null;
@@ -2116,11 +2165,12 @@
     $('homeBtn').style.display = '';
     setHeaderTitle('Cash Advance Form', 'Request and track cash advances');
     window.scrollTo({top:0});
-    if(currentUser && currentUser.role==='admin'){
+    if(caIsReviewer()){
       $('caTechArea').style.display = 'none';
       $('caAdminArea').style.display = '';
       $('caTechHistoryArea').style.display = 'none';
-      caShowAdminSection('requests');
+      const ok = caApplyStaffMode();
+      caShowAdminSection(ok.reqOk ? 'requests' : 'reimb');
     }else{
       $('caTechArea').style.display = '';
       $('caAdminArea').style.display = 'none';

@@ -287,7 +287,7 @@
       // The Messages tab replaces the list rather than filtering it, so a
       // ticket change must not repaint a job order list underneath it —
       // 'messages' is not a status and would match nothing anyway.
-      if(currentUser.role === 'admin'){
+      if(dtIsDispatcher()){
         if(dtAdminFilter === 'messages') dtRenderChatInbox(); else dtRenderAdminList();
       }else{
         if(dtTechListTab === 'inbox') dtRenderChatInbox(); else dtRenderTechList();
@@ -300,7 +300,7 @@
   // entirely for noise.
   function dtApplyRealtimePayload(payload){
     if(!payload || !currentUser) return false;
-    const isAdmin = currentUser.role === 'admin';
+    const isAdmin = dtIsDispatcher();
     const newRow = payload.new && payload.new.data ? dtNormalizeTicket(payload.new.data) : null;
     const oldRow = payload.old && payload.old.data ? payload.old.data : null;
 
@@ -370,7 +370,7 @@
         .on('postgres_changes', { event:'INSERT', schema:'public', table:'dispatch_ticket_messages' }, ()=>{
           // Badge always; the inbox only when it's the visible list.
           if(typeof refreshUnreadMsgBadges === 'function') refreshUnreadMsgBadges();
-          const onInbox = (currentUser.role==='admin') ? dtAdminFilter==='messages' : dtTechListTab==='inbox';
+          const onInbox = (dtIsDispatcher()) ? dtAdminFilter==='messages' : dtTechListTab==='inbox';
           if(onInbox) dtScheduleRender();
         })
         .subscribe();
@@ -1661,7 +1661,7 @@
     // Admin reviews a Completed job order before closing it, so the same
     // stage is labelled for what each side is meant to do with it.
     if(status==='completed'){
-      const label = (currentUser && currentUser.role==='admin') ? 'For Review' : 'Completed';
+      const label = (dtIsDispatcher()) ? 'For Review' : 'Completed';
       return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: '+label+'</span>';
     }
     if(status==='in_progress') return '<span class="status-pill" style="background:#E4F0F1; color:#1F6F7A;">Status: Work in Progress</span>';
@@ -2190,7 +2190,7 @@
   }
   async function dtRenderTechList(){
     const list = $('dtTechList');
-    if(!currentUser || currentUser.role==='admin') return;
+    if(!currentUser || dtIsDispatcher()) return;
     list.innerHTML = '<div class="empty-state">Loading…</div>';
     // Fresh render = every card starts collapsed again, so the toolbar
     // button's label always starts back at "Expand all" too.
@@ -2356,7 +2356,7 @@
       const rec = await dtGetTicket(id);
       if(!rec){ toast('Ticket not found'); return false; }
       const assigned = rec.assignedWorkerIds || [];
-      if(currentUser.role!=='admin' && !assigned.includes(currentUser.id)){
+      if(!dtCanDispatch() && !assigned.includes(currentUser.id)){
         toast('This ticket is not assigned to you');
         return false;
       }
@@ -2393,7 +2393,7 @@
   // Stripping it would knock a ticket backwards out of Work in Progress and
   // silently change what the report says about when work started.
   async function dtReassignWorker(ticketId, outgoingId, incomingWorker, reason){
-    if(!currentUser || currentUser.role!=='admin'){ toast('Only an admin can reassign a job order'); return false; }
+    if(!currentUser || !dtCanDispatch()){ toast('Only an admin can reassign a job order'); return false; }
     if(!incomingWorker || !incomingWorker.id){ toast('Pick a replacement technician'); return false; }
     if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
     try{
@@ -2508,7 +2508,7 @@
   async function dtRenderReassignSection(rec){
     const sec = $('dtReassignSection');
     if(!sec) return;
-    const isAdmin = currentUser && currentUser.role==='admin';
+    const isAdmin = dtCanDispatch();
     const finalized = rec.status==='closed' || rec.status==='cancelled' || dtIsExpired(rec);
     if(!isAdmin || finalized){ sec.style.display='none'; sec.innerHTML=''; return; }
 
@@ -2701,7 +2701,7 @@
       if(rec.arrivedAt){ toast('Arrival already recorded for this job order'); return null; }
       if(dtIsExpired(rec)){ toast('This job order expired — ask your admin to issue a new one'); return null; }
       const ackBy = rec.acknowledgedBy || [];
-      if(currentUser.role!=='admin'){
+      if(!dtCanDispatch()){
         if(!ackBy.includes(currentUser.id)){
           toast('Acknowledge this job order first'); return null;
         }
@@ -2812,7 +2812,7 @@
     try{
       const rec = await dtGetTicket(ticketId);
       if(!rec){ toast('Job order not found'); return false; }
-      if(currentUser.role!=='admin' && !(rec.assignedWorkerIds||[]).includes(currentUser.id)){
+      if(!dtCanDispatch() && !(rec.assignedWorkerIds||[]).includes(currentUser.id)){
         toast('This job order is not assigned to you'); return false;
       }
       const target = (rec.equipmentList||[]).find(it=> it.id===equipId);
@@ -2866,7 +2866,7 @@
     try{
       const rec = await dtGetTicket(ticketId);
       if(!rec){ toast('Job order not found'); return false; }
-      if(currentUser.role!=='admin' && !(rec.assignedWorkerIds||[]).includes(currentUser.id)){
+      if(!dtCanDispatch() && !(rec.assignedWorkerIds||[]).includes(currentUser.id)){
         toast('This job order is not assigned to you'); return false;
       }
       if(dtEffectiveStatus(rec) !== 'in_progress'){
@@ -2946,7 +2946,7 @@
   async function dtRenderReviewSection(rec){
     const sec = $('dtReviewSection');
     if(!sec) return;
-    const isAdmin = currentUser && currentUser.role==='admin';
+    const isAdmin = dtCanDispatch();
     const units = rec.equipmentList || [];
     const anyResolved = units.some(it=> it.reportSrNo || it.notDone);
     // Only worth showing once there is something to review. A job order
@@ -3043,7 +3043,7 @@
     // behind the overlay still showed its old unread count — so a thread
     // just read appeared unread until the list was rebuilt some other way.
     if(currentUser){
-      const onInbox = (currentUser.role==='admin') ? dtAdminFilter==='messages' : dtTechListTab==='inbox';
+      const onInbox = (dtIsDispatcher()) ? dtAdminFilter==='messages' : dtTechListTab==='inbox';
       if(onInbox) dtRenderChatInbox();
     }
   }
@@ -3068,7 +3068,7 @@
 
   function dtCanActOnTicket(rec){
     if(!currentUser) return false;
-    if(currentUser.role==='admin') return true;
+    if(dtCanDispatch()) return true;
     return (rec.assignedWorkerIds||[]).includes(currentUser.id);
   }
 
@@ -3087,7 +3087,7 @@
 
     $('dtTicketTitle').textContent = rec.jobOrderNo+' — '+rec.custName;
     $('dtTicketStatusWrap').innerHTML = dtStatusPill(rec);
-    $('dtTicketSummary').innerHTML = dtCardHtml(rec, currentUser && currentUser.role==='admin', undefined, true);
+    $('dtTicketSummary').innerHTML = dtCardHtml(rec, dtIsDispatcher(), undefined, true);
     // This overlay IS the detail view, so its embedded card summary should
     // show fully expanded, not the collapsed list-row state — force the
     // body open and drop the tap-to-toggle affordance from its header.
@@ -3102,7 +3102,7 @@
     const cancelSecEl = $('dtCancelSection');
     if(cancelSecEl){
       const cancellable = ['preparing','open','acknowledged'].includes(rec.status);
-      if(currentUser && currentUser.role==='admin' && !isCancelled && !alreadyClosed && cancellable){
+      if(dtCanDispatch() && !isCancelled && !alreadyClosed && cancellable){
         cancelSecEl.innerHTML = '<div class="field"><label style="color:var(--danger);">Cancel this dispatch</label>'+
           '<select id="dtCancelReasonSelect" style="margin-bottom:8px;"><option value="">Select a reason…</option>'+
             (typeof SR_CANCEL_REASONS!=='undefined' ? SR_CANCEL_REASONS.map(r=>'<option value="'+r.value+'">'+escapeHtml(r.label)+'</option>').join('') : '')+
@@ -3129,7 +3129,7 @@
             if(typeof srCancelByTicket==='function') srCancelByTicket(rec.id, reason).catch(()=>{});
             toast('Dispatch cancelled');
             dtCloseTicketOverlay();
-            if(currentUser.role==='admin') dtRenderAdminList(); else dtRenderTechList();
+            if(dtIsDispatcher()) dtRenderAdminList(); else dtRenderTechList();
           } else toast('Could not cancel — try again');
         };
       } else {
@@ -3159,7 +3159,7 @@
           // the Create Dispatch Ticket form, which is itself admin-only.
           // dtCanActOnTicket includes assigned technicians, so this used to
           // offer a button that dead-ended for them.
-          : ((currentUser && currentUser.role==='admin')
+          : ((dtCanDispatch())
               ? '<button type="button" class="btn btn-primary" id="dtContinueBtn" style="width:100%; margin-top:8px;">Continue Tomorrow ('+exceptionItems.length+' unit'+(exceptionItems.length===1?'':'s')+' remaining)</button>'
               : '<div class="u-status">'+exceptionItems.length+' unit(s) left unfinished — admin will raise the follow-up job order.</div>');
       }
@@ -3179,7 +3179,7 @@
       // override (e.g. a tech is unavailable to complete the app flow).
       // Closing belongs to admin now — a technician opening this overlay
       // sees where the job order stands instead of a form they can't use.
-      if(currentUser.role!=='admin'){
+      if(!dtCanDispatch()){
         const st = dtEffectiveStatus(rec);
         const units = rec.equipmentList || [];
         const left = units.filter(it=> !it.reportSrNo && !it.notDone).length;
@@ -3308,7 +3308,7 @@
   // cross-called from service-requests.js's srAdminCancelActive when
   // admin cancels from the request side instead of the ticket side.
   async function dtCancelTicket(ticketId, reason){
-    if(!currentUser || currentUser.role!=='admin'){ toast('Only admin can cancel a dispatch'); return false; }
+    if(!currentUser || !dtCanDispatch()){ toast('Only admin can cancel a dispatch'); return false; }
     if(!(await ensureCloud())){ toast('This needs a connection — try again when online'); return false; }
     try{
       const rec = await dtGetTicket(ticketId);
@@ -3357,7 +3357,7 @@
       // function refuses, and guard_dispatch_worker_fields in the database
       // normalises a non-admin 'closed' write back to the old status. A
       // hidden button alone is not a permission.
-      if(currentUser.role!=='admin'){
+      if(!dtCanDispatch()){
         toast('Only admin can close a job order'); return false;
       }
       if(dtEffectiveStatus(rec)==='closed'){ toast('Already closed'); return false; }
@@ -3466,7 +3466,7 @@
     if(ok){
       toast('Job Order closed');
       dtCloseTicketOverlay();
-      if(currentUser && currentUser.role==='admin') dtRenderAdminList(); else dtRenderTechList();
+      if(dtIsDispatcher()) dtRenderAdminList(); else dtRenderTechList();
     }
   });
 
@@ -3596,7 +3596,7 @@
     // Admin and technician views have their own container; only one is on
     // screen at a time, so the renderer targets whichever is visible rather
     // than each view keeping its own copy of this logic.
-    const el = (currentUser && currentUser.role==='admin') ? $('dtAdminInboxList') : $('dtInboxList');
+    const el = (dtIsDispatcher()) ? $('dtAdminInboxList') : $('dtInboxList');
     if(!el) return;
     el.innerHTML = '<div class="empty-state">Loading…</div>';
     const threads = await dtLoadChatInbox();
@@ -3647,7 +3647,7 @@
       try{
         const t = dtOverlayTicket;
         const preview = body.length > 80 ? body.slice(0,80)+'…' : body;
-        if(currentUser.role === 'admin'){
+        if(dtIsDispatcher()){
           const targets = new Set([].concat(t.assignedWorkerIds||[], t.reportAllowedWorkerIds||[]));
           targets.forEach(id=>{
             if(typeof notifyUser === 'function') notifyUser(id, 'Message on '+t.jobOrderNo, preview, 'jo-chat-'+t.id);
@@ -3787,7 +3787,7 @@
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
     setHeaderTitle(
-      (currentUser && currentUser.role==='admin') ? 'Service Dispatch Ticket' : 'My Job Order',
+      (dtIsDispatcher()) ? 'Service Dispatch Ticket' : 'My Job Order',
       'Assign and track field jobs'
     );
     window.scrollTo({top:0});
@@ -3800,10 +3800,11 @@
     // the combo is set up, regardless of what screen was visited first.
     if(!customersCache || customersCache.length===0) await loadCustomers();
     dtSetupCustomerCombo();
-    if(currentUser && currentUser.role==='admin'){
+    if(dtIsDispatcher()){
       $('dispatchTechArea').style.display = 'none';
       $('dispatchAdminArea').style.display = '';
-      dtShowAdminTab(initialTab || 'new');
+      // View-only dispatchers land on the list (they can't create)
+      dtShowAdminTab(initialTab || (dtCanDispatch() ? 'new' : 'all'));
     }else{
       $('dispatchAdminArea').style.display = 'none';
       $('dispatchTechArea').style.display = '';
@@ -3819,7 +3820,9 @@
     dtSubscribeTickets();
   }
 
-  async function showLeaveView(){
+  // forceMine: open the "file my own leave" side even for leave reviewers
+  // (department staff use this from "My Leave").
+  async function showLeaveView(forceMine){
     document.body.classList.remove('dashboard-active');
     $('homeScreen').style.display = 'none';
     $('serviceReportView').style.display = 'none';
@@ -3839,9 +3842,10 @@
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
-    setHeaderTitle('Leave Form', 'File and track leave requests');
+    setHeaderTitle(forceMine === true ? 'My Leave' : 'Leave Form', 'File and track leave requests');
     window.scrollTo({top:0});
-    if(currentUser && currentUser.role==='admin'){
+    if(hrIsReviewer('hr.leaves') && forceMine !== true){
+      hrApplyStaffMode();
       $('leaveTechArea').style.display = 'none';
       $('leaveAdminArea').style.display = '';
       leaveRenderAdminList();

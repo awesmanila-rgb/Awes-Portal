@@ -136,10 +136,15 @@
   function purchOnShow(key){
     purchLoadCategories();   // cached after the first load; realtime keeps it fresh
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
-    if(key === 'myStock'){ if(currentUser) invShowMyStock(); return; } // storekeeper screen (quantities only)
+    if(key === 'myStock'){ if(currentUser){ purchApplyStaffMode(); invShowMyStock(); } return; } // storekeeper / staff screen (quantities only)
     if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
     // Movement screens: admins and storekeepers (the database decides who
     // may post for which warehouse)
+    if(isStaffUser()){
+      // Staff reach these through their sidebar; the database decides what they may post.
+      if(['receive', 'issue', 'returns', 'transfers', 'slips', 'invReports'].includes(key) && !purchStaffAllowed(key)) return;
+      purchApplyStaffMode();
+    }
     if(key === 'receive'){ invShowReceive(); return; }
     if(key === 'issue'){ invShowIssue(); return; }
     if(key === 'returns'){ invShowReturns(); return; }
@@ -149,8 +154,18 @@
     // Tools & Equipment — the database decides who may do what
     const tlPages = { tlHub: tlShowHub, tlRegister: tlShowRegister, tlIssue: tlShowIssue, tlReturn: tlShowReturn, tlHandover: tlShowHandover,
       tlDefects: tlShowDefects, tlMaint: tlShowMaint, tlSlips: tlShowSlips, tlReports: tlShowReports, myTools: tlShowMine };
-    if(tlPages[key]){ tlPages[key](); return; }
-    if(!currentUser || currentUser.role !== 'admin') return;
+    if(tlPages[key]){
+      // Department staff: only the Tools & Equipment pages they were given
+      if(isStaffUser()){
+        if(!staffToolPageAllowed(key)) return;
+        purchApplyStaffMode();
+      }
+      tlPages[key](); return;
+    }
+    // Super Admin: every page. Department staff: only the Purchasing pages
+    // they were given (purchStaffAllowed in staff.js).
+    if(!currentUser || !purchStaffAllowed(key)) return;
+    purchApplyStaffMode();
     purchRealtimeStart();
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
@@ -1958,7 +1973,7 @@
   async function purchApply(){
     const t = purchPending; purchPending = new Set();
     const ids = purchPendingIds; purchPendingIds = new Set();
-    if(!currentUser || currentUser.role !== 'admin') return;
+    if(!currentUser || !(currentUser.role === 'admin' || isStaffUser())) return;
     const has = (...names)=> names.some(n=> t.has(n));
     const jobs = [];
 
@@ -2047,7 +2062,7 @@
 
   // Catch-up when the tab/app comes back or the network returns.
   function purchCatchUp(){
-    if(!purchChannel || !currentUser || currentUser.role !== 'admin') return;
+    if(!purchChannel || !currentUser || !(currentUser.role === 'admin' || isStaffUser())) return;
     if($('purchasingView').style.display === 'none') return;
     purchQueueAll();
   }

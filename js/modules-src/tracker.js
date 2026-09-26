@@ -271,7 +271,9 @@
   // the admin has navigated away from Home — see the check at the top.
   async function trackerRefresh(){
     const card = $('homeTrackerCard');
-    if(!card || card.style.display === 'none' || !currentUser || currentUser.role !== 'admin'){
+    // Stops when the card isn't on screen (Home left, or the staff Tracker
+    // page closed) — trackerAdminInit starts it again when it's shown.
+    if(!card || card.style.display === 'none' || card.offsetParent === null || !currentUser || !trackerViewerOk()){
       if(trackerPollTimer){ clearInterval(trackerPollTimer); trackerPollTimer = null; }
       return;
     }
@@ -334,8 +336,12 @@
   // Called every time the admin's Home Overview renders. Cheap to call
   // repeatedly — the map, tile layer and realtime channel are each set up
   // once and reused; this just makes sure the polling loop is (re)running.
+  // Super Admin, or department staff with Live Tracker
+  function trackerViewerOk(){
+    return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.tracker', 'view')));
+  }
   async function trackerAdminInit(){
-    if(!currentUser || currentUser.role !== 'admin') return;
+    if(!currentUser || !trackerViewerOk()) return;
     const card = $('homeTrackerCard');
     if(!card) return;
     card.style.display = '';

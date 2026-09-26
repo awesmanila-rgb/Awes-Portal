@@ -91,12 +91,16 @@
   $('menuManageAnnouncements').addEventListener('click', async ()=>{
     closeMainMenu();
     if(!(await ensureAdminAuthenticated())) return;
+    annOpenAdmin();
+  });
+  // Also opened by department staff with Announcements (staff.js)
+  function annOpenAdmin(){
     $('announcementsAdminOverlay').classList.add('open');
     $('annTitleInput').value = '';
     $('annBodyInput').value = '';
     $('annPinnedInput').checked = false;
     annRenderAdminList();
-  });
+  }
   $('closeAnnAdmin').addEventListener('click', ()=> $('announcementsAdminOverlay').classList.remove('open'));
   $('announcementsAdminOverlay').addEventListener('click', (e)=>{
     if(e.target.id==='announcementsAdminOverlay') $('announcementsAdminOverlay').classList.remove('open');

@@ -15,7 +15,10 @@
     ret: { label:'Return', title:'MATERIALS RETURN SLIP', table:'return_slips', items:'return_slip_items', fk:'return_id', no:'return_no' },
     trf: { label:'Transfer', title:'STOCK TRANSFER', table:'stock_transfers', items:'stock_transfer_items', fk:'transfer_id', no:'transfer_no' }
   };
-  const invX = { cat:[], catById:new Map(), whs:[], mine:[], avail:new Map(), workers:[], projects:[], jobs:[], isAdmin:false };
+  // isAdmin: Super Admin. allWh: works across every warehouse (admin, or
+  // department staff). money: may enter/see peso values (admin, or staff
+  // with "See peso values"). direct: may receive straight to a project.
+  const invX = { cat:[], catById:new Map(), whs:[], mine:[], avail:new Map(), workers:[], projects:[], jobs:[], isAdmin:false, allWh:false, money:false, direct:false };
   const invAvailKey = (wh, m)=> wh + '|' + m;
   function invAvail(wh, m){ return invX.avail.get(invAvailKey(wh, m)) || 0; }
   function invIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
@@ -24,10 +27,13 @@
   // stock_on_hand_qty works the same for admins and storekeepers.
   async function invLoadCtx(){
     invX.isAdmin = invIsAdmin();
+    invX.allWh = invX.isAdmin || isStaffUser();
+    invX.money = staffSeesCosts();
+    invX.direct = invX.isAdmin || (isStaffUser() && can('inv.receive', 'edit'));
     const [cat, whs, keep, av, wk, pr, jobs] = await Promise.all([
       db.from('materials').select('id, code, name, unit, pack_unit, pack_qty, category, family, specs, brand').eq('is_active', true).order('name'),
       db.from('warehouses').select('*').order('code'),
-      invX.isAdmin ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
+      invX.allWh ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
       db.from('stock_on_hand_qty').select('*'),
       db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'),
       db.from('projects').select('id, project_no, name, status').in('status', ['planning', 'active', 'on_hold']).order('project_no', { ascending:false }),
@@ -63,7 +69,7 @@
       purchFail(invMissingTables(e) ? 'Run migration 20260923_08_inventory_movements.sql first: ' : 'Couldn\u2019t load inventory: ', e);
       return false;
     }
-    if(!invX.mine.length){ toast(invX.isAdmin ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
+    if(!invX.mine.length){ toast(invX.allWh ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
     host.classList.add('po-wide');
     render();
     return true;
@@ -183,7 +189,7 @@
       $('invRcvSupplier').innerHTML = invOpts(sup.data || [], s=> s.id, s=> s.display_name, '— not specified —');
       invFillProjJob('invRcvProject', 'invRcvJob');
       $('invRcvRef').value = ''; $('invRcvNote').value = ''; $('invRcvDirect').checked = false;
-      invLEBind('rcv', 'invRcvLines', { cost: invX.isAdmin, avail:false, wh:'invRcvWh' });
+      invLEBind('rcv', 'invRcvLines', { cost: invX.money, avail:false, wh:'invRcvWh' });
       await invRcvLoadPos();
       invRcvSetMode('po');
     });
@@ -201,7 +207,7 @@
     $('invRcvSupWrap').style.display = m === 'free' ? '' : 'none';
     $('invRcvAdd').style.display = m === 'free' ? '' : 'none';
     $('invRcvHint').textContent = m === 'free'
-      ? (invX.isAdmin ? 'Leave unit cost blank to value it at the current average cost.' : 'Received stock is valued at the current average cost (admins can set a cost).')
+      ? (invX.money ? 'Leave unit cost blank to value it at the current average cost.' : 'Received stock is valued at the current average cost (admins can set a cost).')
       : 'Enter what arrived now. Partial deliveries are fine — the rest stays open on the PO.';
     if(m === 'po') invRcvRenderPo(); else { invLE.rcv.lines = [invLEBlank()]; invLERender('rcv'); }
   }
@@ -282,7 +288,7 @@
       Object.assign(payload, { supplier_id: $('invRcvSupplier').value || null, lines });
       summary = lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' without a PO';
     }
-    const direct = invX.isAdmin && $('invRcvDirect').checked;
+    const direct = invX.direct && $('invRcvDirect').checked;
     if(direct){
       payload.direct_project_id = $('invRcvProject').value || null; payload.direct_job_order_id = $('invRcvJob').value || null;
       if(!payload.direct_project_id && !payload.direct_job_order_id){ toast('Choose the project or job order it was delivered to'); return; }

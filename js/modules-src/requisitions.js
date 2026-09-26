@@ -531,6 +531,15 @@
       html += b('pdf', 'View PDF');
       if(st === 'approved') html += b('cancel', 'Cancel Request', 'danger');
     }else html = b('pdf', 'View PDF');
+    // Staff: deciding needs Approve; fulfilment needs Edit (+ PO Edit to create POs)
+    if(isStaffUser()){
+      const tmp = document.createElement('div'); tmp.innerHTML = html;
+      const ok = { approve: can('pur.requisitions', 'approve'), return: can('pur.requisitions', 'approve'), reject: can('pur.requisitions', 'approve'),
+                   techbuy: can('pur.requisitions', 'edit'), cancel: can('pur.requisitions', 'edit'),
+                   createpo: can('pur.requisitions', 'edit') && can('pur.purchase_orders', 'edit') };
+      tmp.querySelectorAll('[data-mr]').forEach(el=>{ if(ok[el.dataset.mr] === false) el.remove(); });
+      html = tmp.innerHTML;
+    }
     $('mrActions').innerHTML = html;
   }
   // Link a technician's typed line to a Materials Database item (needed
@@ -617,6 +626,7 @@
       if(n !== Number(it.qty_approved != null ? it.qty_approved : it.qty_requested)) updates.push({ id: it.id, qty_approved: n });
     }
     const reduced = updates.filter(u=> u.qty_approved < Number(mrOpenItems.find(x=> x.id === u.id).qty_requested)).length;
+    if(!(await staffApprovalPrecheck('pur.requisitions', null, mrOpenRow.requested_by))) return;
     if(!await uiConfirm('Approve ' + mrOpenRow.mrf_no + (reduced ? ' with ' + reduced + ' reduced quantit' + (reduced === 1 ? 'y' : 'ies') : ' as requested') + '? The technician will be notified.')) return;
     if(!(await purchEnsureSession())) return;
     try{
@@ -630,6 +640,7 @@
     }
   }
   async function mrReturnOrReject(kind){
+    if(!(await staffApprovalPrecheck('pur.requisitions', null, mrOpenRow.requested_by))) return;
     const reason = await uiPrompt(kind === 'reject' ? 'Reject ' + mrOpenRow.mrf_no + '. Reason (the technician will see this):' : 'Return ' + mrOpenRow.mrf_no + ' to the technician for changes. What should they change?');
     if(reason === null) return;
     if(!reason.trim()){ toast('Please give a reason'); return; }

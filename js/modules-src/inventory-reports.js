@@ -13,7 +13,7 @@
 
   let rpTab = 'balance', rpModel = null, rpProjectsAll = [], rpReorderRows = [];
   const RP_MONTH = (d)=> new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-PH', { month:'long', year:'numeric' });
-  function rpMoney(){ return invIsAdmin(); }
+  function rpMoney(){ return staffSeesCosts(); }   // Super Admin, or staff with "See peso values"
   function rpMonthRange(){
     const f = $('rpFrom').value, t = $('rpTo').value || f;
     const first = f + '-01';
@@ -41,23 +41,23 @@
     if(!(await ensureCloud())){ toast('Not connected'); return; }
     try{
       await invLoadCtx();
-      if(invIsAdmin()){ const r = await db.from('projects').select('id, project_no, name, budget, status'); rpProjectsAll = r.data || []; }
+      if(rpMoney()){ const r = await db.from('projects').select('id, project_no, name, budget, status'); rpProjectsAll = r.data || []; }
     }catch(e){ purchFail('Couldn\u2019t load inventory: ', e); return; }
     $('purchasingView').classList.add('po-wide');
     if(!$('rpFrom').value){
       const now = poToday().slice(0, 7);
       $('rpFrom').value = now; $('rpTo').value = now;
     }
-    const whs = invIsAdmin() ? invX.whs : invX.mine;
+    const whs = invX.allWh ? invX.whs : invX.mine;
     $('rpWh').innerHTML = (whs.length > 1 ? '<option value="">All warehouses</option>' : '') + whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' · ' + w.name) + '</option>').join('');
     if($('rpCat').options.length <= 1) $('rpCat').innerHTML = '<option value="">All categories</option>' + PURCH_CAT_ALL.map(c=> '<option>' + escapeHtml(c) + '</option>').join('');
-    rpSetTab(rpTab === 'project' && !invIsAdmin() ? 'balance' : rpTab);
+    rpSetTab(rpTab === 'project' && !rpMoney() ? 'balance' : rpTab);
   }
   function rpSetTab(tab){
     rpTab = tab;
     $$('#rpTabs [data-rp]').forEach(b=> b.classList.toggle('active', b.dataset.rp === tab));
     $$('.rp-filters .rp-f').forEach(f=>{ f.style.display = f.dataset.for.split(' ').includes(tab) ? '' : 'none'; });
-    $('rpMakePo').style.display = tab === 'reorder' && invIsAdmin() ? '' : 'none';
+    $('rpMakePo').style.display = tab === 'reorder' && (invIsAdmin() || (rpMoney() && can('pur.purchase_orders', 'edit'))) ? '' : 'none';
     rpModel = null;
     $('rpSummary').innerHTML = ''; $('rpCheck').textContent = ''; $('rpCheck').className = 'rp-check';
     $('rpOut').innerHTML = '<div class="empty-state">Choose the options and tap <b>Run Report</b>.</div>';
@@ -452,7 +452,7 @@
       });
       const pages = doc.internal.getNumberOfPages();
       for(let p = 1; p <= pages; p++){ doc.setPage(p); doc.setFont(F, 'normal'); doc.setFontSize(7); doc.setTextColor(...SUB);
-        doc.text('Generated ' + new Date().toLocaleString('en-PH') + (invIsAdmin() ? '' : ' · quantities only'), M, H - 16); doc.text('Page ' + p + ' of ' + pages, W - M, H - 16, { align:'right' }); }
+        doc.text('Generated ' + new Date().toLocaleString('en-PH') + (rpMoney() ? '' : ' · quantities only'), M, H - 16); doc.text('Page ' + p + ' of ' + pages, W - M, H - 16, { align:'right' }); }
       const title = rpModel.title;
       $('previewOverlay').querySelector('h3').textContent = title;
       $('previewOkBtn').textContent = 'Close';
