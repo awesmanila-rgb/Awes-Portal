@@ -3946,3 +3946,231 @@ html.ui-dlg-lock, html.ui-dlg-lock body{ overflow:hidden; }
   .mt-summary{ grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
   .mt-sum-n{ font-size:20px; }
 }
+
+/* =====================================================================
+   Department staff (staff.js) — home, Department Staff / My Team,
+   account editor, Activity Log
+   ===================================================================== */
+#staffView .card{ margin-bottom:14px; }
+.stf-note{ font-size:13px; color:var(--text-muted); line-height:1.45; margin:8px 0 0; }
+.stf-hint{ font-size:12px; font-weight:400; color:var(--text-muted); margin-left:4px; }
+.stf-chips{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.stf-chip{ font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px; background:var(--green-light); color:var(--green-dark); }
+.stf-chip-head{ background:#FFF4E0; color:#8A5A12; }
+.stf-head-badge{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:#FFF4E0; color:#8A5A12; vertical-align:middle; }
+.stf-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
+.stf-toolbar select{ min-height:40px; border:1px solid var(--border); border-radius:var(--radius); padding:0 10px; background:var(--surface); font:inherit; flex:1 1 160px; }
+.stf-count{ margin-left:auto; font-size:13px; color:var(--text-muted); }
+.stf-actions-row, .stf-more{ display:flex; flex-wrap:wrap; gap:10px; }
+.stf-actions-row .btn, .stf-more .btn{ flex:1 1 180px; }
+.stf-danger{ color:var(--danger) !important; border-color:#E8C4BD !important; }
+.stf-back{ margin-bottom:12px; }
+
+/* home */
+.stf-hello-name{ font-size:22px; font-weight:800; color:var(--text); }
+.stf-hello-sub{ font-size:14px; color:var(--text-muted); margin-top:2px; }
+.stf-team-tile{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.stf-team-tile .btn{ width:auto; flex:0 0 auto; padding-left:22px; padding-right:22px; }
+.stf-tile-title{ font-size:16px; font-weight:700; }
+.stf-tile-sub{ font-size:13px; color:var(--text-muted); }
+.stf-dept-block + .stf-dept-block{ margin-top:14px; }
+.stf-dept-title{ font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--green-dark); margin-bottom:6px; }
+.stf-access-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-top:1px solid var(--border); font-size:14px; }
+.stf-access-row.stf-ready{ cursor:pointer; }
+.stf-access-name{ font-weight:600; }
+.stf-access-bits{ display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; align-items:center; }
+.stf-lvl{ font-size:12px; font-weight:700; padding:2px 8px; border-radius:6px; }
+.stf-lvl-view{ background:#EEF1ED; color:var(--text); }
+.stf-lvl-edit{ background:var(--teal-light); color:var(--teal); }
+.stf-lvl-approve{ background:var(--green-light); color:var(--green-dark); }
+.stf-meta{ font-size:12px; color:var(--text-muted); }
+.stf-soon{ font-size:11px; font-weight:600; color:var(--amber); }
+.stf-preview-note{ background:#FFF8EA; border:1px solid #F0DDB5; color:#6E4E12; border-radius:var(--radius); padding:10px 12px; font-size:13px; margin-bottom:14px; }
+
+/* team list */
+.stf-list{ display:flex; flex-direction:column; gap:8px; }
+.stf-person{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px; cursor:pointer; font:inherit; color:inherit; }
+.stf-person:hover{ border-color:var(--green); }
+.stf-person.stf-sub{ margin-left:22px; width:calc(100% - 22px); border-left:3px solid var(--green-light); }
+.stf-person.stf-inactive{ opacity:.6; }
+.stf-avatar{ width:38px; height:38px; border-radius:50%; background:var(--green-light); color:var(--green-dark); font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.stf-person-main{ flex:1; min-width:0; display:flex; flex-direction:column; }
+.stf-person-name{ font-weight:700; font-size:15px; }
+.stf-person-sub{ font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stf-off{ font-size:11px; font-weight:700; color:var(--danger); margin-left:4px; }
+.stf-chev{ font-size:22px; color:var(--text-muted); }
+.stf-banner-off{ background:#FBEDEA; color:var(--danger); border-radius:var(--radius); padding:10px 12px; font-size:13px; font-weight:600; margin-bottom:12px; }
+
+/* editor */
+.stf-pw-row{ display:flex; gap:8px; }
+.stf-pw-row input{ flex:1; min-width:0; }
+.stf-dept{ border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; margin-top:10px; }
+.stf-dept.on{ border-color:var(--green); background:#FAFCFA; }
+.stf-dept-head{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; cursor:pointer; }
+.stf-dept-head input, .stf-head-toggle input{ width:18px; height:18px; accent-color:var(--green); }
+.stf-head-toggle{ display:flex; align-items:center; gap:8px; font-size:13px; margin:8px 0 0 28px; color:#8A5A12; font-weight:600; }
+.stf-mods{ margin-top:8px; }
+.stf-mod{ border-top:1px solid var(--border); padding:10px 0; }
+.stf-mod-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.stf-mod-name{ font-size:14px; font-weight:600; flex:1 1 150px; }
+.stf-seg{ display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--surface); }
+.stf-seg-btn{ border:0; background:transparent; font:inherit; font-size:13px; font-weight:600; padding:7px 11px; min-height:36px; cursor:pointer; color:var(--text); border-left:1px solid var(--border); }
+.stf-seg-btn:first-child{ border-left:0; }
+.stf-seg-btn.on{ background:var(--green); color:#fff; }
+.stf-seg-btn[data-level=""].on{ background:#7A857E; }
+.stf-seg-btn:disabled{ opacity:.35; cursor:not-allowed; }
+.stf-mod-extra{ display:flex; flex-wrap:wrap; gap:10px 16px; margin-top:8px; font-size:13px; color:var(--text-muted); }
+.stf-mod-extra label{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.stf-mod-extra input{ border:1px solid var(--border); border-radius:8px; padding:6px 8px; font:inherit; font-size:13px; background:var(--surface); }
+.stf-mod-extra input[type="number"]{ width:130px; }
+.stf-save-bar{ position:sticky; bottom:0; padding:10px 0 14px; background:linear-gradient(to top, var(--bg) 70%, transparent); z-index:2; }
+.stf-save-bar .btn{ width:100%; }
+
+/* activity log */
+.stf-log-row{ border-top:1px solid var(--border); padding:10px 0; font-size:14px; }
+.stf-log-when{ font-size:12px; color:var(--text-muted); }
+.stf-log-what{ margin-top:2px; }
+.stf-log-details{ margin-top:6px; font-size:12px; color:var(--text-muted); }
+.stf-log-details summary{ cursor:pointer; color:var(--green-dark); font-weight:600; }
+.stf-log-details div{ word-break:break-word; margin-top:3px; }
+@media (max-width:520px){
+  .stf-mod-top{ flex-direction:column; align-items:stretch; gap:6px; }
+  .stf-mod-name{ flex:none; }
+  .stf-seg{ display:flex; }
+  .stf-seg-btn{ flex:1; padding:8px 4px; }
+  .stf-person.stf-sub{ margin-left:12px; width:calc(100% - 12px); }
+}
+
+/* ---- Department staff on Purchasing pages (staff.js purchApplyStaffMode) ----
+   Super Admin–only controls, and write controls on pages a staff member can
+   only view. The database refuses these writes regardless; this just keeps
+   people from being offered them. */
+body.role-staff #poSettingsBtn,
+body.role-staff #poEditTermsBtn,
+body.role-staff #mtSeedBtn{ display:none !important; }
+
+body.stf-ro-sup #spAddBtn, body.stf-ro-sup #spImportBtn,
+body.stf-ro-sup #spSaveBtn, body.stf-ro-sup #spContactSaveBtn, body.stf-ro-sup #spContactCancelBtn,
+body.stf-ro-sup #spDocUploadBtn,
+body.stf-ro-sup #spList [data-act="edit"], body.stf-ro-sup #spList [data-act="deactivate"], body.stf-ro-sup #spList [data-act="reactivate"],
+body.stf-ro-sup #spSheetOverlay [data-dact="remove"],
+body.stf-ro-sup #spSheetOverlay .user-card-actions button:not([data-dact="open"]){ display:none !important; }
+body.stf-ro-sup #spSheetOverlay input, body.stf-ro-sup #spSheetOverlay select, body.stf-ro-sup #spSheetOverlay textarea{ pointer-events:none; background:#F5F7F5; }
+
+body.stf-ro-mat #mtAddBtn, body.stf-ro-mat #mcBtn, body.stf-ro-mat #mtImportBtn,
+body.stf-ro-mat #mtSaveBtn, body.stf-ro-mat #mtPriceSaveBtn, body.stf-ro-mat #mtPriceCancelBtn,
+body.stf-ro-mat #mtToggleActiveBtn, body.stf-ro-mat #mtAddSpec,
+body.stf-ro-mat [data-pact]{ display:none !important; }
+body.stf-ro-mat #mtSheetOverlay input, body.stf-ro-mat #mtSheetOverlay select, body.stf-ro-mat #mtSheetOverlay textarea{ pointer-events:none; background:#F5F7F5; }
+
+body.stf-ro-mr .mr-link{ display:none !important; }
+body.stf-ro-mr #mrItemsTable input{ pointer-events:none; background:#F5F7F5; }
+
+body.stf-ro-po #poAddBtn{ display:none !important; }
+
+/* ---- Department staff on Inventory pages (staff.js purchApplyStaffMode) ---- */
+body.role-staff .inv-admin-only{ display:none !important; }
+body.role-staff.stf-inv-direct #invRcvDirectWrap{ display:block !important; }
+body.role-staff.stf-inv-money [data-rp="project"]{ display:block !important; }
+/* shown by rpSetTab (inline style) only on the Reorder tab */
+body.role-staff.stf-inv-makepo #rpMakePo:not([style*="none"]){ display:inline-block !important; }
+body.stf-ro-stock #invOpeningBtn, body.stf-ro-stock #invStockCount, body.stf-ro-stock [data-adjust]{ display:none !important; }
+body.stf-ro-wh #invWhAddBtn, body.stf-ro-wh #invWhSave, body.stf-ro-wh [data-wh-edit]{ display:none !important; }
+body.stf-ro-rcv #invRcvPost, body.stf-ro-rcv #invRcvAdd{ display:none !important; }
+body.stf-ro-iss #invIssPost, body.stf-ro-iss #invIssAdd{ display:none !important; }
+body.stf-ro-ret #invRetPost{ display:none !important; }
+body.stf-ro-trf #invTrfPost, body.stf-ro-trf #invTrfAdd{ display:none !important; }
+
+/* ---- Department staff on Finance pages (cash-advance.js caApplyStaffMode) ---- */
+body.stf-na-ca #caAdminReqSection [data-act="approve"], body.stf-na-ca #caAdminReqSection [data-act="disapprove"],
+body.stf-ne-ca #caAdminReqSection [data-act="disburse-toggle"], body.stf-ne-ca #caAdminReqSection [data-act="confirm-disburse"],
+body.stf-nv-liq #caAdminReqSection [data-act="liq-toggle"],
+body.stf-na-liq [data-act="liq-approve"], body.stf-na-liq [data-act="liq-disapprove"],
+body.stf-ne-liq [data-act="mark-settled"],
+body.stf-na-rb #caAdminReimbSection [data-act="approve"], body.stf-na-rb #caAdminReimbSection [data-act="disapprove"],
+body.stf-ne-rb #caAdminReimbSection [data-act="disburse-toggle"], body.stf-ne-rb #caAdminReimbSection [data-act="confirm-disburse"]{ display:none !important; }
+
+/* ---- Department staff on HR pages (staff.js hrApplyStaffMode) ---- */
+body.stf-nv-tp #dtrAttendanceTableBody .att-view-btn:nth-of-type(2),
+body.stf-nv-att #dtrAttendanceTableBody .att-view-btn:nth-of-type(1),
+body.stf-ne-tp #tpAddViolationBtn, body.stf-ne-tp #tpAddDocBtn,
+body.stf-ne-tp .field:has(#tpViolationDate), body.stf-ne-tp .field:has(#tpViolationDesc),
+body.stf-ne-tp .field:has(#tpDocTitle), body.stf-ne-tp .field:has(#tpDocFile),
+body.stf-ne-tp [data-remove-violation], body.stf-ne-tp [data-remove-doc],
+body.stf-na-lv #leaveAdminArea [data-act="approve"], body.stf-na-lv #leaveAdminArea [data-act="disapprove"]{ display:none !important; }
+
+/* ---- Department staff on Administration pages (staff.js admApplyStaffMode) ---- */
+body.stf-ro-cust #customersManagerView div:has(> #customerFormTitle),
+body.stf-ro-cust #customersManagerView [data-act="edit"], body.stf-ro-cust #customersManagerView [data-act="remove"]{ display:none !important; }
+body.stf-ro-equip #equipListTabAdd, body.stf-ro-equip #equipListTabDelete,
+body.stf-ro-equip #equipmentDetailEditBtn, body.stf-ro-equip #equipmentDetailSaveBtn,
+body.stf-ro-equip #equipmentDetailPhotosSection label.cancel-btn, body.stf-ro-equip #equipmentPhotoFolderInput,
+body.stf-ro-equip #equipmentPhotoGrid button{ display:none !important; }
+
+/* ---- Department staff on Operations pages (staff.js opsApplyStaffMode) ---- */
+body.stf-ro-dt #dtTabNew, body.stf-ro-dt #dtMsgInput, body.stf-ro-dt #dtMsgSendBtn{ display:none !important; }
+body.stf-ro-srq #srMsgInput, body.stf-ro-srq #srMsgSendBtn{ display:none !important; }
+body.role-staff #serviceReportsManagerView [data-act="delete"]{ display:none !important; }   /* deleting stays Super Admin */
+body.stf-ro-srm #serviceReportsManagerView [data-act="continue"]{ display:none !important; }
+/* Service Report page for staff: only Record Past Service (and the lists
+   when they also have Service Reports) — never a blank technician form */
+body.role-staff #srTabNewBtn{ display:none !important; }
+
+/* ---- Department staff on Projects / Tools pages (staff.js purchApplyStaffMode) ---- */
+body.stf-ro-prj #invPrjAddBtn, body.stf-ro-prj #invPrjSave, body.stf-ro-prj #invPrjJobAdd{ display:none !important; }
+body.stf-ro-tlreg #tlAddBtn, body.stf-ro-tlreg #tlImportBtn, body.stf-ro-tlreg #tlFSave, body.stf-ro-tlreg #tlFKitAdd{ display:none !important; }
+body.stf-ro-tlis #tlIsPost{ display:none !important; }
+body.stf-ro-tlrt #tlRtPost{ display:none !important; }
+body.stf-ro-tlho #tlHoPost{ display:none !important; }
+body.stf-ro-tlmt #tlMtSave{ display:none !important; }
+#staffPanel_tracker #homeTrackerCard{ margin-bottom:14px; }
+/* tool controls unlocked for staff by their Tools level */
+body.role-staff.stf-tl-reg #tlAddBtn, body.role-staff.stf-tl-reg #tlImportBtn{ display:inline-block !important; }
+body.role-staff.stf-tl-regmoney #tlFPurchaseSec{ display:block !important; }
+body.role-staff.stf-tl-decide #tlDefDecideSec:not([style*="none"]){ display:block !important; }
+
+/* ---- Round 2: dashboards, templates, delegation ---- */
+.stf-dash-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+.stf-dash-tile{ text-align:left; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:12px; cursor:pointer; font:inherit; color:inherit; }
+.stf-dash-tile:hover:not([disabled]){ border-color:var(--green); }
+.stf-dash-tile[disabled]{ cursor:default; }
+.stf-dash-tile.warn{ border-color:#EBC98A; background:#FFFBF2; }
+.stf-dash-val{ font-size:24px; font-weight:800; line-height:1.1; }
+.stf-dash-val small{ font-size:14px; color:var(--text-muted); font-weight:600; }
+.stf-dash-money{ font-size:13px; font-weight:700; color:var(--green-dark); margin-top:2px; }
+.stf-dash-label{ font-size:12px; color:var(--text-muted); margin-top:4px; line-height:1.3; }
+.stf-deleg{ font-size:11px; font-weight:700; color:#6E4E12; background:#FFF4E0; padding:2px 7px; border-radius:999px; }
+.stf-tpl-pick{ border:1px dashed var(--border); border-radius:var(--radius); padding:10px 12px; margin-bottom:10px; }
+.stf-tpl-linked{ font-size:13px; color:var(--green-dark); margin-bottom:6px; }
+.stf-deleg-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
+.stf-handover{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  background:#FFF8EA; border:1px solid #F0DDB5; color:#6E4E12; border-radius:var(--radius); padding:12px 14px; margin-bottom:14px; font-size:14px; }
+.stf-handover .btn{ width:auto; }
+
+/* ---- Round 3: Inbox ---- */
+.stf-badge{ margin-left:auto; min-width:20px; padding:1px 7px; border-radius:999px; background:#C8553D; color:#fff; font-size:11px; font-weight:800; text-align:center; }
+.stf-inbox-list{ display:flex; flex-direction:column; gap:8px; }
+.stf-inbox-row{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; cursor:pointer; font:inherit; color:inherit; }
+.stf-inbox-row:hover{ border-color:var(--green); }
+.stf-inbox-dot{ width:10px; height:10px; border-radius:50%; background:#9AA59E; flex-shrink:0; }
+.stf-inbox-overdue .stf-inbox-dot{ background:#E0A43A; }
+.stf-inbox-escalated .stf-inbox-dot{ background:#C8553D; }
+.stf-inbox-escalated{ border-color:#EBC2B8; background:#FFF7F5; }
+.stf-inbox-main{ flex:1; min-width:0; display:flex; flex-direction:column; }
+.stf-inbox-label{ font-size:14px; font-weight:600; }
+.stf-inbox-title{ font-size:13px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stf-inbox-meta{ font-size:11px; color:var(--text-muted); }
+.stf-inbox-age{ font-size:14px; font-weight:800; text-align:right; white-space:nowrap; }
+.stf-inbox-age small{ display:block; font-size:10px; font-weight:700; text-transform:uppercase; color:var(--text-muted); }
+.stf-inbox-escalated .stf-inbox-age small{ color:#C8553D; }
+.stf-inbox-overdue .stf-inbox-age small{ color:#B07A1C; }
+.stf-inbox-counts{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+.stf-count-pill{ font-size:12px; font-weight:700; padding:3px 10px; border-radius:999px; background:#EEF1ED; }
+.stf-count-pill.esc{ background:#FBE3DD; color:#A2402B; }
+.stf-count-pill.ovd{ background:#FFF1D6; color:#8A5A12; }
+.stf-chips-row{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 12px; }
+.stf-chip-btn{ border:1px solid var(--border); background:var(--surface); border-radius:999px; padding:5px 12px; font:inherit; font-size:13px; cursor:pointer; }
+.stf-chip-btn.on{ background:var(--green); color:#fff; border-color:var(--green); }
+.stf-sla-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; border-top:1px solid var(--border); padding:10px 0; font-size:13px; }
+.stf-sla-name{ flex:1 1 240px; font-weight:600; }
+.stf-sla-row input[type="number"]{ width:70px; border:1px solid var(--border); border-radius:8px; padding:5px 6px; font:inherit; }
