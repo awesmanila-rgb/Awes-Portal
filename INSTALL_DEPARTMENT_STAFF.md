@@ -26,6 +26,7 @@ over your existing `AWES Portal` folder (it only overwrites these files).
 | 8 | `supabase/migrations/20260926_08_operations_tools_staff_access.sql` | Live Tracker, Projects, Tools & Equipment |
 | 9 | `supabase/migrations/20260927_01_round2_templates_delegation_dashboards.sql` | Role templates, delegation while away, dashboards |
 | 10 | `supabase/migrations/20260928_01_round3_inbox_escalation.sql` | Inbox, response times, escalation queue, staff push |
+| 11 | `supabase/migrations/20260929_01_user_guide.sql` | In-app guide: saves each person's language, tours and tips (optional — without it the guide still works, saved on the device only) |
 
 Each one is safe to re-run, at any time, in any order after the others.
 
@@ -50,7 +51,7 @@ overdue escalates on the first run (grouped into one message per person).
 
 Upload the web files (`index.html`, `css/app.css`, `js/app.bundle.js`,
 `sw.js`; `js/modules-src/` and `build.py` are the source). The service
-worker cache is **v165**, so installed phones update on their own.
+worker cache is **v166**, so installed phones update on their own.
 
 ## 5. After installing
 
@@ -63,11 +64,21 @@ worker cache is **v165**, so installed phones update on their own.
 5. Staff sign in from Staff Access → **Office Staff** with their username
    and the temporary password; they choose their own on first sign-in.
 
+## In-app guide (every account type)
+
+Every page has an **About this page** card (what it's for, what to do,
+where it fits in the workflow), a **?** button to show it again, a
+**Help & Guide** screen (searchable, only pages that person can open),
+a first-run **tour** and a **Getting started** checklist per role —
+Super Admin, department staff, technicians and customers — in English
+with a **Tagalog** switch. Wording lives in one file:
+`js/modules-src/guide-content.js` (then run `python3 build.py`).
+
 ## Verify (optional)
 
 `supabase/verify/` has a probe script per migration (each runs in one
 transaction and rolls back). See `supabase/verify/README.md`.
-Last full run: 264 database checks and 223 browser checks, all passing.
+Last full run: 271 database checks and 254 browser checks, all passing.
 
 ## Still Super Admin only
 
