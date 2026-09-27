@@ -168,3 +168,14 @@ Round 2 is installed, and the "who may read technician rows" rule is one
 shared function (staff_sees_workers) defined identically in _03, _05, _07
 and _08. Checked by re-running each one on a full install and running all
 ten probes after each.
+
+## In-app guide (20260929_01_user_guide.sql)
+
+`user_guide_probe.sql` checks that each person reads and writes only their
+own guide progress (language, tours, closed tips, checklist) — not other
+users, not even the Super Admin, and nothing for signed-out visitors.
+
+```sh
+psql -d awes_backup -f ../migrations/20260929_01_user_guide.sql
+psql -d awes_backup -f user_guide_probe.sql   # expect 7 × PASS
+```
