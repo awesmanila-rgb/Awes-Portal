@@ -27,6 +27,7 @@ over your existing `AWES Portal` folder (it only overwrites these files).
 | 9 | `supabase/migrations/20260927_01_round2_templates_delegation_dashboards.sql` | Role templates, delegation while away, dashboards |
 | 10 | `supabase/migrations/20260928_01_round3_inbox_escalation.sql` | Inbox, response times, escalation queue, staff push |
 | 11 | `supabase/migrations/20260929_01_user_guide.sql` | In-app guide: saves each person's language, tours and tips (optional — without it the guide still works, saved on the device only) |
+| 12 | `supabase/migrations/20260930_01_restricted_reads.sql` | **Security fix:** customers see only their own company's data; internal data (announcements, materials, warehouses, suppliers, settings) only for the company's own people; customers / equipment only for staff whose pages use them |
 
 Each one is safe to re-run, at any time, in any order after the others.
 
@@ -51,7 +52,7 @@ overdue escalates on the first run (grouped into one message per person).
 
 Upload the web files (`index.html`, `css/app.css`, `js/app.bundle.js`,
 `sw.js`; `js/modules-src/` and `build.py` are the source). The service
-worker cache is **v166**, so installed phones update on their own.
+worker cache is **v167**, so installed phones update on their own.
 
 ## 5. After installing
 
@@ -78,7 +79,7 @@ with a **Tagalog** switch. Wording lives in one file:
 
 `supabase/verify/` has a probe script per migration (each runs in one
 transaction and rolls back). See `supabase/verify/README.md`.
-Last full run: 271 database checks and 254 browser checks, all passing.
+Last full run: 290 database checks and 251 browser checks, all passing.
 
 ## Still Super Admin only
 

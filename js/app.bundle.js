@@ -21575,6 +21575,13 @@
 
   // after any post: open the new slip (with its PDF) in Slips & History
   async function invAfterPost(kind, id){
+    // Staff without Slips & History: stay on this page, fresh for the next one
+    if(typeof staffPurchPageAllowed === 'function' && !staffPurchPageAllowed('slips')){
+      toast('Posted \u2713');
+      const cur = document.querySelector('#purchasingView [id^="purchPanel_"]:not([style*="none"])');
+      if(cur) showPurchasingView(cur.id.slice('purchPanel_'.length));
+      return;
+    }
     showPurchasingView('slips');
     setTimeout(()=> invOpenSlip(kind, id), 60);
   }
@@ -22706,7 +22713,7 @@
       kv('Purchased', escapeHtml([t.purchase_date ? poDateLong(t.purchase_date) : '', t.po_no, t.purchase_cost != null && tl.money ? '₱' + poFmt(t.purchase_cost) : ''].filter(Boolean).join(' · '))) +
       kv('Warranty until', t.warranty_until ? escapeHtml(poDateLong(t.warranty_until)) + (t.warranty_until < tlToday() ? ' (expired)' : '') : '');
     const b = (a, l, c)=> '<button type="button" class="btn ' + (c || 'btn-secondary') + '" data-da="' + a + '">' + l + '</button>';
-    $('tlDetActions').innerHTML = b('label', 'Print QR Label') + (t.maint_type && t.status !== 'issued' ? b('maint', 'Record ' + (t.maint_type === 'inspection' ? 'Inspection' : 'Calibration')) : '') +
+    $('tlDetActions').innerHTML = b('label', 'Print QR Label') + (t.maint_type && t.status !== 'issued' && (!isStaffUser() || can('tools.maintenance', 'edit')) ? b('maint', 'Record ' + (t.maint_type === 'inspection' ? 'Inspection' : 'Calibration')) : '') +
       (tl.canRegister ? b('edit', 'Edit') + (t.status === 'lost' ? b('found', 'Mark Found') : '') + (['available', 'lost', 'defective'].includes(t.status) ? b('retire', 'Retire', 'danger') : '') : '');
     tlRegView('detail');
     const h = await db.from('tool_events').select('*').eq('tool_id', t.id).order('at', { ascending:false }).limit(200);
@@ -23037,6 +23044,13 @@
   // =====================================================================
   let tlSlips = [], tlSlipOpen = null;
   async function tlAfterPost(slipId){
+    // Staff without Tool Slips: stay on this page, fresh for the next one
+    if(typeof staffPurchPageAllowed === 'function' && !staffPurchPageAllowed('tlSlips')){
+      toast('Saved \u2713');
+      const cur = document.querySelector('#purchasingView [id^="purchPanel_"]:not([style*="none"])');
+      if(cur) showPurchasingView(cur.id.slice('purchPanel_'.length));
+      return;
+    }
     showPurchasingView('tlSlips');
     setTimeout(()=> tlOpenSlip(slipId), 150);
   }
@@ -24935,6 +24949,12 @@
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
   };
   function showPurchasingView(key){
+    // Department staff: never open a screen they have no access to (it
+    // would only show empty) — say so and stay where they are.
+    if(typeof staffPurchPageAllowed === 'function' && !staffPurchPageAllowed(key)){
+      toast('You don\u2019t have access to that page');
+      return;
+    }
     const page = PURCH_PAGES[key] || PURCH_PAGES.materials;
     document.body.classList.remove('dashboard-active');
     ['homeScreen','serviceReportView','leaveView','cashAdvanceView','dispatchView','dtrView',
@@ -27024,6 +27044,23 @@
   };
   const STAFF_TOOL_KEYS = { tlRegister:'tools.register', tlIssue:'tools.issue', tlReturn:'tools.return', tlHandover:'tools.handover',
     tlDefects:'tools.defects', tlMaint:'tools.maintenance', tlSlips:'tools.slips', tlReports:'tools.reports' };
+  // Any Purchasing / Inventory / Tools screen: may this staff member open it?
+  // (Super Admin and other roles: not decided here.) Technician-only
+  // screens (My Requests / Materials / Tools) are never for staff.
+  function staffPurchPageAllowed(key){
+    if(!isStaffUser()) return true;
+    if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
+    return purchStaffAllowed(key);
+  }
+  // Hide in-page shortcuts (inventory hub, tools hub) to screens this
+  // staff member can't open — they'd only lead to an empty page.
+  function staffGateHubButtons(){
+    const staff = isStaffUser();
+    document.querySelectorAll('#purchasingView [data-inv-go], #purchasingView [data-tl-go], #purchasingView [data-tl-hub]').forEach(b=>{
+      const key = b.dataset.invGo || b.dataset.tlGo || (b.dataset.tlHub ? 'tlHub' : '');
+      b.classList.toggle('stf-hidden', staff && !staffPurchPageAllowed(key));
+    });
+  }
   function staffToolPageAllowed(key){
     if(key === 'tlHub') return Object.values(STAFF_TOOL_KEYS).some(m=> can(m, 'view'));
     const m = STAFF_TOOL_KEYS[key];
@@ -27119,6 +27156,7 @@
   // rules in app.css). The database refuses those writes regardless.
   function purchApplyStaffMode(){
     const staff = isStaffUser();
+    staffGateHubButtons();
     const cls = document.body.classList;
     cls.toggle('stf-ro-sup', staff && !can('pur.suppliers', 'edit'));
     cls.toggle('stf-ro-mat', staff && !can('pur.materials', 'edit'));

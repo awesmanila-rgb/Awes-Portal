@@ -349,7 +349,7 @@
       kv('Purchased', escapeHtml([t.purchase_date ? poDateLong(t.purchase_date) : '', t.po_no, t.purchase_cost != null && tl.money ? '₱' + poFmt(t.purchase_cost) : ''].filter(Boolean).join(' · '))) +
       kv('Warranty until', t.warranty_until ? escapeHtml(poDateLong(t.warranty_until)) + (t.warranty_until < tlToday() ? ' (expired)' : '') : '');
     const b = (a, l, c)=> '<button type="button" class="btn ' + (c || 'btn-secondary') + '" data-da="' + a + '">' + l + '</button>';
-    $('tlDetActions').innerHTML = b('label', 'Print QR Label') + (t.maint_type && t.status !== 'issued' ? b('maint', 'Record ' + (t.maint_type === 'inspection' ? 'Inspection' : 'Calibration')) : '') +
+    $('tlDetActions').innerHTML = b('label', 'Print QR Label') + (t.maint_type && t.status !== 'issued' && (!isStaffUser() || can('tools.maintenance', 'edit')) ? b('maint', 'Record ' + (t.maint_type === 'inspection' ? 'Inspection' : 'Calibration')) : '') +
       (tl.canRegister ? b('edit', 'Edit') + (t.status === 'lost' ? b('found', 'Mark Found') : '') + (['available', 'lost', 'defective'].includes(t.status) ? b('retire', 'Retire', 'danger') : '') : '');
     tlRegView('detail');
     const h = await db.from('tool_events').select('*').eq('tool_id', t.id).order('at', { ascending:false }).limit(200);
@@ -680,6 +680,13 @@
   // =====================================================================
   let tlSlips = [], tlSlipOpen = null;
   async function tlAfterPost(slipId){
+    // Staff without Tool Slips: stay on this page, fresh for the next one
+    if(typeof staffPurchPageAllowed === 'function' && !staffPurchPageAllowed('tlSlips')){
+      toast('Saved \u2713');
+      const cur = document.querySelector('#purchasingView [id^="purchPanel_"]:not([style*="none"])');
+      if(cur) showPurchasingView(cur.id.slice('purchPanel_'.length));
+      return;
+    }
     showPurchasingView('tlSlips');
     setTimeout(()=> tlOpenSlip(slipId), 150);
   }

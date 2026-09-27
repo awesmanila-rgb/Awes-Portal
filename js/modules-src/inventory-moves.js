@@ -478,6 +478,13 @@
 
   // after any post: open the new slip (with its PDF) in Slips & History
   async function invAfterPost(kind, id){
+    // Staff without Slips & History: stay on this page, fresh for the next one
+    if(typeof staffPurchPageAllowed === 'function' && !staffPurchPageAllowed('slips')){
+      toast('Posted \u2713');
+      const cur = document.querySelector('#purchasingView [id^="purchPanel_"]:not([style*="none"])');
+      if(cur) showPurchasingView(cur.id.slice('purchPanel_'.length));
+      return;
+    }
     showPurchasingView('slips');
     setTimeout(()=> invOpenSlip(kind, id), 60);
   }

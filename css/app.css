@@ -4254,3 +4254,5 @@ button.gd-check-row{ cursor:pointer; }
   box-shadow:0 4px 14px rgba(0,0,0,.18); cursor:pointer; }
 .gd-help-fab.on{ background:var(--green-dark); }
 body.role-customer .gd-help-fab{ bottom:calc(84px + env(safe-area-inset-bottom, 0px)); }   /* clear of the customer bottom bar */
+/* in-page shortcuts to screens a staff member can't open (staff.js staffGateHubButtons) */
+.stf-hidden{ display:none !important; }

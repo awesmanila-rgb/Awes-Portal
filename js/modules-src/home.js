@@ -929,6 +929,12 @@
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
   };
   function showPurchasingView(key){
+    // Department staff: never open a screen they have no access to (it
+    // would only show empty) — say so and stay where they are.
+    if(typeof staffPurchPageAllowed === 'function' && !staffPurchPageAllowed(key)){
+      toast('You don\u2019t have access to that page');
+      return;
+    }
     const page = PURCH_PAGES[key] || PURCH_PAGES.materials;
     document.body.classList.remove('dashboard-active');
     ['homeScreen','serviceReportView','leaveView','cashAdvanceView','dispatchView','dtrView',

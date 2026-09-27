@@ -1483,6 +1483,23 @@
   };
   const STAFF_TOOL_KEYS = { tlRegister:'tools.register', tlIssue:'tools.issue', tlReturn:'tools.return', tlHandover:'tools.handover',
     tlDefects:'tools.defects', tlMaint:'tools.maintenance', tlSlips:'tools.slips', tlReports:'tools.reports' };
+  // Any Purchasing / Inventory / Tools screen: may this staff member open it?
+  // (Super Admin and other roles: not decided here.) Technician-only
+  // screens (My Requests / Materials / Tools) are never for staff.
+  function staffPurchPageAllowed(key){
+    if(!isStaffUser()) return true;
+    if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
+    return purchStaffAllowed(key);
+  }
+  // Hide in-page shortcuts (inventory hub, tools hub) to screens this
+  // staff member can't open — they'd only lead to an empty page.
+  function staffGateHubButtons(){
+    const staff = isStaffUser();
+    document.querySelectorAll('#purchasingView [data-inv-go], #purchasingView [data-tl-go], #purchasingView [data-tl-hub]').forEach(b=>{
+      const key = b.dataset.invGo || b.dataset.tlGo || (b.dataset.tlHub ? 'tlHub' : '');
+      b.classList.toggle('stf-hidden', staff && !staffPurchPageAllowed(key));
+    });
+  }
   function staffToolPageAllowed(key){
     if(key === 'tlHub') return Object.values(STAFF_TOOL_KEYS).some(m=> can(m, 'view'));
     const m = STAFF_TOOL_KEYS[key];
@@ -1578,6 +1595,7 @@
   // rules in app.css). The database refuses those writes regardless.
   function purchApplyStaffMode(){
     const staff = isStaffUser();
+    staffGateHubButtons();
     const cls = document.body.classList;
     cls.toggle('stf-ro-sup', staff && !can('pur.suppliers', 'edit'));
     cls.toggle('stf-ro-mat', staff && !can('pur.materials', 'edit'));
