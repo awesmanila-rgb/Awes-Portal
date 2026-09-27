@@ -179,3 +179,17 @@ users, not even the Super Admin, and nothing for signed-out visitors.
 psql -d awes_backup -f ../migrations/20260929_01_user_guide.sql
 psql -d awes_backup -f user_guide_probe.sql   # expect 7 × PASS
 ```
+
+## Role isolation (20260930_01_restricted_reads.sql)
+
+`role_isolation_probe.sql` builds data owned by different people and reads
+every sensitive table as each kind of account — signed out, technician,
+storekeeper, customer, staff with one page, finance staff, a Head and a
+deactivated staff member — checking nobody reads beyond their role
+(e.g. a customer sees only their own company, units and requests, and no
+internal data at all). Run it after any change to access rules.
+
+```sh
+psql -d awes_backup -f ../migrations/20260930_01_restricted_reads.sql
+psql -d awes_backup -f role_isolation_probe.sql   # expect 19 × PASS
+```
