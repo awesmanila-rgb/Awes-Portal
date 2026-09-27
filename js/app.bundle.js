@@ -27183,6 +27183,1063 @@
   }
 
 
+  // =====================================================================
+  // In-app guide — CONTENT (English + Tagalog)
+  //
+  // One entry per page the app shows. guide.js decides which one is on
+  // screen and draws: the "About this page" card, the flow strip, the Help
+  // page, first-run tours and the getting-started checklist.
+  //
+  //   roles   who can land here: admin | staff | tech | customer
+  //   module  (staff) the page permission it needs — hidden otherwise
+  //   go      how to open it, per role: a sidebar / nav button id, or for
+  //           staff the page key opened through staffOpenModule()
+  //   flow    which process chain it belongs to (GUIDE_FLOWS)
+  //   en / tl t = page name (kept in English so it matches the screen),
+  //           p = what it's for, s = steps, tip = one useful hint
+  //
+  // Page names stay in English in both languages on purpose: people must
+  // be able to match the guide to the words on the screen.
+  // =====================================================================
+
+  const GUIDE_PAGES = {
+
+    // ---------------------------------------------------------------- HOME
+    'home.admin': { roles:['admin'], go:{ admin:'sbNavDashboard' },
+      en:{ t:'Dashboard', p:'Your daily overview of the whole company: job orders, who is working, service requests, schedule and live locations.',
+           s:['Check the numbers at the top for anything waiting on you.', 'Use the sidebar (or ☰ Menu on a phone) to open any department page.', 'Management → Inbox lists everything overdue across all departments.'],
+           tip:'Tap ? at the top of any page to see what it is for and what comes before and after it.' },
+      tl:{ p:'Pangkalahatang tanaw ng buong kumpanya araw-araw: mga job order, sino ang nagtatrabaho, mga service request, schedule at live na lokasyon.',
+           s:['Tingnan ang mga numero sa itaas para sa mga naghihintay sa iyo.', 'Gamitin ang sidebar (o ☰ Menu sa phone) para buksan ang kahit anong department page.', 'Sa Management → Inbox makikita ang lahat ng overdue sa lahat ng department.'],
+           tip:'Pindutin ang ? sa itaas ng kahit anong page para malaman kung para saan ito at ano ang kasunod.' } },
+
+    'staff.home': { roles:['staff'], go:{ staff:'@home' },
+      en:{ t:'Home', p:'Your starting point: your Inbox, live figures for your departments, and every page you were given.',
+           s:['Start with the Inbox card — it shows what is waiting on you, oldest first.', 'Tap a figure on a department card to open that page.', 'Your pages are listed in the sidebar under My Work.'],
+           tip:'Pages marked "Opening soon" are given to you but not switched on yet.' },
+      tl:{ p:'Ang simula mo: ang Inbox mo, live na mga numero ng mga department mo, at lahat ng page na ibinigay sa iyo.',
+           s:['Magsimula sa Inbox card — makikita dito ang mga naghihintay sa iyo, pinakaluma muna.', 'Pindutin ang isang numero sa department card para buksan ang page na iyon.', 'Nasa sidebar sa ilalim ng My Work ang mga page mo.'],
+           tip:'Ang mga page na may "Opening soon" ay naibigay na sa iyo pero hindi pa bukas.' } },
+
+    'home.tech': { roles:['tech'], go:{ tech:'techNavBtnHome' },
+      en:{ t:'Home', p:'Your day at a glance: time-in, today\u2019s job orders, announcements and quick actions.',
+           s:['Time in first when you arrive (Attendance).', 'Open Job Orders to see where you are assigned today.', 'Home shortcuts: Material Requests, My Materials, My Tools and more.', 'Use the bottom bar: Home, Job Orders, Report, Finance, More.'],
+           tip:'Turn on notifications so you are told the moment a job order is assigned to you.' },
+      tl:{ p:'Ang araw mo sa isang tingin: time-in, mga job order ngayon, announcements at mabilis na aksyon.',
+           s:['Mag-time in muna pagdating (Attendance).', 'Buksan ang Job Orders para makita kung saan ka naka-assign ngayon.', 'Mga shortcut sa Home: Material Requests, My Materials, My Tools at iba pa.', 'Gamitin ang ibabang bar: Home, Job Orders, Report, Finance, More.'],
+           tip:'I-on ang notifications para malaman mo agad kapag may job order na na-assign sa iyo.' } },
+
+    // ------------------------------------------------------- OPERATIONS
+    'dispatch.office': { roles:['admin','staff'], module:'ops.dispatch', flow:'service', go:{ admin:'sbNavDispatch', staff:'ops.dispatch' },
+      en:{ t:'Dispatch / Job Orders', p:'Create job orders, assign technicians and follow each job until it is closed.',
+           s:['New: pick the customer and equipment, set the date, assign technicians, then save.', 'All: follow every job order by status; open one to chat with the team, reassign or close it.', 'Calendar: see the schedule by day.'],
+           tip:'A job order past its date shows in the Inbox as late.' },
+      tl:{ p:'Gumawa ng job order, mag-assign ng technician at sundan ang bawat trabaho hanggang maisara.',
+           s:['New: piliin ang customer at equipment, itakda ang petsa, mag-assign ng technician, saka i-save.', 'All: sundan ang bawat job order ayon sa status; buksan para makipag-chat sa team, mag-reassign o isara.', 'Calendar: tingnan ang schedule kada araw.'],
+           tip:'Ang job order na lampas na sa petsa ay lalabas sa Inbox bilang late.' } },
+
+    'dispatch.tech': { roles:['tech'], flow:'techwork', go:{ tech:'techNavDispatch' },
+      en:{ t:'My Job Orders', p:'The jobs assigned to you, with the site, schedule, equipment and a chat with the office.',
+           s:['Open a job order and tap Acknowledge so the office knows you saw it.', 'Tap Arrived at Site when you get there — the customer is told work has started.', 'When done, create the Service Report from the job order.'],
+           tip:'Use the job order chat for questions — the whole team and the office see it.' },
+      tl:{ p:'Mga trabahong naka-assign sa iyo, kasama ang site, schedule, equipment at chat sa office.',
+           s:['Buksan ang job order at pindutin ang Acknowledge para malaman ng office na nakita mo.', 'Pindutin ang Arrived at Site pagdating mo — sasabihan ang customer na nagsimula na ang trabaho.', 'Pagkatapos, gawin ang Service Report mula sa job order.'],
+           tip:'Gamitin ang chat ng job order sa mga tanong — nakikita ito ng buong team at ng office.' } },
+
+    'sreq': { roles:['admin','staff'], module:'ops.service_requests', flow:'service', go:{ admin:'sbNavServiceRequests', staff:'ops.service_requests' },
+      en:{ t:'Service Requests', p:'Requests filed by customers (or logged by the office): review, agree a fee and schedule, then turn them into job orders.',
+           s:['Open a new request and read the details and photos.', 'Reply in the conversation, propose a fee and a schedule.', 'Once confirmed, create the job order from the request.'],
+           tip:'New requests escalate quickly (after a few hours) — answer them first.' },
+      tl:{ p:'Mga request ng customer (o inilagay ng office): suriin, pagkasunduan ang bayad at schedule, saka gawing job order.',
+           s:['Buksan ang bagong request at basahin ang detalye at mga litrato.', 'Sumagot sa usapan, mag-propose ng bayad at schedule.', 'Kapag kumpirmado, gumawa ng job order mula sa request.'],
+           tip:'Mabilis mag-escalate ang bagong request (ilang oras lang) — unahin itong sagutin.' } },
+
+    'sr.new': { roles:['tech'], flow:'techwork', go:{ tech:'techNavServiceReport' },
+      en:{ t:'Service Report', p:'The field form you fill in on site: equipment, readings, work done, findings, photos and the customer\u2019s signature.',
+           s:['Start it from your job order so the customer and units are filled in.', 'Complete each section; add photos of before and after.', 'Get the customer\u2019s signature, then submit.'],
+           tip:'No signal? Keep working — the report saves on your phone and sends when you are back online.' },
+      tl:{ p:'Ang form sa site: equipment, readings, ginawang trabaho, findings, litrato at pirma ng customer.',
+           s:['Simulan ito mula sa job order para kumpleto na ang customer at mga unit.', 'Punan ang bawat bahagi; maglagay ng litrato bago at pagkatapos.', 'Papirmahan sa customer, saka i-submit.'],
+           tip:'Walang signal? Tuloy lang — naka-save ang report sa phone mo at ipapadala pagbalik ng internet.' } },
+
+    'sr.history': { roles:['tech'], flow:'techwork', go:{ tech:'techNavServiceReport' },
+      en:{ t:'Saved Reports', p:'Your drafts and completed service reports.',
+           s:['Draft: continue a report you haven\u2019t submitted.', 'Completed: open a submitted report or its PDF.'],
+           tip:'Finish drafts the same day so the office can bill the job.' },
+      tl:{ p:'Mga draft at tapos nang service report mo.',
+           s:['Draft: ituloy ang report na hindi pa naisu-submit.', 'Completed: buksan ang naisumiteng report o ang PDF nito.'],
+           tip:'Tapusin ang draft sa parehong araw para ma-bill ng office ang trabaho.' } },
+
+    'sr.backentry': { roles:['admin','staff'], module:'ops.past_service', flow:'service', go:{ staff:'ops.past_service' },
+      en:{ t:'Record Past Service', p:'Key in work that was already done without a report in the app, so the customer\u2019s history is complete.',
+           s:['Choose the technician who did the work and the customer.', 'Pick the units, the date, and what was done.', 'Save — it appears in the customer\u2019s history marked as past service.'],
+           tip:'Use this for old paper reports when you first move a customer into the app.' },
+      tl:{ p:'Ilagay ang trabahong nagawa na pero walang report sa app, para kumpleto ang history ng customer.',
+           s:['Piliin ang technician na gumawa at ang customer.', 'Piliin ang mga unit, petsa at kung ano ang ginawa.', 'I-save — lalabas ito sa history ng customer bilang past service.'],
+           tip:'Gamitin ito para sa mga lumang papel na report kapag inililipat pa lang ang customer sa app.' } },
+
+    'srm': { roles:['admin','staff'], module:'ops.service_reports', flow:'service', go:{ admin:'menuManageReports', staff:'ops.service_reports' },
+      en:{ t:'Service Reports', p:'Every service report filed by the technicians, searchable by customer, technician or status.',
+           s:['Search or filter to find a report.', 'Open it to view, download or share the PDF.'],
+           tip:'Customers see their own completed reports in their portal.' },
+      tl:{ p:'Lahat ng service report ng mga technician, mahahanap ayon sa customer, technician o status.',
+           s:['Maghanap o mag-filter para makita ang report.', 'Buksan para tingnan, i-download o i-share ang PDF.'],
+           tip:'Nakikita ng customer ang sarili nilang tapos na report sa kanilang portal.' } },
+
+    'staff.tracker': { roles:['staff'], module:'ops.tracker', go:{ staff:'ops.tracker' },
+      en:{ t:'Live Tracker', p:'Where technicians are right now, and today\u2019s trail.',
+           s:['Each dot is a technician who shared their location today.', 'Tap a dot for the name and last update time.'],
+           tip:'Locations only show for technicians who are timed in.' },
+      tl:{ p:'Kung nasaan ang mga technician ngayon, at ang dinaanan nila ngayong araw.',
+           s:['Bawat tuldok ay technician na nag-share ng lokasyon ngayon.', 'Pindutin ang tuldok para sa pangalan at huling update.'],
+           tip:'Lumalabas lang ang lokasyon ng mga technician na naka-time in.' } },
+
+    'messages': { roles:['admin','tech'], go:{ tech:'techNavMessages' },
+      en:{ t:'Job Order Messages', p:'Every job order conversation in one place.',
+           s:['Open a thread to read and reply.', 'Unread threads are marked.'], tip:'' },
+      tl:{ p:'Lahat ng usapan sa mga job order sa iisang lugar.',
+           s:['Buksan ang thread para magbasa at sumagot.', 'May marka ang mga hindi pa nababasa.'], tip:'' } },
+
+    'documents': { roles:['tech'], flow:'techwork', go:{ tech:'techNavDocuments' },
+      en:{ t:'My Documents', p:'Your completed service reports as documents you can open and share.',
+           s:['Open a document to view or share its PDF.'], tip:'' },
+      tl:{ p:'Mga tapos mong service report bilang dokumentong mabubuksan at mai-share.',
+           s:['Buksan ang dokumento para tingnan o i-share ang PDF.'], tip:'' } },
+
+    'p.projects': { roles:['admin','staff'], module:'ops.projects', go:{ admin:'sbNavProjects', staff:'ops.projects' },
+      en:{ t:'Projects', p:'Group job orders and materials under one project to follow its progress and material cost.',
+           s:['Add a project, then link its job orders.', 'Materials issued to the project are counted automatically.', 'Open a project to see its job orders and cost.'],
+           tip:'Material cost shows only for people allowed to see peso values.' },
+      tl:{ p:'Pagsamahin ang mga job order at materyales sa iisang proyekto para masundan ang progreso at gastos.',
+           s:['Magdagdag ng proyekto, saka i-link ang mga job order.', 'Awtomatikong nabibilang ang materyales na na-issue sa proyekto.', 'Buksan ang proyekto para makita ang job orders at gastos.'],
+           tip:'Makikita lang ang gastos ng mga pinapayagang makakita ng halaga (peso values).' } },
+
+    // ---------------------------------------------------------- TOOLS
+    'p.tlHub': { roles:['admin','staff','tech'], flow:'tools', go:{ tech:'@purch:tlHub' },
+      en:{ t:'Tools & Equipment', p:'Everything about company tools: who holds what, issuing and returning, calibration and defects.',
+           s:['Choose what you want to do from the tiles.'], tip:'' },
+      tl:{ p:'Lahat tungkol sa mga tool ng kumpanya: sino ang may hawak, pag-issue at pagbalik, calibration at depekto.',
+           s:['Piliin sa mga tile kung ano ang gagawin.'], tip:'' } },
+    'p.tlRegister': { roles:['admin','staff'], module:'tools.register', flow:'tools', go:{ admin:'sbNavTlRegister', staff:'tools.register' },
+      en:{ t:'Tool Register', p:'The list of every tool and kit, with its status, holder, and full history.',
+           s:['Add a tool or kit (or import a CSV); print QR labels to stick on them.', 'Scan a QR label or search to find a tool.', 'Open a tool to see who has it and everything that happened to it.'],
+           tip:'A tool overdue for calibration can\u2019t be issued until it is checked.' },
+      tl:{ p:'Listahan ng bawat tool at kit, kasama ang status, may hawak at buong history.',
+           s:['Magdagdag ng tool o kit (o mag-import ng CSV); mag-print ng QR label na ididikit.', 'I-scan ang QR o maghanap para makita ang tool.', 'Buksan ang tool para makita kung sino ang may hawak at lahat ng nangyari dito.'],
+           tip:'Ang tool na lampas na sa calibration ay hindi mai-issue hangga\u2019t hindi natsetsek.' } },
+    'p.tlIssue': { roles:['admin','staff'], module:'tools.issue', flow:'tools', go:{ admin:'sbNavTlIssue', staff:'tools.issue' },
+      en:{ t:'Issue Tools', p:'Lend tools to a worker, signed by the warehouseman and the worker.',
+           s:['Choose the warehouse, the worker and the job order or project.', 'Scan or pick the tools, set the due-back date.', 'Both sign, then Sign & Issue.'], tip:'The worker sees the tools under My Tools.' },
+      tl:{ p:'Magpahiram ng tool sa worker, pinipirmahan ng warehouseman at ng worker.',
+           s:['Piliin ang warehouse, worker at job order o proyekto.', 'I-scan o piliin ang mga tool, itakda ang petsa ng pagbalik.', 'Parehong pumirma, saka Sign & Issue.'], tip:'Makikita ng worker ang mga tool sa My Tools.' } },
+    'p.tlReturn': { roles:['admin','staff'], module:'tools.return', flow:'tools', go:{ admin:'sbNavTlReturn', staff:'tools.return' },
+      en:{ t:'Return Tools', p:'Take tools back into the warehouse, checking their condition.',
+           s:['Choose the worker; their tools are listed.', 'Mark each tool\u2019s condition; report a defect if something is wrong.', 'Both sign to receive.'], tip:'' },
+      tl:{ p:'Ibalik ang mga tool sa warehouse at tsekin ang kondisyon.',
+           s:['Piliin ang worker; lalabas ang mga tool niya.', 'Markahan ang kondisyon ng bawat tool; mag-report ng depekto kung may sira.', 'Parehong pumirma para matanggap.'], tip:'' } },
+    'p.tlHandover': { roles:['admin','staff'], module:'tools.handover', flow:'tools', go:{ admin:'sbNavTlHandover', staff:'tools.handover' },
+      en:{ t:'Tool Handover', p:'Pass tools from one worker to another on site, without going back to the warehouse.',
+           s:['Choose who hands over and who receives.', 'Pick the tools; both sign.'], tip:'' },
+      tl:{ p:'Ipasa ang tool mula sa isang worker papunta sa isa pa sa site, hindi na babalik sa warehouse.',
+           s:['Piliin kung sino ang magpapasa at sino ang tatanggap.', 'Piliin ang mga tool; parehong pumirma.'], tip:'' } },
+    'p.tlDefects': { roles:['admin','staff'], module:'tools.defects', flow:'tools', go:{ admin:'sbNavTlDefects', staff:'tools.defects' },
+      en:{ t:'Defect Reports', p:'Defective, damaged and lost tools, and the decision for each (repair, write off, charge).',
+           s:['Open a report to see what happened.', 'Decide: send for repair, write off, or mark found.'], tip:'Open defects escalate in the Inbox if left undecided.' },
+      tl:{ p:'Mga sira, nasira at nawawalang tool, at ang desisyon sa bawat isa (ipaayos, i-write off, singilin).',
+           s:['Buksan ang report para makita ang nangyari.', 'Magdesisyon: ipaayos, i-write off, o markahang nakita na.'], tip:'Nag-e-escalate sa Inbox ang depektong hindi pa napagpapasyahan.' } },
+    'p.tlMaint': { roles:['admin','staff'], module:'tools.maintenance', flow:'tools', go:{ admin:'sbNavTlMaint', staff:'tools.maintenance' },
+      en:{ t:'Calibration & Inspection', p:'Due dates for calibration and inspection; log each check.',
+           s:['Overdue tools are listed first.', 'Log the check and the next due date.'], tip:'Overdue tools can\u2019t be issued.' },
+      tl:{ p:'Mga petsa ng calibration at inspection; itala ang bawat tsek.',
+           s:['Nauuna sa listahan ang mga overdue.', 'Itala ang tsek at ang susunod na petsa.'], tip:'Hindi mai-issue ang overdue na tool.' } },
+    'p.tlSlips': { roles:['admin','staff'], module:'tools.slips', flow:'tools', go:{ admin:'sbNavTlSlips', staff:'tools.slips' },
+      en:{ t:'Tool Slips', p:'Every issue, return and handover slip, with signatures.', s:['Search and open a slip to view or print it.'], tip:'' },
+      tl:{ p:'Lahat ng issue, return at handover slip, may pirma.', s:['Maghanap at buksan ang slip para tingnan o i-print.'], tip:'' } },
+    'p.tlReports': { roles:['admin','staff'], module:'tools.reports', flow:'tools', go:{ admin:'sbNavTlReports', staff:'tools.reports' },
+      en:{ t:'Tool Reports', p:'Movements, who holds what, defects and the full register, for a date range.', s:['Choose the report and the dates.'], tip:'' },
+      tl:{ p:'Galaw ng tool, sino ang may hawak, depekto at buong register, sa isang petsa.', s:['Piliin ang report at ang mga petsa.'], tip:'' } },
+    'p.myTools': { roles:['tech'], flow:'tools', go:{ tech:'@purch:myTools' },
+      en:{ t:'My Tools', p:'The tools you are holding, and tools waiting for your signature.',
+           s:['Sign for tools issued or handed to you.', 'Report a problem with a tool here.'], tip:'Return tools on time — overdue tools show on your record.' },
+      tl:{ p:'Mga tool na hawak mo, at mga tool na naghihintay ng pirma mo.',
+           s:['Pumirma para sa tool na na-issue o ipinasa sa iyo.', 'Mag-report dito kung may problema ang tool.'], tip:'Ibalik sa tamang oras — nakikita sa record mo ang overdue.' } },
+
+    // ------------------------------------------------------- PURCHASING
+    'p.materials': { roles:['admin','staff'], module:'pur.materials', flow:'purchasing', go:{ admin:'sbNavMaterials', staff:'pur.materials' },
+      en:{ t:'Materials Database', p:'The catalog of materials and parts everyone picks from — requisitions, POs and stock all use it.',
+           s:['Add a material with its category, unit and specs.', 'Add supplier prices so POs fill in automatically.', 'Import or export the list as CSV.'], tip:'One clean catalog = accurate stock and costing.' },
+      tl:{ p:'Ang katalogo ng materyales at piyesa na pinipilian ng lahat — gamit ito ng requisition, PO at stock.',
+           s:['Magdagdag ng materyal kasama ang kategorya, unit at specs.', 'Maglagay ng presyo ng supplier para kusang mapuno ang PO.', 'Mag-import o mag-export bilang CSV.'], tip:'Maayos na katalogo = tamang stock at costing.' } },
+    'p.suppliers': { roles:['admin','staff'], module:'pur.suppliers', flow:'purchasing', go:{ admin:'sbNavSuppliers', staff:'pur.suppliers' },
+      en:{ t:'Supplier Database', p:'Your suppliers, their contacts, documents and price lists.',
+           s:['Add a supplier with TIN, address and payment terms.', 'Add contacts, documents (e.g. permits) and prices per material.'], tip:'' },
+      tl:{ p:'Mga supplier mo, kanilang contact, dokumento at presyo.',
+           s:['Magdagdag ng supplier kasama ang TIN, address at payment terms.', 'Maglagay ng contact, dokumento (hal. permit) at presyo kada materyal.'], tip:'' } },
+    'p.requisitions': { roles:['admin','staff'], module:'pur.requisitions', flow:'purchasing', go:{ admin:'sbNavRequisitions', staff:'pur.requisitions' },
+      en:{ t:'Material Requisition', p:'Material requests from technicians: review, approve, then fulfil from stock or with a PO.',
+           s:['Open a submitted request and check the items and quantities.', 'Approve (you can lower quantities), return for changes, or reject.', 'Fulfil: issue from stock, let the technician buy, or create PO(s).'],
+           tip:'You can\u2019t approve your own request — another approver has to.' },
+      tl:{ p:'Mga request ng materyales mula sa technician: suriin, aprubahan, saka ibigay mula sa stock o sa PO.',
+           s:['Buksan ang na-submit na request at tsekin ang mga item at dami.', 'Aprubahan (puwedeng bawasan ang dami), ibalik para ayusin, o tanggihan.', 'Ibigay: i-issue mula sa stock, hayaang bumili ang technician, o gumawa ng PO.'],
+           tip:'Hindi mo maaaprubahan ang sarili mong request — iba ang dapat mag-approve.' } },
+    'p.myRequests': { roles:['tech'], flow:'purchasing', go:{ tech:'@purch:myRequests' },
+      en:{ t:'Material Requests', p:'Ask the office for materials you need for a job.',
+           s:['Create a request, link it to your job order, add the items.', 'Submit — you are told when it is approved.', 'Follow the status here.'], tip:'' },
+      tl:{ p:'Humingi sa office ng materyales na kailangan mo sa trabaho.',
+           s:['Gumawa ng request, i-link sa job order mo, idagdag ang mga item.', 'I-submit — sasabihan ka kapag naaprubahan.', 'Sundan ang status dito.'], tip:'' } },
+    'p.purchaseOrders': { roles:['admin','staff'], module:'pur.purchase_orders', flow:'purchasing', go:{ admin:'sbNavPurchaseOrders', staff:'pur.purchase_orders' },
+      en:{ t:'Purchase Orders', p:'Create, issue and download purchase orders to suppliers.',
+           s:['New PO: choose the supplier, add catalog items, check VAT and terms.', 'Save as draft; an approver issues it.', 'Download or send the PDF; track deliveries under Receive.'],
+           tip:'Issuing asks for your password and prints your own signature. You can\u2019t issue a PO you drafted.' },
+      tl:{ p:'Gumawa, mag-issue at mag-download ng purchase order sa supplier.',
+           s:['Bagong PO: piliin ang supplier, idagdag ang mga item, tsekin ang VAT at terms.', 'I-save bilang draft; ang approver ang mag-i-issue.', 'I-download o ipadala ang PDF; sundan ang delivery sa Receive.'],
+           tip:'Kapag nag-issue, hihingin ang password mo at ipi-print ang sarili mong pirma. Hindi mo mai-issue ang PO na ikaw ang gumawa.' } },
+
+    // -------------------------------------------------------- INVENTORY
+    'p.stock': { roles:['admin','staff'], module:'inv.stock', flow:'inventory', go:{ admin:'sbNavStock', staff:'inv.stock' },
+      en:{ t:'Stock on Hand', p:'How much of each material is in each warehouse, and its value.',
+           s:['Filter by warehouse or search a material.', 'Open a material for its movements; adjust the count after a physical count.', 'Opening Balance sets starting stock when you begin using the app.'], tip:'' },
+      tl:{ p:'Ilan ang bawat materyal sa bawat warehouse, at ang halaga nito.',
+           s:['I-filter ayon sa warehouse o hanapin ang materyal.', 'Buksan ang materyal para sa galaw nito; i-adjust pagkatapos ng bilangan.', 'Ang Opening Balance ang panimulang stock pagsimula sa app.'], tip:'' } },
+    'p.myStock': { roles:['tech','staff'], module:'inv.stock', flow:'inventory', go:{ tech:'@purch:myStock', staff:'inv.stock' },
+      en:{ t:'Warehouse Stock', p:'Quantities in the warehouses you look after (no peso values).', s:['Choose a warehouse to see its stock.'], tip:'' },
+      tl:{ p:'Dami ng stock sa mga warehouse na hawak mo (walang halaga).', s:['Pumili ng warehouse para makita ang stock.'], tip:'' } },
+    'p.warehouses': { roles:['admin','staff'], module:'inv.warehouses', flow:'inventory', go:{ admin:'sbNavWarehouses', staff:'inv.warehouses' },
+      en:{ t:'Warehouses', p:'Your stock locations and who keeps each one.', s:['Add a warehouse with its code and address.', 'Storekeepers are assigned in Users & Roles.'], tip:'' },
+      tl:{ p:'Mga lugar ng stock at kung sino ang may hawak sa bawat isa.', s:['Magdagdag ng warehouse kasama ang code at address.', 'Sa Users & Roles ina-assign ang storekeeper.'], tip:'' } },
+    'p.receive': { roles:['admin','staff','tech'], module:'inv.receive', flow:'inventory', go:{ admin:'sbNavReceive', staff:'inv.receive', tech:'@purch:receive' },
+      en:{ t:'Receive Stock', p:'Record deliveries coming in — against a PO, or without one.',
+           s:['Against a PO: choose the PO; the items and remaining quantities appear.', 'Enter what actually arrived, choose the warehouse.', 'Post — stock goes up and the PO shows as received.'], tip:'Issued POs not received after a week show in the Inbox.' },
+      tl:{ p:'Itala ang dumating na delivery — may PO man o wala.',
+           s:['May PO: piliin ang PO; lalabas ang mga item at natitirang dami.', 'Ilagay ang talagang dumating, piliin ang warehouse.', 'I-post — tataas ang stock at makikitang natanggap ang PO.'], tip:'Ang PO na hindi pa natatanggap pagkalipas ng isang linggo ay lalabas sa Inbox.' } },
+    'p.issue': { roles:['admin','staff','tech'], module:'inv.issue', flow:'inventory', go:{ admin:'sbNavIssue', staff:'inv.issue', tech:'@purch:issue' },
+      en:{ t:'Issue to Worker', p:'Give materials to a technician for a job order or project.',
+           s:['Choose the warehouse, worker and job order or project.', 'Add the materials (or load an approved requisition).', 'Post — the worker signs for it under My Materials.'], tip:'' },
+      tl:{ p:'Magbigay ng materyales sa technician para sa job order o proyekto.',
+           s:['Piliin ang warehouse, worker at job order o proyekto.', 'Idagdag ang materyales (o i-load ang naaprubahang requisition).', 'I-post — pipirma ang worker sa My Materials.'], tip:'' } },
+    'p.returns': { roles:['admin','staff','tech'], module:'inv.returns', flow:'inventory', go:{ admin:'sbNavReturns', staff:'inv.returns', tech:'@purch:returns' },
+      en:{ t:'Returns', p:'Take unused materials back into stock.', s:['Choose the worker; what they hold is listed.', 'Enter what comes back and post.'], tip:'' },
+      tl:{ p:'Ibalik sa stock ang hindi nagamit na materyales.', s:['Piliin ang worker; lalabas ang hawak niya.', 'Ilagay ang ibinabalik at i-post.'], tip:'' } },
+    'p.transfers': { roles:['admin','staff','tech'], module:'inv.transfers', flow:'inventory', go:{ admin:'sbNavTransfers', staff:'inv.transfers', tech:'@purch:transfers' },
+      en:{ t:'Transfers', p:'Move stock from one warehouse to another.', s:['Choose the from and to warehouses, add the items, post.'], tip:'' },
+      tl:{ p:'Ilipat ang stock mula sa isang warehouse papunta sa iba.', s:['Piliin ang pinanggalingan at pupuntahang warehouse, idagdag ang item, i-post.'], tip:'' } },
+    'p.slips': { roles:['admin','staff','tech'], module:'inv.slips', flow:'inventory', go:{ admin:'sbNavSlips', staff:'inv.slips', tech:'@purch:slips' },
+      en:{ t:'Slips & History', p:'Every receipt, issue, return and transfer document.', s:['Search and open a slip to view or print it.'], tip:'' },
+      tl:{ p:'Lahat ng dokumento ng receipt, issue, return at transfer.', s:['Maghanap at buksan ang slip para tingnan o i-print.'], tip:'' } },
+    'p.invReports': { roles:['admin','staff'], module:'inv.reports', flow:'inventory', go:{ admin:'sbNavInvReports', staff:'inv.reports' },
+      en:{ t:'Inventory Reports', p:'Balances, movements, project cost, reorder and slow-moving items.',
+           s:['Choose a report tab and the date range.', 'Reorder suggests what to buy; you can turn it into draft POs.'], tip:'' },
+      tl:{ p:'Balanse, galaw, gastos ng proyekto, reorder at mabagal gumalaw na item.',
+           s:['Pumili ng report at ng petsa.', 'Ang Reorder ay nagmumungkahi ng bibilhin; puwedeng gawing draft PO.'], tip:'' } },
+    'p.myMaterials': { roles:['tech'], flow:'inventory', go:{ tech:'@purch:myMaterials' },
+      en:{ t:'My Materials', p:'Materials issued to you: sign for them and see what you still hold.', s:['Sign for new issues.', 'Return what you didn\u2019t use through the warehouse.'], tip:'' },
+      tl:{ p:'Materyales na na-issue sa iyo: pumirma at tingnan ang hawak mo pa.', s:['Pumirma sa bagong issue.', 'Ibalik sa warehouse ang hindi nagamit.'], tip:'' } },
+
+    // ------------------------------------------------ ACCOUNTING & FINANCE
+    'ca.office': { roles:['admin','staff'], module:'fin.cash_advance', flow:'cash', go:{ admin:'sbNavCashAdvance', staff:'fin.cash_advance' },
+      en:{ t:'Cash Advance · Liquidation · Reimbursement', p:'Technicians\u2019 money requests from start to finish: approve, give the cash, review the liquidation, settle the balance.',
+           s:['Pending: approve or disapprove each request.', 'Approved: record the cash given.', 'To Review Liquidation: check receipts and approve.', 'To Settle: mark the balance returned or reimbursed.'],
+           tip:'Approving asks for your password, and your peso limit applies.' },
+      tl:{ p:'Mga request ng pera ng technician mula simula hanggang dulo: aprubahan, ibigay ang cash, suriin ang liquidation, ayusin ang balanse.',
+           s:['Pending: aprubahan o tanggihan ang bawat request.', 'Approved: itala ang ibinigay na cash.', 'To Review Liquidation: tsekin ang resibo at aprubahan.', 'To Settle: markahang naibalik o na-reimburse ang balanse.'],
+           tip:'Kapag mag-a-approve, hihingin ang password mo, at may limitasyon ang halagang puwede mong aprubahan.' } },
+    'ca.mine': { roles:['tech'], flow:'cash', go:{ tech:'techNavCashAdvance' },
+      en:{ t:'Cash Advance', p:'Ask for cash for a job, then liquidate it with receipts. Reimbursement is for money you spent from your own pocket.',
+           s:['New request: amount, purpose and job order.', 'When approved and given, spend it for the job.', 'Liquidate: add each expense with a photo of the receipt.'],
+           tip:'Liquidate within a week — unliquidated advances are flagged to Finance.' },
+      tl:{ p:'Humingi ng cash para sa trabaho, saka i-liquidate gamit ang resibo. Ang Reimbursement ay para sa perang ginastos mo mula sa sariling bulsa.',
+           s:['Bagong request: halaga, layunin at job order.', 'Kapag naaprubahan at naibigay, gastusin para sa trabaho.', 'Liquidate: idagdag ang bawat gastos kasama ang litrato ng resibo.'],
+           tip:'Mag-liquidate sa loob ng isang linggo — naaabisuhan ang Finance sa hindi pa nali-liquidate.' } },
+    'financeHr': { roles:['tech'], go:{ tech:'techNavBtnFinance' },
+      en:{ t:'Finance & HR', p:'Your attendance, cash advances, liquidation, reimbursement and leave in one place.', s:['Tap a tile to open it.'], tip:'Materials and tools are on your Home shortcuts.' },
+      tl:{ p:'Ang attendance, cash advance, liquidation, reimbursement at leave mo sa iisang lugar.', s:['Pindutin ang tile para buksan.'], tip:'Nasa mga shortcut sa Home mo ang materyales at tools.' } },
+
+    // ------------------------------------------------------- HUMAN RESOURCES
+    'dtr.office': { roles:['admin','staff'], module:'hr.attendance', go:{ admin:'sbNavTechnicians', staff:'hr.attendance' },
+      en:{ t:'Technicians · Attendance', p:'Today\u2019s attendance for every technician, their DTR history and their profile.',
+           s:['See who is present, completed or on overtime today.', 'View DTR for a technician\u2019s time records.', 'View Profile for leaves, violations and documents.'], tip:'' },
+      tl:{ p:'Attendance ngayon ng bawat technician, ang DTR history at profile nila.',
+           s:['Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng technician.', 'View Profile para sa leave, violation at dokumento.'], tip:'' } },
+    'dtr.tech': { roles:['tech'], go:{ tech:'techNavDtr' },
+      en:{ t:'Attendance (DTR)', p:'Time in and out each day, including overtime.',
+           s:['Tap Time In when you arrive; allow location.', 'Tap Time Out when you leave.', 'Your history is below.'], tip:'Use the same phone every day — attendance is tied to your registered device.' },
+      tl:{ p:'Mag-time in at time out araw-araw, kasama ang overtime.',
+           s:['Pindutin ang Time In pagdating; payagan ang lokasyon.', 'Pindutin ang Time Out pag-alis.', 'Nasa ibaba ang history mo.'], tip:'Gamitin ang parehong phone araw-araw — nakatali ang attendance sa naka-register mong device.' } },
+    'leave.office': { roles:['admin','staff'], module:'hr.leaves', flow:'leave', go:{ admin:'@fn:leave', staff:'hr.leaves' },
+      en:{ t:'Leave Requests', p:'Everyone\u2019s leave requests: approve or disapprove them.',
+           s:['Open a pending request; check the dates and reason.', 'Approve or disapprove with a comment.'], tip:'You can\u2019t approve your own leave.' },
+      tl:{ p:'Mga leave request ng lahat: aprubahan o tanggihan.',
+           s:['Buksan ang pending na request; tsekin ang petsa at dahilan.', 'Aprubahan o tanggihan kasama ang komento.'], tip:'Hindi mo maaaprubahan ang sarili mong leave.' } },
+    'leave.mine': { roles:['tech','staff'], flow:'leave', go:{ tech:'techNavLeave', staff:'@myleave' },
+      en:{ t:'My Leave', p:'File a leave and follow its status.',
+           s:['Choose the leave type and dates, add the reason.', 'Submit — HR decides and you are told.'], tip:'Heads: when your leave is approved, your home offers to hand over your approvals for those dates.' },
+      tl:{ p:'Mag-file ng leave at sundan ang status nito.',
+           s:['Piliin ang uri ng leave at mga petsa, ilagay ang dahilan.', 'I-submit — ang HR ang magpapasya at sasabihan ka.'], tip:'Mga Head: kapag naaprubahan ang leave mo, iaalok sa home na ipasa ang mga approval mo sa mga petsang iyon.' } },
+
+    // --------------------------------------------------------- ADMINISTRATION
+    'customers': { roles:['admin','staff'], module:'adm.customers', flow:'service', go:{ admin:'menuManageCustomers', staff:'adm.customers' },
+      en:{ t:'Customers', p:'Your customer list with contacts, their equipment and full service history.',
+           s:['Add a customer with address and contact person.', 'Open a customer to see and add their equipment.', 'History shows every visit and report.'], tip:'Renaming a customer updates the name on their old reports too.' },
+      tl:{ p:'Listahan ng customer kasama ang contact, equipment at buong service history.',
+           s:['Magdagdag ng customer kasama ang address at contact person.', 'Buksan ang customer para makita at madagdagan ang equipment.', 'Nasa History ang bawat bisita at report.'], tip:'Kapag pinalitan ang pangalan ng customer, napapalitan din sa mga lumang report.' } },
+    'custHistory': { roles:['admin','staff'], module:'adm.customers', flow:'service', go:{},
+      en:{ t:'Customer History', p:'Every service visit for this customer, newest first.', s:['Open a visit for its report.'], tip:'' },
+      tl:{ p:'Bawat bisita sa customer na ito, pinakabago muna.', s:['Buksan ang bisita para sa report nito.'], tip:'' } },
+    'equipment': { roles:['admin','staff'], module:'adm.equipment', go:{ admin:'menuManageEquipment', staff:'adm.equipment' },
+      en:{ t:'Customer Equipment', p:'Every aircon unit and piece of equipment you service, with photos, next PM date and history.',
+           s:['Add equipment for a customer, or scan its QR.', 'Open a unit for its details, photos and service history.'], tip:'Units overdue for PM show on the Administration dashboard.' },
+      tl:{ p:'Bawat aircon unit at equipment na sine-service mo, may litrato, susunod na PM at history.',
+           s:['Magdagdag ng equipment sa customer, o i-scan ang QR nito.', 'Buksan ang unit para sa detalye, litrato at service history.'], tip:'Lumalabas sa Administration dashboard ang mga unit na overdue sa PM.' } },
+    'ann': { roles:['admin','staff'], module:'adm.announcements', go:{ admin:'menuManageAnnouncements', staff:'adm.announcements' },
+      en:{ t:'Announcements', p:'Post notices everyone sees on their home screen.', s:['Write a title and message; pin it to keep it on top.', 'Post — it appears for everyone right away.'], tip:'' },
+      tl:{ p:'Mag-post ng abiso na makikita ng lahat sa kanilang home.', s:['Isulat ang pamagat at mensahe; i-pin para manatili sa itaas.', 'I-post — lalabas agad para sa lahat.'], tip:'' } },
+    'dropdowns': { roles:['admin','staff'], module:'adm.dropdowns', go:{ admin:'menuManageDropdowns', staff:'adm.dropdowns' },
+      en:{ t:'Dropdown Lists', p:'The pick-lists technicians choose from in the service report (findings, recommendations and more).', s:['Add, rename or remove entries.', 'Save — the report form uses them right away.'], tip:'' },
+      tl:{ p:'Mga pagpipilian ng technician sa service report (findings, recommendations at iba pa).', s:['Magdagdag, magpalit ng pangalan o magtanggal.', 'I-save — gagamitin agad ng report form.'], tip:'' } },
+    'users': { roles:['admin'], go:{ admin:'menuManageUsers' },
+      en:{ t:'Users & Roles', p:'Technician accounts, storekeepers and customer portal logins.', s:['Add a technician; set restrictions if needed.', 'Assign storekeepers to warehouses.', 'Create a customer portal login and link it to the customer.'], tip:'Office staff accounts are under Department Staff.' },
+      tl:{ p:'Mga account ng technician, storekeeper at login ng customer portal.', s:['Magdagdag ng technician; maglagay ng restriction kung kailangan.', 'Mag-assign ng storekeeper sa warehouse.', 'Gumawa ng login sa customer portal at i-link sa customer.'], tip:'Nasa Department Staff ang mga account ng office staff.' } },
+
+    // ------------------------------------------------------ DEPARTMENT STAFF
+    'staff.team': { roles:['admin','staff'], flow:'people', go:{ admin:'menuManageStaff', staff:'@team' },
+      en:{ t:'Department Staff / My Team', p:'Office staff accounts. The Super Admin creates department Heads; Heads add sub-users under them.',
+           s:['+ Add: name, username, temporary password, departments and page levels.', 'View sees a page, Edit also changes it, Approve also approves.', 'Heads: Delegate while away hands your approvals to a sub-user for set dates.'],
+           tip:'A sub-user can never get more access than their Head.' },
+      tl:{ p:'Mga account ng office staff. Ang Super Admin ang gumagawa ng department Head; ang Head ang nagdadagdag ng sub-user.',
+           s:['+ Add: pangalan, username, temporary password, department at level ng bawat page.', 'View = nakikita, Edit = nababago rin, Approve = naaaprubahan din.', 'Mga Head: ang Delegate while away ay nagpapasa ng approval mo sa sub-user sa itinakdang petsa.'],
+           tip:'Hindi kailanman lalampas ang access ng sub-user sa access ng Head niya.' } },
+    'staff.edit': { roles:['admin','staff'], flow:'people', go:{},
+      en:{ t:'Staff Account', p:'One person\u2019s account: details, departments and page levels.',
+           s:['Tick a department, then choose each page\u2019s level.', 'Approve pages with money can have a peso limit.', 'More: preview what they see, reset password, deactivate.'], tip:'Apply a role template to fill this in quickly.' },
+      tl:{ p:'Account ng isang tao: detalye, department at level ng bawat page.',
+           s:['I-tick ang department, saka piliin ang level ng bawat page.', 'Ang page na may pera ay puwedeng lagyan ng limitasyon sa halaga.', 'More: tingnan ang nakikita niya, i-reset ang password, i-deactivate.'], tip:'Gumamit ng role template para mabilis itong mapunan.' } },
+    'staff.templates': { roles:['admin'], flow:'people', go:{},
+      en:{ t:'Role Templates', p:'Saved sets of departments and page levels, like "Purchasing Clerk".',
+           s:['Create a template once.', 'Apply it to people; kept-in-sync people update when you change it.'], tip:'' },
+      tl:{ p:'Nakasave na set ng department at page level, gaya ng "Purchasing Clerk".',
+           s:['Gumawa ng template nang isang beses.', 'I-apply sa mga tao; nag-a-update ang mga naka-sync kapag binago mo ito.'], tip:'' } },
+    'staff.activity': { roles:['admin','staff'], flow:'people', go:{ admin:'menuActivityLog', staff:'@activity' },
+      en:{ t:'Activity Log', p:'A permanent record of who changed what, and when. Lines can\u2019t be edited or removed.', s:['Filter by person or record type.', 'Open Details to see exactly what changed.'], tip:'' },
+      tl:{ p:'Permanenteng tala kung sino ang nagbago ng ano at kailan. Hindi ito mababago o mabubura.', s:['I-filter ayon sa tao o uri ng record.', 'Buksan ang Details para makita ang eksaktong binago.'], tip:'' } },
+    'staff.inbox': { roles:['admin','staff'], go:{ admin:'menuInbox', staff:'@inbox' },
+      en:{ t:'Inbox', p:'Everything waiting on a page you can act on, across all departments, most urgent first.',
+           s:['Red = escalated (the Head has been told), orange = overdue, grey = waiting.', 'Tap an item to open its page and act on it.', 'Super Admin: Response times sets when items become overdue and escalate.'],
+           tip:'Items leave the Inbox by themselves once the work is done.' },
+      tl:{ p:'Lahat ng naghihintay sa page na kaya mong aksyunan, sa lahat ng department, pinakaapurahan muna.',
+           s:['Pula = escalated (naabisuhan na ang Head), orange = overdue, abo = naghihintay.', 'Pindutin ang item para buksan ang page at aksyunan.', 'Super Admin: sa Response times itinatakda kung kailan nagiging overdue at nag-e-escalate.'],
+           tip:'Kusang nawawala sa Inbox ang item kapag natapos na ang trabaho.' } },
+
+    // --------------------------------------------------------- CUSTOMER PORTAL
+    'cp.accountPicker': { roles:['customer'], go:{},
+      en:{ t:'Choose Account', p:'Your login covers more than one customer account (e.g. several branches). Pick the one to view.', s:['Tap an account to open it.'], tip:'' },
+      tl:{ p:'Higit sa isang customer account ang sakop ng login mo (hal. ilang branch). Piliin ang titingnan.', s:['Pindutin ang account para buksan.'], tip:'' } },
+    'cp.home': { roles:['customer'], flow:'booking', go:{ customer:'cpNavHome' },
+      en:{ t:'Home', p:'Your units, upcoming visits and latest service at a glance.', s:['Book a service from Requests.', 'See your units under My Units.'], tip:'' },
+      tl:{ p:'Ang mga unit mo, darating na bisita at pinakahuling service sa isang tingin.', s:['Mag-book ng service sa Requests.', 'Makikita ang mga unit mo sa My Units.'], tip:'' } },
+    'cp.units': { roles:['customer'], flow:'booking', go:{ customer:'cpNavUnits' },
+      en:{ t:'My Units', p:'Every aircon unit and piece of equipment registered to you.', s:['Open a unit for its details, photos and service history.'], tip:'' },
+      tl:{ p:'Bawat aircon unit at equipment na naka-register sa iyo.', s:['Buksan ang unit para sa detalye, litrato at service history.'], tip:'' } },
+    'cp.equipmentDetail': { roles:['customer'], flow:'booking', go:{},
+      en:{ t:'Unit Details', p:'One unit: its details, photos and every service done on it.', s:['Request service for this unit from here.'], tip:'' },
+      tl:{ p:'Isang unit: detalye, litrato at bawat service na ginawa dito.', s:['Mag-request ng service para sa unit na ito mula dito.'], tip:'' } },
+    'cp.requests': { roles:['customer'], flow:'booking', go:{ customer:'cpNavRequests' },
+      en:{ t:'Service Requests', p:'Book a service and follow it until it is done.',
+           s:['New: choose the unit(s), describe the problem, add photos, pick a preferred date.', 'The office replies with a fee and schedule — accept it here.', 'Follow the status; the report appears in History when done.'], tip:'' },
+      tl:{ p:'Mag-book ng service at sundan hanggang matapos.',
+           s:['Bago: piliin ang unit, ilarawan ang problema, maglagay ng litrato, pumili ng gustong petsa.', 'Sasagot ang office ng bayad at schedule — tanggapin dito.', 'Sundan ang status; lalabas ang report sa History pagkatapos.'], tip:'' } },
+    'cp.history': { roles:['customer'], flow:'booking', go:{ customer:'@fn:cpHistory' },
+      en:{ t:'Service History', p:'Every visit and service report for your units.', s:['Open a report to view or download its PDF.'], tip:'' },
+      tl:{ p:'Bawat bisita at service report para sa mga unit mo.', s:['Buksan ang report para tingnan o i-download ang PDF.'], tip:'' } },
+    'cp.tools': { roles:['customer'], go:{ customer:'cpNavTools' },
+      en:{ t:'Tools', p:'Handy helpers, such as the aircon size calculator.', s:['Choose a tool to open it.'], tip:'' },
+      tl:{ p:'Mga kapaki-pakinabang na gamit, gaya ng calculator ng tamang laki ng aircon.', s:['Pumili ng tool para buksan.'], tip:'' } },
+    'cp.calc': { roles:['customer'], go:{},
+      en:{ t:'Aircon Size Calculator', p:'Estimate the right aircon capacity for a room.', s:['Enter the room size and conditions; the recommended capacity appears.'], tip:'' },
+      tl:{ p:'Tantyahin ang tamang laki ng aircon para sa kuwarto.', s:['Ilagay ang sukat ng kuwarto at kondisyon; lalabas ang inirerekomendang laki.'], tip:'' } },
+    'cp.profile': { roles:['customer'], go:{ customer:'cpNavProfile' },
+      en:{ t:'Profile', p:'Your details, password, notifications, privacy and help.', s:['Keep your contact number up to date.', 'Turn on notifications to hear about visits and replies.'], tip:'' },
+      tl:{ p:'Ang detalye mo, password, notifications, privacy at tulong.', s:['Panatilihing tama ang contact number mo.', 'I-on ang notifications para malaman ang bisita at mga sagot.'], tip:'' } },
+    // ------------------------------------------------ POP-UP SCREENS
+    'settings': { roles:['admin'], go:{ admin:'settingsBtn' },
+      en:{ t:'Auto-Email Setup', p:'Set up automatic e-mailing of finished service reports to customers. Only the Super Admin can change this.',
+           s:['Fill in the e-mail service details, then Save.', 'Tap Setup guide for step-by-step help.', 'File one test report and check the customer copy arrives.'],
+           tip:'This affects every report — test before relying on it.' },
+      tl:{ p:'I-set up ang awtomatikong pag-e-mail ng tapos na service report sa mga customer. Super Admin lang ang puwedeng magbago nito.',
+           s:['Punan ang detalye ng e-mail service, saka i-Save.', 'Pindutin ang Setup guide para sa sunud-sunod na tulong.', 'Gumawa ng isang test report at tingnan kung dumating ang kopya ng customer.'],
+           tip:'Apektado nito ang bawat report — subukan muna bago umasa dito.' } },
+
+    'poSettings': { roles:['admin'],
+      en:{ t:'PO Settings', p:'Company details, logo, terms and signatories printed on every purchase order.',
+           s:['Company: fill in your details and upload your logo.', 'Terms: set the default terms printed on POs.', 'Signatories: add each approver and choose their Staff login — staff can only issue POs once linked.'],
+           tip:'A staff member who issues a PO always prints their own linked signature.' },
+      tl:{ p:'Detalye ng kumpanya, logo, terms at mga signatory na naka-print sa bawat purchase order.',
+           s:['Company: punan ang detalye at i-upload ang logo.', 'Terms: itakda ang karaniwang terms na naka-print sa PO.', 'Signatories: idagdag ang bawat approver at piliin ang Staff login nila — makaka-issue lang ng PO ang staff kapag naka-link.'],
+           tip:'Ang staff na nag-issue ng PO ay laging naka-print ang sarili niyang naka-link na pirma.' } },
+
+    'techProfile': { roles:['admin','staff'], module:'hr.tech_profiles',
+      en:{ t:'Technician profile', p:'One technician\u2019s attendance, leaves, violations and documents.',
+           s:['Switch between tabs at the top.', 'Violations and Documents: add or remove records if you have Edit.', 'Close with × to go back to the list.'],
+           tip:'Tabs you have no access to are hidden.' },
+      tl:{ p:'Attendance, leave, violation at mga dokumento ng isang technician.',
+           s:['Lumipat sa mga tab sa itaas.', 'Violations at Documents: magdagdag o magtanggal ng record kung may Edit ka.', 'Isara gamit ang × para bumalik sa listahan.'],
+           tip:'Nakatago ang mga tab na wala kang access.' } },
+
+    'staff.preview': { roles:['admin'],
+      en:{ t:'Preview', p:'Exactly what this staff member sees after signing in. Nothing here can be changed.',
+           s:['Check their pages and levels look right.', 'Tap Back to account to return.'] },
+      tl:{ p:'Ito mismo ang makikita ng staff na ito pagka-sign in. Walang mababago dito.',
+           s:['Tingnan kung tama ang mga page at level nila.', 'Pindutin ang Back to account para bumalik.'] } },
+
+    'cp.legal': { roles:['customer'], go:{},
+      en:{ t:'Privacy & Terms', p:'How your data is used and the terms of the service.',
+           s:['Read how your personal information and service records are kept and used.', 'Tap Back to Profile when you are done.'],
+           tip:'Questions about your data? Contact us from your Profile.' },
+      tl:{ p:'Kung paano ginagamit ang data mo at ang mga tuntunin ng serbisyo.',
+           s:['Basahin kung paano iniingatan at ginagamit ang personal na impormasyon at mga service record mo.', 'Pindutin ang Back to Profile kapag tapos ka na.'],
+           tip:'May tanong tungkol sa data mo? Makipag-ugnayan sa amin mula sa Profile mo.' } }
+  };
+
+  // Process chains shown in the "Where this fits" strip. A step is a page
+  // key, or a {en, tl} label for a stage inside a single page.
+  const GUIDE_FLOWS = {
+    service:    ['sreq', 'dispatch.office', 'srm', 'customers'],
+    techwork:   ['dispatch.tech', 'sr.new', 'sr.history', 'documents'],
+    purchasing: ['p.requisitions', 'p.purchaseOrders', 'p.receive', 'p.issue'],
+    inventory:  ['p.receive', 'p.stock', 'p.issue', 'p.returns', 'p.invReports'],
+    tools:      ['p.tlRegister', 'p.tlIssue', 'p.tlHandover', 'p.tlReturn', 'p.tlDefects'],
+    cash:       [{ en:'Request', tl:'Request' }, { en:'Approve', tl:'Aprubahan' }, { en:'Give cash', tl:'Ibigay ang cash' },
+                 { en:'Liquidate', tl:'I-liquidate' }, { en:'Settle', tl:'Ayusin ang balanse' }],
+    leave:      ['leave.mine', 'leave.office'],
+    people:     ['staff.team', 'staff.edit', 'staff.templates', 'staff.activity'],
+    booking:    ['cp.requests', { en:'Scheduled', tl:'Naka-schedule' }, { en:'Service done', tl:'Tapos ang service' }, 'cp.units']
+  };
+
+  // First-run tours. Steps whose element isn't on screen are skipped.
+  const GUIDE_TOURS = {
+    admin: [
+      { sel:null, en:'Welcome! Tap ? on any page for what it does and what comes next. Help & Guide is in the menu.', tl:'Maligayang pagdating! Pindutin ang ? sa kahit anong page para malaman ang gamit nito at ang kasunod. Nasa menu ang Help & Guide.' },
+      { sel:'#menuBtn', en:'On a phone, open the sidebar here.', tl:'Sa phone, dito buksan ang sidebar.' },
+      { sel:'#sbNavDispatch', en:'Dispatch: create job orders and assign technicians.', tl:'Dispatch: gumawa ng job order at mag-assign ng technician.' },
+      { sel:'#menuInbox', en:'Inbox: everything overdue across all departments.', tl:'Inbox: lahat ng overdue sa lahat ng department.' },
+      { sel:'#menuManageStaff', en:'Department Staff: create office staff and choose what each can do.', tl:'Department Staff: gumawa ng office staff at piliin ang kaya ng bawat isa.' },
+      { sel:'#menuManageUsers', en:'Users & Roles: technician accounts, storekeepers and customer logins.', tl:'Users & Roles: account ng technician, storekeeper at login ng customer.' }
+    ],
+    staff: [
+      { sel:null, en:'Welcome! Tap ? on any page for what it does and what comes next.', tl:'Maligayang pagdating! Pindutin ang ? sa kahit anong page para malaman ang gamit nito at ang kasunod.' },
+      { sel:'#menuBtn', en:'On a phone, open your menu here.', tl:'Sa phone, dito buksan ang menu mo.' },
+      { sel:'#staffNavInbox', en:'Your Inbox: work waiting on you, most urgent first.', tl:'Ang Inbox mo: trabahong naghihintay sa iyo, pinakaapurahan muna.' },
+      { sel:'#staffNavPages', en:'These are the pages you were given.', tl:'Ito ang mga page na ibinigay sa iyo.' },
+      { sel:'#staffNavMyLeave', en:'File your own leave here.', tl:'Dito mag-file ng sarili mong leave.' }
+    ],
+    tech: [
+      { sel:null, en:'Welcome! Tap ? on any page to see what it is for.', tl:'Maligayang pagdating! Pindutin ang ? sa kahit anong page para malaman ang gamit nito.' },
+      { sel:'#techNavBtnHome', en:'Home: your day, time-in, announcements, and shortcuts to materials and tools.', tl:'Home: ang araw mo, time-in, announcements, at shortcut sa materyales at tools.' },
+      { sel:'#techNavBtnJobs', en:'Job Orders: where you are assigned.', tl:'Job Orders: kung saan ka naka-assign.' },
+      { sel:'#techNavBtnReport', en:'Report: fill in the service report on site.', tl:'Report: punan ang service report sa site.' },
+      { sel:'#techNavBtnFinance', en:'Finance: attendance, cash advance, liquidation, reimbursement and leave.', tl:'Finance: attendance, cash advance, liquidation, reimbursement at leave.' },
+      { sel:'#techNavBtnMore', en:'More: messages, documents, settings and Help.', tl:'More: messages, dokumento, settings at Help.' }
+    ],
+    customer: [
+      { sel:null, en:'Welcome! Tap ? on any screen to see what it is for.', tl:'Maligayang pagdating! Pindutin ang ? sa kahit anong screen para malaman ang gamit nito.' },
+      { sel:'#cpNavUnits', en:'My Units: your registered aircon units.', tl:'My Units: ang mga naka-register mong aircon unit.' },
+      { sel:'#cpNavRequests', en:'Requests: book a service here.', tl:'Requests: dito mag-book ng service.' },
+      { sel:'#cpNavProfile', en:'Profile: your details, notifications and Help.', tl:'Profile: ang detalye mo, notifications at Help.' }
+    ]
+  };
+
+  // Getting-started checklist per role. `page` items tick when the page is
+  // opened; `check` items tick when the condition is true.
+  const GUIDE_CHECKLISTS = {
+    admin: [
+      { id:'staff',  page:'staff.team',  check:'hasStaff', en:'Create your first department Head', tl:'Gumawa ng unang department Head' },
+      { id:'sig',    page:'p.purchaseOrders', check:'hasSignatoryLink', en:'Link PO signatories to staff logins (PO Settings)', tl:'I-link ang PO signatory sa staff login (PO Settings)' },
+      { id:'tech',   page:'users',       check:'hasTech', en:'Add a technician', tl:'Magdagdag ng technician' },
+      { id:'cust',   page:'customers',   check:'hasCustomer', en:'Add your customers', tl:'Idagdag ang mga customer mo' },
+      { id:'inbox',  page:'staff.inbox', en:'Open the Inbox and check Response times', tl:'Buksan ang Inbox at tsekin ang Response times' }
+    ],
+    staff: [
+      { id:'pw',     check:'passwordChanged', en:'Set your own password', tl:'Magtakda ng sariling password' },
+      { id:'inbox',  page:'staff.inbox', en:'Open your Inbox', tl:'Buksan ang Inbox mo' },
+      { id:'page',   check:'openedAPage', en:'Open one of your pages', tl:'Buksan ang isa sa mga page mo' },
+      { id:'push',   check:'pushOn', en:'Turn on notifications', tl:'I-on ang notifications' }
+    ],
+    tech: [
+      { id:'dtr',    page:'dtr.tech',      en:'Time in (Attendance)', tl:'Mag-time in (Attendance)' },
+      { id:'jobs',   page:'dispatch.tech', en:'Open your job orders', tl:'Buksan ang mga job order mo' },
+      { id:'report', page:'sr.new',        en:'Open the service report form', tl:'Buksan ang service report form' },
+      { id:'push',   check:'pushOn',       en:'Turn on notifications', tl:'I-on ang notifications' }
+    ],
+    customer: [
+      { id:'units',  page:'cp.units',    en:'Check your units', tl:'Tingnan ang mga unit mo' },
+      { id:'req',    page:'cp.requests', en:'See how to book a service', tl:'Alamin kung paano mag-book ng service' },
+      { id:'push',   check:'pushOn',     en:'Turn on notifications', tl:'I-on ang notifications' }
+    ]
+  };
+
+
+  // =====================================================================
+  // In-app guide — ENGINE (content lives in guide-content.js)
+  //
+  //   * works out which page is on screen (for every kind of user)
+  //   * "About this page" card at the top of it, with a "Where this fits"
+  //     flow strip; × closes it for that page, ? in the header brings it back
+  //   * Help & Guide: every page this person can open, searchable
+  //   * first-run tour per role, and a getting-started checklist on home
+  //   * English / Tagalog toggle everywhere
+  //   * progress saved per person (user_guide_progress, 20260929_01), with
+  //     this device as the fallback
+  // =====================================================================
+
+  const GD_UI = {
+    about:   { en:'About this page', tl:'Tungkol sa page na ito' },
+    steps:   { en:'How to use it', tl:'Paano gamitin' },
+    tip:     { en:'Tip', tl:'Tip' },
+    fits:    { en:'Where this fits', tl:'Saan ito kabilang' },
+    allHelp: { en:'All pages & help', tl:'Lahat ng page at tulong' },
+    help:    { en:'Help & Guide', tl:'Tulong at Gabay' },
+    search:  { en:'Search pages…', tl:'Maghanap ng page…' },
+    replay:  { en:'Replay the tour', tl:'Ulitin ang tour' },
+    resetTips:{ en:'Show all page tips again', tl:'Ipakita ulit ang lahat ng tip' },
+    open:    { en:'Open this page', tl:'Buksan ang page na ito' },
+    next:    { en:'Next', tl:'Susunod' },
+    back:    { en:'Back', tl:'Bumalik' },
+    done:    { en:'Done', tl:'Tapos' },
+    skip:    { en:'Skip', tl:'Laktawan' },
+    start:   { en:'Getting started', tl:'Pagsisimula' },
+    hide:    { en:'Hide', tl:'Itago' },
+    none:    { en:'No pages match.', tl:'Walang tugmang page.' },
+    langNote:{ en:'Page names stay in English so they match the screen.', tl:'Nananatiling English ang pangalan ng page para tugma sa screen.' }
+  };
+  const GD_GROUPS = [
+    ['home.', { en:'Home', tl:'Home' }], ['staff.home', { en:'Home', tl:'Home' }],
+    ['staff.inbox', { en:'Inbox', tl:'Inbox' }],
+    ['dispatch', { en:'Operations', tl:'Operations' }], ['sreq', { en:'Operations', tl:'Operations' }], ['sr.', { en:'Operations', tl:'Operations' }],
+    ['srm', { en:'Operations', tl:'Operations' }], ['messages', { en:'Operations', tl:'Operations' }], ['documents', { en:'Operations', tl:'Operations' }],
+    ['staff.tracker', { en:'Operations', tl:'Operations' }], ['p.projects', { en:'Operations', tl:'Operations' }],
+    ['p.tl', { en:'Tools & Equipment', tl:'Tools & Equipment' }], ['p.myTools', { en:'Tools & Equipment', tl:'Tools & Equipment' }],
+    ['p.materials', { en:'Purchasing', tl:'Purchasing' }], ['p.suppliers', { en:'Purchasing', tl:'Purchasing' }], ['p.requisitions', { en:'Purchasing', tl:'Purchasing' }],
+    ['p.myRequests', { en:'Purchasing', tl:'Purchasing' }], ['p.purchaseOrders', { en:'Purchasing', tl:'Purchasing' }],
+    ['p.', { en:'Inventory', tl:'Inventory' }],
+    ['ca.', { en:'Accounting & Finance', tl:'Accounting & Finance' }], ['financeHr', { en:'Accounting & Finance', tl:'Accounting & Finance' }],
+    ['dtr.', { en:'Human Resources', tl:'Human Resources' }], ['leave.', { en:'Human Resources', tl:'Human Resources' }],
+    ['customers', { en:'Administration', tl:'Administration' }], ['custHistory', { en:'Administration', tl:'Administration' }],
+    ['equipment', { en:'Administration', tl:'Administration' }], ['ann', { en:'Administration', tl:'Administration' }],
+    ['dropdowns', { en:'Administration', tl:'Administration' }], ['users', { en:'Administration', tl:'Administration' }],
+    ['staff.', { en:'Department Staff', tl:'Department Staff' }], ['cp.', { en:'Customer Portal', tl:'Customer Portal' }]
+  ];
+
+  const GD = { lang:'en', uid:null, prog:null, key:null, force:{}, saveT:null, obsT:null, tour:null, loading:false, checkAt:0 };
+
+  function gdL(o){ return o ? (o[GD.lang] != null ? o[GD.lang] : o.en) : ''; }
+  function gdRole(){
+    if(!currentUser) return null;
+    if(currentUser.role === 'admin') return 'admin';
+    if(currentUser.role === 'staff') return 'staff';
+    if(currentUser.role === 'customer') return 'customer';
+    return 'tech';
+  }
+  function gdShown(el){ return !!(el && el.getClientRects().length); }
+  function gdEl(id){ return document.getElementById(id); }
+  function gdTitle(key){ const e = GUIDE_PAGES[key]; return e ? e.en.t : key; }   // page names stay English
+
+  // ---------------------------------------------------------------------
+  // Progress
+  // ---------------------------------------------------------------------
+  function gdBlank(){ return { lang:null, closed:{}, seen:{}, tours:{}, done:{}, hidden:{} }; }
+  async function gdLoad(uid){
+    GD.loading = true;
+    let p = null;
+    try{ p = JSON.parse(localStorage.getItem('awes-guide:' + uid) || 'null'); }catch(e){}
+    try{
+      if(typeof ensureCloud === 'function' && await ensureCloud()){
+        const { data, error } = await db.from('user_guide_progress').select('data').eq('user_id', uid).maybeSingle();
+        if(!error && data && data.data) p = data.data;
+      }
+    }catch(e){}
+    GD.prog = Object.assign(gdBlank(), p || {});
+    GD.lang = GD.prog.lang || localStorage.getItem('awes-guide-lang') || 'en';
+    GD.loading = false;
+  }
+  function gdSave(){
+    if(!GD.uid || !GD.prog) return;
+    try{ localStorage.setItem('awes-guide:' + GD.uid, JSON.stringify(GD.prog)); }catch(e){}
+    clearTimeout(GD.saveT);
+    GD.saveT = setTimeout(async ()=>{
+      try{
+        if(typeof ensureCloud === 'function' && await ensureCloud())
+          await db.from('user_guide_progress').upsert({ user_id: GD.uid, data: GD.prog, updated_at: new Date().toISOString() });
+      }catch(e){}
+    }, 1200);
+  }
+  function gdSetLang(l){
+    GD.lang = l === 'tl' ? 'tl' : 'en';
+    try{ localStorage.setItem('awes-guide-lang', GD.lang); }catch(e){}
+    if(GD.prog){ GD.prog.lang = GD.lang; gdSave(); }
+    gdRender(true);
+    if(gdEl('gdHelp') && gdEl('gdHelp').classList.contains('open')) gdRenderHelp();
+    GD.checkAt = 0; gdRenderChecklist();
+    if(GD.tour) gdTourStep(GD.tour.i);
+  }
+
+  // ---------------------------------------------------------------------
+  // Which page is on screen
+  // ---------------------------------------------------------------------
+  function gdDetect(){
+    const role = gdRole();
+    if(!role) return null;
+    const hit = (key, host)=> ({ key, host });
+    // overlays that are pages of their own
+    const ov = [['techProfileOverlay', 'techProfile'], ['poSettingsOverlay', 'poSettings'], ['settingsOverlay', 'settings'],
+                ['announcementsAdminOverlay', 'ann'], ['adminOverlay', 'dropdowns'], ['usersOverlay', 'users']];
+    for(const [id, key] of ov){
+      const o = gdEl(id);
+      if(o && o.classList.contains('open')) return hit(key, o.querySelector('.sheet-body, .modal-body, .sheet-content') || o.firstElementChild);
+    }
+    const sv = gdEl('staffView');
+    if(gdShown(sv)){
+      const p = [...sv.querySelectorAll('.stf-panel')].find(gdShown);
+      const map = { staffPanel_home:'staff.home', staffPanel_team:'staff.team', staffPanel_edit:'staff.edit', staffPanel_templates:'staff.templates',
+                    staffPanel_activity:'staff.activity', staffPanel_inbox:'staff.inbox', staffPanel_tracker:'staff.tracker',
+                    staffPanel_preview:'staff.preview' };
+      return p && map[p.id] ? hit(map[p.id], p) : null;
+    }
+    for(const el of document.querySelectorAll('.cp-screen')){
+      if(gdShown(el)){
+        const k = el.id.replace(/^customer/, '').replace(/Screen$/, '');
+        return hit('cp.' + k.charAt(0).toLowerCase() + k.slice(1), el);
+      }
+    }
+    const pv = gdEl('purchasingView');
+    if(gdShown(pv)){
+      const p = [...pv.querySelectorAll('[id^="purchPanel_"]')].find(gdShown);
+      return p ? hit('p.' + p.id.slice('purchPanel_'.length), p) : null;
+    }
+    const pair = (viewId, officeId, officeKey, mineId, mineKey)=>{
+      const v = gdEl(viewId); if(!gdShown(v)) return null;
+      if(gdShown(gdEl(officeId))) return hit(officeKey, gdEl(officeId));
+      return hit(mineKey, gdShown(gdEl(mineId)) ? gdEl(mineId) : v);
+    };
+    let r;
+    if((r = pair('dispatchView', 'dispatchAdminArea', 'dispatch.office', 'dispatchTechArea', 'dispatch.tech'))) return r;
+    if((r = pair('leaveView', 'leaveAdminArea', 'leave.office', 'leaveTechArea', 'leave.mine'))) return r;
+    if((r = pair('cashAdvanceView', 'caAdminArea', 'ca.office', 'caTechArea', 'ca.mine'))) return r;
+    const dv = gdEl('dtrView');
+    if(gdShown(dv)) return hit(gdShown(gdEl('dtrAdminTableCard')) ? 'dtr.office' : 'dtr.tech', dv);
+    const srv = gdEl('serviceReportView');
+    if(gdShown(srv)){
+      if(gdShown(gdEl('srBackEntryPanel'))) return hit('sr.backentry', gdEl('srBackEntryPanel'));
+      if(gdShown(gdEl('srHistoryPanel')) && role === 'tech') return hit('sr.history', gdEl('srHistoryPanel'));
+      if(gdShown(gdEl('srNewPanel')) && role === 'tech') return hit('sr.new', gdEl('srNewPanel'));
+      return null;
+    }
+    const simple = { serviceRequestsView:'sreq', serviceReportsManagerView:'srm', customersManagerView:'customers', customerHistoryView:'custHistory',
+                     equipmentManagerView:'equipment', messagesView:'messages', documentsView:'documents', financeHrView:'financeHr' };
+    for(const id in simple) if(gdShown(gdEl(id))) return hit(simple[id], gdEl(id));
+    const hs = gdEl('homeScreen');
+    if(gdShown(hs)){
+      if(role === 'admin') return hit('home.admin', hs);
+      if(role === 'tech') return hit('home.tech', hs);
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------
+  // Opening a page from the guide (flow strip, Help, checklist)
+  // ---------------------------------------------------------------------
+  function gdGoValue(key){
+    const e = GUIDE_PAGES[key], role = gdRole();
+    if(!e || !role || !(e.roles || []).includes(role)) return null;
+    const g = (e.go || {})[role];
+    if(!g) return null;
+    if(role === 'staff' && /^[a-z]+\.[a-z_]+$/.test(g)){
+      if(!(typeof STAFF_READY_MODULES !== 'undefined' && STAFF_READY_MODULES.includes(g) && can(g, 'view'))) return null;
+    }
+    if(role === 'staff' && e.module && !can(e.module, 'view')) return null;
+    if(g === '@team' && !(staffIsHead && staffIsHead())) return null;
+    return g;
+  }
+  function gdCanOpen(key){ return !!gdGoValue(key); }
+  function gdGo(key){
+    const g = gdGoValue(key);
+    if(!g) return false;
+    gdCloseHelp();
+    if(/^[a-z]+\.[a-z_]+$/.test(g)){ staffOpenModule(g); return true; }
+    if(g.startsWith('@purch:')){ showPurchasingView(g.slice(7)); return true; }
+    const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
+                 '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
+                 '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];
+    if(fn){ fn(); return true; }
+    const el = gdEl(g);
+    if(el){ el.click(); return true; }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------
+  // "About this page" card
+  // ---------------------------------------------------------------------
+  function gdLangSwitch(){
+    return '<span class="gd-lang" role="group" aria-label="Language">' +
+      '<button type="button" data-gd-lang="en" class="' + (GD.lang === 'en' ? 'on' : '') + '">EN</button>' +
+      '<button type="button" data-gd-lang="tl" class="' + (GD.lang === 'tl' ? 'on' : '') + '">TL</button></span>';
+  }
+  function gdFlowHtml(key){
+    const e = GUIDE_PAGES[key];
+    const steps = e && e.flow ? GUIDE_FLOWS[e.flow] : null;
+    if(!steps) return '';
+    return '<div class="gd-flow"><div class="gd-flow-label">' + escapeHtml(gdL(GD_UI.fits)) + '</div><div class="gd-flow-steps">' +
+      steps.map((st, i)=>{
+        const arrow = i ? '<span class="gd-arrow" aria-hidden="true">\u203A</span>' : '';
+        if(typeof st !== 'string') return arrow + '<span class="gd-step gd-stage">' + escapeHtml(gdL(st)) + '</span>';
+        const cur = st === key, ok = !cur && gdCanOpen(st);
+        return arrow + '<button type="button" class="gd-step' + (cur ? ' cur' : '') + (!cur && !ok ? ' off' : '') + '"' + (ok ? ' data-gd-go="' + st + '"' : ' disabled') + '>' +
+          escapeHtml(gdTitle(st)) + '</button>';
+      }).join('') + '</div></div>';
+  }
+  function gdCardHtml(key){
+    const e = GUIDE_PAGES[key], t = e[GD.lang] || e.en;
+    const steps = (t.s && t.s.length) ? t.s : e.en.s;
+    return '<div class="gd-head"><span class="gd-i">?</span><span class="gd-about">' + escapeHtml(gdL(GD_UI.about)) + '</span>' +
+        gdLangSwitch() + '<button type="button" class="gd-x" data-gd-close aria-label="Close">\u00D7</button></div>' +
+      '<div class="gd-title">' + escapeHtml(e.en.t) + '</div>' +
+      '<p class="gd-p">' + escapeHtml(t.p || e.en.p) + '</p>' +
+      (steps && steps.length ? '<ol class="gd-steps">' + steps.map(x=> '<li>' + escapeHtml(x) + '</li>').join('') + '</ol>' : '') +
+      ((t.tip || e.en.tip) ? '<div class="gd-tip"><b>' + escapeHtml(gdL(GD_UI.tip)) + ':</b> ' + escapeHtml(t.tip || e.en.tip) + '</div>' : '') +
+      gdFlowHtml(key) +
+      '<div class="gd-foot"><button type="button" class="gd-link" data-gd-help>' + escapeHtml(gdL(GD_UI.allHelp)) + ' \u203A</button></div>';
+  }
+  function gdCard(){
+    let c = gdEl('gdCard');
+    if(!c){
+      c = document.createElement('div');
+      c.id = 'gdCard'; c.className = 'gd-card';
+      c.addEventListener('click', (ev)=>{
+        const t = ev.target.closest('[data-gd-lang],[data-gd-close],[data-gd-go],[data-gd-help]');
+        if(!t) return;
+        if(t.dataset.gdLang) return gdSetLang(t.dataset.gdLang);
+        if(t.hasAttribute('data-gd-close')){ if(GD.key && GD.prog){ GD.prog.closed[GD.key] = true; delete GD.force[GD.key]; gdSave(); } return gdRender(true); }
+        if(t.dataset.gdGo) return gdGo(t.dataset.gdGo);
+        if(t.hasAttribute('data-gd-help')) return gdOpenHelp();
+      });
+    }
+    return c;
+  }
+
+  // Put guide blocks at the top of a page — but after a page's own header
+  // (the customer portal screens start with their brand / title bar).
+  function gdInsertTop(host, el){
+    const first = host.firstElementChild;
+    const after = first && first !== el && first.matches('.cp-header, .cp-tools-head, .cp-profile-head, .sheet-head') ? first : null;
+    const ref = after ? after.nextSibling : host.firstChild;
+    if(el.parentNode === host && (el === ref || el.previousSibling === after || (!after && el === host.firstChild))) return;
+    host.insertBefore(el, ref);
+  }
+  function gdRender(forceRedraw){
+    const card = gdCard();
+    const btn = gdEl('gdHelpBtn');
+    // only write when it changes — every style write wakes the observer
+    const want = currentUser && GD.prog ? '' : 'none';
+    if(btn && btn.style.display !== want) btn.style.display = want;
+    const fab = gdEl('gdHelpFab');
+    if(fab){
+      const headerOn = !!(btn && want === '' && btn.getBoundingClientRect().width > 0);
+      const fwant = want === '' && !headerOn && !(GD.tour) ? '' : 'none';
+      if(fab.style.display !== fwant) fab.style.display = fwant;
+    }
+    if(!currentUser || !GD.prog){ card.remove(); GD.key = null; return; }
+    const d = gdDetect();
+    const key = d && GUIDE_PAGES[d.key] && (GUIDE_PAGES[d.key].roles || []).includes(gdRole()) ? d.key : null;
+    if(key !== GD.key){
+      GD.key = key;
+      if(key && !GD.prog.seen[key]){ GD.prog.seen[key] = true; gdSave(); GD.checkAt = 0; }
+      forceRedraw = true;
+    }
+    const on = !!(key && (GD.force[key] || !GD.prog.closed[key]));
+    if(btn && btn.classList.contains('on') !== on) btn.classList.toggle('on', on);
+    if(fab && fab.classList.contains('on') !== on) fab.classList.toggle('on', on);
+    if(!key || (GD.prog.closed[key] && !GD.force[key]) || !d.host){ card.remove(); return; }
+    if(forceRedraw || card.dataset.key !== key || card.dataset.lang !== GD.lang){
+      card.innerHTML = gdCardHtml(key);
+      card.dataset.key = key; card.dataset.lang = GD.lang;
+    }
+    if(card.parentNode !== d.host) gdInsertTop(d.host, card);
+  }
+
+  // ---------------------------------------------------------------------
+  // Help & Guide
+  // ---------------------------------------------------------------------
+  function gdGroupOf(key){ for(const [pre, g] of GD_GROUPS) if(key === pre || key.startsWith(pre)) return g; return { en:'Other', tl:'Iba pa' }; }
+  function gdHelpPages(){
+    const role = gdRole();
+    return Object.keys(GUIDE_PAGES).filter(k=>{
+      const e = GUIDE_PAGES[k];
+      if(!(e.roles || []).includes(role)) return false;
+      if(role === 'staff' && e.module && !can(e.module, 'view')) return false;
+      if(role === 'staff' && k === 'staff.team' && !(staffIsHead && staffIsHead())) return false;
+      return true;
+    });
+  }
+  function gdOpenHelp(){
+    let h = gdEl('gdHelp');
+    if(!h){
+      h = document.createElement('div');
+      h.id = 'gdHelp'; h.className = 'gd-help';
+      h.innerHTML = '<div class="gd-help-sheet" role="dialog" aria-modal="true"><div class="gd-help-head"></div><div class="gd-help-body"></div></div>';
+      document.body.appendChild(h);
+      h.addEventListener('click', (ev)=>{
+        if(ev.target === h) return gdCloseHelp();
+        const t = ev.target.closest('[data-gd-lang],[data-gd-go],[data-gd-x],[data-gd-replay],[data-gd-reset]');
+        if(!t) return;
+        if(t.dataset.gdLang) return gdSetLang(t.dataset.gdLang);
+        if(t.dataset.gdGo) return gdGo(t.dataset.gdGo);
+        if(t.hasAttribute('data-gd-x')) return gdCloseHelp();
+        if(t.hasAttribute('data-gd-replay')){ gdCloseHelp(); return gdStartTour(true); }
+        if(t.hasAttribute('data-gd-reset')){ GD.prog.closed = {}; GD.force = {}; gdSave(); gdCloseHelp(); gdRender(true); toast(GD.lang === 'tl' ? 'Ipinapakita ulit ang mga tip' : 'Page tips will show again'); }
+      });
+      h.addEventListener('input', (ev)=>{ if(ev.target.matches('[data-gd-search]')) gdRenderHelpList(ev.target.value); });
+    }
+    gdRenderHelp();
+    h.classList.add('open');
+    setTimeout(()=>{ const s = h.querySelector('[data-gd-search]'); if(s && window.innerWidth > 700) s.focus(); }, 60);
+  }
+  function gdCloseHelp(){ const h = gdEl('gdHelp'); if(h) h.classList.remove('open'); }
+  function gdRenderHelp(){
+    const h = gdEl('gdHelp'); if(!h) return;
+    const q = (h.querySelector('[data-gd-search]') || {}).value || '';
+    h.querySelector('.gd-help-head').innerHTML =
+      '<div class="gd-help-title">' + escapeHtml(gdL(GD_UI.help)) + '</div>' + gdLangSwitch() +
+      '<button type="button" class="gd-x" data-gd-x aria-label="Close">\u00D7</button>';
+    h.querySelector('.gd-help-body').innerHTML =
+      '<input type="search" class="gd-search" data-gd-search placeholder="' + escapeHtml(gdL(GD_UI.search)) + '" value="' + escapeHtml(q) + '">' +
+      '<div class="gd-help-actions"><button type="button" class="btn btn-secondary" data-gd-replay>' + escapeHtml(gdL(GD_UI.replay)) + '</button>' +
+      '<button type="button" class="btn btn-secondary" data-gd-reset>' + escapeHtml(gdL(GD_UI.resetTips)) + '</button></div>' +
+      '<p class="gd-note">' + escapeHtml(gdL(GD_UI.langNote)) + '</p><div class="gd-help-list"></div>';
+    gdRenderHelpList(q);
+  }
+  function gdRenderHelpList(q){
+    const h = gdEl('gdHelp'); if(!h) return;
+    const list = h.querySelector('.gd-help-list');
+    q = String(q || '').trim().toLowerCase();
+    const keys = gdHelpPages().filter(k=>{
+      if(!q) return true;
+      const e = GUIDE_PAGES[k];
+      return [e.en.t, e.en.p, e.tl.p, (e.en.s || []).join(' '), (e.tl.s || []).join(' ')].join(' ').toLowerCase().includes(q);
+    });
+    if(!keys.length){ list.innerHTML = '<div class="empty-state">' + escapeHtml(gdL(GD_UI.none)) + '</div>'; return; }
+    let html = '', lastGroup = '';
+    keys.forEach(k=>{
+      const e = GUIDE_PAGES[k], t = e[GD.lang] || e.en, g = gdL(gdGroupOf(k));
+      if(g !== lastGroup){ html += '<div class="gd-group">' + escapeHtml(g) + '</div>'; lastGroup = g; }
+      html += '<details class="gd-item"' + (k === GD.key ? ' open' : '') + '><summary><b>' + escapeHtml(e.en.t) + '</b><span>' + escapeHtml(t.p || e.en.p) + '</span></summary>' +
+        ((t.s || []).length ? '<ol class="gd-steps">' + t.s.map(x=> '<li>' + escapeHtml(x) + '</li>').join('') + '</ol>' : '') +
+        (t.tip ? '<div class="gd-tip"><b>' + escapeHtml(gdL(GD_UI.tip)) + ':</b> ' + escapeHtml(t.tip) + '</div>' : '') +
+        gdFlowHtml(k) +
+        (gdCanOpen(k) && k !== GD.key ? '<button type="button" class="btn btn-primary gd-open" data-gd-go="' + k + '">' + escapeHtml(gdL(GD_UI.open)) + '</button>' : '') +
+      '</details>';
+    });
+    list.innerHTML = html;
+  }
+
+  // ---------------------------------------------------------------------
+  // First-run tour
+  // ---------------------------------------------------------------------
+  function gdStartTour(manual){
+    const role = gdRole();
+    // steps without a target (sel: null) are centred messages
+    const steps = (GUIDE_TOURS[role] || []).filter(s=> !s.sel || gdShown(document.querySelector(s.sel)));
+    if(!steps.length) return;
+    if(!manual && GD.prog.tours[role]) return;
+    GD.tour = { role, steps, i:0 };
+    let o = gdEl('gdTour');
+    if(!o){
+      o = document.createElement('div');
+      o.id = 'gdTour'; o.className = 'gd-tour';
+      o.innerHTML = '<div class="gd-spot"></div><div class="gd-bubble" role="dialog" aria-live="polite"></div>';
+      document.body.appendChild(o);
+      o.addEventListener('click', (ev)=>{
+        const t = ev.target.closest('[data-gd-t],[data-gd-lang]');
+        if(!t) return;
+        if(t.dataset.gdLang) return gdSetLang(t.dataset.gdLang);
+        const a = t.dataset.gdT;
+        if(a === 'next') gdTourStep(GD.tour.i + 1);
+        else if(a === 'back') gdTourStep(GD.tour.i - 1);
+        else gdEndTour();
+      });
+      window.addEventListener('resize', ()=>{ if(GD.tour) gdTourStep(GD.tour.i); });
+    }
+    o.classList.add('open');
+    gdTourStep(0);
+  }
+  function gdTourStep(i){
+    const T = GD.tour; if(!T) return;
+    if(i >= T.steps.length) return gdEndTour();
+    T.i = Math.max(0, i);
+    const s = T.steps[T.i], el = s.sel ? document.querySelector(s.sel) : null;
+    const o = gdEl('gdTour'), spot = o.querySelector('.gd-spot'), b = o.querySelector('.gd-bubble');
+    if(s.sel && !gdShown(el)){ return gdTourStep(T.i + 1); }
+    const pad = 6;
+    // no target: a zero-size spot in the middle just dims the screen
+    const r = el ? el.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2 - 90, right: window.innerWidth / 2, bottom: window.innerHeight / 2 - 90, width: 0, height: 0 };
+    Object.assign(spot.style, el ? { left:(r.left - pad) + 'px', top:(r.top - pad) + 'px', width:(r.width + pad*2) + 'px', height:(r.height + pad*2) + 'px', borderColor:'#fff' }
+                                 : { left:r.left + 'px', top:r.top + 'px', width:'0px', height:'0px', borderColor:'transparent' });
+    const last = T.i === T.steps.length - 1;
+    b.innerHTML = '<div class="gd-bubble-head"><span class="gd-count">' + (T.i + 1) + ' / ' + T.steps.length + '</span>' + gdLangSwitch() + '</div>' +
+      '<p>' + escapeHtml(gdL(s)) + '</p><div class="gd-bubble-btns">' +
+      '<button type="button" class="gd-link" data-gd-t="skip">' + escapeHtml(gdL(GD_UI.skip)) + '</button>' +
+      (T.i ? '<button type="button" class="btn btn-secondary" data-gd-t="back">' + escapeHtml(gdL(GD_UI.back)) + '</button>' : '') +
+      '<button type="button" class="btn btn-primary" data-gd-t="next">' + escapeHtml(gdL(last ? GD_UI.done : GD_UI.next)) + '</button></div>';
+    // bubble below the target, or above it when there's no room
+    const bw = Math.min(320, window.innerWidth - 24);
+    b.style.width = bw + 'px';
+    b.style.left = (el ? Math.max(12, Math.min(r.left, window.innerWidth - bw - 12)) : Math.round((window.innerWidth - bw) / 2)) + 'px';
+    const below = r.bottom + 12, h = b.offsetHeight || 150;
+    b.style.top = (below + h < window.innerHeight - 8 ? below : Math.max(12, r.top - h - 12)) + 'px';
+  }
+  function gdEndTour(){
+    const o = gdEl('gdTour'); if(o) o.classList.remove('open');
+    if(GD.tour && GD.prog){ GD.prog.tours[GD.tour.role] = true; gdSave(); }
+    GD.tour = null;
+  }
+
+  // ---------------------------------------------------------------------
+  // Getting-started checklist (on each role's home)
+  // ---------------------------------------------------------------------
+  const GD_CHECKS = {
+    hasStaff: async ()=> { const r = await db.from('profiles').select('id', { count:'exact', head:true }).eq('role', 'staff'); return (r.count || 0) > 0; },
+    hasSignatoryLink: async ()=> { const r = await db.from('po_signatories').select('id', { count:'exact', head:true }).not('user_id', 'is', null); return !r.error && (r.count || 0) > 0; },
+    hasTech: async ()=> { const r = await db.from('profiles').select('id', { count:'exact', head:true }).eq('role', 'technician'); return (r.count || 0) > 0; },
+    hasCustomer: async ()=> { const r = await db.from('customers').select('id', { count:'exact', head:true }); return (r.count || 0) > 0; },
+    passwordChanged: async ()=> !(currentUser && currentUser.mustChangePassword),
+    openedAPage: async ()=> Object.keys(GD.prog.seen || {}).some(k=> !['staff.home', 'staff.inbox', 'leave.mine'].includes(k)),
+    pushOn: async ()=> typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  };
+  function gdChecklistHost(role){
+    if(role === 'admin') return gdEl('adminDash') || gdEl('homeScreen');
+    if(role === 'staff') return gdEl('staffPanel_home');
+    if(role === 'tech') return gdEl('homeScreen');
+    if(role === 'customer') return gdEl('customerHomeScreen');
+    return null;
+  }
+  let gdCheckBusy = false;
+  // throttled: at most every 30 s, or right after something relevant (checkAt = 0)
+  async function gdRenderChecklist(){
+    if(GD.checkAt && Date.now() - GD.checkAt < 30000 && gdEl('gdChecklist') && gdEl('gdChecklist').parentNode === gdChecklistHost(gdRole())) return;
+    GD.checkAt = Date.now();
+    const role = gdRole();
+    const old = gdEl('gdChecklist');
+    if(!role || !GD.prog || GD.prog.hidden[role]){ if(old) old.remove(); return; }
+    const host = gdChecklistHost(role);
+    if(!host || !gdShown(host)){ return; }
+    if(gdCheckBusy) return;
+    gdCheckBusy = true;
+    const items = GUIDE_CHECKLISTS[role] || [];
+    const done = [];
+    for(const it of items){
+      let ok = !!(GD.prog.done[it.id] || (it.page && !it.check && GD.prog.seen[it.page]));
+      if(!ok && it.check && GD_CHECKS[it.check]){ try{ ok = await GD_CHECKS[it.check](); }catch(e){ ok = false; } }
+      if(ok && !GD.prog.done[it.id]){ GD.prog.done[it.id] = true; gdSave(); }
+      done.push(ok);
+    }
+    gdCheckBusy = false;
+    const n = done.filter(Boolean).length;
+    if(n === items.length){ const c = gdEl('gdChecklist'); if(c) c.remove(); return; }
+    let c = gdEl('gdChecklist');
+    if(!c){
+      c = document.createElement('div');
+      c.id = 'gdChecklist'; c.className = 'card gd-check';
+      c.addEventListener('click', (ev)=>{
+        const t = ev.target.closest('[data-gd-go],[data-gd-hide],[data-gd-lang]');
+        if(!t) return;
+        if(t.dataset.gdLang) return gdSetLang(t.dataset.gdLang);
+        if(t.hasAttribute('data-gd-hide')){ GD.prog.hidden[gdRole()] = true; gdSave(); return c.remove(); }
+        if(t.dataset.gdGo) gdGo(t.dataset.gdGo);
+      });
+    }
+    c.innerHTML = '<div class="card-body"><div class="gd-check-head"><b>' + escapeHtml(gdL(GD_UI.start)) + '</b><span class="gd-check-n">' + n + ' / ' + items.length + '</span>' +
+      gdLangSwitch() + '<button type="button" class="gd-link" data-gd-hide>' + escapeHtml(gdL(GD_UI.hide)) + '</button></div>' +
+      '<div class="gd-bar"><span style="width:' + Math.round(n / items.length * 100) + '%"></span></div>' +
+      items.map((it, i)=>{
+        const go = it.page && gdCanOpen(it.page) && !done[i];
+        return '<' + (go ? 'button type="button" data-gd-go="' + it.page + '"' : 'div') + ' class="gd-check-row' + (done[i] ? ' done' : '') + '">' +
+          '<span class="gd-tick">' + (done[i] ? '\u2713' : '') + '</span><span>' + escapeHtml(gdL(it)) + '</span>' + (go ? '<span class="gd-chev">\u203A</span>' : '') +
+          '</' + (go ? 'button' : 'div') + '>';
+      }).join('') + '</div>';
+    if(c.parentNode !== host) gdInsertTop(host, c);
+  }
+
+  // ---------------------------------------------------------------------
+  // Wiring
+  // ---------------------------------------------------------------------
+  // ? : show / hide this page's card (or open Help when the page has none)
+  function gdHelpClick(){
+    if(!GD.key){ gdOpenHelp(); return; }
+    const shown = !!(gdEl('gdCard') && gdEl('gdCard').parentNode);
+    if(shown){ GD.prog.closed[GD.key] = true; delete GD.force[GD.key]; gdSave(); }
+    else GD.force[GD.key] = true;
+    gdRender(true);
+    if(!shown) setTimeout(()=>{ const c = gdEl('gdCard'); if(c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 40);
+  }
+  function gdAddHelpLinks(){
+    const mk = (id, cls)=>{
+      const b = document.createElement('button');
+      b.type = 'button'; b.id = id; b.className = cls;
+      b.innerHTML = '<span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>' + 'Help &amp; Guide';
+      b.addEventListener('click', ()=>{ if(typeof closeMainMenu === 'function') closeMainMenu(); gdOpenHelp(); });
+      return b;
+    };
+    [['menuChangePin', 'menuGuide'], ['staffNavPassword', 'staffNavGuide'], ['techNavSettings', 'techNavGuide']].forEach(([after, id])=>{
+      const a = gdEl(after);
+      if(a && !gdEl(id)) a.parentNode.insertBefore(mk(id, a.className), a.nextSibling);
+    });
+    const prof = gdEl('customerProfileScreen');
+    if(prof && !gdEl('cpGuideBtn')){
+      const b = document.createElement('button');
+      b.type = 'button'; b.id = 'cpGuideBtn'; b.className = 'btn btn-secondary gd-cp-help';
+      b.textContent = 'Help & Guide';
+      b.addEventListener('click', gdOpenHelp);
+      gdInsertTop(prof, b);
+    }
+  }
+
+  (function gdWire(){
+    const actions = document.querySelector('.app-top .top-actions');
+    if(actions && !gdEl('gdHelpBtn')){
+      const b = document.createElement('button');
+      b.className = 'icon-btn gd-help-btn'; b.id = 'gdHelpBtn'; b.type = 'button';
+      b.setAttribute('aria-label', 'About this page'); b.textContent = '?'; b.style.display = 'none';
+      b.addEventListener('click', gdHelpClick);
+      actions.insertBefore(b, actions.firstChild);
+    }
+    // The header is hidden on wide screens (sidebar layout) and in the
+    // customer portal — there, the same ? floats in the corner instead.
+    if(!gdEl('gdHelpFab')){
+      const f = document.createElement('button');
+      f.type = 'button'; f.id = 'gdHelpFab'; f.className = 'gd-help-fab'; f.textContent = '?';
+      f.setAttribute('aria-label', 'About this page'); f.style.display = 'none';
+      f.addEventListener('click', gdHelpClick);
+      document.body.appendChild(f);
+    }
+    gdAddHelpLinks();
+
+    // Follow sign-in / sign-out and every screen change
+    const tick = async ()=>{
+      const uid = currentUser ? currentUser.id : null;
+      if(uid !== GD.uid){
+        GD.uid = uid; GD.prog = null; GD.key = null; GD.force = {}; GD.checkAt = 0;
+        if(GD.tour) gdEndTour();
+        gdCloseHelp();
+        const old = gdEl('gdChecklist'); if(old) old.remove();
+        if(uid){ await gdLoad(uid); if(GD.uid !== uid) return; }
+        gdRender(true);
+        if(uid) setTimeout(()=>{ if(GD.uid === uid && GD.prog && !GD.prog.tours[gdRole()]) gdStartTour(false); }, 1800);
+      }else gdRender(false);
+      if(GD.key && /^(home\.|staff\.home|cp\.home)/.test(GD.key)) gdRenderChecklist();
+    };
+    const obs = new MutationObserver(()=>{ clearTimeout(GD.obsT); GD.obsT = setTimeout(tick, 150); });
+    obs.observe(document.body, { attributes:true, subtree:true, attributeFilter:['style', 'class'] });
+    setTimeout(tick, 400);
+  })();
+
+
 // ---------- Real-time technician location tracker (table: technician_locations) ----------
   // Two halves living in one module:
   //   1. Technician side — while timed in (regular shift or overtime — see
