@@ -48,7 +48,7 @@ select public.staff_apply_access(:H::uuid, '[{"id":"purchasing","is_head":true}]
 select public.staff_apply_access(:H2::uuid, '[{"id":"operations","is_head":true}]', '[{"module":"ops.dispatch","level":"view"}]', :A::uuid);
 insert into public.profiles (id, name, role, username, supervisor_id) values (:S::uuid, 'Sam Sub', 'staff', 'ss_sub', :H::uuid);
 select public.staff_apply_access(:S::uuid, '[{"id":"purchasing"}]', '[{"module":"pur.suppliers","level":"view"}]', :H::uuid);
-select public.staff_apply_access(:HR::uuid, '[{"id":"hr"}]', '[{"module":"hr.leaves","level":"approve"},{"module":"hr.attendance","level":"view"}]', :A::uuid);
+select public.staff_apply_access(:HR::uuid, '[{"id":"hr"}]', '[{"module":"hr.leaves","level":"approve"},{"module":"hr.attendance","level":"view"},{"module":"hr.staff_attendance","level":"view"}]', :A::uuid);
 select public.staff_apply_access(:FN::uuid, '[{"id":"finance"}]', '[{"module":"fin.cash_advance","level":"approve"}]', :A::uuid);
 select public.staff_record_reauth(:HR::uuid); select public.staff_record_reauth(:FN::uuid);
 
@@ -154,7 +154,7 @@ select pg_temp.ok(pg_temp.inbox_has('leave_decide', 'ac000000-0000-0000-0000-000
 select pg_temp.as_user(:A::uuid); set local role postgres;   -- the guard keeps submitted_at for everyone but the Super Admin
 update public.leave_requests set submitted_at = now() - interval '3 days' where id = 'ac000000-0000-0000-0000-000000000004';
 select pg_temp.as_user(null);
-select public.staff_apply_access(:HR::uuid, '[{"id":"hr","is_head":true}]', '[{"module":"hr.leaves","level":"approve"},{"module":"hr.attendance","level":"view"}]', :A::uuid);
+select public.staff_apply_access(:HR::uuid, '[{"id":"hr","is_head":true}]', '[{"module":"hr.leaves","level":"approve"},{"module":"hr.attendance","level":"view"},{"module":"hr.staff_attendance","level":"view"}]', :A::uuid);
 select pg_temp.ok((select recipients = array['00000000-0000-0000-0000-0000000000a1']::uuid[] from public.inbox_escalations_due()
                     where key = 'leave_decide:ac000000-0000-0000-0000-000000000004:L1'), 'an overdue Head''s leave escalates to the Super Admin');
 reset role;

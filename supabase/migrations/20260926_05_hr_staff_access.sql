@@ -117,9 +117,23 @@ end $guard$;
 -- 2. Row-level security
 -- ---------------------------------------------------------------------
 -- DTR: read only for staff
+-- Whose time records can the viewer read? Technicians' need Technician
+-- Attendance (hr.attendance); office staff's need Office Staff Attendance
+-- (hr.staff_attendance). Same definition in 20260926_05 and 20261003_01.
+create or replace function public.hr_sees_dtr_of(p_person uuid)
+returns boolean language sql stable security definer
+set search_path = public, pg_temp
+as $$
+  select exists (select 1 from public.profiles t where t.id = p_person and (
+           (t.role = 'technician' and public.has_perm('hr.attendance', 'view'))
+        or (t.role = 'staff' and public.has_perm('hr.staff_attendance', 'view'))));
+$$;
+revoke execute on function public.hr_sees_dtr_of(uuid) from public, anon;
+grant execute on function public.hr_sees_dtr_of(uuid) to authenticated, service_role;
+
 drop policy if exists dtr_select_own_or_admin on public.dtr_records;
 create policy dtr_select_own_or_admin on public.dtr_records for select to authenticated
-  using (technician_id = auth.uid() or public.is_admin() or (select public.has_perm('hr.attendance', 'view')));
+  using (technician_id = auth.uid() or public.is_admin() or public.hr_sees_dtr_of(technician_id));
 
 -- Leave requests: read with View; decide with Approve (the guard above
 -- lets staff change nothing but the decision).

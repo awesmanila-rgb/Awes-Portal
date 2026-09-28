@@ -222,5 +222,18 @@ second run changes nothing.
 
 ```sh
 psql -d awes_backup -f ../migrations/20261002_01_inventory_to_administration.sql
-psql -d awes_backup -f inventory_to_administration_probe.sql   # expect 12 × PASS
+psql -d awes_backup -f inventory_to_administration_probe.sql   # expect 14 × PASS
+```
+
+## Attendance split (20261003_01_staff_attendance_split.sql)
+
+`attendance_split_probe.sql` checks the two pages: Technician Attendance
+reads technicians' time records (and names) only; Office Staff Attendance
+reads office staff's only; both / own / Super Admin see as before; upgrading
+gives everyone who had Attendance the new page (and templates) once — and a
+later re-run doesn't give it back to someone you've set to technicians only.
+
+```sh
+psql -d awes_backup -f ../migrations/20261003_01_staff_attendance_split.sql
+psql -d awes_backup -f attendance_split_probe.sql   # expect 16 × PASS
 ```

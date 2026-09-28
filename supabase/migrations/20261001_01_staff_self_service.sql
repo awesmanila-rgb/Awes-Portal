@@ -486,7 +486,7 @@ create policy cash_select_team on public.cash_advance_requests for select to aut
 
 drop policy if exists profiles_select_staff_for_hr on public.profiles;
 create policy profiles_select_staff_for_hr on public.profiles for select to authenticated
-  using (role = 'staff' and ((select public.has_perm('hr.attendance', 'view')) or (select public.has_perm('hr.leaves', 'view'))
+  using (role = 'staff' and ((select public.has_perm('hr.staff_attendance', 'view')) or (select public.has_perm('hr.leaves', 'view'))
                              or (select public.has_perm('hr.tech_profiles', 'view'))));
 
 -- ---------------------------------------------------------------------

@@ -20,8 +20,8 @@
 --   * the Inbox item "Issued PO not yet received" (Receive page) is now an
 --     Administration item, so its escalation goes to Administration Heads.
 --
--- Requires 20260926_01 … 20261001_01. Safe to re-run (a second run finds
--- nothing left to move).
+-- Requires 20260926_01 … 20261001_01. Safe to re-run: people are moved only
+-- the first time (recorded in app_one_time_steps).
 -- =====================================================================
 
 begin;
@@ -84,7 +84,39 @@ $fn$;
 revoke execute on function public.inventory_move_to_administration() from public, anon, authenticated;
 grant execute on function public.inventory_move_to_administration() to service_role;
 
-select public.inventory_move_to_administration();
+-- Move people ONCE per database: re-running this migration later must not
+-- re-add Administration memberships or Head roles you've since changed.
+create table if not exists public.app_one_time_steps (
+  step     text primary key,
+  done_at  timestamptz not null default now(),
+  result   jsonb
+);
+alter table public.app_one_time_steps enable row level security;
+revoke all on public.app_one_time_steps from anon, authenticated;
+
+create or replace function public.inventory_move_once()
+returns boolean
+language plpgsql security definer
+set search_path = public, pg_temp
+as $fn$
+declare r jsonb;
+begin
+  -- the catalog and the Inbox item always follow the current layout
+  update public.app_modules m set department = 'administration', section = 'Inventory', sort = v.sort
+    from (values ('inv.stock', 54), ('inv.warehouses', 55), ('inv.receive', 56), ('inv.issue', 57),
+                 ('inv.returns', 58), ('inv.transfers', 59), ('inv.slips', 60), ('inv.reports', 61)) v(key, sort)
+   where m.key = v.key and (m.department is distinct from 'administration' or m.sort is distinct from v.sort);
+  update public.inbox_sla set department = 'administration' where kind = 'po_receive' and department is distinct from 'administration';
+  if exists (select 1 from public.app_one_time_steps where step = 'inventory_to_administration') then return false; end if;
+  r := public.inventory_move_to_administration();
+  insert into public.app_one_time_steps (step, result) values ('inventory_to_administration', r);
+  return true;
+end;
+$fn$;
+revoke execute on function public.inventory_move_once() from public, anon, authenticated;
+grant execute on function public.inventory_move_once() to service_role;
+
+select public.inventory_move_once();
 
 -- 6. A line in the Activity Log
 do $$ begin

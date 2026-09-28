@@ -79,6 +79,13 @@ select pg_temp.ok(not exists (select * from before2 except select user_id, depar
                   and not exists (select user_id, department_id, is_head from public.staff_departments except select * from before2),
                   'running the move again changes nothing');
 
+-- a later re-run of the migration doesn't undo the Super Admin's changes
+delete from public.app_one_time_steps where step = 'inventory_to_administration';
+select public.inventory_move_once();                                    -- the first real run
+update public.staff_departments set is_head = false where user_id = :PH::uuid and department_id = 'administration' and is_head;   -- Super Admin demotes
+select pg_temp.ok(not public.inventory_move_once(), 'a re-run of the migration skips moving people');
+select pg_temp.ok(pg_temp.dept(:PH::uuid, 'administration') = 'member', '… so a Head role you removed stays removed');
+
 \echo
 \echo 'All inventory → administration probes passed — rolling back.'
 rollback;

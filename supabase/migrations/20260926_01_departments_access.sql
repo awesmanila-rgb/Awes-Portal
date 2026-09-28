@@ -139,9 +139,10 @@ insert into public.app_modules (key, department, section, label, sort, approvabl
   ('fin.reimbursement',   'finance',        'Finance',    'Reimbursement',               32, true,  true,  false),
   ('fin.costs',           'finance',        'Finance',    'See peso values',             33, false, false, true),
   -- Human Resources
-  ('hr.attendance',       'hr',             'HR',         'Attendance (DTR)',            40, false, false, false),
-  ('hr.leaves',           'hr',             'HR',         'Leave Requests',              41, true,  false, false),
-  ('hr.tech_profiles',    'hr',             'HR',         'Technician Profiles',         42, false, false, false),
+  ('hr.attendance',       'hr',             'HR',         'Technician Attendance',       40, false, false, false),
+  ('hr.staff_attendance', 'hr',             'HR',         'Office Staff Attendance',     41, false, false, false),
+  ('hr.leaves',           'hr',             'HR',         'Leave Requests',              42, true,  false, false),
+  ('hr.tech_profiles',    'hr',             'HR',         'Technician Profiles',         43, false, false, false),
   -- Administration
   ('adm.customers',       'administration', 'Administration', 'Customers',               50, false, false, false),
   ('adm.equipment',       'administration', 'Administration', 'Customer Equipment',      51, false, false, false),
