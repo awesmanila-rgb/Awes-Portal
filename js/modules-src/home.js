@@ -872,6 +872,8 @@
   }
   $('sbNavDashboard').addEventListener('click', ()=>{ closeMainMenu(); showHome(); });
   $('sbNavTechnicians').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavTechnicians'); showDtrView(); });
+  // Human Resources → Leave Requests (was only reachable from a Dashboard tile)
+  $('sbNavLeave').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavLeave'); showLeaveView(); });
   // The Finance section used to be a single "Requisitions" sidebar item; it's
   // now three (Cash Advance / Liquidation / Reimbursement) so each opens the
   // same Cash Advance view already highlighted on the relevant tab.

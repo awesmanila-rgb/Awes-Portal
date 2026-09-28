@@ -280,7 +280,7 @@
            s:['Tap Time In when you arrive; allow location.', 'Tap Time Out when you leave.', 'Your history is below.'], tip:'Use the same phone every day — attendance is tied to your registered device.' },
       tl:{ p:'Mag-time in at time out araw-araw, kasama ang overtime.',
            s:['Pindutin ang Time In pagdating; payagan ang lokasyon.', 'Pindutin ang Time Out pag-alis.', 'Nasa ibaba ang history mo.'], tip:'Gamitin ang parehong phone araw-araw — nakatali ang attendance sa naka-register mong device.' } },
-    'leave.office': { roles:['admin','staff'], module:'hr.leaves', flow:'leave', go:{ admin:'@fn:leave', staff:'hr.leaves' },
+    'leave.office': { roles:['admin','staff'], module:'hr.leaves', flow:'leave', go:{ admin:'sbNavLeave', staff:'hr.leaves' },
       en:{ t:'Leave Requests', p:'Everyone\u2019s leave requests: approve or disapprove them.',
            s:['Open a pending request; check the dates and reason.', 'Approve or disapprove with a comment.'], tip:'You can\u2019t approve your own leave. Department Heads\u2019 leave is decided by the Super Admin.' },
       tl:{ p:'Mga leave request ng lahat: aprubahan o tanggihan.',
