@@ -435,7 +435,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const row = document.createElement('div');
-      row.className = 'hist-item';
+      row.className = 'hist-item'; row.dataset.reqId = r.id;
       row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
       let disbursementLine = '';
       if(r.status==='approved'){
@@ -471,6 +471,7 @@
         (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
       list.appendChild(row);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'mine');
   }
 
   function caShowTab(which){
@@ -1407,7 +1408,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card';
+      card.className = 'user-card'; card.dataset.reqId = r.id;
       const disbursedSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -1510,6 +1511,7 @@
       }
       list.appendChild(card);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'review');
   }
   document.querySelectorAll('#caAdminFilterRow button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -1993,7 +1995,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const row = document.createElement('div');
-      row.className = 'hist-item';
+      row.className = 'hist-item'; row.dataset.reqId = r.id;
       row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
       const datesLine =
         '<div class="leave-comment" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px;">'+
@@ -2016,6 +2018,7 @@
       $$('[data-view-item]', row).forEach(()=>{}); // no-op, keeps structure consistent with other lists
       list.appendChild(row);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'mine');
   }
 
   // ---- Admin: separate list + actions, reusing caDecide/caRecordDisbursement ----
@@ -2044,7 +2047,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card';
+      card.className = 'user-card'; card.dataset.reqId = r.id;
       const paidSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Paid</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -2114,6 +2117,7 @@
       }
       list.appendChild(card);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'review');
   }
   document.querySelectorAll('#caReimbAdminFilterRow button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -2143,7 +2147,9 @@
   $('caAdminSecRequests').addEventListener('click', ()=> caShowAdminSection('requests'));
   $('caAdminSecReimb').addEventListener('click', ()=> caShowAdminSection('reimb'));
 
-  async function showCashAdvanceView(){
+  // forceMine: office staff opening their OWN cash advance from My HR, even
+  // if they also review requests (Finance). tab: 'new' | 'liquidate' | 'reimburse' | 'history'
+  async function showCashAdvanceView(forceMine, tab){
     document.body.classList.remove('dashboard-active');
     $('homeScreen').style.display = 'none';
     $('serviceReportView').style.display = 'none';
@@ -2163,9 +2169,9 @@
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
-    setHeaderTitle('Cash Advance Form', 'Request and track cash advances');
+    setHeaderTitle(forceMine === true ? 'My Cash Advance' : 'Cash Advance Form', 'Request and track cash advances');
     window.scrollTo({top:0});
-    if(caIsReviewer()){
+    if(caIsReviewer() && forceMine !== true){
       $('caTechArea').style.display = 'none';
       $('caAdminArea').style.display = '';
       $('caTechHistoryArea').style.display = 'none';
@@ -2175,6 +2181,6 @@
       $('caTechArea').style.display = '';
       $('caAdminArea').style.display = 'none';
       $('caTechHistoryArea').style.display = 'none';
-      caShowTab('new');
+      caShowTab(forceMine === true && tab ? tab : 'new');
     }
   }

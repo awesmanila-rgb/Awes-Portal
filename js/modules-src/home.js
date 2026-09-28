@@ -4,7 +4,9 @@
     $('brandSub').textContent = sub || '';
   }
 
-  async function showDtrView(){
+  // forceMine: office staff opening their OWN attendance from My HR, even
+  // if they also review attendance (HR).
+  async function showDtrView(forceMine){
     document.body.classList.remove('dashboard-active');
     $('homeScreen').style.display = 'none';
     $('serviceReportView').style.display = 'none';
@@ -24,9 +26,9 @@
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
-    setHeaderTitle('Online DTR', 'Daily Time Record');
+    setHeaderTitle(forceMine === true ? 'My Attendance' : 'Online DTR', 'Daily Time Record');
     window.scrollTo({top:0});
-    if(hrIsReviewer()){
+    if(hrIsReviewer() && forceMine !== true){
       hrApplyStaffMode();
       // Admin has no DTR of their own — DTR is per-technician. Land on the
       // attendance table (today's status for everyone); "View DTR" on a

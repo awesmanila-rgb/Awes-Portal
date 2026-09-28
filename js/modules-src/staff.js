@@ -416,7 +416,11 @@
       (opts.preview ? '<button type="button" class="btn btn-secondary" data-act="back" style="width:100%;">\u2190 Back to account</button>' :
         '<div class="stf-actions-row"><button type="button" class="btn btn-secondary" data-act="password">Change Password</button>' +
         '<button type="button" class="btn btn-secondary" data-act="activity">My Activity</button></div>');
-    if(!opts.preview){ staffRenderInboxSummary(target); staffRenderDashboard(target); if(access.is_head) staffRenderLeaveHandover(target); }
+    if(!opts.preview){
+      staffRenderToday(target);
+      staffRenderInboxSummary(target); staffRenderDashboard(target);
+      if(access.is_head) staffRenderLeaveHandover(target);
+    }
     const on = (act, fn)=>{ const b = target.querySelector('[data-act="' + act + '"]'); if(b) b.addEventListener('click', fn); };
     on('team', ()=> staffOpenTeam());
     on('password', ()=> showChangePasswordScreen(false));
@@ -514,6 +518,7 @@
       '</div></div>';
     target.querySelector('[data-act="add"]').addEventListener('click', ()=> staffOpenEditor(null));
     const tb = target.querySelector('[data-act="templates"]'); if(tb) tb.addEventListener('click', ()=> staffOpenTemplates());
+    if(!isSuper) staffRenderTeamHrCard(target);
     if(!isSuper && stf.round2) staffRenderDelegationCard(target);
     target.querySelector('[data-act="inactive"]').addEventListener('change', (e)=>{ stfShowInactive = e.target.checked; staffRenderTeam(); });
     target.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=> staffOpenEditor(b.getAttribute('data-edit'))));
@@ -635,6 +640,7 @@
       (!isNew ? '<div class="card"><div class="card-head"><span>More</span></div><div class="card-body stf-more">' +
         (isSuper ? '<button type="button" class="btn btn-secondary" data-act="preview">Preview what they see</button>' : '') +
         '<button type="button" class="btn btn-secondary" data-act="resetpw">Reset password</button>' +
+        (isSuper ? '<button type="button" class="btn btn-secondary" data-act="resetdev">Reset DTR device</button>' : '') +
         '<button type="button" class="btn btn-secondary" data-act="activity">Their activity</button>' +
         (p && p.active ? '<button type="button" class="btn btn-secondary stf-danger" data-act="deactivate">Deactivate</button>'
                        : '<button type="button" class="btn btn-secondary" data-act="reactivate">Reactivate</button>') +
@@ -722,6 +728,12 @@
     on('applytpl', ()=> staffApplyTemplateFromEditor(target));
     on('preview', ()=> staffPreview());
     on('resetpw', ()=> staffResetPassword());
+    on('resetdev', async ()=>{
+      const p = stfEd.original;
+      if(!(await uiConfirm('Reset ' + p.name + '\u2019s DTR device? Their next time-in registers the phone they use then.', { ok:'Reset device' }))) return;
+      const ok = await clearDeviceLock(p.id);
+      toast(ok ? 'DTR device reset for ' + p.name : 'Could not reset the device');
+    });
     on('activity', ()=> staffOpenActivity({ actorId: s.id }));
     on('deactivate', ()=> staffDeactivate());
     on('reactivate', ()=> staffReactivate());
@@ -1282,7 +1294,7 @@
   }
   function staffInboxRowHtml(x){
     const dept = STF_INBOX_DEPT[x.department] || x.department;
-    return '<button type="button" class="stf-inbox-row stf-inbox-' + x.state + '" data-open="' + escapeHtml(x.module) + '">' +
+    return '<button type="button" class="stf-inbox-row stf-inbox-' + x.state + '" data-open="' + escapeHtml(x.module) + '" data-kind="' + escapeHtml(x.kind) + '">' +
       '<span class="stf-inbox-dot"></span>' +
       '<span class="stf-inbox-main"><span class="stf-inbox-label">' + escapeHtml(x.label) + (x.ref_label ? ' \u00B7 <b>' + escapeHtml(x.ref_label) + '</b>' : '') + '</span>' +
       '<span class="stf-inbox-title">' + escapeHtml(x.title || '') + '</span>' +
@@ -1351,7 +1363,10 @@
         (currentUser.role === 'admin' ? '<button type="button" class="btn btn-secondary" data-act="sla" style="width:100%; margin-top:10px;">Response times\u2026</button>' : '') +
       '</div></div>';
     target.querySelectorAll('[data-filter]').forEach(b=> b.addEventListener('click', ()=>{ stfInbox.filter = b.dataset.filter; staffRenderInbox(); }));
-    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=> staffOpenModule(b.dataset.open)));
+    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=>{
+      // "…to endorse (your team)" items are handled on My Team
+      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam(); else staffOpenModule(b.dataset.open);
+    }));
     const sla = target.querySelector('[data-act="sla"]'); if(sla) sla.addEventListener('click', ()=> staffOpenSla());
   }
 
@@ -1404,6 +1419,141 @@
     return false;
   }
 
+  // =====================================================================
+  // My HR for office staff + Head endorsement (20261001_01_staff_self_service.sql)
+  // =====================================================================
+  // Mark request cards / rows (tagged with data-req-id) that wait for a
+  // Head's endorsement. mode 'review': HR / Finance lists — no deciding yet
+  // (the Super Admin keeps the buttons: override). mode 'mine': the
+  // person's own list — shows where it stands.
+  async function staffMarkEndorsements(list, kind, mode){
+    if(!list) return;
+    const ids = [...list.querySelectorAll('[data-req-id]')].map(e=> e.dataset.reqId);
+    if(!ids.length) return;
+    let rows = [];
+    try{
+      const { data, error } = await db.from('request_endorsements').select('request_id, status, head, comment, decided_at').eq('request_kind', kind).in('request_id', ids);
+      if(error) return;
+      rows = data || [];
+    }catch(e){ return; }
+    if(!rows.length) return;
+    const heads = {};
+    try{
+      const hid = [...new Set(rows.map(r=> r.head))];
+      const { data } = await db.from('profiles').select('id, name').in('id', hid);
+      (data || []).forEach(p=> heads[p.id] = p.name);
+    }catch(e){}
+    rows.forEach(r=>{
+      const el = list.querySelector('[data-req-id="' + r.request_id + '"]'); if(!el || el.querySelector('.stf-endorse-note')) return;
+      // A sub-user can't read their Head's account; their own access summary
+      // carries the Head's name.
+      const sup = currentUser && currentUser.access && currentUser.access.supervisor;
+      const who = heads[r.head] || (sup && sup.id === r.head && sup.name) || (mode === 'mine' ? 'your Head' : 'their Head');
+      let note = '';
+      if(r.status === 'pending') note = mode === 'mine' ? 'Waiting for ' + who + ' to endorse' : 'Waiting for ' + who + '\u2019s endorsement';
+      else if(r.status === 'endorsed') note = 'Endorsed by ' + who;
+      else return;   // declined: the request itself shows disapproved with the reason
+      const n = document.createElement('div');
+      n.className = 'stf-endorse-note ' + r.status;
+      n.textContent = note;
+      el.insertBefore(n, el.children[1] || null);
+      if(r.status === 'pending' && mode === 'review' && currentUser.role !== 'admin'){
+        el.querySelectorAll('[data-act="approve"], [data-act="disapprove"], [data-act="review"]').forEach(b=> b.style.display = 'none');
+      }
+    });
+  }
+
+  // "Today" on the staff home: attendance at a glance + what's open
+  async function staffRenderToday(target){
+    const today = staffDateOf(new Date().toISOString());
+    let dtr = null, leaves = [], cash = [];
+    try{
+      const [d, l, c] = await Promise.all([
+        db.from('dtr_records').select('data').eq('technician_id', currentUser.id).eq('date', today).maybeSingle(),
+        db.from('leave_requests').select('status').eq('technician_id', currentUser.id).eq('status', 'pending'),
+        db.from('cash_advance_requests').select('status, data').eq('technician_id', currentUser.id)
+      ]);
+      dtr = d.data && d.data.data; leaves = l.data || []; cash = c.data || [];
+    }catch(e){ return; }
+    const tIn = dtr && dtr.timeIn, tOut = dtr && dtr.timeOut;
+    const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(e){ return ''; } };
+    const toLiq = cash.filter(r=> r.data && r.data.disbursed && (!r.data.liquidation || typeof r.data.liquidation !== 'object')).length;
+    const pend = leaves.length + cash.filter(r=> r.status === 'pending').length;
+    const card = document.createElement('div');
+    card.className = 'card stf-today';
+    card.innerHTML = '<div class="card-body stf-today-body">' +
+      '<div class="stf-today-main"><div class="stf-tile-title">' + (tIn ? (tOut ? 'Timed out ' + escapeHtml(fmt(tOut)) : 'Timed in ' + escapeHtml(fmt(tIn))) : 'Not timed in yet') + '</div>' +
+      '<div class="stf-tile-sub">' + [pend ? pend + ' request' + (pend === 1 ? '' : 's') + ' pending' : '', toLiq ? toLiq + ' advance' + (toLiq === 1 ? '' : 's') + ' to liquidate' : ''].filter(Boolean).join(' \u00B7 ') + '</div></div>' +
+      '<div class="stf-today-acts"><button type="button" class="btn btn-primary" data-act="dtr">' + (tIn && !tOut ? 'Time Out' : tIn ? 'My Attendance' : 'Time In') + '</button>' +
+      (toLiq ? '<button type="button" class="btn btn-secondary" data-act="liq">Liquidate</button>' : '') + '</div></div>';
+    card.querySelector('[data-act="dtr"]').addEventListener('click', ()=>{ showDtrView(true); setSidebarActive('staffNavMyDtr'); });
+    const lq = card.querySelector('[data-act="liq"]'); if(lq) lq.addEventListener('click', ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
+    const first = target.querySelector('.card');
+    if(first && first.nextSibling) target.insertBefore(card, first.nextSibling); else target.appendChild(card);
+  }
+
+  // Head: the team's attendance and leave today (read only) + requests to endorse
+  async function staffRenderTeamHrCard(teamTarget){
+    const subs = stf.people.filter(p=> p.supervisor_id === currentUser.id && p.active);
+    if(!subs.length) return;
+    const ids = subs.map(p=> p.id);
+    const today = staffDateOf(new Date().toISOString());
+    let dtr = [], leaves = [], ends = [], cash = [];
+    try{
+      const [d, l, e, c] = await Promise.all([
+        db.from('dtr_records').select('technician_id, data').eq('date', today).in('technician_id', ids),
+        db.from('leave_requests').select('id, technician_id, status, data').in('technician_id', ids),
+        db.from('request_endorsements').select('*').eq('status', 'pending').in('requester', ids),
+        db.from('cash_advance_requests').select('id, technician_id, status, data').in('technician_id', ids).eq('status', 'pending')
+      ]);
+      dtr = d.data || []; leaves = l.data || []; ends = e.error ? [] : (e.data || []); cash = c.data || [];
+    }catch(err){ return; }
+    const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(x){ return ''; } };
+    const onLeave = (pid)=> leaves.some(r=> r.technician_id === pid && r.status === 'approved' && r.data &&
+                                  (r.data.dateFrom || r.data.from) <= today && (r.data.dateTo || r.data.to || r.data.dateFrom || r.data.from) >= today);
+    const rowsHtml = subs.map(p=>{
+      const rec = (dtr.find(r=> r.technician_id === p.id) || {}).data || {};
+      const st = onLeave(p.id) ? '<span class="stf-lvl stf-lvl-view">On leave</span>'
+               : rec.timeIn ? '<span class="stf-lvl stf-lvl-approve">In ' + escapeHtml(fmt(rec.timeIn)) + (rec.timeOut ? ' \u2013 ' + escapeHtml(fmt(rec.timeOut)) : '') + '</span>'
+               : '<span class="stf-lvl" style="background:#FBEDEA; color:#A2402B;">Not in</span>';
+      return '<div class="stf-access-row"><span class="stf-access-name">' + escapeHtml(p.name) + '</span><span class="stf-access-bits">' + st + '</span></div>';
+    }).join('');
+    const nameOf = (id)=> (stfPerson(id) || {}).name || '';
+    const endHtml = ends.map(e=>{
+      let what = '';
+      if(e.request_kind === 'leave'){ const r = leaves.find(x=> x.id === e.request_id); const d = r && r.data || {};
+        what = escapeHtml(d.leaveType || 'Leave') + ' \u00B7 ' + escapeHtml(staffFmtDate((d.dateFrom || d.from || today) + 'T12:00:00+08:00')) + (d.reason ? ' \u2014 ' + escapeHtml(String(d.reason).slice(0, 80)) : ''); }
+      else { const r = cash.find(x=> x.id === e.request_id); const d = r && r.data || {};
+        what = (d.kind === 'reimbursement' ? 'Reimbursement ' : 'Cash advance ') + staffFmtPeso(d.amount) + (d.purpose ? ' \u2014 ' + escapeHtml(String(d.purpose).slice(0, 80)) : ''); }
+      return '<div class="stf-deleg-row"><div><b>' + escapeHtml(nameOf(e.requester)) + '</b><div class="stf-hint" style="margin:0;">' + what + '</div></div>' +
+        '<div class="stf-endorse-acts"><button type="button" class="btn btn-secondary stf-danger" data-decline="' + e.request_kind + ':' + e.request_id + '">Decline</button>' +
+        '<button type="button" class="btn btn-primary" data-endorse="' + e.request_kind + ':' + e.request_id + '">Endorse</button></div></div>';
+    }).join('');
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<div class="card-head"><span>My team today</span></div><div class="card-body">' +
+      (ends.length ? '<div class="stf-dept-title">To endorse (' + ends.length + ')</div><p class="stf-note" style="margin-top:0;">Your team\u2019s leave, cash advance and reimbursement requests come to you first. Once you endorse, HR or Finance makes the final decision.</p>' +
+        '<div class="stf-list" style="margin-bottom:14px;">' + endHtml + '</div>' : '') +
+      '<div class="stf-dept-title">Attendance \u00B7 ' + escapeHtml(staffFmtDate(today + 'T12:00:00+08:00')) + '</div>' + rowsHtml +
+      '<p class="stf-note">Read only \u2014 HR keeps the records.</p></div>';
+    teamTarget.appendChild(card);
+    const act = async (key, decision)=>{
+      const [kind, id] = key.split(':');
+      let comment = '';
+      if(decision === 'decline'){
+        comment = await uiPrompt('Why are you declining? The person will see this.', '', { title:'Decline request', ok:'Decline' });
+        if(comment == null) return;
+        if(!comment.trim()){ toast('Give a reason for declining'); return; }
+      }
+      const { error } = await db.rpc('staff_endorse', { p_kind: kind, p_request: id, p_decision: decision, p_comment: comment });
+      if(error){ toast(error.message); return; }
+      toast(decision === 'endorse' ? 'Endorsed \u2014 sent to ' + (kind === 'leave' ? 'HR' : 'Finance') : 'Declined');
+      staffRenderTeam();
+    };
+    card.querySelectorAll('[data-endorse]').forEach(b=> b.addEventListener('click', ()=> act(b.dataset.endorse, 'endorse')));
+    card.querySelectorAll('[data-decline]').forEach(b=> b.addEventListener('click', ()=> act(b.dataset.decline, 'decline')));
+  }
+
   // ---------------------------------------------------------------------
   // Wiring
   // ---------------------------------------------------------------------
@@ -1415,6 +1565,11 @@
     bind('staffNavActivity', ()=> staffOpenActivity());
     bind('staffNavPassword', ()=> showChangePasswordScreen(false));
     bind('staffNavMyLeave', ()=>{ showLeaveView(true); setSidebarActive('staffNavMyLeave'); });
+    // My HR (20261001_01): the same screens technicians use, in "my own" mode
+    bind('staffNavMyDtr',   ()=>{ showDtrView(true); setSidebarActive('staffNavMyDtr'); });
+    bind('staffNavMyCash',  ()=>{ showCashAdvanceView(true, 'new'); setSidebarActive('staffNavMyCash'); });
+    bind('staffNavMyLiq',   ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
+    bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');

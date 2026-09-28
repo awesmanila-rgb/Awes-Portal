@@ -188,6 +188,7 @@
     if(g.startsWith('@purch:')){ showPurchasingView(g.slice(7)); return true; }
     const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
                  '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
+                 '@mydtr': ()=> showDtrView(true), '@mycash': ()=> showCashAdvanceView(true, 'new'),
                  '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];
     if(fn){ fn(); return true; }
     const el = gdEl(g);

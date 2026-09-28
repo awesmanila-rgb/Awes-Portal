@@ -181,7 +181,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const row = document.createElement('div');
-      row.className = 'hist-item';
+      row.className = 'hist-item'; row.dataset.reqId = r.id;
       row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
       row.innerHTML =
         '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">'+
@@ -193,6 +193,7 @@
         (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
       list.appendChild(row);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'leave', 'mine');
   }
 
   function leaveShowTab(which){
@@ -216,7 +217,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card';
+      card.className = 'user-card'; card.dataset.reqId = r.id;
       card.innerHTML =
         '<div class="user-card-head">'+
           '<div>'+
@@ -247,6 +248,7 @@
       card.querySelector('[data-act="disapprove"]').addEventListener('click', ()=> leaveDecide(r.id, 'disapproved', panel.querySelector('[data-f="comment"]').value.trim()));
       list.appendChild(card);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'leave', 'review');
   }
   async function leaveDecide(id, status, comment){
     if(status==='disapproved' && !comment){

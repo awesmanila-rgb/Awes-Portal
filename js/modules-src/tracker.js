@@ -100,6 +100,9 @@
   registerOutboxHandler('geo', async (key, payload)=>{ await trackerWritePoint(payload); });
 
   function trackerStartBroadcasting(){
+    // Office staff time in with their location like technicians, but they
+    // aren't followed on the field Live Tracker.
+    if(currentUser && currentUser.role === 'staff') return;
     if(!navigator.geolocation || trackerWatchId != null) return; // already running, or no browser support
     trackerWatchId = navigator.geolocation.watchPosition(
       trackerPushLocation,

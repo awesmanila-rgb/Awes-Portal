@@ -7898,7 +7898,29 @@
     }catch(e){ dtrAdminRt = null; }
   }
 
+  // HR's attendance table: technicians, or office staff (My HR, 20261001_01)
+  let dtrPeopleMode = 'tech';
+  function dtrEnsurePeopleToggle(){
+    const card = $('dtrAdminTableCard'); if(!card || document.getElementById('dtrPeopleToggle')) return;
+    const body = card.querySelector('.card-body'); if(!body) return;
+    const t = document.createElement('div');
+    t.id = 'dtrPeopleToggle'; t.className = 'seg-tabs'; t.style.marginBottom = '10px';
+    t.innerHTML = '<button type="button" class="seg-tab active" data-people="tech">Technicians</button><button type="button" class="seg-tab" data-people="staff">Office staff</button>';
+    t.addEventListener('click', (e)=>{
+      const b = e.target.closest('[data-people]'); if(!b || b.dataset.people === dtrPeopleMode) return;
+      dtrPeopleMode = b.dataset.people;
+      t.querySelectorAll('[data-people]').forEach(x=> x.classList.toggle('active', x === b));
+      dtrRenderAdminTable();
+    });
+    body.insertBefore(t, body.firstChild);
+  }
+  async function dtrListStaffPeople(){
+    const { data, error } = await db.from('profiles').select('id, name, active, role').eq('role', 'staff').order('name');
+    if(error) throw error;
+    return data || [];
+  }
   async function dtrRenderAdminTable(opts){
+    dtrEnsurePeopleToggle();
     const quiet = !!(opts && opts.quiet);
     const seq = ++dtrAdminRenderSeq;
     const body = $('dtrAttendanceTableBody');
@@ -7912,7 +7934,7 @@
     // showing everyone as "Absent" would be wrong).
     const seeDtr = hrIsReviewer('hr.attendance');
     const [users, records] = await Promise.all([
-      cloudListUsers().catch(()=>null),
+      (dtrPeopleMode === 'staff' ? dtrListStaffPeople() : cloudListUsers()).catch(()=>null),
       seeDtr ? dtrListAllForDate(dateISO).catch(()=>null) : Promise.resolve([])
     ]);
     if(seq !== dtrAdminRenderSeq) return;            // a newer refresh already started
@@ -7921,7 +7943,7 @@
       .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
     const summaryEl = $('dtrAttendanceSummary');
     if(active.length===0){
-      body.innerHTML = '<tr><td colspan="9"><div class="empty-state">No technician accounts yet.</div></td></tr>';
+      body.innerHTML = '<tr><td colspan="9"><div class="empty-state">' + (dtrPeopleMode === 'staff' ? 'No office staff accounts yet.' : 'No technician accounts yet.') + '</div></td></tr>';
       if(summaryEl) summaryEl.textContent = '';
       return;
     }
@@ -7974,6 +7996,8 @@
         '<td>'+escapeHtml(otHoursTxt)+'</td>'+
         '<td><button type="button" class="att-view-btn">View DTR</button> <button type="button" class="att-view-btn">View Profile</button></td>';
       const [viewDtrBtn, viewProfileBtn] = row.querySelectorAll('.att-view-btn');
+      // Violations and documents exist for technicians only
+      if(dtrPeopleMode === 'staff' && viewProfileBtn) viewProfileBtn.style.display = 'none';
       viewDtrBtn.addEventListener('click', ()=> dtrShowTechnicianDetail({id:u.id, name:u.name}));
       viewProfileBtn.addEventListener('click', ()=> techOpenProfile({id:u.id, name:u.name}));
       frag.appendChild(row);
@@ -8186,7 +8210,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const row = document.createElement('div');
-      row.className = 'hist-item';
+      row.className = 'hist-item'; row.dataset.reqId = r.id;
       row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
       row.innerHTML =
         '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">'+
@@ -8198,6 +8222,7 @@
         (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
       list.appendChild(row);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'leave', 'mine');
   }
 
   function leaveShowTab(which){
@@ -8221,7 +8246,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card';
+      card.className = 'user-card'; card.dataset.reqId = r.id;
       card.innerHTML =
         '<div class="user-card-head">'+
           '<div>'+
@@ -8252,6 +8277,7 @@
       card.querySelector('[data-act="disapprove"]').addEventListener('click', ()=> leaveDecide(r.id, 'disapproved', panel.querySelector('[data-f="comment"]').value.trim()));
       list.appendChild(card);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'leave', 'review');
   }
   async function leaveDecide(id, status, comment){
     if(status==='disapproved' && !comment){
@@ -13775,7 +13801,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const row = document.createElement('div');
-      row.className = 'hist-item';
+      row.className = 'hist-item'; row.dataset.reqId = r.id;
       row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
       let disbursementLine = '';
       if(r.status==='approved'){
@@ -13811,6 +13837,7 @@
         (r.comment ? '<div class="leave-comment"><b>Admin comment</b>'+escapeHtml(r.comment)+'</div>' : '');
       list.appendChild(row);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'mine');
   }
 
   function caShowTab(which){
@@ -14747,7 +14774,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card';
+      card.className = 'user-card'; card.dataset.reqId = r.id;
       const disbursedSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -14850,6 +14877,7 @@
       }
       list.appendChild(card);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'review');
   }
   document.querySelectorAll('#caAdminFilterRow button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -15333,7 +15361,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const row = document.createElement('div');
-      row.className = 'hist-item';
+      row.className = 'hist-item'; row.dataset.reqId = r.id;
       row.style.cssText = 'cursor:default; flex-direction:column; align-items:stretch;';
       const datesLine =
         '<div class="leave-comment" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 10px;">'+
@@ -15356,6 +15384,7 @@
       $$('[data-view-item]', row).forEach(()=>{}); // no-op, keeps structure consistent with other lists
       list.appendChild(row);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'mine');
   }
 
   // ---- Admin: separate list + actions, reusing caDecide/caRecordDisbursement ----
@@ -15384,7 +15413,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card';
+      card.className = 'user-card'; card.dataset.reqId = r.id;
       const paidSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Paid</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -15454,6 +15483,7 @@
       }
       list.appendChild(card);
     });
+    if(typeof staffMarkEndorsements === 'function') staffMarkEndorsements(list, 'cash', 'review');
   }
   document.querySelectorAll('#caReimbAdminFilterRow button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -15483,7 +15513,9 @@
   $('caAdminSecRequests').addEventListener('click', ()=> caShowAdminSection('requests'));
   $('caAdminSecReimb').addEventListener('click', ()=> caShowAdminSection('reimb'));
 
-  async function showCashAdvanceView(){
+  // forceMine: office staff opening their OWN cash advance from My HR, even
+  // if they also review requests (Finance). tab: 'new' | 'liquidate' | 'reimburse' | 'history'
+  async function showCashAdvanceView(forceMine, tab){
     document.body.classList.remove('dashboard-active');
     $('homeScreen').style.display = 'none';
     $('serviceReportView').style.display = 'none';
@@ -15503,9 +15535,9 @@
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
-    setHeaderTitle('Cash Advance Form', 'Request and track cash advances');
+    setHeaderTitle(forceMine === true ? 'My Cash Advance' : 'Cash Advance Form', 'Request and track cash advances');
     window.scrollTo({top:0});
-    if(caIsReviewer()){
+    if(caIsReviewer() && forceMine !== true){
       $('caTechArea').style.display = 'none';
       $('caAdminArea').style.display = '';
       $('caTechHistoryArea').style.display = 'none';
@@ -15515,7 +15547,7 @@
       $('caTechArea').style.display = '';
       $('caAdminArea').style.display = 'none';
       $('caTechHistoryArea').style.display = 'none';
-      caShowTab('new');
+      caShowTab(forceMine === true && tab ? tab : 'new');
     }
   }
 
@@ -24024,7 +24056,9 @@
     $('brandSub').textContent = sub || '';
   }
 
-  async function showDtrView(){
+  // forceMine: office staff opening their OWN attendance from My HR, even
+  // if they also review attendance (HR).
+  async function showDtrView(forceMine){
     document.body.classList.remove('dashboard-active');
     $('homeScreen').style.display = 'none';
     $('serviceReportView').style.display = 'none';
@@ -24044,9 +24078,9 @@
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
-    setHeaderTitle('Online DTR', 'Daily Time Record');
+    setHeaderTitle(forceMine === true ? 'My Attendance' : 'Online DTR', 'Daily Time Record');
     window.scrollTo({top:0});
-    if(hrIsReviewer()){
+    if(hrIsReviewer() && forceMine !== true){
       hrApplyStaffMode();
       // Admin has no DTR of their own — DTR is per-technician. Land on the
       // attendance table (today's status for everyone); "View DTR" on a
@@ -25977,7 +26011,11 @@
       (opts.preview ? '<button type="button" class="btn btn-secondary" data-act="back" style="width:100%;">\u2190 Back to account</button>' :
         '<div class="stf-actions-row"><button type="button" class="btn btn-secondary" data-act="password">Change Password</button>' +
         '<button type="button" class="btn btn-secondary" data-act="activity">My Activity</button></div>');
-    if(!opts.preview){ staffRenderInboxSummary(target); staffRenderDashboard(target); if(access.is_head) staffRenderLeaveHandover(target); }
+    if(!opts.preview){
+      staffRenderToday(target);
+      staffRenderInboxSummary(target); staffRenderDashboard(target);
+      if(access.is_head) staffRenderLeaveHandover(target);
+    }
     const on = (act, fn)=>{ const b = target.querySelector('[data-act="' + act + '"]'); if(b) b.addEventListener('click', fn); };
     on('team', ()=> staffOpenTeam());
     on('password', ()=> showChangePasswordScreen(false));
@@ -26075,6 +26113,7 @@
       '</div></div>';
     target.querySelector('[data-act="add"]').addEventListener('click', ()=> staffOpenEditor(null));
     const tb = target.querySelector('[data-act="templates"]'); if(tb) tb.addEventListener('click', ()=> staffOpenTemplates());
+    if(!isSuper) staffRenderTeamHrCard(target);
     if(!isSuper && stf.round2) staffRenderDelegationCard(target);
     target.querySelector('[data-act="inactive"]').addEventListener('change', (e)=>{ stfShowInactive = e.target.checked; staffRenderTeam(); });
     target.querySelectorAll('[data-edit]').forEach(b=> b.addEventListener('click', ()=> staffOpenEditor(b.getAttribute('data-edit'))));
@@ -26196,6 +26235,7 @@
       (!isNew ? '<div class="card"><div class="card-head"><span>More</span></div><div class="card-body stf-more">' +
         (isSuper ? '<button type="button" class="btn btn-secondary" data-act="preview">Preview what they see</button>' : '') +
         '<button type="button" class="btn btn-secondary" data-act="resetpw">Reset password</button>' +
+        (isSuper ? '<button type="button" class="btn btn-secondary" data-act="resetdev">Reset DTR device</button>' : '') +
         '<button type="button" class="btn btn-secondary" data-act="activity">Their activity</button>' +
         (p && p.active ? '<button type="button" class="btn btn-secondary stf-danger" data-act="deactivate">Deactivate</button>'
                        : '<button type="button" class="btn btn-secondary" data-act="reactivate">Reactivate</button>') +
@@ -26283,6 +26323,12 @@
     on('applytpl', ()=> staffApplyTemplateFromEditor(target));
     on('preview', ()=> staffPreview());
     on('resetpw', ()=> staffResetPassword());
+    on('resetdev', async ()=>{
+      const p = stfEd.original;
+      if(!(await uiConfirm('Reset ' + p.name + '\u2019s DTR device? Their next time-in registers the phone they use then.', { ok:'Reset device' }))) return;
+      const ok = await clearDeviceLock(p.id);
+      toast(ok ? 'DTR device reset for ' + p.name : 'Could not reset the device');
+    });
     on('activity', ()=> staffOpenActivity({ actorId: s.id }));
     on('deactivate', ()=> staffDeactivate());
     on('reactivate', ()=> staffReactivate());
@@ -26843,7 +26889,7 @@
   }
   function staffInboxRowHtml(x){
     const dept = STF_INBOX_DEPT[x.department] || x.department;
-    return '<button type="button" class="stf-inbox-row stf-inbox-' + x.state + '" data-open="' + escapeHtml(x.module) + '">' +
+    return '<button type="button" class="stf-inbox-row stf-inbox-' + x.state + '" data-open="' + escapeHtml(x.module) + '" data-kind="' + escapeHtml(x.kind) + '">' +
       '<span class="stf-inbox-dot"></span>' +
       '<span class="stf-inbox-main"><span class="stf-inbox-label">' + escapeHtml(x.label) + (x.ref_label ? ' \u00B7 <b>' + escapeHtml(x.ref_label) + '</b>' : '') + '</span>' +
       '<span class="stf-inbox-title">' + escapeHtml(x.title || '') + '</span>' +
@@ -26912,7 +26958,10 @@
         (currentUser.role === 'admin' ? '<button type="button" class="btn btn-secondary" data-act="sla" style="width:100%; margin-top:10px;">Response times\u2026</button>' : '') +
       '</div></div>';
     target.querySelectorAll('[data-filter]').forEach(b=> b.addEventListener('click', ()=>{ stfInbox.filter = b.dataset.filter; staffRenderInbox(); }));
-    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=> staffOpenModule(b.dataset.open)));
+    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=>{
+      // "…to endorse (your team)" items are handled on My Team
+      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam(); else staffOpenModule(b.dataset.open);
+    }));
     const sla = target.querySelector('[data-act="sla"]'); if(sla) sla.addEventListener('click', ()=> staffOpenSla());
   }
 
@@ -26965,6 +27014,141 @@
     return false;
   }
 
+  // =====================================================================
+  // My HR for office staff + Head endorsement (20261001_01_staff_self_service.sql)
+  // =====================================================================
+  // Mark request cards / rows (tagged with data-req-id) that wait for a
+  // Head's endorsement. mode 'review': HR / Finance lists — no deciding yet
+  // (the Super Admin keeps the buttons: override). mode 'mine': the
+  // person's own list — shows where it stands.
+  async function staffMarkEndorsements(list, kind, mode){
+    if(!list) return;
+    const ids = [...list.querySelectorAll('[data-req-id]')].map(e=> e.dataset.reqId);
+    if(!ids.length) return;
+    let rows = [];
+    try{
+      const { data, error } = await db.from('request_endorsements').select('request_id, status, head, comment, decided_at').eq('request_kind', kind).in('request_id', ids);
+      if(error) return;
+      rows = data || [];
+    }catch(e){ return; }
+    if(!rows.length) return;
+    const heads = {};
+    try{
+      const hid = [...new Set(rows.map(r=> r.head))];
+      const { data } = await db.from('profiles').select('id, name').in('id', hid);
+      (data || []).forEach(p=> heads[p.id] = p.name);
+    }catch(e){}
+    rows.forEach(r=>{
+      const el = list.querySelector('[data-req-id="' + r.request_id + '"]'); if(!el || el.querySelector('.stf-endorse-note')) return;
+      // A sub-user can't read their Head's account; their own access summary
+      // carries the Head's name.
+      const sup = currentUser && currentUser.access && currentUser.access.supervisor;
+      const who = heads[r.head] || (sup && sup.id === r.head && sup.name) || (mode === 'mine' ? 'your Head' : 'their Head');
+      let note = '';
+      if(r.status === 'pending') note = mode === 'mine' ? 'Waiting for ' + who + ' to endorse' : 'Waiting for ' + who + '\u2019s endorsement';
+      else if(r.status === 'endorsed') note = 'Endorsed by ' + who;
+      else return;   // declined: the request itself shows disapproved with the reason
+      const n = document.createElement('div');
+      n.className = 'stf-endorse-note ' + r.status;
+      n.textContent = note;
+      el.insertBefore(n, el.children[1] || null);
+      if(r.status === 'pending' && mode === 'review' && currentUser.role !== 'admin'){
+        el.querySelectorAll('[data-act="approve"], [data-act="disapprove"], [data-act="review"]').forEach(b=> b.style.display = 'none');
+      }
+    });
+  }
+
+  // "Today" on the staff home: attendance at a glance + what's open
+  async function staffRenderToday(target){
+    const today = staffDateOf(new Date().toISOString());
+    let dtr = null, leaves = [], cash = [];
+    try{
+      const [d, l, c] = await Promise.all([
+        db.from('dtr_records').select('data').eq('technician_id', currentUser.id).eq('date', today).maybeSingle(),
+        db.from('leave_requests').select('status').eq('technician_id', currentUser.id).eq('status', 'pending'),
+        db.from('cash_advance_requests').select('status, data').eq('technician_id', currentUser.id)
+      ]);
+      dtr = d.data && d.data.data; leaves = l.data || []; cash = c.data || [];
+    }catch(e){ return; }
+    const tIn = dtr && dtr.timeIn, tOut = dtr && dtr.timeOut;
+    const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(e){ return ''; } };
+    const toLiq = cash.filter(r=> r.data && r.data.disbursed && (!r.data.liquidation || typeof r.data.liquidation !== 'object')).length;
+    const pend = leaves.length + cash.filter(r=> r.status === 'pending').length;
+    const card = document.createElement('div');
+    card.className = 'card stf-today';
+    card.innerHTML = '<div class="card-body stf-today-body">' +
+      '<div class="stf-today-main"><div class="stf-tile-title">' + (tIn ? (tOut ? 'Timed out ' + escapeHtml(fmt(tOut)) : 'Timed in ' + escapeHtml(fmt(tIn))) : 'Not timed in yet') + '</div>' +
+      '<div class="stf-tile-sub">' + [pend ? pend + ' request' + (pend === 1 ? '' : 's') + ' pending' : '', toLiq ? toLiq + ' advance' + (toLiq === 1 ? '' : 's') + ' to liquidate' : ''].filter(Boolean).join(' \u00B7 ') + '</div></div>' +
+      '<div class="stf-today-acts"><button type="button" class="btn btn-primary" data-act="dtr">' + (tIn && !tOut ? 'Time Out' : tIn ? 'My Attendance' : 'Time In') + '</button>' +
+      (toLiq ? '<button type="button" class="btn btn-secondary" data-act="liq">Liquidate</button>' : '') + '</div></div>';
+    card.querySelector('[data-act="dtr"]').addEventListener('click', ()=>{ showDtrView(true); setSidebarActive('staffNavMyDtr'); });
+    const lq = card.querySelector('[data-act="liq"]'); if(lq) lq.addEventListener('click', ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
+    const first = target.querySelector('.card');
+    if(first && first.nextSibling) target.insertBefore(card, first.nextSibling); else target.appendChild(card);
+  }
+
+  // Head: the team's attendance and leave today (read only) + requests to endorse
+  async function staffRenderTeamHrCard(teamTarget){
+    const subs = stf.people.filter(p=> p.supervisor_id === currentUser.id && p.active);
+    if(!subs.length) return;
+    const ids = subs.map(p=> p.id);
+    const today = staffDateOf(new Date().toISOString());
+    let dtr = [], leaves = [], ends = [], cash = [];
+    try{
+      const [d, l, e, c] = await Promise.all([
+        db.from('dtr_records').select('technician_id, data').eq('date', today).in('technician_id', ids),
+        db.from('leave_requests').select('id, technician_id, status, data').in('technician_id', ids),
+        db.from('request_endorsements').select('*').eq('status', 'pending').in('requester', ids),
+        db.from('cash_advance_requests').select('id, technician_id, status, data').in('technician_id', ids).eq('status', 'pending')
+      ]);
+      dtr = d.data || []; leaves = l.data || []; ends = e.error ? [] : (e.data || []); cash = c.data || [];
+    }catch(err){ return; }
+    const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(x){ return ''; } };
+    const onLeave = (pid)=> leaves.some(r=> r.technician_id === pid && r.status === 'approved' && r.data &&
+                                  (r.data.dateFrom || r.data.from) <= today && (r.data.dateTo || r.data.to || r.data.dateFrom || r.data.from) >= today);
+    const rowsHtml = subs.map(p=>{
+      const rec = (dtr.find(r=> r.technician_id === p.id) || {}).data || {};
+      const st = onLeave(p.id) ? '<span class="stf-lvl stf-lvl-view">On leave</span>'
+               : rec.timeIn ? '<span class="stf-lvl stf-lvl-approve">In ' + escapeHtml(fmt(rec.timeIn)) + (rec.timeOut ? ' \u2013 ' + escapeHtml(fmt(rec.timeOut)) : '') + '</span>'
+               : '<span class="stf-lvl" style="background:#FBEDEA; color:#A2402B;">Not in</span>';
+      return '<div class="stf-access-row"><span class="stf-access-name">' + escapeHtml(p.name) + '</span><span class="stf-access-bits">' + st + '</span></div>';
+    }).join('');
+    const nameOf = (id)=> (stfPerson(id) || {}).name || '';
+    const endHtml = ends.map(e=>{
+      let what = '';
+      if(e.request_kind === 'leave'){ const r = leaves.find(x=> x.id === e.request_id); const d = r && r.data || {};
+        what = escapeHtml(d.leaveType || 'Leave') + ' \u00B7 ' + escapeHtml(staffFmtDate((d.dateFrom || d.from || today) + 'T12:00:00+08:00')) + (d.reason ? ' \u2014 ' + escapeHtml(String(d.reason).slice(0, 80)) : ''); }
+      else { const r = cash.find(x=> x.id === e.request_id); const d = r && r.data || {};
+        what = (d.kind === 'reimbursement' ? 'Reimbursement ' : 'Cash advance ') + staffFmtPeso(d.amount) + (d.purpose ? ' \u2014 ' + escapeHtml(String(d.purpose).slice(0, 80)) : ''); }
+      return '<div class="stf-deleg-row"><div><b>' + escapeHtml(nameOf(e.requester)) + '</b><div class="stf-hint" style="margin:0;">' + what + '</div></div>' +
+        '<div class="stf-endorse-acts"><button type="button" class="btn btn-secondary stf-danger" data-decline="' + e.request_kind + ':' + e.request_id + '">Decline</button>' +
+        '<button type="button" class="btn btn-primary" data-endorse="' + e.request_kind + ':' + e.request_id + '">Endorse</button></div></div>';
+    }).join('');
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<div class="card-head"><span>My team today</span></div><div class="card-body">' +
+      (ends.length ? '<div class="stf-dept-title">To endorse (' + ends.length + ')</div><p class="stf-note" style="margin-top:0;">Your team\u2019s leave, cash advance and reimbursement requests come to you first. Once you endorse, HR or Finance makes the final decision.</p>' +
+        '<div class="stf-list" style="margin-bottom:14px;">' + endHtml + '</div>' : '') +
+      '<div class="stf-dept-title">Attendance \u00B7 ' + escapeHtml(staffFmtDate(today + 'T12:00:00+08:00')) + '</div>' + rowsHtml +
+      '<p class="stf-note">Read only \u2014 HR keeps the records.</p></div>';
+    teamTarget.appendChild(card);
+    const act = async (key, decision)=>{
+      const [kind, id] = key.split(':');
+      let comment = '';
+      if(decision === 'decline'){
+        comment = await uiPrompt('Why are you declining? The person will see this.', '', { title:'Decline request', ok:'Decline' });
+        if(comment == null) return;
+        if(!comment.trim()){ toast('Give a reason for declining'); return; }
+      }
+      const { error } = await db.rpc('staff_endorse', { p_kind: kind, p_request: id, p_decision: decision, p_comment: comment });
+      if(error){ toast(error.message); return; }
+      toast(decision === 'endorse' ? 'Endorsed \u2014 sent to ' + (kind === 'leave' ? 'HR' : 'Finance') : 'Declined');
+      staffRenderTeam();
+    };
+    card.querySelectorAll('[data-endorse]').forEach(b=> b.addEventListener('click', ()=> act(b.dataset.endorse, 'endorse')));
+    card.querySelectorAll('[data-decline]').forEach(b=> b.addEventListener('click', ()=> act(b.dataset.decline, 'decline')));
+  }
+
   // ---------------------------------------------------------------------
   // Wiring
   // ---------------------------------------------------------------------
@@ -26976,6 +27160,11 @@
     bind('staffNavActivity', ()=> staffOpenActivity());
     bind('staffNavPassword', ()=> showChangePasswordScreen(false));
     bind('staffNavMyLeave', ()=>{ showLeaveView(true); setSidebarActive('staffNavMyLeave'); });
+    // My HR (20261001_01): the same screens technicians use, in "my own" mode
+    bind('staffNavMyDtr',   ()=>{ showDtrView(true); setSidebarActive('staffNavMyDtr'); });
+    bind('staffNavMyCash',  ()=>{ showCashAdvanceView(true, 'new'); setSidebarActive('staffNavMyCash'); });
+    bind('staffNavMyLiq',   ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
+    bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -27481,24 +27670,24 @@
       tl:{ p:'Mga request ng pera ng technician mula simula hanggang dulo: aprubahan, ibigay ang cash, suriin ang liquidation, ayusin ang balanse.',
            s:['Pending: aprubahan o tanggihan ang bawat request.', 'Approved: itala ang ibinigay na cash.', 'To Review Liquidation: tsekin ang resibo at aprubahan.', 'To Settle: markahang naibalik o na-reimburse ang balanse.'],
            tip:'Kapag mag-a-approve, hihingin ang password mo, at may limitasyon ang halagang puwede mong aprubahan.' } },
-    'ca.mine': { roles:['tech'], flow:'cash', go:{ tech:'techNavCashAdvance' },
+    'ca.mine': { roles:['tech','staff'], flow:'cash', go:{ tech:'techNavCashAdvance', staff:'@mycash' },
       en:{ t:'Cash Advance', p:'Ask for cash for a job, then liquidate it with receipts. Reimbursement is for money you spent from your own pocket.',
            s:['New request: amount, purpose and job order.', 'When approved and given, spend it for the job.', 'Liquidate: add each expense with a photo of the receipt.'],
-           tip:'Liquidate within a week — unliquidated advances are flagged to Finance.' },
+           tip:'Liquidate within a week — unliquidated advances are flagged to Finance. Office staff with a Head: your Head endorses first, then Finance decides.' },
       tl:{ p:'Humingi ng cash para sa trabaho, saka i-liquidate gamit ang resibo. Ang Reimbursement ay para sa perang ginastos mo mula sa sariling bulsa.',
            s:['Bagong request: halaga, layunin at job order.', 'Kapag naaprubahan at naibigay, gastusin para sa trabaho.', 'Liquidate: idagdag ang bawat gastos kasama ang litrato ng resibo.'],
-           tip:'Mag-liquidate sa loob ng isang linggo — naaabisuhan ang Finance sa hindi pa nali-liquidate.' } },
+           tip:'Mag-liquidate sa loob ng isang linggo — naaabisuhan ang Finance sa hindi pa nali-liquidate. Office staff na may Head: ang Head mo muna ang mag-e-endorse, saka ang Finance ang magpapasya.' } },
     'financeHr': { roles:['tech'], go:{ tech:'techNavBtnFinance' },
       en:{ t:'Finance & HR', p:'Your attendance, cash advances, liquidation, reimbursement and leave in one place.', s:['Tap a tile to open it.'], tip:'Materials and tools are on your Home shortcuts.' },
       tl:{ p:'Ang attendance, cash advance, liquidation, reimbursement at leave mo sa iisang lugar.', s:['Pindutin ang tile para buksan.'], tip:'Nasa mga shortcut sa Home mo ang materyales at tools.' } },
 
     // ------------------------------------------------------- HUMAN RESOURCES
     'dtr.office': { roles:['admin','staff'], module:'hr.attendance', go:{ admin:'sbNavTechnicians', staff:'hr.attendance' },
-      en:{ t:'Technicians · Attendance', p:'Today\u2019s attendance for every technician, their DTR history and their profile.',
-           s:['See who is present, completed or on overtime today.', 'View DTR for a technician\u2019s time records.', 'View Profile for leaves, violations and documents.'], tip:'' },
-      tl:{ p:'Attendance ngayon ng bawat technician, ang DTR history at profile nila.',
-           s:['Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng technician.', 'View Profile para sa leave, violation at dokumento.'], tip:'' } },
-    'dtr.tech': { roles:['tech'], go:{ tech:'techNavDtr' },
+      en:{ t:'Attendance', p:'Today\u2019s attendance for technicians and office staff, their DTR history and technicians\u2019 profiles.',
+           s:['Switch between Technicians and Office staff at the top.', 'See who is present, completed or on overtime today.', 'View DTR for a person\u2019s time records; View Profile (technicians) for leaves, violations and documents.'], tip:'' },
+      tl:{ p:'Attendance ngayon ng mga technician at office staff, ang DTR history nila at profile ng mga technician.',
+           s:['Lumipat sa Technicians o Office staff sa itaas.', 'Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng tao; View Profile (technician) para sa leave, violation at dokumento.'], tip:'' } },
+    'dtr.tech': { roles:['tech','staff'], go:{ tech:'techNavDtr', staff:'@mydtr' },
       en:{ t:'Attendance (DTR)', p:'Time in and out each day, including overtime.',
            s:['Tap Time In when you arrive; allow location.', 'Tap Time Out when you leave.', 'Your history is below.'], tip:'Use the same phone every day — attendance is tied to your registered device.' },
       tl:{ p:'Mag-time in at time out araw-araw, kasama ang overtime.',
@@ -27510,9 +27699,9 @@
            s:['Buksan ang pending na request; tsekin ang petsa at dahilan.', 'Aprubahan o tanggihan kasama ang komento.'], tip:'Hindi mo maaaprubahan ang sarili mong leave.' } },
     'leave.mine': { roles:['tech','staff'], flow:'leave', go:{ tech:'techNavLeave', staff:'@myleave' },
       en:{ t:'My Leave', p:'File a leave and follow its status.',
-           s:['Choose the leave type and dates, add the reason.', 'Submit — HR decides and you are told.'], tip:'Heads: when your leave is approved, your home offers to hand over your approvals for those dates.' },
+           s:['Choose the leave type and dates, add the reason.', 'Submit — HR decides and you are told. Office staff with a Head: your Head endorses it first.'], tip:'Heads: when your leave is approved, your home offers to hand over your approvals for those dates.' },
       tl:{ p:'Mag-file ng leave at sundan ang status nito.',
-           s:['Piliin ang uri ng leave at mga petsa, ilagay ang dahilan.', 'I-submit — ang HR ang magpapasya at sasabihan ka.'], tip:'Mga Head: kapag naaprubahan ang leave mo, iaalok sa home na ipasa ang mga approval mo sa mga petsang iyon.' } },
+           s:['Piliin ang uri ng leave at mga petsa, ilagay ang dahilan.', 'I-submit — ang HR ang magpapasya at sasabihan ka. Office staff na may Head: ang Head mo muna ang mag-e-endorse.'], tip:'Mga Head: kapag naaprubahan ang leave mo, iaalok sa home na ipasa ang mga approval mo sa mga petsang iyon.' } },
 
     // --------------------------------------------------------- ADMINISTRATION
     'customers': { roles:['admin','staff'], module:'adm.customers', flow:'service', go:{ admin:'menuManageCustomers', staff:'adm.customers' },
@@ -27541,10 +27730,10 @@
     // ------------------------------------------------------ DEPARTMENT STAFF
     'staff.team': { roles:['admin','staff'], flow:'people', go:{ admin:'menuManageStaff', staff:'@team' },
       en:{ t:'Department Staff / My Team', p:'Office staff accounts. The Super Admin creates department Heads; Heads add sub-users under them.',
-           s:['+ Add: name, username, temporary password, departments and page levels.', 'View sees a page, Edit also changes it, Approve also approves.', 'Heads: Delegate while away hands your approvals to a sub-user for set dates.'],
+           s:['+ Add: name, username, temporary password, departments and page levels.', 'View sees a page, Edit also changes it, Approve also approves.', 'Heads: My team today shows who is in, and your team\u2019s leave and cash requests to endorse.', 'Heads: Delegate while away hands your approvals to a sub-user for set dates.'],
            tip:'A sub-user can never get more access than their Head.' },
       tl:{ p:'Mga account ng office staff. Ang Super Admin ang gumagawa ng department Head; ang Head ang nagdadagdag ng sub-user.',
-           s:['+ Add: pangalan, username, temporary password, department at level ng bawat page.', 'View = nakikita, Edit = nababago rin, Approve = naaaprubahan din.', 'Mga Head: ang Delegate while away ay nagpapasa ng approval mo sa sub-user sa itinakdang petsa.'],
+           s:['+ Add: pangalan, username, temporary password, department at level ng bawat page.', 'View = nakikita, Edit = nababago rin, Approve = naaaprubahan din.', 'Mga Head: ipinapakita ng My team today kung sino ang pumasok, at ang leave at cash request ng team mo na ie-endorse.', 'Mga Head: ang Delegate while away ay nagpapasa ng approval mo sa sub-user sa itinakdang petsa.'],
            tip:'Hindi kailanman lalampas ang access ng sub-user sa access ng Head niya.' } },
     'staff.edit': { roles:['admin','staff'], flow:'people', go:{},
       en:{ t:'Staff Account', p:'One person\u2019s account: details, departments and page levels.',
@@ -27698,6 +27887,7 @@
     staff: [
       { id:'pw',     check:'passwordChanged', en:'Set your own password', tl:'Magtakda ng sariling password' },
       { id:'inbox',  page:'staff.inbox', en:'Open your Inbox', tl:'Buksan ang Inbox mo' },
+      { id:'dtr',    page:'dtr.tech',    en:'Time in (My Attendance)', tl:'Mag-time in (My Attendance)' },
       { id:'page',   check:'openedAPage', en:'Open one of your pages', tl:'Buksan ang isa sa mga page mo' },
       { id:'push',   check:'pushOn', en:'Turn on notifications', tl:'I-on ang notifications' }
     ],
@@ -27905,6 +28095,7 @@
     if(g.startsWith('@purch:')){ showPurchasingView(g.slice(7)); return true; }
     const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
                  '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
+                 '@mydtr': ()=> showDtrView(true), '@mycash': ()=> showCashAdvanceView(true, 'new'),
                  '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];
     if(fn){ fn(); return true; }
     const el = gdEl(g);
@@ -28380,6 +28571,9 @@
   registerOutboxHandler('geo', async (key, payload)=>{ await trackerWritePoint(payload); });
 
   function trackerStartBroadcasting(){
+    // Office staff time in with their location like technicians, but they
+    // aren't followed on the field Live Tracker.
+    if(currentUser && currentUser.role === 'staff') return;
     if(!navigator.geolocation || trackerWatchId != null) return; // already running, or no browser support
     trackerWatchId = navigator.geolocation.watchPosition(
       trackerPushLocation,

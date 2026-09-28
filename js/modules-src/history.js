@@ -804,7 +804,29 @@
     }catch(e){ dtrAdminRt = null; }
   }
 
+  // HR's attendance table: technicians, or office staff (My HR, 20261001_01)
+  let dtrPeopleMode = 'tech';
+  function dtrEnsurePeopleToggle(){
+    const card = $('dtrAdminTableCard'); if(!card || document.getElementById('dtrPeopleToggle')) return;
+    const body = card.querySelector('.card-body'); if(!body) return;
+    const t = document.createElement('div');
+    t.id = 'dtrPeopleToggle'; t.className = 'seg-tabs'; t.style.marginBottom = '10px';
+    t.innerHTML = '<button type="button" class="seg-tab active" data-people="tech">Technicians</button><button type="button" class="seg-tab" data-people="staff">Office staff</button>';
+    t.addEventListener('click', (e)=>{
+      const b = e.target.closest('[data-people]'); if(!b || b.dataset.people === dtrPeopleMode) return;
+      dtrPeopleMode = b.dataset.people;
+      t.querySelectorAll('[data-people]').forEach(x=> x.classList.toggle('active', x === b));
+      dtrRenderAdminTable();
+    });
+    body.insertBefore(t, body.firstChild);
+  }
+  async function dtrListStaffPeople(){
+    const { data, error } = await db.from('profiles').select('id, name, active, role').eq('role', 'staff').order('name');
+    if(error) throw error;
+    return data || [];
+  }
   async function dtrRenderAdminTable(opts){
+    dtrEnsurePeopleToggle();
     const quiet = !!(opts && opts.quiet);
     const seq = ++dtrAdminRenderSeq;
     const body = $('dtrAttendanceTableBody');
@@ -818,7 +840,7 @@
     // showing everyone as "Absent" would be wrong).
     const seeDtr = hrIsReviewer('hr.attendance');
     const [users, records] = await Promise.all([
-      cloudListUsers().catch(()=>null),
+      (dtrPeopleMode === 'staff' ? dtrListStaffPeople() : cloudListUsers()).catch(()=>null),
       seeDtr ? dtrListAllForDate(dateISO).catch(()=>null) : Promise.resolve([])
     ]);
     if(seq !== dtrAdminRenderSeq) return;            // a newer refresh already started
@@ -827,7 +849,7 @@
       .sort((a,b)=> (a.name||'').localeCompare(b.name||''));
     const summaryEl = $('dtrAttendanceSummary');
     if(active.length===0){
-      body.innerHTML = '<tr><td colspan="9"><div class="empty-state">No technician accounts yet.</div></td></tr>';
+      body.innerHTML = '<tr><td colspan="9"><div class="empty-state">' + (dtrPeopleMode === 'staff' ? 'No office staff accounts yet.' : 'No technician accounts yet.') + '</div></td></tr>';
       if(summaryEl) summaryEl.textContent = '';
       return;
     }
@@ -880,6 +902,8 @@
         '<td>'+escapeHtml(otHoursTxt)+'</td>'+
         '<td><button type="button" class="att-view-btn">View DTR</button> <button type="button" class="att-view-btn">View Profile</button></td>';
       const [viewDtrBtn, viewProfileBtn] = row.querySelectorAll('.att-view-btn');
+      // Violations and documents exist for technicians only
+      if(dtrPeopleMode === 'staff' && viewProfileBtn) viewProfileBtn.style.display = 'none';
       viewDtrBtn.addEventListener('click', ()=> dtrShowTechnicianDetail({id:u.id, name:u.name}));
       viewProfileBtn.addEventListener('click', ()=> techOpenProfile({id:u.id, name:u.name}));
       frag.appendChild(row);
