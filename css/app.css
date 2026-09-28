@@ -4294,3 +4294,4 @@ body.role-customer #customerProfileScreen > #cpGuideBtn{ display:block; box-sizi
 .stf-today-body{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .stf-today-acts{ display:flex; gap:8px; }
 .stf-today-acts .btn{ width:auto; padding-left:18px; padding-right:18px; }
+.stf-endorse-note.stf-head-note{ background:#EEF0FA; color:#3A4A8A; }

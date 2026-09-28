@@ -1408,7 +1408,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card'; card.dataset.reqId = r.id;
+      card.className = 'user-card'; card.dataset.reqId = r.id; card.dataset.requester = r.userId || '';
       const disbursedSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -2047,7 +2047,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card'; card.dataset.reqId = r.id;
+      card.className = 'user-card'; card.dataset.reqId = r.id; card.dataset.requester = r.userId || '';
       const paidSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Paid</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';

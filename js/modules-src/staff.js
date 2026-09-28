@@ -1430,6 +1430,7 @@
     if(!list) return;
     const ids = [...list.querySelectorAll('[data-req-id]')].map(e=> e.dataset.reqId);
     if(!ids.length) return;
+    if(mode === 'review') await staffMarkHeadRequests(list);
     let rows = [];
     try{
       const { data, error } = await db.from('request_endorsements').select('request_id, status, head, comment, decided_at').eq('request_kind', kind).in('request_id', ids);
@@ -1459,6 +1460,31 @@
       el.insertBefore(n, el.children[1] || null);
       if(r.status === 'pending' && mode === 'review' && currentUser.role !== 'admin'){
         el.querySelectorAll('[data-act="approve"], [data-act="disapprove"], [data-act="review"]').forEach(b=> b.style.display = 'none');
+      }
+    });
+  }
+
+  // Reviewer lists: a department Head's own request is decided by the Super
+  // Admin — HR / Finance staff see it, labelled, without the decision
+  // buttons (the database refuses them anyway). Money steps (cash given,
+  // settlement) stay with Finance.
+  async function staffMarkHeadRequests(list){
+    const cards = [...list.querySelectorAll('[data-requester]')].filter(c=> c.dataset.requester);
+    if(!cards.length) return;
+    let heads = [];
+    try{
+      const { data, error } = await db.rpc('staff_heads_among', { p_ids: [...new Set(cards.map(c=> c.dataset.requester))] });
+      if(error) return;
+      heads = data || [];
+    }catch(e){ return; }
+    cards.filter(c=> heads.includes(c.dataset.requester)).forEach(c=>{
+      if(c.querySelector('.stf-head-note')) return;
+      const n = document.createElement('div');
+      n.className = 'stf-endorse-note stf-head-note';
+      n.textContent = currentUser.role === 'admin' ? 'Department Head\u2019s request \u2014 yours to decide' : 'Department Head\u2019s request \u2014 the Super Admin decides';
+      c.insertBefore(n, c.children[1] || null);
+      if(currentUser.role !== 'admin'){
+        c.querySelectorAll('[data-act="review"], [data-act="approve"], [data-act="disapprove"], [data-act="liq"]').forEach(b=> b.style.display = 'none');
       }
     });
   }

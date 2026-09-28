@@ -8246,7 +8246,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card'; card.dataset.reqId = r.id;
+      card.className = 'user-card'; card.dataset.reqId = r.id; card.dataset.requester = r.userId || '';
       card.innerHTML =
         '<div class="user-card-head">'+
           '<div>'+
@@ -14774,7 +14774,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card'; card.dataset.reqId = r.id;
+      card.className = 'user-card'; card.dataset.reqId = r.id; card.dataset.requester = r.userId || '';
       const disbursedSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Cash given</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -15413,7 +15413,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card'; card.dataset.reqId = r.id;
+      card.className = 'user-card'; card.dataset.reqId = r.id; card.dataset.requester = r.userId || '';
       const paidSummary = r.disbursed
         ? '<div class="leave-comment" style="background:#EAF5FC; border-color:#C6E2F2;"><b>Paid</b>'+caFmtPeso(r.amountGiven)+' on '+leaveFmtDate(r.dateGiven)+(r.disbursedBy ? (' · recorded by '+escapeHtml(r.disbursedBy)) : '')+'</div>'
         : '';
@@ -27025,6 +27025,7 @@
     if(!list) return;
     const ids = [...list.querySelectorAll('[data-req-id]')].map(e=> e.dataset.reqId);
     if(!ids.length) return;
+    if(mode === 'review') await staffMarkHeadRequests(list);
     let rows = [];
     try{
       const { data, error } = await db.from('request_endorsements').select('request_id, status, head, comment, decided_at').eq('request_kind', kind).in('request_id', ids);
@@ -27054,6 +27055,31 @@
       el.insertBefore(n, el.children[1] || null);
       if(r.status === 'pending' && mode === 'review' && currentUser.role !== 'admin'){
         el.querySelectorAll('[data-act="approve"], [data-act="disapprove"], [data-act="review"]').forEach(b=> b.style.display = 'none');
+      }
+    });
+  }
+
+  // Reviewer lists: a department Head's own request is decided by the Super
+  // Admin — HR / Finance staff see it, labelled, without the decision
+  // buttons (the database refuses them anyway). Money steps (cash given,
+  // settlement) stay with Finance.
+  async function staffMarkHeadRequests(list){
+    const cards = [...list.querySelectorAll('[data-requester]')].filter(c=> c.dataset.requester);
+    if(!cards.length) return;
+    let heads = [];
+    try{
+      const { data, error } = await db.rpc('staff_heads_among', { p_ids: [...new Set(cards.map(c=> c.dataset.requester))] });
+      if(error) return;
+      heads = data || [];
+    }catch(e){ return; }
+    cards.filter(c=> heads.includes(c.dataset.requester)).forEach(c=>{
+      if(c.querySelector('.stf-head-note')) return;
+      const n = document.createElement('div');
+      n.className = 'stf-endorse-note stf-head-note';
+      n.textContent = currentUser.role === 'admin' ? 'Department Head\u2019s request \u2014 yours to decide' : 'Department Head\u2019s request \u2014 the Super Admin decides';
+      c.insertBefore(n, c.children[1] || null);
+      if(currentUser.role !== 'admin'){
+        c.querySelectorAll('[data-act="review"], [data-act="approve"], [data-act="disapprove"], [data-act="liq"]').forEach(b=> b.style.display = 'none');
       }
     });
   }
@@ -27666,17 +27692,17 @@
     'ca.office': { roles:['admin','staff'], module:'fin.cash_advance', flow:'cash', go:{ admin:'sbNavCashAdvance', staff:'fin.cash_advance' },
       en:{ t:'Cash Advance · Liquidation · Reimbursement', p:'Technicians\u2019 money requests from start to finish: approve, give the cash, review the liquidation, settle the balance.',
            s:['Pending: approve or disapprove each request.', 'Approved: record the cash given.', 'To Review Liquidation: check receipts and approve.', 'To Settle: mark the balance returned or reimbursed.'],
-           tip:'Approving asks for your password, and your peso limit applies.' },
+           tip:'Approving asks for your password, and your peso limit applies. Department Heads\u2019 requests and liquidations are decided by the Super Admin.' },
       tl:{ p:'Mga request ng pera ng technician mula simula hanggang dulo: aprubahan, ibigay ang cash, suriin ang liquidation, ayusin ang balanse.',
            s:['Pending: aprubahan o tanggihan ang bawat request.', 'Approved: itala ang ibinigay na cash.', 'To Review Liquidation: tsekin ang resibo at aprubahan.', 'To Settle: markahang naibalik o na-reimburse ang balanse.'],
-           tip:'Kapag mag-a-approve, hihingin ang password mo, at may limitasyon ang halagang puwede mong aprubahan.' } },
+           tip:'Kapag mag-a-approve, hihingin ang password mo, at may limitasyon ang halagang puwede mong aprubahan. Ang request at liquidation ng mga department Head ay ang Super Admin ang magpapasya.' } },
     'ca.mine': { roles:['tech','staff'], flow:'cash', go:{ tech:'techNavCashAdvance', staff:'@mycash' },
       en:{ t:'Cash Advance', p:'Ask for cash for a job, then liquidate it with receipts. Reimbursement is for money you spent from your own pocket.',
            s:['New request: amount, purpose and job order.', 'When approved and given, spend it for the job.', 'Liquidate: add each expense with a photo of the receipt.'],
-           tip:'Liquidate within a week — unliquidated advances are flagged to Finance. Office staff with a Head: your Head endorses first, then Finance decides.' },
+           tip:'Liquidate within a week — unliquidated advances are flagged to Finance. Office staff with a Head: your Head endorses first, then Finance decides. Department Heads: the Super Admin decides yours.' },
       tl:{ p:'Humingi ng cash para sa trabaho, saka i-liquidate gamit ang resibo. Ang Reimbursement ay para sa perang ginastos mo mula sa sariling bulsa.',
            s:['Bagong request: halaga, layunin at job order.', 'Kapag naaprubahan at naibigay, gastusin para sa trabaho.', 'Liquidate: idagdag ang bawat gastos kasama ang litrato ng resibo.'],
-           tip:'Mag-liquidate sa loob ng isang linggo — naaabisuhan ang Finance sa hindi pa nali-liquidate. Office staff na may Head: ang Head mo muna ang mag-e-endorse, saka ang Finance ang magpapasya.' } },
+           tip:'Mag-liquidate sa loob ng isang linggo — naaabisuhan ang Finance sa hindi pa nali-liquidate. Office staff na may Head: ang Head mo muna ang mag-e-endorse, saka ang Finance ang magpapasya. Mga department Head: ang Super Admin ang magpapasya sa inyo.' } },
     'financeHr': { roles:['tech'], go:{ tech:'techNavBtnFinance' },
       en:{ t:'Finance & HR', p:'Your attendance, cash advances, liquidation, reimbursement and leave in one place.', s:['Tap a tile to open it.'], tip:'Materials and tools are on your Home shortcuts.' },
       tl:{ p:'Ang attendance, cash advance, liquidation, reimbursement at leave mo sa iisang lugar.', s:['Pindutin ang tile para buksan.'], tip:'Nasa mga shortcut sa Home mo ang materyales at tools.' } },
@@ -27694,14 +27720,14 @@
            s:['Pindutin ang Time In pagdating; payagan ang lokasyon.', 'Pindutin ang Time Out pag-alis.', 'Nasa ibaba ang history mo.'], tip:'Gamitin ang parehong phone araw-araw — nakatali ang attendance sa naka-register mong device.' } },
     'leave.office': { roles:['admin','staff'], module:'hr.leaves', flow:'leave', go:{ admin:'@fn:leave', staff:'hr.leaves' },
       en:{ t:'Leave Requests', p:'Everyone\u2019s leave requests: approve or disapprove them.',
-           s:['Open a pending request; check the dates and reason.', 'Approve or disapprove with a comment.'], tip:'You can\u2019t approve your own leave.' },
+           s:['Open a pending request; check the dates and reason.', 'Approve or disapprove with a comment.'], tip:'You can\u2019t approve your own leave. Department Heads\u2019 leave is decided by the Super Admin.' },
       tl:{ p:'Mga leave request ng lahat: aprubahan o tanggihan.',
-           s:['Buksan ang pending na request; tsekin ang petsa at dahilan.', 'Aprubahan o tanggihan kasama ang komento.'], tip:'Hindi mo maaaprubahan ang sarili mong leave.' } },
+           s:['Buksan ang pending na request; tsekin ang petsa at dahilan.', 'Aprubahan o tanggihan kasama ang komento.'], tip:'Hindi mo maaaprubahan ang sarili mong leave. Ang leave ng mga department Head ay ang Super Admin ang magpapasya.' } },
     'leave.mine': { roles:['tech','staff'], flow:'leave', go:{ tech:'techNavLeave', staff:'@myleave' },
       en:{ t:'My Leave', p:'File a leave and follow its status.',
-           s:['Choose the leave type and dates, add the reason.', 'Submit — HR decides and you are told. Office staff with a Head: your Head endorses it first.'], tip:'Heads: when your leave is approved, your home offers to hand over your approvals for those dates.' },
+           s:['Choose the leave type and dates, add the reason.', 'Submit — HR decides and you are told. Office staff with a Head: your Head endorses it first. Department Heads: the Super Admin decides yours.'], tip:'Heads: when your leave is approved, your home offers to hand over your approvals for those dates.' },
       tl:{ p:'Mag-file ng leave at sundan ang status nito.',
-           s:['Piliin ang uri ng leave at mga petsa, ilagay ang dahilan.', 'I-submit — ang HR ang magpapasya at sasabihan ka. Office staff na may Head: ang Head mo muna ang mag-e-endorse.'], tip:'Mga Head: kapag naaprubahan ang leave mo, iaalok sa home na ipasa ang mga approval mo sa mga petsang iyon.' } },
+           s:['Piliin ang uri ng leave at mga petsa, ilagay ang dahilan.', 'I-submit — ang HR ang magpapasya at sasabihan ka. Office staff na may Head: ang Head mo muna ang mag-e-endorse. Mga department Head: ang Super Admin ang magpapasya sa inyo.'], tip:'Mga Head: kapag naaprubahan ang leave mo, iaalok sa home na ipasa ang mga approval mo sa mga petsang iyon.' } },
 
     // --------------------------------------------------------- ADMINISTRATION
     'customers': { roles:['admin','staff'], module:'adm.customers', flow:'service', go:{ admin:'menuManageCustomers', staff:'adm.customers' },

@@ -217,7 +217,7 @@
     list.innerHTML = '';
     items.forEach(r=>{
       const card = document.createElement('div');
-      card.className = 'user-card'; card.dataset.reqId = r.id;
+      card.className = 'user-card'; card.dataset.reqId = r.id; card.dataset.requester = r.userId || '';
       card.innerHTML =
         '<div class="user-card-head">'+
           '<div>'+
