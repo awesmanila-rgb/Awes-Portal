@@ -930,7 +930,9 @@
     tlSlips:        { nav:'sbNavTlSlips',        title:'Tool Slips',           sub:'Issue, return & handover slips' },
     tlReports:      { nav:'sbNavTlReports',      title:'Tool Reports',         sub:'Movements, custody, defects, register' },
     myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
-    purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' }
+    purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' },
+    paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
+    payRules:       { nav:'sbNavPayRules',       title:'Payroll Rules',        sub:'SSS, PhilHealth, Pag-IBIG, BIR & premiums' }
   };
   function showPurchasingView(key){
     // Department staff: never open a screen they have no access to (it

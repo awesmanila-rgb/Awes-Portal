@@ -34,6 +34,8 @@
     'fin.cash_advance', 'fin.liquidation', 'fin.reimbursement',
     // Human Resources — 20260926_05_hr_staff_access.sql
     'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
+    // Payroll, Phase 1 — 20261004_01_payroll_foundation.sql
+    'hr.payroll_setup', 'fin.payroll_rules',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -1658,6 +1660,8 @@
     'hr.staff_attendance': ()=>{ dtrSetPeopleMode('staff'); showDtrView(); },
     'hr.tech_profiles':    ()=> showDtrView(),
     'hr.leaves':           ()=> showLeaveView(),
+    'hr.payroll_setup':    ()=> showPurchasingView('paySetup'),
+    'fin.payroll_rules':   ()=> showPurchasingView('payRules'),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
     'adm.equipment':       ()=>{ admApplyStaffMode(); showEquipmentManagerView(); },
     'adm.announcements':   ()=>{ admApplyStaffMode(); annOpenAdmin(); },
@@ -1780,7 +1784,8 @@
   // ---------------------------------------------------------------------
   const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
-    returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports' };
+    returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
+    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules' };
   // May this user open purchasing page `key`? (Super Admin: always)
   function purchStaffAllowed(key){
     if(currentUser && currentUser.role === 'admin') return true;

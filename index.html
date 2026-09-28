@@ -275,6 +275,7 @@ window.awesCss = {
         <div class="sb-section-body" id="sbSec_hr"><div class="sb-section-inner">
           <button type="button" class="sidebar-link" id="sbNavTechnicians"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>Attendance</button>
           <button type="button" class="sidebar-link" id="sbNavLeave"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span>Leave Requests</button>
+          <button type="button" class="sidebar-link" id="sbNavPaySetup"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg></span>Payroll Setup</button>
         </div></div>
       </div>
       <div class="sb-section" data-sb-key="finance">
@@ -283,6 +284,7 @@ window.awesCss = {
           <button type="button" class="sidebar-link" id="sbNavCashAdvance"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>Cash Advance</button>
           <button type="button" class="sidebar-link" id="sbNavLiquidation"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg></span>Liquidation</button>
           <button type="button" class="sidebar-link" id="sbNavReimbursement"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12 7 8 3 12l4 4z"/><path d="M13 12l4-4 4 4-4 4z"/><path d="M7 8l3-3 2 2 2-2 3 3"/></svg></span>Reimbursement</button>
+          <button type="button" class="sidebar-link" id="sbNavPayRules"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 7h14"/><path d="M5 7l-3 7a4 4 0 0 0 6 0z"/><path d="M19 7l-3 7a4 4 0 0 0 6 0z"/><path d="M8 21h8"/></svg></span>Payroll Rules</button>
         </div></div>
       </div>
 
@@ -2749,6 +2751,66 @@ window.awesCss = {
       </div>
       <div id="invWhList"><div class="empty-state">Loading…</div></div>
     </div>
+  </div>
+
+  <!-- Payroll (payroll.js, migration 20261004_01_payroll_foundation.sql) -->
+  <div class="card purch-panel" id="purchPanel_paySetup" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> Payroll Setup</span><span class="purch-head-right"><span class="sp-count" id="payEmpCount"></span></span></div>
+    <div class="card-body">
+      <div class="seg-tabs pay-tabs" id="paySetupTabs">
+        <button type="button" class="seg-tab active" data-pay-tab="employees">Employees</button>
+        <button type="button" class="seg-tab" data-pay-tab="holidays">Holidays</button>
+        <button type="button" class="seg-tab" data-pay-tab="settings">Company Settings</button>
+      </div>
+      <div id="payTab_employees">
+        <div id="payEmpListView">
+          <p class="pay-intro">Rates, schedules and government contributions for each technician and office staff member. Pay runs use what is saved here.</p>
+          <div class="sp-toolbar po-toolbar">
+            <input type="text" id="payEmpSearch" placeholder="Search name, employee no., position…">
+            <select id="payEmpFilter"><option value="">Everyone active</option><option value="missing">Not set up yet</option><option value="set">On payroll</option><option value="inactive">Off payroll / deactivated</option></select>
+          </div>
+          <div id="payEmpList"><div class="empty-state">Loading…</div></div>
+        </div>
+        <div id="payEmpEditView" style="display:none;">
+          <div class="po-ed-top"><button type="button" class="po-back" id="payEmpBack">‹ Employees</button><div class="po-ed-title" id="payEmpTitle"></div></div>
+          <div id="payEmpForm"></div>
+          <div class="pay-actions">
+            <button type="button" class="btn btn-primary" id="payEmpSave">Save Pay Setup</button>
+            <button type="button" class="btn btn-secondary" id="payEmpCancel">Cancel</button>
+          </div>
+          <div class="po-sec"><div class="po-sec-title">Rate history</div><div id="payEmpHistory"></div></div>
+        </div>
+      </div>
+      <div id="payTab_holidays" style="display:none;">
+        <p class="pay-intro">Holidays decide holiday pay in pay runs. Add each year’s movable holidays (Holy Week, National Heroes Day, the Eids, Chinese New Year) and any moved dates from that year’s proclamation.</p>
+        <div class="pay-hol-bar">
+          <select id="payHolYear"></select>
+          <button type="button" class="btn btn-secondary pay-edit-only" id="payHolPrefill">Add fixed-date holidays</button>
+        </div>
+        <div class="po-sec pay-edit-only">
+          <div class="po-sec-title">Add a holiday</div>
+          <div class="po-grid">
+            <div class="field po-c3"><label>Date <span class="req">*</span></label><input type="date" id="payHolDate"></div>
+            <div class="field po-c6"><label>Name <span class="req">*</span></label><input type="text" id="payHolName" placeholder="e.g. Maundy Thursday"></div>
+            <div class="field po-c3"><label>Type</label><select id="payHolKind"><option value="REGULAR">Regular holiday</option><option value="SPECIAL_NON_WORKING">Special non-working day</option><option value="SPECIAL_WORKING">Special working day</option></select></div>
+            <div class="field po-c3"><label>Where</label><input type="text" id="payHolScope" value="National" placeholder="National, or a city"></div>
+            <div class="field po-c6"><label>Notes</label><input type="text" id="payHolNotes" placeholder="e.g. Proclamation No. …"></div>
+            <div class="field po-c3"><label>&nbsp;</label><button type="button" class="btn btn-primary" id="payHolAdd" style="width:100%;">+ Add</button></div>
+          </div>
+        </div>
+        <div id="payHolList"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="payTab_settings" style="display:none;">
+        <div id="paySettingsForm"></div>
+        <div class="pay-actions"><button type="button" class="btn btn-primary" id="paySettingsSave">Save Settings</button></div>
+      </div>
+      <datalist id="payDaysList"><option value="261"></option><option value="313"></option><option value="365"></option></datalist>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_payRules" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 7h14"/><path d="M5 7l-3 7a4 4 0 0 0 6 0z"/><path d="M19 7l-3 7a4 4 0 0 0 6 0z"/><path d="M8 21h8"/></svg> Payroll Rules</span><span class="purch-head-right"></span></div>
+    <div class="card-body"><div id="payRulesBody"><div class="empty-state">Loading…</div></div></div>
   </div>
 
   <div class="card purch-panel" id="purchPanel_projects" style="display:none;">
