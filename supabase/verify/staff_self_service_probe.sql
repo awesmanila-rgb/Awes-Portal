@@ -136,6 +136,58 @@ select pg_temp.ok(pg_temp.seen(:HR::uuid, 'select 1 from public.profiles where r
                   'HR sees office staff and their attendance');
 select pg_temp.ok(pg_temp.seen(:H::uuid, 'select 1 from public.device_locks') = 0, 'nobody else sees a person''s registered device');
 
+-- ---- a department Head's own requests: Super Admin only ----------------------
+select pg_temp.as_user(:HR::uuid); set local role authenticated;
+select pg_temp.fails($q$update public.leave_requests set status='approved', data = data || '{"status":"approved"}' where id='ac000000-0000-0000-0000-000000000004'$q$,
+       'decided by the Super Admin', 'HR cannot approve a department Head''s leave');
+select pg_temp.fails($q$update public.leave_requests set status='disapproved', data = data || '{"status":"disapproved"}' where id='ac000000-0000-0000-0000-000000000004'$q$,
+       'decided by the Super Admin', '… nor disapprove it');
+reset role;
+select pg_temp.as_user(:HR::uuid);
+select pg_temp.ok(not pg_temp.inbox_has('leave_decide', 'ac000000-0000-0000-0000-000000000004') and pg_temp.inbox_has('leave_decide', 'ac000000-0000-0000-0000-000000000005'),
+                  'HR Inbox: no Head''s leave (the technician''s is still there)');
+select pg_temp.ok(public.staff_heads_among(array['ab000000-0000-0000-0000-00000000000a','ab000000-0000-0000-0000-00000000000b']::uuid[])
+                  = array['ab000000-0000-0000-0000-00000000000a']::uuid[], 'reviewer screens can tell which requesters are Heads');
+select pg_temp.as_user(:A::uuid);
+select pg_temp.ok(pg_temp.inbox_has('leave_decide', 'ac000000-0000-0000-0000-000000000004'), 'Super Admin Inbox has the Head''s leave');
+-- escalation of a Head's request goes to the Super Admin, not HR's Head
+select pg_temp.as_user(:A::uuid); set local role postgres;   -- the guard keeps submitted_at for everyone but the Super Admin
+update public.leave_requests set submitted_at = now() - interval '3 days' where id = 'ac000000-0000-0000-0000-000000000004';
+select pg_temp.as_user(null);
+select public.staff_apply_access(:HR::uuid, '[{"id":"hr","is_head":true}]', '[{"module":"hr.leaves","level":"approve"},{"module":"hr.attendance","level":"view"}]', :A::uuid);
+select pg_temp.ok((select recipients = array['00000000-0000-0000-0000-0000000000a1']::uuid[] from public.inbox_escalations_due()
+                    where key = 'leave_decide:ac000000-0000-0000-0000-000000000004:L1'), 'an overdue Head''s leave escalates to the Super Admin');
+reset role;
+select pg_temp.as_user(:A::uuid); set local role authenticated;
+update public.leave_requests set status = 'approved', data = data || '{"status":"approved"}' where id = 'ac000000-0000-0000-0000-000000000004';
+reset role;
+select pg_temp.ok((select status from public.leave_requests where id = 'ac000000-0000-0000-0000-000000000004') = 'approved', 'the Super Admin approves the Head''s leave');
+
+-- cash advance: approve (Super Admin) → cash given (Finance) → liquidation (Super Admin)
+select pg_temp.as_user(:H::uuid); set local role authenticated;
+insert into public.cash_advance_requests (id, technician_id, status, submitted_at, data) values ('ac000000-0000-0000-0000-000000000007', :H::uuid, 'pending', now(), '{"amount":3000,"technicianName":"Hera Head"}');
+reset role;
+select pg_temp.as_user(:FN::uuid); set local role authenticated;
+select pg_temp.fails($q$update public.cash_advance_requests set status='approved', data = data || '{"status":"approved"}' where id='ac000000-0000-0000-0000-000000000007'$q$,
+       'decided by the Super Admin', 'Finance cannot approve a department Head''s cash advance');
+reset role;
+select pg_temp.as_user(:A::uuid); set local role authenticated;
+update public.cash_advance_requests set status = 'approved', data = data || '{"status":"approved"}' where id = 'ac000000-0000-0000-0000-000000000007';
+reset role;
+select pg_temp.as_user(:FN::uuid); set local role authenticated;
+update public.cash_advance_requests set data = data || jsonb_build_object('disbursed', true, 'dateGiven', current_date, 'amountGiven', 3000)
+ where id = 'ac000000-0000-0000-0000-000000000007';
+reset role;
+select pg_temp.ok((select (data->>'disbursed')::boolean from public.cash_advance_requests where id = 'ac000000-0000-0000-0000-000000000007'),
+                  'once approved, Finance still records the cash given');
+select pg_temp.as_user(:H::uuid); set local role authenticated;
+update public.cash_advance_requests set data = data || '{"liquidation":{"status":"pending","totalAmount":2800,"items":[]}}' where id = 'ac000000-0000-0000-0000-000000000007';
+reset role;
+select pg_temp.as_user(:FN::uuid); set local role authenticated;
+select pg_temp.fails($q$update public.cash_advance_requests set data = jsonb_set(data, '{liquidation,status}', '"approved"') where id='ac000000-0000-0000-0000-000000000007'$q$,
+       'reviewed by the Super Admin', 'Finance cannot review a department Head''s liquidation');
+reset role;
+
 -- ---- Super Admin can override ------------------------------------------------
 select pg_temp.as_user(:S::uuid); set local role authenticated;
 insert into public.leave_requests (id, technician_id, status, submitted_at, data) values ('ac000000-0000-0000-0000-000000000006', :S::uuid, 'pending', now(), '{"leaveType":"Emergency"}');

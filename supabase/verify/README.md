@@ -202,9 +202,11 @@ refused until endorsed; only the Super Admin can override); who may endorse
 (that person's Head only — not another Head, not themselves, never written
 directly); declining with a reason; the Inbox (endorse items for the Head,
 approvals for HR / Finance only once endorsed); the Head's read-only team
-view; HR seeing office staff.
+view; HR seeing office staff; department Heads' own requests decided by the
+Super Admin only (HR / Finance refused, Inbox and escalations to the Super
+Admin, Finance still records cash given).
 
 ```sh
 psql -d awes_backup -f ../migrations/20261001_01_staff_self_service.sql
-psql -d awes_backup -f staff_self_service_probe.sql   # expect 25 × PASS
+psql -d awes_backup -f staff_self_service_probe.sql   # expect 35 × PASS
 ```
