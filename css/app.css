@@ -4256,3 +4256,31 @@ button.gd-check-row{ cursor:pointer; }
 body.role-customer .gd-help-fab{ bottom:calc(84px + env(safe-area-inset-bottom, 0px)); }   /* clear of the customer bottom bar */
 /* in-page shortcuts to screens a staff member can't open (staff.js staffGateHubButtons) */
 .stf-hidden{ display:none !important; }
+
+/* In-app guide blocks inside customer screens: follow the portal's own
+   gutter (20px phones · 24px tablets · centred 1152px column on desktop),
+   so they line up with the header and the page content. */
+body.role-customer .cp-screen > #gdChecklist,
+body.role-customer .cp-screen > #gdCard{ margin:16px 20px; }
+@media (min-width:769px){
+  body.role-customer .cp-screen > #gdChecklist,
+  body.role-customer .cp-screen > #gdCard{ margin-left:24px; margin-right:24px; }
+}
+@media (min-width:1248px){
+  body.role-customer .cp-screen > #gdChecklist,
+  body.role-customer .cp-screen > #gdCard{ margin-left:calc(50% - 576px); margin-right:calc(50% - 576px); }
+}
+
+/* Account (profile) screen uses a narrower centred column (560px with
+   20px padding → 520px of content): the guide card and the Help & Guide
+   button follow that column instead of the wide one. */
+body.role-customer #customerProfileScreen > #gdCard,
+body.role-customer #customerProfileScreen > #cpGuideBtn{ margin:16px 20px 0; width:auto; }
+@media (min-width:561px){
+  body.role-customer #customerProfileScreen > #gdCard,
+  body.role-customer #customerProfileScreen > #cpGuideBtn{ max-width:520px; margin-left:auto; margin-right:auto; }
+}
+body.role-customer #customerProfileScreen > #cpGuideBtn{ display:block; box-sizing:border-box; width:calc(100% - 40px); }
+@media (min-width:561px){
+  body.role-customer #customerProfileScreen > #cpGuideBtn{ width:100%; }
+}
