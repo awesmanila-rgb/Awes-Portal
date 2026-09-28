@@ -255,7 +255,6 @@ window.awesCss = {
       <div class="sb-section" data-sb-key="operations">
         <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_operations"><span class="sb-title">Operations</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
         <div class="sb-section-body" id="sbSec_operations"><div class="sb-section-inner">
-          <button type="button" class="sidebar-link" id="sbNavTechnicians"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>Technicians</button>
           <button type="button" class="sidebar-link" id="menuManageReports"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></span>Service Reports</button>
           <button type="button" class="sidebar-link" id="sbNavDispatch"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg></span>Dispatch</button>
           <!-- Admin-only — customer-filed service requests. Technicians never
@@ -268,6 +267,14 @@ window.awesCss = {
           </button>
           <button type="button" class="sidebar-link" id="menuManageCustomers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/><path d="M8 6h2M14 6h2M8 10h2M14 10h2M8 14h2M14 14h2"/></svg></span>Customers</button>
           <button type="button" class="sidebar-link" id="menuManageEquipment"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="20" height="11" rx="2"/><path d="M8 9V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M2 14h20"/></svg></span>Equipment</button>
+          <button type="button" class="sidebar-link" id="sbNavProjects"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h4M8 17h7"/></svg></span>Projects</button>
+        </div></div>
+      </div>
+      <div class="sb-section" data-sb-key="hr">
+        <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_hr"><span class="sb-title">Human Resources</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+        <div class="sb-section-body" id="sbSec_hr"><div class="sb-section-inner">
+          <button type="button" class="sidebar-link" id="sbNavTechnicians"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>Attendance</button>
+          <button type="button" class="sidebar-link" id="sbNavLeave"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m9 16 2 2 4-4"/></svg></span>Leave Requests</button>
         </div></div>
       </div>
       <div class="sb-section" data-sb-key="finance">
@@ -295,9 +302,9 @@ window.awesCss = {
       <!-- Inventory — Phase 1: stock on hand, warehouses, projects.
            Pages live in #purchasingView (same show/hide framework as
            Purchasing); logic in inventory.js. -->
-      <div class="sb-section" data-sb-key="inventory">
-        <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_inventory"><span class="sb-title">Inventory</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
-        <div class="sb-section-body" id="sbSec_inventory"><div class="sb-section-inner">
+      <div class="sb-section" data-sb-key="administration">
+        <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_administration"><span class="sb-title">Administration</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+        <div class="sb-section-body" id="sbSec_administration"><div class="sb-section-inner">
           <button type="button" class="sidebar-link" id="sbNavStock"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg></span>Stock on Hand</button>
           <button type="button" class="sidebar-link" id="sbNavWarehouses"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg></span>Warehouses</button>
           <button type="button" class="sidebar-link" id="sbNavReceive"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg></span>Receive</button>
@@ -306,7 +313,6 @@ window.awesCss = {
           <button type="button" class="sidebar-link" id="sbNavTransfers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M21 7H9"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12"/></svg></span>Transfers</button>
           <button type="button" class="sidebar-link" id="sbNavSlips"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg></span>Slips &amp; History</button>
           <button type="button" class="sidebar-link" id="sbNavInvReports"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span>Inventory Reports</button>
-          <button type="button" class="sidebar-link" id="sbNavProjects"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h4M8 17h7"/></svg></span>Projects</button>
         </div></div>
       </div>
       <!-- Tools & Equipment (tools.js) -->

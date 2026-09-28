@@ -53,7 +53,7 @@ overdue escalates on the first run (grouped into one message per person).
 
 Upload the web files (`index.html`, `css/app.css`, `js/app.bundle.js`,
 `sw.js`; `js/modules-src/` and `build.py` are the source). The service
-worker cache is **v170**, so installed phones update on their own.
+worker cache is **v171**, so installed phones update on their own.
 
 ## 5. After installing
 
