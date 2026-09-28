@@ -270,11 +270,11 @@
       tl:{ p:'Ang attendance, cash advance, liquidation, reimbursement at leave mo sa iisang lugar.', s:['Pindutin ang tile para buksan.'], tip:'Nasa mga shortcut sa Home mo ang materyales at tools.' } },
 
     // ------------------------------------------------------- HUMAN RESOURCES
-    'dtr.office': { roles:['admin','staff'], module:'hr.attendance', go:{ admin:'sbNavTechnicians', staff:'hr.attendance' },
+    'dtr.office': { roles:['admin','staff'], module:['hr.attendance','hr.staff_attendance'], go:{ admin:'sbNavTechnicians', staff:'@attendance' },
       en:{ t:'Attendance', p:'Today\u2019s attendance for technicians and office staff, their DTR history and technicians\u2019 profiles.',
-           s:['Switch between Technicians and Office staff at the top.', 'See who is present, completed or on overtime today.', 'View DTR for a person\u2019s time records; View Profile (technicians) for leaves, violations and documents.'], tip:'' },
+           s:['Switch between Technicians and Office staff at the top (each is its own access: Technician Attendance / Office Staff Attendance).', 'See who is present, completed or on overtime today.', 'View DTR for a person\u2019s time records; View Profile (technicians) for leaves, violations and documents.'], tip:'' },
       tl:{ p:'Attendance ngayon ng mga technician at office staff, ang DTR history nila at profile ng mga technician.',
-           s:['Lumipat sa Technicians o Office staff sa itaas.', 'Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng tao; View Profile (technician) para sa leave, violation at dokumento.'], tip:'' } },
+           s:['Lumipat sa Technicians o Office staff sa itaas (magkahiwalay na access: Technician Attendance / Office Staff Attendance).', 'Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng tao; View Profile (technician) para sa leave, violation at dokumento.'], tip:'' } },
     'dtr.tech': { roles:['tech','staff'], go:{ tech:'techNavDtr', staff:'@mydtr' },
       en:{ t:'Attendance (DTR)', p:'Time in and out each day, including overtime.',
            s:['Tap Time In when you arrive; allow location.', 'Tap Time Out when you leave.', 'Your history is below.'], tip:'Use the same phone every day — attendance is tied to your registered device.' },

@@ -33,7 +33,7 @@
     // ('fin.costs' is a switch, not a page — it just unlocks peso values)
     'fin.cash_advance', 'fin.liquidation', 'fin.reimbursement',
     // Human Resources — 20260926_05_hr_staff_access.sql
-    'hr.attendance', 'hr.leaves', 'hr.tech_profiles',
+    'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -1654,7 +1654,8 @@
     'fin.reimbursement':   async ()=>{ await showCashAdvanceView(); caShowAdminSection('reimb'); },
     // Attendance and Technician Profiles both start from the technician
     // list on the Online DTR page (profiles open from "View Profile").
-    'hr.attendance':       ()=> showDtrView(),
+    'hr.attendance':       ()=>{ dtrSetPeopleMode('tech'); showDtrView(); },
+    'hr.staff_attendance': ()=>{ dtrSetPeopleMode('staff'); showDtrView(); },
     'hr.tech_profiles':    ()=> showDtrView(),
     'hr.leaves':           ()=> showLeaveView(),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
@@ -1751,11 +1752,11 @@
     if(!currentUser) return false;
     if(currentUser.role === 'admin') return true;
     if(!isStaffUser()) return false;
-    return module ? can(module, 'view') : (can('hr.attendance', 'view') || can('hr.tech_profiles', 'view'));
+    return module ? can(module, 'view') : (can('hr.attendance', 'view') || can('hr.staff_attendance', 'view') || can('hr.tech_profiles', 'view'));
   }
   function hrApplyStaffMode(){
     const staff = isStaffUser(), cls = document.body.classList;
-    cls.toggle('stf-nv-att', staff && !can('hr.attendance', 'view'));
+    cls.toggle('stf-nv-att', staff && !can('hr.attendance', 'view') && !can('hr.staff_attendance', 'view'));
     cls.toggle('stf-nv-tp',  staff && !can('hr.tech_profiles', 'view'));
     cls.toggle('stf-ne-tp',  staff && !can('hr.tech_profiles', 'edit'));
     cls.toggle('stf-na-lv',  staff && !can('hr.leaves', 'approve'));

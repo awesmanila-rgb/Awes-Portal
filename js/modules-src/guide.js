@@ -175,7 +175,7 @@
     if(role === 'staff' && /^[a-z]+\.[a-z_]+$/.test(g)){
       if(!(typeof STAFF_READY_MODULES !== 'undefined' && STAFF_READY_MODULES.includes(g) && can(g, 'view'))) return null;
     }
-    if(role === 'staff' && e.module && !can(e.module, 'view')) return null;
+    if(role === 'staff' && e.module && ![].concat(e.module).some(m=> can(m, 'view'))) return null;
     if(g === '@team' && !(staffIsHead && staffIsHead())) return null;
     return g;
   }
@@ -189,6 +189,7 @@
     const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
                  '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
                  '@mydtr': ()=> showDtrView(true), '@mycash': ()=> showCashAdvanceView(true, 'new'),
+                 '@attendance': ()=> staffOpenModule(can('hr.attendance', 'view') ? 'hr.attendance' : 'hr.staff_attendance'),
                  '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];
     if(fn){ fn(); return true; }
     const el = gdEl(g);
@@ -295,7 +296,7 @@
     return Object.keys(GUIDE_PAGES).filter(k=>{
       const e = GUIDE_PAGES[k];
       if(!(e.roles || []).includes(role)) return false;
-      if(role === 'staff' && e.module && !can(e.module, 'view')) return false;
+      if(role === 'staff' && e.module && ![].concat(e.module).some(m=> can(m, 'view'))) return false;
       if(role === 'staff' && k === 'staff.team' && !(staffIsHead && staffIsHead())) return false;
       return true;
     });

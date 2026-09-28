@@ -30,6 +30,7 @@ over your existing `AWES Portal` folder (it only overwrites these files).
 | 12 | `supabase/migrations/20260930_01_restricted_reads.sql` | **Security fix:** customers see only their own company's data; internal data (announcements, materials, warehouses, suppliers, settings) only for the company's own people; customers / equipment only for staff whose pages use them |
 | 13 | `supabase/migrations/20261001_01_staff_self_service.sql` | **My HR for office staff:** attendance, leave, cash advance, liquidation, reimbursement; a sub-user's leave / cash request is endorsed by their Head before HR / Finance decides; Heads see their team's attendance and leave (read only) |
 | 14 | `supabase/migrations/20261002_01_inventory_to_administration.sql` | **Inventory moves to the Administration department** (sidebar and staff access). Existing staff keep every page; Purchasing Heads with stock teams also become Administration Heads |
+| 15 | `supabase/migrations/20261003_01_staff_attendance_split.sql` | **Attendance splits in two:** Technician Attendance (technicians only) and Office Staff Attendance (office staff only). Everyone who had Attendance gets both, once — then set e.g. Operations dispatchers to Technician Attendance only |
 
 Each one is safe to re-run, at any time, in any order after the others.
 
@@ -54,7 +55,7 @@ overdue escalates on the first run (grouped into one message per person).
 
 Upload the web files (`index.html`, `css/app.css`, `js/app.bundle.js`,
 `sw.js`; `js/modules-src/` and `build.py` are the source). The service
-worker cache is **v172**, so installed phones update on their own.
+worker cache is **v173**, so installed phones update on their own.
 
 ## 5. After installing
 
@@ -99,7 +100,7 @@ with a **Tagalog** switch. Wording lives in one file:
 
 `supabase/verify/` has a probe script per migration (each runs in one
 transaction and rolls back). See `supabase/verify/README.md`.
-Last full run: 337 database checks and 298 browser checks, all passing.
+Last full run: 355 database checks and 307 browser checks, all passing.
 
 ## Still Super Admin only
 

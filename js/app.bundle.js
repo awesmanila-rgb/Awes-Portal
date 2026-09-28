@@ -7900,8 +7900,30 @@
 
   // HR's attendance table: technicians, or office staff (My HR, 20261001_01)
   let dtrPeopleMode = 'tech';
+  // Technician Attendance (hr.attendance) and Office Staff Attendance
+  // (hr.staff_attendance) are separate pages: show only the tab(s) this
+  // person has (the Super Admin has both). The database enforces it too.
+  function dtrCanSeePeople(mode){
+    if(!currentUser) return false;
+    if(currentUser.role === 'admin') return true;
+    return typeof can === 'function' && can(mode === 'staff' ? 'hr.staff_attendance' : 'hr.attendance', 'view');
+  }
+  function dtrSetPeopleMode(mode){ dtrPeopleMode = mode === 'staff' ? 'staff' : 'tech'; }
+  function dtrSyncPeopleMode(){
+    const tech = dtrCanSeePeople('tech'), staff = dtrCanSeePeople('staff');
+    if(dtrPeopleMode === 'staff' && !staff) dtrPeopleMode = 'tech';
+    if(dtrPeopleMode === 'tech' && !tech && staff) dtrPeopleMode = 'staff';
+    const t = document.getElementById('dtrPeopleToggle');
+    if(t){
+      t.style.display = tech && staff ? '' : 'none';
+      t.querySelectorAll('[data-people]').forEach(x=> x.classList.toggle('active', x.dataset.people === dtrPeopleMode));
+    }
+    const title = document.getElementById('dtrAdminTableTitle');
+    if(title) title.textContent = dtrPeopleMode === 'staff' ? 'Office Staff Attendance' : 'Technician Attendance';
+  }
   function dtrEnsurePeopleToggle(){
-    const card = $('dtrAdminTableCard'); if(!card || document.getElementById('dtrPeopleToggle')) return;
+    const card = $('dtrAdminTableCard'); if(!card){ return; }
+    if(document.getElementById('dtrPeopleToggle')){ dtrSyncPeopleMode(); return; }
     const body = card.querySelector('.card-body'); if(!body) return;
     const t = document.createElement('div');
     t.id = 'dtrPeopleToggle'; t.className = 'seg-tabs'; t.style.marginBottom = '10px';
@@ -7909,10 +7931,11 @@
     t.addEventListener('click', (e)=>{
       const b = e.target.closest('[data-people]'); if(!b || b.dataset.people === dtrPeopleMode) return;
       dtrPeopleMode = b.dataset.people;
-      t.querySelectorAll('[data-people]').forEach(x=> x.classList.toggle('active', x === b));
+      dtrSyncPeopleMode();
       dtrRenderAdminTable();
     });
     body.insertBefore(t, body.firstChild);
+    dtrSyncPeopleMode();
   }
   async function dtrListStaffPeople(){
     const { data, error } = await db.from('profiles').select('id, name, active, role').eq('role', 'staff').order('name');
@@ -7932,7 +7955,7 @@
     // Staff with Technician Profiles but not Attendance get the technician
     // list without DTR figures (the database wouldn't return them anyway —
     // showing everyone as "Absent" would be wrong).
-    const seeDtr = hrIsReviewer('hr.attendance');
+    const seeDtr = dtrCanSeePeople(dtrPeopleMode);
     const [users, records] = await Promise.all([
       (dtrPeopleMode === 'staff' ? dtrListStaffPeople() : cloudListUsers()).catch(()=>null),
       seeDtr ? dtrListAllForDate(dateISO).catch(()=>null) : Promise.resolve([])
@@ -25630,7 +25653,7 @@
     // ('fin.costs' is a switch, not a page — it just unlocks peso values)
     'fin.cash_advance', 'fin.liquidation', 'fin.reimbursement',
     // Human Resources — 20260926_05_hr_staff_access.sql
-    'hr.attendance', 'hr.leaves', 'hr.tech_profiles',
+    'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -27251,7 +27274,8 @@
     'fin.reimbursement':   async ()=>{ await showCashAdvanceView(); caShowAdminSection('reimb'); },
     // Attendance and Technician Profiles both start from the technician
     // list on the Online DTR page (profiles open from "View Profile").
-    'hr.attendance':       ()=> showDtrView(),
+    'hr.attendance':       ()=>{ dtrSetPeopleMode('tech'); showDtrView(); },
+    'hr.staff_attendance': ()=>{ dtrSetPeopleMode('staff'); showDtrView(); },
     'hr.tech_profiles':    ()=> showDtrView(),
     'hr.leaves':           ()=> showLeaveView(),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
@@ -27348,11 +27372,11 @@
     if(!currentUser) return false;
     if(currentUser.role === 'admin') return true;
     if(!isStaffUser()) return false;
-    return module ? can(module, 'view') : (can('hr.attendance', 'view') || can('hr.tech_profiles', 'view'));
+    return module ? can(module, 'view') : (can('hr.attendance', 'view') || can('hr.staff_attendance', 'view') || can('hr.tech_profiles', 'view'));
   }
   function hrApplyStaffMode(){
     const staff = isStaffUser(), cls = document.body.classList;
-    cls.toggle('stf-nv-att', staff && !can('hr.attendance', 'view'));
+    cls.toggle('stf-nv-att', staff && !can('hr.attendance', 'view') && !can('hr.staff_attendance', 'view'));
     cls.toggle('stf-nv-tp',  staff && !can('hr.tech_profiles', 'view'));
     cls.toggle('stf-ne-tp',  staff && !can('hr.tech_profiles', 'edit'));
     cls.toggle('stf-na-lv',  staff && !can('hr.leaves', 'approve'));
@@ -27724,11 +27748,11 @@
       tl:{ p:'Ang attendance, cash advance, liquidation, reimbursement at leave mo sa iisang lugar.', s:['Pindutin ang tile para buksan.'], tip:'Nasa mga shortcut sa Home mo ang materyales at tools.' } },
 
     // ------------------------------------------------------- HUMAN RESOURCES
-    'dtr.office': { roles:['admin','staff'], module:'hr.attendance', go:{ admin:'sbNavTechnicians', staff:'hr.attendance' },
+    'dtr.office': { roles:['admin','staff'], module:['hr.attendance','hr.staff_attendance'], go:{ admin:'sbNavTechnicians', staff:'@attendance' },
       en:{ t:'Attendance', p:'Today\u2019s attendance for technicians and office staff, their DTR history and technicians\u2019 profiles.',
-           s:['Switch between Technicians and Office staff at the top.', 'See who is present, completed or on overtime today.', 'View DTR for a person\u2019s time records; View Profile (technicians) for leaves, violations and documents.'], tip:'' },
+           s:['Switch between Technicians and Office staff at the top (each is its own access: Technician Attendance / Office Staff Attendance).', 'See who is present, completed or on overtime today.', 'View DTR for a person\u2019s time records; View Profile (technicians) for leaves, violations and documents.'], tip:'' },
       tl:{ p:'Attendance ngayon ng mga technician at office staff, ang DTR history nila at profile ng mga technician.',
-           s:['Lumipat sa Technicians o Office staff sa itaas.', 'Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng tao; View Profile (technician) para sa leave, violation at dokumento.'], tip:'' } },
+           s:['Lumipat sa Technicians o Office staff sa itaas (magkahiwalay na access: Technician Attendance / Office Staff Attendance).', 'Tingnan kung sino ang present, tapos na o naka-overtime ngayon.', 'View DTR para sa time record ng tao; View Profile (technician) para sa leave, violation at dokumento.'], tip:'' } },
     'dtr.tech': { roles:['tech','staff'], go:{ tech:'techNavDtr', staff:'@mydtr' },
       en:{ t:'Attendance (DTR)', p:'Time in and out each day, including overtime.',
            s:['Tap Time In when you arrive; allow location.', 'Tap Time Out when you leave.', 'Your history is below.'], tip:'Use the same phone every day — attendance is tied to your registered device.' },
@@ -28124,7 +28148,7 @@
     if(role === 'staff' && /^[a-z]+\.[a-z_]+$/.test(g)){
       if(!(typeof STAFF_READY_MODULES !== 'undefined' && STAFF_READY_MODULES.includes(g) && can(g, 'view'))) return null;
     }
-    if(role === 'staff' && e.module && !can(e.module, 'view')) return null;
+    if(role === 'staff' && e.module && ![].concat(e.module).some(m=> can(m, 'view'))) return null;
     if(g === '@team' && !(staffIsHead && staffIsHead())) return null;
     return g;
   }
@@ -28138,6 +28162,7 @@
     const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
                  '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
                  '@mydtr': ()=> showDtrView(true), '@mycash': ()=> showCashAdvanceView(true, 'new'),
+                 '@attendance': ()=> staffOpenModule(can('hr.attendance', 'view') ? 'hr.attendance' : 'hr.staff_attendance'),
                  '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];
     if(fn){ fn(); return true; }
     const el = gdEl(g);
@@ -28244,7 +28269,7 @@
     return Object.keys(GUIDE_PAGES).filter(k=>{
       const e = GUIDE_PAGES[k];
       if(!(e.roles || []).includes(role)) return false;
-      if(role === 'staff' && e.module && !can(e.module, 'view')) return false;
+      if(role === 'staff' && e.module && ![].concat(e.module).some(m=> can(m, 'view'))) return false;
       if(role === 'staff' && k === 'staff.team' && !(staffIsHead && staffIsHead())) return false;
       return true;
     });

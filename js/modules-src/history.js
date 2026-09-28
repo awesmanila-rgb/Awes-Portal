@@ -806,8 +806,30 @@
 
   // HR's attendance table: technicians, or office staff (My HR, 20261001_01)
   let dtrPeopleMode = 'tech';
+  // Technician Attendance (hr.attendance) and Office Staff Attendance
+  // (hr.staff_attendance) are separate pages: show only the tab(s) this
+  // person has (the Super Admin has both). The database enforces it too.
+  function dtrCanSeePeople(mode){
+    if(!currentUser) return false;
+    if(currentUser.role === 'admin') return true;
+    return typeof can === 'function' && can(mode === 'staff' ? 'hr.staff_attendance' : 'hr.attendance', 'view');
+  }
+  function dtrSetPeopleMode(mode){ dtrPeopleMode = mode === 'staff' ? 'staff' : 'tech'; }
+  function dtrSyncPeopleMode(){
+    const tech = dtrCanSeePeople('tech'), staff = dtrCanSeePeople('staff');
+    if(dtrPeopleMode === 'staff' && !staff) dtrPeopleMode = 'tech';
+    if(dtrPeopleMode === 'tech' && !tech && staff) dtrPeopleMode = 'staff';
+    const t = document.getElementById('dtrPeopleToggle');
+    if(t){
+      t.style.display = tech && staff ? '' : 'none';
+      t.querySelectorAll('[data-people]').forEach(x=> x.classList.toggle('active', x.dataset.people === dtrPeopleMode));
+    }
+    const title = document.getElementById('dtrAdminTableTitle');
+    if(title) title.textContent = dtrPeopleMode === 'staff' ? 'Office Staff Attendance' : 'Technician Attendance';
+  }
   function dtrEnsurePeopleToggle(){
-    const card = $('dtrAdminTableCard'); if(!card || document.getElementById('dtrPeopleToggle')) return;
+    const card = $('dtrAdminTableCard'); if(!card){ return; }
+    if(document.getElementById('dtrPeopleToggle')){ dtrSyncPeopleMode(); return; }
     const body = card.querySelector('.card-body'); if(!body) return;
     const t = document.createElement('div');
     t.id = 'dtrPeopleToggle'; t.className = 'seg-tabs'; t.style.marginBottom = '10px';
@@ -815,10 +837,11 @@
     t.addEventListener('click', (e)=>{
       const b = e.target.closest('[data-people]'); if(!b || b.dataset.people === dtrPeopleMode) return;
       dtrPeopleMode = b.dataset.people;
-      t.querySelectorAll('[data-people]').forEach(x=> x.classList.toggle('active', x === b));
+      dtrSyncPeopleMode();
       dtrRenderAdminTable();
     });
     body.insertBefore(t, body.firstChild);
+    dtrSyncPeopleMode();
   }
   async function dtrListStaffPeople(){
     const { data, error } = await db.from('profiles').select('id, name, active, role').eq('role', 'staff').order('name');
@@ -838,7 +861,7 @@
     // Staff with Technician Profiles but not Attendance get the technician
     // list without DTR figures (the database wouldn't return them anyway —
     // showing everyone as "Absent" would be wrong).
-    const seeDtr = hrIsReviewer('hr.attendance');
+    const seeDtr = dtrCanSeePeople(dtrPeopleMode);
     const [users, records] = await Promise.all([
       (dtrPeopleMode === 'staff' ? dtrListStaffPeople() : cloudListUsers()).catch(()=>null),
       seeDtr ? dtrListAllForDate(dateISO).catch(()=>null) : Promise.resolve([])
