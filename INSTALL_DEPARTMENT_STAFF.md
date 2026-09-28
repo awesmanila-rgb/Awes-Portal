@@ -28,6 +28,7 @@ over your existing `AWES Portal` folder (it only overwrites these files).
 | 10 | `supabase/migrations/20260928_01_round3_inbox_escalation.sql` | Inbox, response times, escalation queue, staff push |
 | 11 | `supabase/migrations/20260929_01_user_guide.sql` | In-app guide: saves each person's language, tours and tips (optional — without it the guide still works, saved on the device only) |
 | 12 | `supabase/migrations/20260930_01_restricted_reads.sql` | **Security fix:** customers see only their own company's data; internal data (announcements, materials, warehouses, suppliers, settings) only for the company's own people; customers / equipment only for staff whose pages use them |
+| 13 | `supabase/migrations/20261001_01_staff_self_service.sql` | **My HR for office staff:** attendance, leave, cash advance, liquidation, reimbursement; a sub-user's leave / cash request is endorsed by their Head before HR / Finance decides; Heads see their team's attendance and leave (read only) |
 
 Each one is safe to re-run, at any time, in any order after the others.
 
@@ -52,7 +53,7 @@ overdue escalates on the first run (grouped into one message per person).
 
 Upload the web files (`index.html`, `css/app.css`, `js/app.bundle.js`,
 `sw.js`; `js/modules-src/` and `build.py` are the source). The service
-worker cache is **v167**, so installed phones update on their own.
+worker cache is **v169**, so installed phones update on their own.
 
 ## 5. After installing
 
@@ -64,6 +65,21 @@ worker cache is **v167**, so installed phones update on their own.
 4. Optional: Department Staff → **Role Templates** for common access sets.
 5. Staff sign in from Staff Access → **Office Staff** with their username
    and the temporary password; they choose their own on first sign-in.
+
+## My HR for office staff
+
+Every staff member (Heads and sub-users) has a **My HR** section: My
+Attendance (time in / out with a registered device and location, like
+technicians — office staff are not shown on the field Live Tracker), My
+Leave, My Cash Advance, My Liquidation and My Reimbursement.
+
+A sub-user's leave, cash advance and reimbursement go to their **Head
+first** (My Team → *My team today*, and the Inbox). Once endorsed, HR or
+Finance decides as usual; a Head who declines closes the request with their
+reason. Heads also see, read only, who in their team is in or on leave.
+HR's attendance page has a **Technicians / Office staff** switch. The Super
+Admin can **Reset DTR device** on a staff account when someone changes
+phones.
 
 ## In-app guide (every account type)
 
@@ -79,7 +95,7 @@ with a **Tagalog** switch. Wording lives in one file:
 
 `supabase/verify/` has a probe script per migration (each runs in one
 transaction and rolls back). See `supabase/verify/README.md`.
-Last full run: 290 database checks and 251 browser checks, all passing.
+Last full run: 315 database checks and 267 browser checks, all passing.
 
 ## Still Super Admin only
 

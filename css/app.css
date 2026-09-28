@@ -4284,3 +4284,13 @@ body.role-customer #customerProfileScreen > #cpGuideBtn{ display:block; box-sizi
 @media (min-width:561px){
   body.role-customer #customerProfileScreen > #cpGuideBtn{ width:100%; }
 }
+
+/* ---- My HR for office staff + Head endorsement ---- */
+.stf-endorse-note{ font-size:12px; font-weight:700; padding:4px 10px; border-radius:8px; margin:6px 0; display:inline-block; }
+.stf-endorse-note.pending{ background:#FFF4E0; color:#8A5A12; }
+.stf-endorse-note.endorsed{ background:var(--green-light); color:var(--green-dark); }
+.stf-endorse-acts{ display:flex; gap:8px; flex-shrink:0; }
+.stf-endorse-acts .btn{ width:auto; padding-left:14px; padding-right:14px; }
+.stf-today-body{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.stf-today-acts{ display:flex; gap:8px; }
+.stf-today-acts .btn{ width:auto; padding-left:18px; padding-right:18px; }
