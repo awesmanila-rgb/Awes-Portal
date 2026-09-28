@@ -210,3 +210,17 @@ Admin, Finance still records cash given).
 psql -d awes_backup -f ../migrations/20261001_01_staff_self_service.sql
 psql -d awes_backup -f staff_self_service_probe.sql   # expect 35 × PASS
 ```
+
+## Inventory → Administration (20261002_01_inventory_to_administration.sql)
+
+`inventory_to_administration_probe.sql` sets up a company the old way
+(Inventory pages under Purchasing), runs the move, and checks that nobody
+gained or lost a page; that Purchasing Heads (and anyone whose sub-users hold
+Inventory pages) now head Administration, stock sub-users follow them, and
+view-only people join as members; templates and the Inbox item move; and a
+second run changes nothing.
+
+```sh
+psql -d awes_backup -f ../migrations/20261002_01_inventory_to_administration.sql
+psql -d awes_backup -f inventory_to_administration_probe.sql   # expect 12 × PASS
+```

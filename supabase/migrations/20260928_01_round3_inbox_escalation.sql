@@ -58,7 +58,7 @@ insert into public.inbox_sla (kind, label, department, module, level, warn_hours
   ('mr_review',    'Requisition to review',                'purchasing',     'pur.requisitions',     'approve',  24,  48, 10),
   ('mr_fulfil',    'Approved requisition to fulfil',       'purchasing',     'pur.requisitions',     'edit',     48,  96, 11),
   ('po_draft',     'Draft PO to issue',                    'purchasing',     'pur.purchase_orders',  'approve',  24,  72, 12),
-  ('po_receive',   'Issued PO not yet received',           'purchasing',     'inv.receive',          'edit',    168, 336, 13),
+  ('po_receive',   'Issued PO not yet received',           'administration', 'inv.receive',          'edit',    168, 336, 13),
   ('ca_approve',   'Cash advance to approve',              'finance',        'fin.cash_advance',     'approve',   8,  24, 20),
   ('ca_release',   'Approved advance — cash not given',    'finance',        'fin.cash_advance',     'edit',     24,  48, 21),
   ('liq_submit',   'Advance not yet liquidated',           'finance',        'fin.liquidation',      'edit',    168, 336, 22),

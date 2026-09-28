@@ -478,15 +478,15 @@ begin
   -- ---- Inventory ----
   if public.has_perm('inv.receive') then
     select jsonb_array_length(coalesce(public.inv_pos_to_receive(), '[]'::jsonb)) into n;
-    out := out || jsonb_build_array(jsonb_build_object('dept','purchasing','module','inv.receive','label','POs waiting to be received','value',n,'tone',case when n>0 then 'warn' end));
+    out := out || jsonb_build_array(jsonb_build_object('dept','administration','module','inv.receive','label','POs waiting to be received','value',n,'tone',case when n>0 then 'warn' end));
   end if;
   if public.has_perm('inv.reports') then
     select count(*) into n from public.inv_rpt_reorder(90) where reorder;
-    out := out || jsonb_build_array(jsonb_build_object('dept','purchasing','module','inv.reports','label','Materials to reorder','value',n,'tone',case when n>0 then 'warn' end));
+    out := out || jsonb_build_array(jsonb_build_object('dept','administration','module','inv.reports','label','Materials to reorder','value',n,'tone',case when n>0 then 'warn' end));
   end if;
   if public.has_perm('inv.stock') and money then
     select coalesce(sum(qty_on_hand * coalesce(avg_cost, 0)), 0) into s from public.stock_balances;
-    out := out || jsonb_build_array(jsonb_build_object('dept','purchasing','module','inv.stock','label','Stock value (all warehouses)','money',s));
+    out := out || jsonb_build_array(jsonb_build_object('dept','administration','module','inv.stock','label','Stock value (all warehouses)','money',s));
   end if;
   -- ---- Accounting & Finance ----
   if public.has_perm('fin.cash_advance') then
