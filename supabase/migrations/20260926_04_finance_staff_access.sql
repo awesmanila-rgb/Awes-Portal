@@ -44,12 +44,17 @@ $$;
 -- ---------------------------------------------------------------------
 -- 1. Guard: the technician path is unchanged; a new staff path
 -- ---------------------------------------------------------------------
+-- 20261001_01_staff_self_service installs a newer guard_cash_decision() (Head endorsement);
+-- re-running this migration after it must not put this older version back.
+do $guard$ begin
+  if to_regclass('public.request_endorsements') is null then
+    execute $ddl$
 create or replace function public.guard_cash_decision()
 returns trigger
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $$
+as $body$
 declare
   v_old public.cash_advance_requests%rowtype;
   v_is_new boolean;
@@ -232,7 +237,10 @@ begin
 
   return new;
 end;
-$$;
+$body$;
+    $ddl$;
+  end if;
+end $guard$;
 
 
 -- ---------------------------------------------------------------------

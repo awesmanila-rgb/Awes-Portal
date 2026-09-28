@@ -98,13 +98,22 @@ create index if not exists inbox_escalation_log_sent_idx on public.inbox_escalat
 -- ---------------------------------------------------------------------
 -- owner: who created / asked for it. Nobody may approve their own
 -- record, so approval items never wait on their own owner.
-drop function if exists public.inbox_items_with_state();
-drop function if exists public.inbox_all_items();
+do $guard$ begin
+  if to_regclass('public.request_endorsements') is null then   -- (see the note on inbox_all_items below)
+    drop function if exists public.inbox_items_with_state();
+    drop function if exists public.inbox_all_items();
+  end if;
+end $guard$;
+-- 20261001_01_staff_self_service installs a newer inbox_all_items() (Head endorsement);
+-- re-running this migration after it must not put this older version back.
+do $guard$ begin
+  if to_regclass('public.request_endorsements') is null then
+    execute $ddl$
 create or replace function public.inbox_all_items()
 returns table (kind text, ref_id text, ref_label text, title text, since timestamptz, owner uuid)
 language sql stable security definer
 set search_path = public, pg_temp
-as $$
+as $body$
   -- Purchasing
   select 'mr_review', m.id::text, coalesce(m.mrf_no, ''), 'From ' || coalesce(nullif(m.requester_name, ''), 'a technician'),
          coalesce(m.submitted_at, m.updated_at), m.requested_by
@@ -188,7 +197,10 @@ as $$
          coalesce((select asset_tag || ' ' || name from public.tools where id = d.tool_id), 'Tool') || ' — ' || left(coalesce(d.description, ''), 60),
          d.created_at, null::uuid
     from public.tool_defects d where d.status = 'open';
-$$;
+$body$;
+    $ddl$;
+  end if;
+end $guard$;
 
 -- Items with their response times and state
 create or replace function public.inbox_items_with_state()
@@ -211,11 +223,16 @@ $$;
 -- The caller's inbox: items on pages they can act on (at that level).
 -- Heads also see their department's escalated items, even on a page they
 -- only view.
+-- 20261001_01_staff_self_service installs a newer inbox_items() (Head endorsement);
+-- re-running this migration after it must not put this older version back.
+do $guard$ begin
+  if to_regclass('public.request_endorsements') is null then
+    execute $ddl$
 create or replace function public.inbox_items()
 returns jsonb
 language sql stable security definer
 set search_path = public, pg_temp
-as $$
+as $body$
   select coalesce(jsonb_agg(to_jsonb(x) - 'owner' order by
            case x.state when 'escalated' then 0 when 'overdue' then 1 else 2 end, x.age_hours desc), '[]'::jsonb)
     from public.inbox_items_with_state() x
@@ -224,7 +241,10 @@ as $$
       or public.has_perm(x.module, x.level)
       or (x.state = 'escalated' and public.has_perm(x.module, 'view')
           and exists (select 1 from public.staff_departments d where d.user_id = auth.uid() and d.department_id = x.department and d.is_head)));
-$$;
+$body$;
+    $ddl$;
+  end if;
+end $guard$;
 
 -- ---------------------------------------------------------------------
 -- 3. Escalation (service role)

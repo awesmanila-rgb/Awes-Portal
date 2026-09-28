@@ -193,3 +193,18 @@ internal data at all). Run it after any change to access rules.
 psql -d awes_backup -f ../migrations/20260930_01_restricted_reads.sql
 psql -d awes_backup -f role_isolation_probe.sql   # expect 19 × PASS
 ```
+
+## My HR for office staff (20261001_01_staff_self_service.sql)
+
+`staff_self_service_probe.sql` checks office staff filing attendance, leave
+and cash advances; a sub-user's request waiting for their Head (HR / Finance
+refused until endorsed; only the Super Admin can override); who may endorse
+(that person's Head only — not another Head, not themselves, never written
+directly); declining with a reason; the Inbox (endorse items for the Head,
+approvals for HR / Finance only once endorsed); the Head's read-only team
+view; HR seeing office staff.
+
+```sh
+psql -d awes_backup -f ../migrations/20261001_01_staff_self_service.sql
+psql -d awes_backup -f staff_self_service_probe.sql   # expect 25 × PASS
+```
