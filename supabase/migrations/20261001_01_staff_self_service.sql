@@ -21,6 +21,12 @@
 --   HR reads office staff names (attendance table, profiles) with an HR page.
 --   Inbox                  "…to endorse (your team)" items for the Head;
 --       HR / Finance "to approve" items appear only once endorsed.
+--   Department Heads' own requests   decided by the SUPER ADMIN only:
+--       approving / disapproving their leave, cash advance and
+--       reimbursement, and reviewing their liquidation. HR / Finance staff
+--       are refused; the Inbox and escalations route these to the Super
+--       Admin. (Finance still records cash given and settlements once the
+--       Super Admin has approved.)
 --
 -- Attendance: office staff use the same rules as technicians — one
 -- registered device, location recorded at time-in and time-out (the
@@ -28,8 +34,9 @@
 -- the field Live Tracker.
 --
 -- This migration holds the current versions of guard_leave_decision,
--- guard_cash_decision, inbox_all_items and inbox_items; the older copies
--- in 20260926_04 / _05 / 20260928_01 skip themselves once it's installed.
+-- guard_cash_decision, inbox_all_items, inbox_items and inbox_escalations_due;
+-- the older copies in 20260926_04 / _05 / 20260928_01 skip themselves once
+-- it's installed.
 -- Requires 20260926_01 … 20260930_01. Idempotent.
 -- =====================================================================
 
@@ -141,6 +148,32 @@ revoke execute on function public.staff_endorse(text, uuid, text, text) from pub
 grant execute on function public.staff_endorse(text, uuid, text, text) to authenticated;
 
 -- ---------------------------------------------------------------------
+-- Department Heads' requests are decided by the Super Admin
+-- ---------------------------------------------------------------------
+create or replace function public.staff_is_head(p_user uuid)
+returns boolean language sql stable security definer
+set search_path = public, pg_temp
+as $$
+  select exists (select 1 from public.staff_departments d join public.profiles p on p.id = d.user_id
+                  where d.user_id = p_user and d.is_head and p.role = 'staff');
+$$;
+revoke execute on function public.staff_is_head(uuid) from public, anon, authenticated;
+grant execute on function public.staff_is_head(uuid) to service_role;
+
+-- For reviewer screens: which of these requesters are department Heads
+-- (company people only — never customers or signed-out visitors)
+create or replace function public.staff_heads_among(p_ids uuid[])
+returns uuid[] language sql stable security definer
+set search_path = public, pg_temp
+as $$
+  select case when public.app_is_internal()
+              then coalesce((select array_agg(distinct u) from unnest(p_ids) u where public.staff_is_head(u)), '{}')
+              else '{}'::uuid[] end;
+$$;
+revoke execute on function public.staff_heads_among(uuid[]) from public, anon;
+grant execute on function public.staff_heads_among(uuid[]) to authenticated;
+
+-- ---------------------------------------------------------------------
 -- 2. Decision guards: nothing is approved before the Head endorses
 --    (current versions — the copies in 20260926_04 / _05 skip themselves)
 -- ---------------------------------------------------------------------
@@ -177,6 +210,9 @@ begin
       end if;
       if new.status not in ('approved', 'disapproved') then
         raise exception 'A leave request can only be approved or disapproved.' using errcode = 'P0001';
+      end if;
+      if public.staff_is_head(old.technician_id) then
+        raise exception 'Requests from department Heads are decided by the Super Admin.' using errcode = '42501';
       end if;
       if exists (select 1 from public.request_endorsements e
                   where e.request_kind = 'leave' and e.request_id = old.id and e.status = 'pending') then
@@ -277,6 +313,9 @@ begin
       if new.status not in ('approved', 'disapproved') then
         raise exception 'A request can only be approved or disapproved.' using errcode = 'P0001';
       end if;
+      if public.staff_is_head(old.technician_id) then
+        raise exception 'Requests from department Heads are decided by the Super Admin.' using errcode = '42501';
+      end if;
       if exists (select 1 from public.request_endorsements e
                   where e.request_kind = 'cash' and e.request_id = old.id and e.status = 'pending') then
         raise exception 'Waiting for %''s endorsement first.',
@@ -330,6 +369,9 @@ begin
         end if;
         if nl->>'status' not in ('approved', 'disapproved') then
           raise exception 'A liquidation can only be approved or disapproved.' using errcode = 'P0001';
+        end if;
+        if public.staff_is_head(old.technician_id) then
+          raise exception 'Liquidations from department Heads are reviewed by the Super Admin.' using errcode = '42501';
         end if;
         perform public.staff_approval_assert('fin.liquidation', nullif(ol->>'totalAmount', '')::numeric, old.technician_id);
         nl := nl || jsonb_build_object('decidedBy', s_me, 'decidedAt', s_now);
@@ -575,10 +617,48 @@ as $$
      and (public.is_admin()
       -- endorsement items: only the requester's own Head
       or (x.kind like '%\_endorse' escape '\' and public.is_supervisor_of(x.owner))
-      or (x.kind not like '%\_endorse' escape '\' and public.has_perm(x.module, x.level))
+      or (x.kind not like '%\_endorse' escape '\' and public.has_perm(x.module, x.level)
+          and not (x.kind in ('leave_decide', 'ca_approve', 'rb_approve', 'liq_review') and public.staff_is_head(x.owner)))
       or (x.state = 'escalated' and x.kind not like '%\_endorse' escape '\' and public.has_perm(x.module, 'view')
+          and not (x.kind in ('leave_decide', 'ca_approve', 'rb_approve', 'liq_review') and public.staff_is_head(x.owner))
           and exists (select 1 from public.staff_departments d where d.user_id = auth.uid() and d.department_id = x.department and d.is_head)));
 $$;;
+
+create or replace function public.inbox_escalations_due()
+returns table (key text, kind text, ref_id text, ref_label text, title text, label text, level smallint,
+               age_hours numeric, module text, recipients uuid[])
+language plpgsql stable security definer
+set search_path = public, pg_temp
+as $$
+declare r record; heads uuid[]; admins uuid[];
+begin
+  select coalesce(array_agg(id), '{}') into admins from public.profiles where role = 'admin' and active;
+  for r in select * from public.inbox_items_with_state() x where x.state = 'escalated' loop
+    -- level 2
+    if r.age_hours >= 2 * greatest(r.escalate_hours, 0.5)
+       and not exists (select 1 from public.inbox_escalation_log l where l.key = r.kind || ':' || r.ref_id || ':L2') then
+      key := r.kind || ':' || r.ref_id || ':L2'; kind := r.kind; ref_id := r.ref_id; ref_label := r.ref_label; title := r.title;
+      label := r.label; level := 2; age_hours := r.age_hours; module := r.module; recipients := admins;
+      return next;
+    end if;
+    -- level 1
+    if not exists (select 1 from public.inbox_escalation_log l where l.key = r.kind || ':' || r.ref_id || ':L1') then
+      select coalesce(array_agg(distinct d.user_id), '{}') into heads
+        from public.staff_departments d
+        join public.staff_access a on a.user_id = d.user_id and a.module_key = r.module and (a.expires_at is null or a.expires_at > now())
+       where d.department_id = r.department and d.is_head and public.staff_is_active(d.user_id)
+         and d.user_id is distinct from r.owner;   -- not their own request
+      key := r.kind || ':' || r.ref_id || ':L1'; kind := r.kind; ref_id := r.ref_id; ref_label := r.ref_label; title := r.title;
+      label := r.label; level := 1; age_hours := r.age_hours; module := r.module;
+      recipients := case when r.kind in ('leave_decide', 'ca_approve', 'rb_approve', 'liq_review') and public.staff_is_head(r.owner) then admins   -- a Head's own request: only the Super Admin decides it
+                         when cardinality(heads) > 0 then heads else admins end;
+      return next;
+    end if;
+  end loop;
+end;
+$$;;
+revoke execute on function public.inbox_escalations_due() from public, anon, authenticated;
+grant execute on function public.inbox_escalations_due() to service_role;
 
 revoke execute on function public.inbox_all_items() from public, anon, authenticated;
 grant execute on function public.inbox_all_items() to service_role;

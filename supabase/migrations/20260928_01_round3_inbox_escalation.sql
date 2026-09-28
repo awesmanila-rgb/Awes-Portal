@@ -252,12 +252,17 @@ end $guard$;
 -- Level 1 at escalate_hours → the department's active Heads who can see
 -- that page (or the Super Admin if there are none). Level 2 at twice
 -- escalate_hours → the Super Admin.
+-- 20261001_01_staff_self_service installs a newer inbox_escalations_due() (Heads' own
+-- requests go to the Super Admin); re-running this migration must not put this older one back.
+do $guard$ begin
+  if to_regclass('public.request_endorsements') is null then
+    execute $ddl$
 create or replace function public.inbox_escalations_due()
 returns table (key text, kind text, ref_id text, ref_label text, title text, label text, level smallint,
                age_hours numeric, module text, recipients uuid[])
 language plpgsql stable security definer
 set search_path = public, pg_temp
-as $$
+as $body$
 declare r record; heads uuid[]; admins uuid[];
 begin
   select coalesce(array_agg(id), '{}') into admins from public.profiles where role = 'admin' and active;
@@ -283,7 +288,10 @@ begin
     end if;
   end loop;
 end;
-$$;
+$body$;
+    $ddl$;
+  end if;
+end $guard$;
 
 create or replace function public.inbox_mark_sent(p_rows jsonb)
 returns integer
