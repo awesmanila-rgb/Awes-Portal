@@ -594,11 +594,11 @@
       if(cap && !cap.depts.includes(d.id)) return '';
       const st = s.depts[d.id] || { member:false, head:false };
       const mods = stf.modules.filter(m=> m.department === d.id && (!cap || cap.modules[m.key]));
-      const rows = mods.map(m=>{
+      const rows = mods.map((m, i)=>{
         const g = s.grants[m.key] || { level:'', limit:'', until:'' };
         const c = cap ? cap.modules[m.key] : null;
         const showLimit = g.level === 'approve' && m.has_limit;
-        return '<div class="stf-mod" data-mod="' + escapeHtml(m.key) + '">' +
+        return staffSectionHead(mods, i) + '<div class="stf-mod" data-mod="' + escapeHtml(m.key) + '">' +
           '<div class="stf-mod-top"><span class="stf-mod-name">' + escapeHtml(m.label) + '</span>' + staffLevelControl(m, g, c) + '</div>' +
           (g.level ? '<div class="stf-mod-extra">' +
             (showLimit ? '<label>Approve up to \u20B1<input type="number" min="0" step="0.01" inputmode="decimal" data-f="limit" value="' + escapeHtml(g.limit) + '" placeholder="' + (c && c.limit != null ? 'max ' + escapeHtml(String(c.limit)) : 'no limit') + '"></label>' : '') +
@@ -883,7 +883,7 @@
     dispatch_tickets:'Job order', service_requests:'Service request', service_reports:'Service report',
     customers:'Customer', customer_equipment:'Customer equipment', customer_login_links:'Customer login',
     technician_violations:'Violation', technician_documents:'Technician document', announcements:'Announcement', app_settings:'Settings',
-    template:'Role template', inbox_sla:'Inbox response time', supplier_documents:'Supplier document'
+    template:'Role template', inbox_sla:'Inbox response time', supplier_documents:'Supplier document', app_modules:'Page catalog'
   };
   const STAFF_ACTION_LABEL = {
     insert:'created', update:'changed', delete:'deleted',
@@ -891,7 +891,8 @@
     'staff.change_username':'renamed', 'staff.reset_password':'reset password of', 'staff.set_supervisor':'moved',
     'staff.deactivate':'deactivated', 'staff.reactivate':'reactivated', 'staff.reauth_failed':'wrong password (approval)',
     'staff.apply_template':'applied a role template to', 'template.create':'created', 'template.update':'changed', 'template.delete':'deleted',
-    'delegation.create':'set up a delegation for', 'delegation.revoke':'ended the delegation for', 'inbox.sla':'changed the response time for'
+    'delegation.create':'set up a delegation for', 'delegation.revoke':'ended the delegation for', 'inbox.sla':'changed the response time for',
+    'catalog.move':'moved pages:', 'staff.endorse':'endorsed the request of', 'staff.decline':'declined the request of'
   };
   // gen: bumped whenever the list is reset, so a fetch that was already in
   // flight for an older filter/screen can't finish into the new one.
@@ -1014,8 +1015,11 @@
     try{ const { data, error } = await db.rpc('dept_dashboard'); if(!error) rows = data; }catch(e){}
     if(!Array.isArray(rows) || !rows.length){ host.remove(); return; }
     await staffLoadDirectory();
+    // Group by the page's department in the catalog (so a page moved to
+    // another department shows under it even before the dashboard function
+    // is re-installed); the figure's own dept is the fallback.
     const byDept = {};
-    rows.forEach(r=> (byDept[r.dept] = byDept[r.dept] || []).push(r));
+    rows.forEach(r=>{ const d = (stfModule(r.module) || {}).department || r.dept; (byDept[d] = byDept[d] || []).push(r); });
     host.innerHTML = stf.departments.filter(d=> byDept[d.id]).map(d=>
       '<div class="card stf-dash-card"><div class="card-head"><span>' + escapeHtml(d.name) + '</span></div><div class="card-body stf-dash-grid">' +
       byDept[d.id].map(r=>{
@@ -1100,9 +1104,10 @@
       '<div class="card"><div class="card-head"><span>Departments &amp; pages</span></div><div class="card-body">' +
         stf.departments.map(d=>{
           const on = !!t.depts[d.id];
-          const rows = stf.modules.filter(m=> m.department === d.id).map(m=>{
+          const tmods = stf.modules.filter(m=> m.department === d.id);
+          const rows = tmods.map((m, i)=>{
             const g = t.grants[m.key] || { level:'', limit:'' };
-            return '<div class="stf-mod" data-mod="' + escapeHtml(m.key) + '"><div class="stf-mod-top"><span class="stf-mod-name">' + escapeHtml(m.label) + '</span>' +
+            return staffSectionHead(tmods, i) + '<div class="stf-mod" data-mod="' + escapeHtml(m.key) + '"><div class="stf-mod-top"><span class="stf-mod-name">' + escapeHtml(m.label) + '</span>' +
               staffLevelControl(m, g, null) + '</div>' +
               (g.level === 'approve' && m.has_limit ? '<div class="stf-mod-extra"><label>Approve up to \u20B1<input type="number" min="0" step="0.01" data-f="limit" value="' + escapeHtml(g.limit) + '" placeholder="no limit"></label></div>' : '') +
             '</div>';
@@ -1197,6 +1202,15 @@
   // fromId: whose approvals are handed over (default: me, as a Head).
   // The Super Admin can set one up for any Head from that Head's account
   // page, to any other active staff member.
+  // A small heading where a department's pages change section (e.g.
+  // Administration → "Inventory"), only when the department has more than one.
+  function staffSectionHead(mods, i){
+    const m = mods[i];
+    if(new Set(mods.map(x=> x.section)).size < 2) return '';
+    // the first group needs no heading (the card title names it)
+    if(i === 0 || mods[i - 1].section === m.section) return '';
+    return '<div class="stf-mod-section">' + escapeHtml(m.section || '') + '</div>';
+  }
   function staffRenderDelegationCard(teamTarget, fromId, redraw){
     const me = fromId || currentUser.id;
     const asAdmin = currentUser.role === 'admin';
