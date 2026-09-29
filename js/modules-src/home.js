@@ -932,6 +932,9 @@
     myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' },
     paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
+    payRuns:        { nav:'sbNavPayRuns',        title:'Pay Runs',             sub:'Compute, approve & release pay' },
+    myPayslips:     { nav:'',                    title:'My Payslips',          sub:'Your released payslips' },
+    payTimesheets:  { nav:'sbNavPayTimesheets',  title:'Timesheets',           sub:'Hours from DTR, OT approval & lock' },
     payRules:       { nav:'sbNavPayRules',       title:'Payroll Rules',        sub:'SSS, PhilHealth, Pag-IBIG, BIR & premiums' }
   };
   function showPurchasingView(key){
@@ -990,6 +993,9 @@
   });
   $('techNavDtr').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDtr'); showDtrView(); });
   $('techNavLeave').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavLeave'); showLeaveView(); });
+  // Payroll (payroll-runs.js): payslips for technicians; Finance's approval entry opens Pay Runs
+  $('techNavPayslips').addEventListener('click', ()=>{ closeMainMenu(); showPurchasingView('myPayslips'); setSidebarActive('techNavPayslips'); });
+  $('sbNavPayApprove').addEventListener('click', async ()=>{ closeMainMenu(); if(!(await ensureAdminAuthenticated())) return; showPurchasingView('payRuns'); setSidebarActive('sbNavPayApprove'); });
   $('techNavMessages').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavMessages'); showMessagesView(); });
   $('techNavDocuments').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDocuments'); showDocumentsView(); });
   $('techNavSettings').addEventListener('click', ()=>{ closeMainMenu(); showChangePasswordScreen(false); });

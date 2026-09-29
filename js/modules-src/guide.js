@@ -187,7 +187,7 @@
     if(/^[a-z]+\.[a-z_]+$/.test(g)){ staffOpenModule(g); return true; }
     if(g.startsWith('@purch:')){ showPurchasingView(g.slice(7)); return true; }
     const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
-                 '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
+                 '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true), '@mypayslips': ()=> showPurchasingView('myPayslips'),
                  '@mydtr': ()=> showDtrView(true), '@mycash': ()=> showCashAdvanceView(true, 'new'),
                  '@attendance': ()=> staffOpenModule(can('hr.attendance', 'view') ? 'hr.attendance' : 'hr.staff_attendance'),
                  '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];

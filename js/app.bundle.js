@@ -15980,6 +15980,9 @@
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
     // Payroll (payroll.js): Super Admin, or staff with that page
     if(key === 'paySetup' || key === 'payRules'){ if(currentUser && purchStaffAllowed(key)) payOnShow(key); return; }
+    if(key === 'myPayslips'){ if(currentUser) prMyPayslipsShow(); return; }
+    if(key === 'payRuns'){ if(currentUser && purchStaffAllowed(key)) prOnShow(); return; }
+    if(key === 'payTimesheets'){ if(currentUser && purchStaffAllowed(key)) tsOnShow(); return; }
     if(key === 'myStock'){ if(currentUser){ purchApplyStaffMode(); invShowMyStock(); } return; } // storekeeper / staff screen (quantities only)
     if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
     // Movement screens: admins and storekeepers (the database decides who
@@ -23637,6 +23640,7 @@
         payField('po-c3', 'Pag-IBIG MID no.', '<input type="text" id="payG_pag" value="' + payEsc(g.pagibig_no) + '" placeholder="0000-0000-0000">') +
         '<div class="po-c12 pay-hint" id="payG_warn"></div>' +
       '</div></div>') +
+      '<div class="po-sec"><div class="po-sec-title">Allowances &amp; loans (every pay run)</div><div id="payEmpRecurring"></div></div>' +
       '<div class="po-sec"><div class="po-sec-title">Notes</div>' +
         '<div class="field"><textarea id="payE_notes" rows="2"' + dis + '>' + payEsc(e.notes) + '</textarea></div></div>';
     $('payEmpSave').style.display = ro ? 'none' : '';
@@ -23644,6 +23648,8 @@
     payIdWarn();
     window.scrollTo({ top:0 });
     payLoadHistory(id);
+    if(existing && typeof prLoadRecurring === 'function') prLoadRecurring(id);
+    else if($('payEmpRecurring')) $('payEmpRecurring').innerHTML = '<div class="pay-hint">Save the pay setup first, then add allowances and loans.</div>';
   }
   // same arithmetic the payroll engine uses (engine.ts), so what HR sees here is what pay runs will use
   function payEmpDerive(){
@@ -23655,7 +23661,10 @@
     if(type === 'MONTHLY'){ monthly = rate; daily = rate * 12 / days; hourly = daily / hours; }
     else if(type === 'DAILY'){ daily = rate; monthly = rate * days / 12; hourly = rate / hours; }
     else { hourly = rate; daily = rate * hours; monthly = daily * days / 12; }
-    el.innerHTML = '<b>' + payPeso(daily) + '</b>/day \u00B7 <b>' + payPeso(hourly) + '</b>/hour \u00B7 <b>' + payPeso(monthly) + '</b>/month equivalent';
+    const restN = $$('#payE_rest [data-rest]').filter(c=> c.checked).length;
+    const hint = restN === 2 && Math.abs(days - 313) < 1 ? '<div class="pay-warn">Two rest days a week usually means 261 working days a year, not 313.</div>'
+      : restN === 1 && Math.abs(days - 261) < 1 ? '<div class="pay-warn">One rest day a week usually means 313 working days a year, not 261.</div>' : '';
+    el.innerHTML = hint + '<b>' + payPeso(daily) + '</b>/day \u00B7 <b>' + payPeso(hourly) + '</b>/hour \u00B7 <b>' + payPeso(monthly) + '</b>/month equivalent';
     const mwe = $('payE_mwe').value === 'true', min = payNum($('payE_minWage').value);
     if(min > 0 && daily + 0.005 < min) el.innerHTML += '<div class="pay-warn">Below the regional minimum daily wage you entered (' + payPeso(min) + ').</div>';
     else if(mwe && min > 0 && daily > min + 0.005) el.innerHTML += '<div class="pay-warn">Marked as minimum wage earner but paid above the minimum \u2014 check the tax exemption.</div>';
@@ -23674,7 +23683,7 @@
     if(/^payE_(rate|days|hours|minWage)$/.test(e.target.id)) payEmpDerive();
     if(/^payG_/.test(e.target.id)) payIdWarn();
   });
-  $('payEmpForm').addEventListener('change', (e)=>{ if(/^payE_(rateType|mwe)$/.test(e.target.id)) payEmpDerive(); });
+  $('payEmpForm').addEventListener('change', (e)=>{ if(/^payE_(rateType|mwe)$/.test(e.target.id) || e.target.dataset.rest != null) payEmpDerive(); });
 
   async function payLoadHistory(id){
     const el = $('payEmpHistory');
@@ -23849,9 +23858,17 @@
           payField('po-c3', 'Minimum take-home pay (\u20B1)', '<input type="text" inputmode="decimal" id="payS_minNet" value="' + payEsc(s.minimum_net_pay) + '"' + dis + '>',
             'Loans and other deductions stop at this amount; the rest carries over.') +
           payField('po-c3', 'Grace period for lates (minutes)', '<input type="text" inputmode="numeric" id="payS_grace" value="' + payEsc(s.grace_minutes) + '"' + dis + '>') +
+          payField('po-c6', 'Company location (for local holidays)', '<input type="text" id="payS_locality" value="' + payEsc(s.holiday_locality || '') + '" placeholder="e.g. Quezon City"' + dis + '>',
+            'A holiday marked for this city or province counts for everyone. Leave blank to use national holidays only.') +
         '</div></div>' +
+        '<div class="po-sec"><div class="po-sec-title">Leave types</div><div id="payS_leave" class="pay-checks"><span class="pay-muted">Loading…</span></div>' +
+          '<div class="pay-hint">Ticked = paid. Timesheets use this for approved leave; a type not on this list is flagged for HR.</div></div>' +
         (s.updated_at ? '<div class="pay-hint">Last changed ' + payEsc(payWhen(s.updated_at)) + '</div>' : '');
       $('paySettingsSave').style.display = payCanSetup() ? '' : 'none';
+      const lt = await db.from('payroll_leave_types').select('*').order('sort');
+      $('payS_leave').innerHTML = lt.error ? '<span class="pay-muted">Available after migration 20261005_01_payroll_timesheets.sql.</span>' :
+        (lt.data || []).map(t=> '<label class="pay-chk"><input type="checkbox" data-leave="' + payEsc(t.name) + '"' + (t.is_paid ? ' checked' : '') + dis + '> ' + payEsc(t.name) + '</label>').join('');
+      pay.leaveTypes = lt.error ? null : (lt.data || []);
     }catch(e){ box.innerHTML = '<div class="empty-state">' + payErrHtml('Couldn\u2019t load settings: ', e) + '</div>'; }
   }
   $('paySettingsSave').addEventListener('click', async ()=>{
@@ -23864,9 +23881,17 @@
     if(!(row.default_hours_per_day > 0 && row.default_hours_per_day <= 24)){ toast('Hours a day must be between 1 and 24'); return; }
     if(!(row.minimum_net_pay >= 0)){ toast('Minimum take-home pay must be 0 or more'); return; }
     if(!(row.grace_minutes >= 0 && row.grace_minutes <= 120)){ toast('Grace period must be 0 to 120 minutes'); return; }
+    if(pay.leaveTypes) row.holiday_locality = $('payS_locality').value.trim();
     const { data, error } = await db.from('payroll_settings').update(row).eq('id', 1).select();
     if(error){ toast('Couldn\u2019t save: ' + payDbMsg(error)); return; }
     if(!data || !data.length){ toast('You don\u2019t have Edit access for this.'); return; }
+    for(const t of (pay.leaveTypes || [])){
+      const box = $$('#payS_leave [data-leave]').find(x=> x.dataset.leave === t.name);
+      if(box && box.checked !== t.is_paid){
+        const r = await db.from('payroll_leave_types').update({ is_paid: box.checked }).eq('name', t.name);
+        if(r.error){ toast('Couldn\u2019t save ' + t.name + ': ' + payDbMsg(r.error)); return; }
+      }
+    }
     toast('Payroll settings saved');
     payLoadSettings();
   });
@@ -24301,6 +24326,889 @@
     toast(K.name + ' published');
     payRulesShow();
   }
+
+
+  // =====================================================================
+  // Payroll — Phase 2: Timesheets (migration 20261005_01_payroll_timesheets.sql)
+  //
+  //   HR › Timesheets (module hr.timesheets)
+  //     periods list → a period (everyone's totals) → one person's days
+  //   Build pulls DTR, approved leave, holidays and rest days. Every number
+  //   on these screens is worked out by the database (one trigger), so what
+  //   HR sees is what Phase 3's pay runs will use.
+  // =====================================================================
+
+  const TS_MIGRATION_MSG = 'Timesheets aren\u2019t set up in the database yet \u2014 run migration <b>20261005_01_payroll_timesheets.sql</b> in Supabase first.';
+  const TS_STATUS = { present:'Present', incomplete:'No time-out', absent:'Absent', leave:'Leave', rest:'Rest day', holiday:'Holiday', not_hired:'Not yet hired', upcoming:'Upcoming' };
+  const TS_STATUS_CLS = { present:'', incomplete:'danger', absent:'warn', leave:'muted', rest:'muted', holiday:'muted', not_hired:'muted', upcoming:'muted' };
+  const TS_DAY_TYPE = { ORDINARY:'', REST_DAY:'Rest day', SPECIAL_HOLIDAY:'Special day', SPECIAL_HOLIDAY_REST_DAY:'Special day + rest day',
+    HOLIDAY_REGULAR_WORKED:'Regular holiday', HOLIDAY_REGULAR_REST_DAY:'Regular holiday + rest day' };
+  const TS_FLAG = { MISSING_OUT:'No time-out', MISSING_OT_OUT:'No OT time-out', OT_NOT_APPROVED:'OT not approved', TIME_OUT_BEFORE_IN:'Time-out before time-in',
+    OT_OUT_BEFORE_IN:'OT out before OT in', WORKED_ON_LEAVE:'Worked while on leave', UNKNOWN_LEAVE_TYPE:'Leave type not in the list', LONG_SHIFT:'Over 16 hours',
+    LATE:'Late', UNDERTIME:'Undertime' };
+  const TS_BLOCKING = ['MISSING_OUT', 'MISSING_OT_OUT', 'OT_NOT_APPROVED', 'TIME_OUT_BEFORE_IN', 'OT_OUT_BEFORE_IN'];
+  const TS_HR_STATUS = { '':'As recorded', absent:'Absent', leave_paid:'Paid leave', leave_unpaid:'Unpaid leave', day_off:'Day off (rest-day swap)', workday:'Workday (rest-day swap)' };
+
+  const ts = { periods:[], period:null, totals:[], person:null, days:[] };
+  const tsCanEdit = ()=> can('hr.timesheets', 'edit');
+  const tsCanLock = ()=> can('hr.timesheets', 'approve');
+
+  function tsMissing(e){ return payMissing(e) || /payroll_period|payroll_timesheet/.test(String(e && e.message)); }
+  function tsErr(prefix, e){
+    if(typeof purchIsAuthError === 'function' && purchIsAuthError(e)) return PURCH_EXPIRED_HTML;
+    return tsMissing(e) ? TS_MIGRATION_MSG : payEsc(prefix + describeCloudError(e));
+  }
+  // minutes → "7:40"
+  function tsHM(m){ m = Math.round(Number(m) || 0); if(!m) return '\u2013'; return Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); }
+  function tsH(h){ const n = Number(h) || 0; return n ? String(payTidy(n)) : '\u2013'; }
+  function tsClock(t){
+    if(!t) return '';
+    try{ return new Date(t).toLocaleTimeString('en-GB', { timeZone:'Asia/Manila', hour:'2-digit', minute:'2-digit' }); }catch(e){ return ''; }
+  }
+  function tsDayLabel(d){
+    const dt = new Date(d + 'T00:00:00+08:00');
+    return dt.toLocaleDateString('en-PH', { timeZone:'Asia/Manila', weekday:'short' }) + ' ' + dt.toLocaleDateString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric' });
+  }
+  // "HH:MM" on a work date (Manila) → ISO; `after` = the time it must come after
+  function tsIso(date, hhmm, after){
+    if(!hhmm) return null;
+    let t = new Date(date + 'T' + hhmm + ':00+08:00').getTime();
+    if(after){ const a = new Date(after).getTime(); while(t <= a) t += 864e5; }
+    return new Date(t).toISOString();
+  }
+  function tsShow(which){
+    ['list', 'period', 'person'].forEach(k=>{ $('tsView_' + k).style.display = k === which ? '' : 'none'; });
+    window.scrollTo({ top:0 });
+  }
+
+  function tsOnShow(){
+    $('purchasingView').classList.add('po-wide');
+    document.body.classList.toggle('ts-ro', !tsCanEdit());
+    tsShow('list');
+    tsLoadPeriods();
+  }
+
+  // ---------------- periods ----------------
+  async function tsLoadPeriods(){
+    const list = $('tsPeriodList');
+    list.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    if(!(await ensureCloud())){ list.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const { data, error } = await db.from('payroll_periods').select('*').order('period_start', { ascending:false }).limit(60);
+      if(error) throw error;
+      ts.periods = data || [];
+      tsSuggestNext();
+      if(!ts.periods.length){ list.innerHTML = '<div class="empty-state">No pay periods yet.' + (tsCanEdit() ? ' Open the first one above.' : '') + '</div>'; return; }
+      list.innerHTML = ts.periods.map(p=> '<div class="sp-row" data-id="' + payEsc(p.id) + '"><div class="sp-row-top"><div style="min-width:0;">' +
+        '<div class="sp-row-title">' + payEsc(p.label) + ' ' + (p.status === 'locked' ? '<span class="sp-tag">\u{1F512} Locked</span>' : (p.built_at ? '<span class="sp-tag warn">Being reviewed</span>' : '<span class="sp-tag muted">Not built yet</span>')) + '</div>' +
+        '<div class="sp-row-sub">' + payEsc(PAY_FREQ[p.pay_frequency] || p.pay_frequency) + ' \u00B7 pay date ' + payEsc(payDate(p.pay_date)) + '</div></div></div>' +
+        '<div class="user-card-actions"><button type="button" class="primary" data-ts-open="1">Open</button></div></div>').join('');
+    }catch(e){ list.innerHTML = '<div class="empty-state">' + tsErr('Couldn\u2019t load pay periods: ', e) + '</div>'; }
+  }
+  // next period after the latest one of the chosen frequency
+  function tsSuggestNext(){
+    const f = $('tsNewFreq').value;
+    const last = ts.periods.filter(p=> p.pay_frequency === f).sort((a, b)=> b.period_end.localeCompare(a.period_end))[0];
+    const iso = (d)=> d.toISOString().slice(0, 10);
+    const addDays = (s, n)=>{ const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+    const eom = (y, m)=> iso(new Date(Date.UTC(y, m + 1, 0)));
+    let start;
+    if(last) start = addDays(last.period_end, 1);
+    else {
+      const t = payToday(), y = +t.slice(0, 4), m = +t.slice(5, 7) - 1, day = +t.slice(8, 10);
+      start = f === 'SEMI_MONTHLY' ? (day <= 15 ? t.slice(0, 8) + '01' : t.slice(0, 8) + '16') : (f === 'MONTHLY' ? t.slice(0, 8) + '01' : t);
+      if(f === 'WEEKLY' || f === 'BI_WEEKLY'){ const d = new Date(t + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); start = iso(d); }
+    }
+    const y = +start.slice(0, 4), m = +start.slice(5, 7) - 1, day = +start.slice(8, 10);
+    let end;
+    if(f === 'SEMI_MONTHLY') end = day <= 15 ? start.slice(0, 8) + '15' : eom(y, m);
+    else if(f === 'MONTHLY') end = addDays(iso(new Date(Date.UTC(y, m + 1, day))), -1);
+    else end = addDays(start, f === 'WEEKLY' ? 6 : 13);
+    $('tsNewStart').value = start; $('tsNewEnd').value = end;
+    $('tsNewPay').value = addDays(end, f === 'SEMI_MONTHLY' || f === 'MONTHLY' ? 5 : 3);
+  }
+  $('tsNewFreq').addEventListener('change', tsSuggestNext);
+  $('tsNewCreate').addEventListener('click', async ()=>{
+    if(!tsCanEdit()) return;
+    const f = $('tsNewFreq').value, s = $('tsNewStart').value, e = $('tsNewEnd').value, pd = $('tsNewPay').value;
+    if(!s || !e || !pd){ toast('Enter the period dates and the pay date'); return; }
+    const { data, error } = await db.rpc('payroll_period_create', { p_frequency:f, p_start:s, p_end:e, p_pay_date:pd, p_label:'' });
+    if(error){ toast(tsMissing(error) ? 'Run migration 20261005_01_payroll_timesheets.sql first' : 'Couldn\u2019t open the period: ' + payDbMsg(error)); return; }
+    toast('Pay period opened \u2014 now build its timesheets');
+    await tsLoadPeriods();
+    tsOpenPeriod(data);
+  });
+  $('tsPeriodList').addEventListener('click', (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) tsLoadPeriods(); }); return; }
+    const row = e.target.closest('.sp-row');
+    if(row && e.target.closest('[data-ts-open]')) tsOpenPeriod(row.dataset.id);
+  });
+
+  // ---------------- one period ----------------
+  async function tsOpenPeriod(id){
+    tsShow('period');
+    const box = $('tsPeriodBody');
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    try{
+      const [p, t] = await Promise.all([
+        db.from('payroll_periods').select('*').eq('id', id).maybeSingle(),
+        db.rpc('payroll_period_totals', { p_period:id })
+      ]);
+      if(p.error) throw p.error; if(t.error) throw t.error;
+      if(!p.data){ box.innerHTML = '<div class="empty-state">That pay period no longer exists.</div>'; return; }
+      ts.period = p.data; ts.totals = t.data || [];
+      tsRenderPeriod();
+    }catch(e){ box.innerHTML = '<div class="empty-state">' + tsErr('Couldn\u2019t load the period: ', e) + '</div>'; }
+  }
+  function tsRenderPeriod(){
+    const p = ts.period, locked = p.status === 'locked', edit = tsCanEdit() && !locked;
+    $('tsPeriodTitle').textContent = p.label;
+    const issues = ts.totals.reduce((a, r)=> a + (r.issues || 0), 0);
+    const unrev = ts.totals.filter(r=> !r.reviewed_at).length;
+    const ended = p.period_end < payToday();
+    let status;
+    if(locked) status = '<div class="pay-banner">\u{1F512} Locked ' + payEsc(payWhen(p.locked_at)) + '. Pay runs will use these totals. Unlock only to fix a mistake.</div>';
+    else if(!p.built_at) status = '<div class="pay-banner warn">Not built yet. <b>Build timesheets</b> pulls everyone\u2019s DTR, approved leave and holidays for these dates.</div>';
+    else status = '<div class="pay-banner ' + (issues || unrev ? 'warn' : '') + '">' +
+      (issues ? '<b>' + issues + ' day' + (issues === 1 ? '' : 's') + ' need attention</b> (missing time-out or OT to approve). ' : '') +
+      (unrev ? unrev + ' of ' + ts.totals.length + ' not reviewed yet. ' : 'Everyone is reviewed. ') +
+      (!ended ? 'The period ends ' + payEsc(payDate(p.period_end)) + ' \u2014 rebuild after then to pick up the last days.' : (!issues && !unrev ? 'Ready to lock.' : '')) + '</div>';
+    const act = [];
+    if(edit) act.push('<button type="button" class="btn btn-primary" data-ts-act="build">' + (p.built_at ? 'Rebuild from DTR' : 'Build timesheets') + '</button>');
+    if(edit && p.built_at) act.push('<button type="button" class="btn btn-secondary" data-ts-act="otall">Approve all OT</button>');
+    if(!locked && tsCanLock() && p.built_at) act.push('<button type="button" class="btn btn-primary" data-ts-act="lock">\u{1F512} Lock period</button>');
+    if(locked && tsCanLock()) act.push('<button type="button" class="btn btn-secondary" data-ts-act="unlock">Unlock\u2026</button>');
+    if(edit && p.built_at) act.push('<button type="button" class="btn btn-secondary pay-danger" data-ts-act="reset">Start over\u2026</button>');
+    if(edit) act.push('<button type="button" class="btn btn-secondary pay-danger" data-ts-act="delete">Delete period</button>');
+    const rows = ts.totals.map(r=>{
+      const leave = (Number(r.days_paid_leave) || 0) + (Number(r.days_unpaid_leave) || 0);
+      return '<tr data-person="' + payEsc(r.profile_id) + '" class="ts-click' + (r.issues ? ' ts-bad' : '') + '">' +
+        '<td><b>' + payEsc(r.name || '') + '</b>' + (r.employee_no ? '<div class="pay-muted">' + payEsc(r.employee_no) + '</div>' : '') + '</td>' +
+        '<td class="num">' + (r.days_present || '\u2013') + '</td><td class="num">' + (r.days_absent || '\u2013') + '</td>' +
+        '<td class="num">' + (leave ? payTidy(leave) + (Number(r.days_unpaid_leave) ? ' <span class="pay-muted">(' + payTidy(r.days_unpaid_leave) + ' unpaid)</span>' : '') : '\u2013') + '</td>' +
+        '<td class="num">' + tsH(r.regular_hours) + '</td><td class="num">' + tsH(Number(r.late_hours) + Number(r.undertime_hours)) + '</td>' +
+        '<td class="num">' + tsH(r.ot_paid_hours) + (Number(r.ot_claimed_hours) > Number(r.ot_paid_hours) ? ' <span class="pay-muted">of ' + tsH(r.ot_claimed_hours) + '</span>' : '') + '</td>' +
+        '<td>' + (r.issues ? '<span class="sp-tag danger">' + r.issues + ' to fix</span>' : '') + (r.warnings ? ' <span class="sp-tag warn">' + r.warnings + ' note' + (r.warnings === 1 ? '' : 's') + '</span>' : '') + '</td>' +
+        '<td>' + (r.reviewed_at ? '<span class="pay-ok">\u2713 Reviewed</span>' : '<span class="pay-muted">Not yet</span>') + '</td></tr>';
+    }).join('');
+    $('tsPeriodBody').innerHTML = status +
+      '<div class="pay-hint" style="margin:-6px 0 12px;">' + payEsc(PAY_FREQ[p.pay_frequency] || p.pay_frequency) + ' \u00B7 ' + payEsc(payDate(p.period_start)) + ' to ' + payEsc(payDate(p.period_end)) +
+        ' \u00B7 pay date ' + payEsc(payDate(p.pay_date)) + (p.built_at ? ' \u00B7 built ' + payEsc(payWhen(p.built_at)) : '') + '</div>' +
+      (act.length ? '<div class="pay-actions">' + act.join('') + '</div>' : '') +
+      (ts.totals.length ? '<div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Employee</th><th class="num">Present</th><th class="num">Absent</th><th class="num">Leave</th><th class="num">Regular h</th><th class="num">Late / UT h</th><th class="num">OT h</th><th>Checks</th><th>Review</th></tr></thead><tbody>' +
+        rows + '</tbody></table></div><div class="pay-hint">Tap a person to see and correct their days.</div>'
+        : (p.built_at ? '<div class="empty-state">Nobody is paid ' + payEsc((PAY_FREQ[p.pay_frequency] || '').toLowerCase()) + '. Check Payroll Setup \u203A Employees.</div>' : ''));
+  }
+  $('tsPeriodBack').addEventListener('click', ()=>{ tsShow('list'); tsLoadPeriods(); });
+  $('tsPeriodBody').addEventListener('click', async (e)=>{
+    const tr = e.target.closest('tr[data-person]');
+    if(tr){ tsOpenPerson(tr.dataset.person); return; }
+    const b = e.target.closest('[data-ts-act]');
+    if(!b) return;
+    const p = ts.period, act = b.dataset.tsAct;
+    b.disabled = true;
+    try{
+      if(act === 'build'){
+        const { data, error } = await db.rpc('payroll_period_build', { p_period:p.id, p_reset:false });
+        if(error) throw error;
+        toast((data.employees || 0) + ' people, ' + (data.days || 0) + ' days built' + (data.kept_corrections ? ' \u2014 ' + data.kept_corrections + ' correction' + (data.kept_corrections === 1 ? '' : 's') + ' kept' : ''));
+      }
+      if(act === 'reset'){
+        if(!await uiConfirm('Start over?\n\nEvery correction, absence change and OT approval in this period is thrown away and the days are rebuilt straight from DTR.', { ok:'Start over', danger:true })) return;
+        const { error } = await db.rpc('payroll_period_build', { p_period:p.id, p_reset:true });
+        if(error) throw error;
+        toast('Rebuilt from DTR');
+      }
+      if(act === 'otall'){
+        if(!await uiConfirm('Approve all OT in this period?\n\nEvery overtime hour still waiting is approved as recorded. You can lower any day afterwards.', { ok:'Approve' })) return;
+        const { data, error } = await db.rpc('payroll_ts_approve_ot', { p_period:p.id, p_profile:null });
+        if(error) throw error;
+        toast((data || 0) + ' day' + (data === 1 ? '' : 's') + ' of OT approved');
+      }
+      if(act === 'lock'){
+        if(!(await staffApprovalPrecheck('hr.timesheets', null, null))) return;
+        if(!await uiConfirm('Lock ' + p.label + '?\n\nNobody can change these timesheets after this. Pay runs will use the totals.', { ok:'Lock' })) return;
+        const { error } = await db.rpc('payroll_period_lock', { p_period:p.id });
+        if(error){ if(error.hint === 'reauth_required' && await staffEnsureReauth()){ b.disabled = false; return b.click(); } throw error; }
+        toast('Period locked');
+      }
+      if(act === 'unlock'){
+        if(!(await staffApprovalPrecheck('hr.timesheets', null, null))) return;
+        const why = await uiPrompt('Unlock ' + p.label + '?\n\nWhy? (kept in the activity log)', '', { ok:'Unlock', multiline:false });
+        if(why == null) return;
+        if(!why.trim()){ toast('Say why the period is being unlocked'); return; }
+        const { error } = await db.rpc('payroll_period_unlock', { p_period:p.id, p_reason:why.trim() });
+        if(error) throw error;
+        toast('Period unlocked');
+      }
+      if(act === 'delete'){
+        if(!await uiConfirm('Delete ' + p.label + '?\n\nIts timesheets and corrections are removed. DTR records are not affected.')) return;
+        const { error } = await db.rpc('payroll_period_delete', { p_period:p.id });
+        if(error) throw error;
+        toast('Pay period deleted');
+        tsShow('list'); tsLoadPeriods(); return;
+      }
+      tsOpenPeriod(p.id);
+    }catch(err){ toast('Couldn\u2019t do that: ' + payDbMsg(err)); }
+    finally{ b.disabled = false; }
+  });
+
+  // ---------------- one person ----------------
+  async function tsOpenPerson(profileId){
+    const r = ts.totals.find(x=> x.profile_id === profileId);
+    ts.person = r || { profile_id:profileId, name:'' };
+    tsShow('person');
+    $('tsPersonTitle').textContent = (r && r.name) || '';
+    const box = $('tsPersonBody');
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    try{
+      const { data, error } = await db.from('payroll_timesheet_days').select('*').eq('period_id', ts.period.id).eq('profile_id', profileId).order('work_date');
+      if(error) throw error;
+      ts.days = data || [];
+      tsRenderPerson();
+    }catch(e){ box.innerHTML = '<div class="empty-state">' + tsErr('Couldn\u2019t load the days: ', e) + '</div>'; }
+  }
+  function tsRenderPerson(){
+    const r = ts.person, locked = ts.period.status === 'locked', edit = tsCanEdit() && !locked;
+    const rest = (r.rest_days || []).map(d=> PAY_DAYS[d]).join(', ') || 'none';
+    const pendingOt = ts.days.filter(d=> (d.flags || []).includes('OT_NOT_APPROVED')).length;
+    const bad = ts.days.filter(d=> (d.flags || []).some(f=> TS_BLOCKING.includes(f))).length;
+    const rows = ts.days.map(d=>{
+      const flags = (d.flags || []).filter(f=> f !== 'LATE' && f !== 'UNDERTIME');
+      const blocking = flags.some(f=> TS_BLOCKING.includes(f));
+      const type = TS_DAY_TYPE[d.day_type] || '';
+      return '<tr data-day="' + payEsc(d.id) + '" class="' + (blocking ? 'ts-bad' : '') + '">' +
+        '<td class="ts-date"><b>' + payEsc(tsDayLabel(d.work_date)) + '</b>' + (type ? '<div class="pay-muted">' + payEsc(type) + (d.holiday_name ? ': ' + payEsc(d.holiday_name) : '') + '</div>' : '') + '</td>' +
+        '<td><span class="sp-tag ' + (TS_STATUS_CLS[d.status] || '') + '">' + payEsc(d.status === 'leave' ? (d.leave_paid ? 'Paid leave' : d.leave_paid === false ? 'Unpaid leave' : 'Leave') : TS_STATUS[d.status] || d.status) + '</span>' +
+          (d.adjusted ? ' <span class="sp-tag warn" title="' + payEsc(d.adjust_note) + '">Corrected</span>' : '') + '</td>' +
+        '<td class="num">' + payEsc(tsClock(d.time_in) || '\u2013') + ' \u2013 ' + payEsc(tsClock(d.time_out) || '\u2013') + '</td>' +
+        '<td class="num">' + tsHM(d.regular_min + d.premium_min) + '</td>' +
+        '<td class="num">' + tsHM(d.late_min + d.undertime_min) + '</td>' +
+        '<td class="num">' + (d.ot_claimed_min ? payEsc(tsClock(d.ot_in) || '') + (d.ot_in ? '\u2013' + payEsc(tsClock(d.ot_out) || '?') + '<br>' : '') + tsHM(d.ot_claimed_min) : '\u2013') + '</td>' +
+        '<td class="num">' + (d.ot_claimed_min ? (edit ? '<input type="text" inputmode="decimal" class="ts-ot-in" data-ot="' + payEsc(d.id) + '" value="' + (d.ot_approved_min == null ? '' : payTidy(d.ot_approved_min / 60)) + '" placeholder="h">' : tsHM(d.ot_paid_min)) : '') + '</td>' +
+        '<td class="num">' + tsHM(d.nd_min + d.nd_ot_min) + '</td>' +
+        '<td>' + flags.map(f=> '<span class="sp-tag ' + (TS_BLOCKING.includes(f) ? 'danger' : 'warn') + '">' + payEsc(TS_FLAG[f] || f) + '</span>').join(' ') + '</td>' +
+        (edit ? '<td><button type="button" class="pay-link" data-ts-fix="1">Correct</button></td>' : '') + '</tr>';
+    }).join('');
+    $('tsPersonBody').innerHTML =
+      '<div class="pay-hint" style="margin:-6px 0 10px;">Shift ' + payEsc(payT(r.shift_start) || '\u2014') + '\u2013' + payEsc(payT(r.shift_end) || '\u2014') + ' \u00B7 break ' + payEsc(r.break_minutes == null ? '\u2014' : r.break_minutes + ' min') + ' \u00B7 rest days: ' + payEsc(rest) +
+        ' \u00B7 ' + payEsc(ts.period.label) + '</div>' +
+      (edit ? '<div class="pay-actions">' +
+        (pendingOt ? '<button type="button" class="btn btn-secondary" data-ts-pact="ot">Approve all OT (' + pendingOt + ')</button>' : '') +
+        (r.reviewed_at ? '<button type="button" class="btn btn-secondary" data-ts-pact="unreview">Undo review</button>'
+                       : '<button type="button" class="btn btn-primary" data-ts-pact="review"' + (bad ? ' disabled title="Fix the days in red first"' : '') + '>\u2713 Mark reviewed</button>') +
+        '</div>' : '') +
+      (r.reviewed_at ? '<div class="pay-banner">\u2713 Reviewed ' + payEsc(payWhen(r.reviewed_at)) + '. Any correction clears this.</div>' : (bad ? '<div class="pay-banner warn">Fix the ' + bad + ' day' + (bad === 1 ? '' : 's') + ' in red, then mark reviewed.</div>' : '')) +
+      '<div class="pay-table-wrap"><table class="pay-table ts-days"><thead><tr><th>Day</th><th>Status</th><th class="num">In \u2013 Out</th><th class="num">Hours</th><th class="num">Late / UT</th><th class="num">OT recorded</th><th class="num">OT approved (h)</th><th class="num">Night diff.</th><th>Checks</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>' +
+        rows + '</tbody></table></div>' +
+      '<div class="pay-hint">Hours are h:mm. OT is paid only once approved; leave the box empty to decide later, or enter fewer hours to approve part of it.</div>';
+  }
+  $('tsPersonBack').addEventListener('click', ()=>{ tsOpenPeriod(ts.period.id); });
+  $('tsPersonBody').addEventListener('change', async (e)=>{
+    const inp = e.target.closest('[data-ot]');
+    if(!inp) return;
+    const d = ts.days.find(x=> x.id === inp.dataset.ot);
+    const s = inp.value.trim();
+    let mins = null;
+    if(s !== ''){ const h = payNum(s); if(!(h >= 0)){ toast('Enter hours, e.g. 2 or 1.5'); return; } mins = Math.round(h * 60); }
+    if(mins != null && mins > d.ot_claimed_min){ toast('That\u2019s more than the ' + tsHM(d.ot_claimed_min) + ' recorded \u2014 approving the recorded OT'); mins = d.ot_claimed_min; }
+    const { error } = await db.from('payroll_timesheet_days').update({ ot_approved_min:mins }).eq('id', d.id);
+    if(error){ toast('Couldn\u2019t save: ' + payDbMsg(error)); return; }
+    await tsReloadPerson();
+  });
+  async function tsReloadPerson(){
+    const [t, dd] = await Promise.all([
+      db.rpc('payroll_period_totals', { p_period:ts.period.id }),
+      db.from('payroll_timesheet_days').select('*').eq('period_id', ts.period.id).eq('profile_id', ts.person.profile_id).order('work_date')
+    ]);
+    if(!t.error){ ts.totals = t.data || []; ts.person = ts.totals.find(x=> x.profile_id === ts.person.profile_id) || ts.person; }
+    if(!dd.error) ts.days = dd.data || [];
+    tsRenderPerson();
+  }
+  $('tsPersonBody').addEventListener('click', async (e)=>{
+    const pa = e.target.closest('[data-ts-pact]');
+    if(pa){
+      const a = pa.dataset.tsPact; pa.disabled = true;
+      try{
+        if(a === 'ot'){
+          const { error } = await db.rpc('payroll_ts_approve_ot', { p_period:ts.period.id, p_profile:ts.person.profile_id });
+          if(error) throw error; toast('OT approved');
+        } else {
+          const { error } = await db.rpc('payroll_ts_set_reviewed', { p_period:ts.period.id, p_profile:ts.person.profile_id, p_reviewed: a === 'review' });
+          if(error) throw error; toast(a === 'review' ? 'Marked reviewed' : 'Review undone');
+        }
+        await tsReloadPerson();
+      }catch(err){ toast('Couldn\u2019t do that: ' + payDbMsg(err)); pa.disabled = false; }
+      return;
+    }
+    if(e.target.closest('[data-ts-fix]')){ tsOpenFix(e.target.closest('tr').dataset.day); return; }
+    if(e.target.closest('[data-fix-cancel]')){ tsRenderPerson(); return; }
+    if(e.target.closest('[data-fix-save]')) tsSaveFix(e.target.closest('tr').dataset.fix);
+  });
+  function tsOpenFix(id){
+    tsRenderPerson();
+    const d = ts.days.find(x=> x.id === id);
+    const tr = $('tsPersonBody').querySelector('tr[data-day="' + id + '"]');
+    if(!d || !tr) return;
+    const cols = tr.cells.length;
+    tr.insertAdjacentHTML('afterend', '<tr class="ts-fix" data-fix="' + payEsc(id) + '"><td colspan="' + cols + '"><div class="po-grid">' +
+      payField('po-c3', 'Time in', '<input type="time" data-f="in" value="' + payEsc(tsClock(d.time_in)) + '">') +
+      payField('po-c3', 'Time out', '<input type="time" data-f="out" value="' + payEsc(tsClock(d.time_out)) + '">', 'Earlier than time in = next day') +
+      payField('po-c3', 'OT in', '<input type="time" data-f="otin" value="' + payEsc(tsClock(d.ot_in)) + '">') +
+      payField('po-c3', 'OT out', '<input type="time" data-f="otout" value="' + payEsc(tsClock(d.ot_out)) + '">') +
+      payField('po-c6', 'Count this day as', '<select data-f="status">' + payOpts(TS_HR_STATUS, d.hr_status || '') + '</select>',
+        d.leave_type ? 'Approved leave on file: ' + payEsc(d.leave_type) : '') +
+      payField('po-c6', 'Why? <span class="req">*</span>', '<input type="text" data-f="note" value="" placeholder="e.g. Forgot to time out \u2014 confirmed by foreman">',
+        d.adjusted ? 'Last correction: ' + payEsc(d.adjust_note) : '') +
+      '</div><div class="pay-actions"><button type="button" class="btn btn-primary" data-fix-save="1">Save correction</button><button type="button" class="btn btn-secondary" data-fix-cancel="1">Cancel</button></div>' +
+      (d.dtr_snapshot ? '<div class="pay-hint">DTR as recorded: in ' + payEsc(tsClock(payDtrTime(d.work_date, d.dtr_snapshot.timeIn)) || '\u2013') + ', out ' + payEsc(tsClock(payDtrTime(d.work_date, d.dtr_snapshot.timeOut)) || '\u2013') +
+        (d.dtr_snapshot.otTimeIn ? ', OT ' + payEsc(tsClock(payDtrTime(d.work_date, d.dtr_snapshot.otTimeIn)) || '') + '\u2013' + payEsc(tsClock(payDtrTime(d.work_date, d.dtr_snapshot.otTimeOut)) || '') : '') + '</div>' : '<div class="pay-hint">No DTR record for this day.</div>') +
+      '</td></tr>');
+    const note = $('tsPersonBody').querySelector('tr.ts-fix [data-f="note"]');
+    if(note) note.focus();
+  }
+  function payDtrTime(date, v){
+    if(!v) return null;
+    if(/^\s*\d{1,2}:\d{2}/.test(v)) return tsIso(date, v.trim().slice(0, 5).padStart(5, '0'));
+    return v;
+  }
+  async function tsSaveFix(id){
+    const d = ts.days.find(x=> x.id === id);
+    const row = $('tsPersonBody').querySelector('tr.ts-fix');
+    const g = (f)=> row.querySelector('[data-f="' + f + '"]').value;
+    const note = g('note').trim();
+    if(!note){ toast('Say why this day is being corrected'); return; }
+    const tin = tsIso(d.work_date, g('in'));
+    const tout = tsIso(d.work_date, g('out'), tin);
+    const oin = tsIso(d.work_date, g('otin'), tout || tin);
+    const oout = tsIso(d.work_date, g('otout'), oin);
+    if(!tin && tout){ toast('Enter the time in too'); return; }
+    if(!oin && oout){ toast('Enter the OT start too'); return; }
+    const upd = { time_in:tin, time_out:tout, ot_in:oin, ot_out:oout, hr_status: g('status') || null, adjust_note:note };
+    const { error } = await db.from('payroll_timesheet_days').update(upd).eq('id', id);
+    if(error){ toast('Couldn\u2019t save: ' + payDbMsg(error)); return; }
+    toast('Day corrected');
+    await tsReloadPerson();
+  }
+
+
+  // =====================================================================
+  // Payroll — Phase 3: pay runs and payslips (20261006_01_payroll_runs.sql)
+  //
+  //   HR › Pay Runs (hr.payroll_runs) / Finance › Payroll Approval
+  //   (fin.payroll_approve) — the same page; buttons follow access:
+  //     start (locked timesheets) → adjustments / cash advances → Compute
+  //     (payroll-compute Edge Function) → Submit → Approve / Send back →
+  //     Release (payslips appear, cash advances settle, loans go down)
+  //   Payroll Setup › Employees › Allowances & loans (recurring items)
+  //   My HR › My Payslips (technicians and office staff)
+  //   Payslip and payroll register PDFs open in the shared PDF viewer;
+  //   the register also exports to Excel.
+  // =====================================================================
+
+  const PR_MIGRATION_MSG = 'Pay runs aren\u2019t set up in the database yet \u2014 run migration <b>20261006_01_payroll_runs.sql</b> in Supabase first.';
+  const PR_STATUS = { draft:'Draft', computed:'Computed \u2014 check it', submitted:'Waiting for approval', approved:'Approved \u2014 ready to release', released:'Released' };
+  const PR_STATUS_CLS = { draft:'muted', computed:'warn', submitted:'warn', approved:'', released:'' };
+  const PR_CATS_EARN = { ALLOWANCE:'Allowance', BONUS:'Bonus', THIRTEENTH_MONTH:'13th month pay', OTHER_BENEFITS:'Other benefits', COMMISSION:'Commission', HAZARD_PAY:'Hazard pay', ADJUSTMENT:'Adjustment', REIMBURSEMENT:'Reimbursement', OTHER:'Other' };
+  const PR_CATS_DED = { LOAN:'Loan', CASH_ADVANCE:'Cash advance', UNIFORM:'Uniform / equipment', UNION_DUES:'Union dues', ADJUSTMENT:'Adjustment', OTHER:'Other' };
+
+  const pr = { runs:[], periods:[], run:null, period:null, lines:[], adj:[], names:new Map() };
+  const prCanRun = ()=> can('hr.payroll_runs', 'edit');
+  const prCanApprove = ()=> can('fin.payroll_approve', 'approve');
+  const prCanRelease = ()=> can('fin.payroll_approve', 'edit');
+  const prMissing = (e)=> payMissing(e) || /payroll_run|payroll_lines/.test(String(e && e.message));
+  function prErr(prefix, e){
+    if(typeof purchIsAuthError === 'function' && purchIsAuthError(e)) return PURCH_EXPIRED_HTML;
+    return prMissing(e) ? PR_MIGRATION_MSG : payEsc(prefix + describeCloudError(e));
+  }
+  const prShow = (w)=>{ ['list', 'run'].forEach(k=>{ $('prView_' + k).style.display = k === w ? '' : 'none'; }); window.scrollTo({ top:0 }); };
+
+  function prOnShow(){
+    $('purchasingView').classList.add('po-wide');
+    prShow('list');
+    prLoadList();
+  }
+
+  // ---------------- list ----------------
+  async function prLoadList(){
+    const box = $('prList');
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    if(!(await ensureCloud())){ box.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const [r, p] = await Promise.all([
+        db.from('payroll_runs').select('*').order('created_at', { ascending:false }).limit(60),
+        db.from('payroll_periods').select('*').eq('status', 'locked').order('period_start', { ascending:false }).limit(60)
+      ]);
+      if(r.error) throw r.error; if(p.error) throw p.error;
+      pr.runs = r.data || []; pr.periods = p.data || [];
+      const byId = new Map(pr.periods.map(x=> [x.id, x]));
+      const ready = pr.periods.filter(x=> !pr.runs.some(r=> r.period_id === x.id));
+      let html = '';
+      if(ready.length && prCanRun()){
+        html += '<div class="po-sec"><div class="po-sec-title">Ready for a pay run</div>' + ready.map(x=>
+          '<div class="pay-ver"><div><b>' + payEsc(x.label) + '</b><div class="sp-row-sub">' + payEsc(PAY_FREQ[x.pay_frequency] || '') + ' \u00B7 pay date ' + payEsc(payDate(x.pay_date)) + ' \u00B7 timesheets locked</div></div>' +
+          '<button type="button" class="btn btn-primary pay-sm" data-pr-start="' + payEsc(x.id) + '">Start pay run</button></div>').join('') + '</div>';
+      } else if(!pr.runs.length){
+        html += '<div class="pay-banner warn">No pay runs yet. Lock a period in <b>Timesheets</b> first, then start its pay run here.</div>';
+      }
+      html += pr.runs.map(r=>{
+        const per = byId.get(r.period_id);
+        return '<div class="sp-row" data-id="' + payEsc(r.id) + '"><div class="sp-row-top"><div style="min-width:0;">' +
+          '<div class="sp-row-title">' + payEsc(per ? per.label : 'Pay run') + ' <span class="sp-tag ' + (PR_STATUS_CLS[r.status] || '') + '">' + payEsc(PR_STATUS[r.status] || r.status) + '</span></div>' +
+          '<div class="sp-row-sub">' + (per ? 'Pay date ' + payEsc(payDate(per.pay_date)) + ' \u00B7 ' : '') + (r.headcount ? r.headcount + ' people' : 'not computed yet') + (r.sent_back_note ? ' \u00B7 sent back: ' + payEsc(r.sent_back_note) : '') + '</div></div>' +
+          (r.headcount ? '<div class="mt-row-price">' + payPeso(r.total_net) + '<div class="sp-row-sub">net pay</div></div>' : '') + '</div>' +
+          '<div class="user-card-actions"><button type="button" class="primary" data-pr-open="1">Open</button></div></div>';
+      }).join('');
+      box.innerHTML = html || '<div class="empty-state">No pay runs yet.</div>';
+    }catch(e){ box.innerHTML = '<div class="empty-state">' + prErr('Couldn\u2019t load pay runs: ', e) + '</div>'; }
+  }
+  $('prList').addEventListener('click', async (e)=>{
+    if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) prLoadList(); }); return; }
+    const st = e.target.closest('[data-pr-start]');
+    if(st){
+      st.disabled = true;
+      const { data, error } = await db.rpc('payroll_run_create', { p_period: st.dataset.prStart });
+      if(error){ st.disabled = false; toast('Couldn\u2019t start: ' + payDbMsg(error)); return; }
+      const ca = await db.rpc('payroll_run_add_cash_advances', { p_run:data });
+      toast('Pay run started' + (!ca.error && ca.data ? ' \u2014 ' + ca.data + ' cash advance balance' + (ca.data === 1 ? '' : 's') + ' added' : ''));
+      prOpenRun(data);
+      return;
+    }
+    const row = e.target.closest('.sp-row');
+    if(row && e.target.closest('[data-pr-open]')) prOpenRun(row.dataset.id);
+  });
+
+  // ---------------- one run ----------------
+  async function prOpenRun(id){
+    prShow('run');
+    const box = $('prRunBody');
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    try{
+      const r = await db.from('payroll_runs').select('*').eq('id', id).maybeSingle();
+      if(r.error) throw r.error;
+      if(!r.data){ box.innerHTML = '<div class="empty-state">That pay run no longer exists.</div>'; return; }
+      pr.run = r.data;
+      const [p, l, a, t] = await Promise.all([
+        db.from('payroll_periods').select('*').eq('id', pr.run.period_id).maybeSingle(),
+        db.from('payroll_lines').select('*').eq('run_id', id),
+        db.from('payroll_run_adjustments').select('*').eq('run_id', id).order('created_at'),
+        db.from('payroll_timesheets').select('profile_id').eq('period_id', pr.run.period_id)
+      ]);
+      for(const x of [p, l, a]) if(x.error) throw x.error;
+      pr.period = p.data; pr.lines = l.data || []; pr.adj = a.data || [];
+      const ids = [...new Set([...(t.data || []).map(x=> x.profile_id), ...pr.lines.map(x=> x.profile_id), ...pr.adj.map(x=> x.profile_id)])];
+      if(ids.length){
+        const pp = await db.from('profiles').select('id, name').in('id', ids);
+        (pp.data || []).forEach(x=> pr.names.set(x.id, x.name));
+      }
+      pr.people = ids.sort((x, y)=> String(pr.names.get(x) || '').localeCompare(String(pr.names.get(y) || '')));
+      prRenderRun();
+    }catch(e){ box.innerHTML = '<div class="empty-state">' + prErr('Couldn\u2019t load the pay run: ', e) + '</div>'; }
+  }
+  function prRenderRun(){
+    const r = pr.run, per = pr.period || {}, editable = prCanRun() && (r.status === 'draft' || r.status === 'computed');
+    $('prRunTitle').textContent = per.label || 'Pay run';
+    const banner = {
+      draft: 'Add any one-off earnings or deductions below, then <b>Compute</b>. Recurring allowances and loans come from Payroll Setup; hours come from the locked timesheets.',
+      computed: 'Check each person\u2019s pay (tap a row for the payslip). Change anything and it goes back to draft. When it\u2019s right, <b>Submit for approval</b>.',
+      submitted: 'Waiting for Finance to approve. HR can\u2019t change it now; Finance can send it back with a reason.',
+      approved: 'Approved. <b>Release</b> once salaries are paid out \u2014 payslips then appear in each person\u2019s My HR.',
+      released: 'Released ' + payWhen(r.released_at) + '. Payslips are in each person\u2019s My HR. This pay run is final.'
+    }[r.status];
+    const act = [];
+    if(editable){
+      act.push('<button type="button" class="btn btn-primary" data-pr-act="compute">' + (r.status === 'computed' ? 'Compute again' : 'Compute pay') + '</button>');
+      if(r.status === 'computed') act.push('<button type="button" class="btn btn-primary" data-pr-act="submit">Submit for approval</button>');
+      act.push('<button type="button" class="btn btn-secondary" data-pr-act="ca">Pull in cash advances</button>');
+    }
+    if(r.status === 'submitted' && prCanApprove()) act.push('<button type="button" class="btn btn-primary" data-pr-act="approve">\u2713 Approve ' + payPeso(r.total_net) + '</button>');
+    if(r.status === 'submitted' && (prCanApprove() || prCanRun())) act.push('<button type="button" class="btn btn-secondary" data-pr-act="back">Send back\u2026</button>');
+    if(r.status === 'approved' && prCanRelease()) act.push('<button type="button" class="btn btn-primary" data-pr-act="release">Release pay</button>');
+    if(pr.lines.length){
+      act.push('<button type="button" class="btn btn-secondary" data-pr-act="pdf">Register PDF</button>');
+      act.push('<button type="button" class="btn btn-secondary" data-pr-act="xlsx">Register Excel</button>');
+    }
+    if(editable) act.push('<button type="button" class="btn btn-secondary pay-danger" data-pr-act="delete">Delete pay run</button>');
+
+    const T = (l)=> (l.result && l.result.totals) || {};
+    const rows = pr.lines.slice().sort((a, b)=> String(pr.names.get(a.profile_id) || '').localeCompare(String(pr.names.get(b.profile_id) || ''))).map(l=>{
+      const t = T(l), w = (l.warnings || []).length;
+      return '<tr class="ts-click" data-line="' + payEsc(l.profile_id) + '"><td><b>' + payEsc(pr.names.get(l.profile_id) || '') + '</b>' + (w ? ' <span class="sp-tag warn">' + w + ' note' + (w === 1 ? '' : 's') + '</span>' : '') + '</td>' +
+        '<td class="num">' + payPeso(t.grossPay) + '</td><td class="num">' + payPeso(t.employeeMandatoryContributions) + '</td><td class="num">' + payPeso(t.withholdingTax) + '</td>' +
+        '<td class="num">' + payPeso(t.voluntaryDeductions) + (Number(t.deferredDeductions) ? '<div class="pay-warn">' + payPeso(t.deferredDeductions) + ' carried over</div>' : '') + '</td>' +
+        '<td class="num"><b>' + payPeso(t.netPay) + '</b></td><td class="num pay-muted">' + payPeso(t.employerContributions) + '</td></tr>';
+    }).join('');
+    const tot = pr.lines.reduce((a, l)=>{ const t = T(l); ['grossPay', 'employeeMandatoryContributions', 'withholdingTax', 'voluntaryDeductions', 'netPay', 'employerContributions'].forEach(k=> a[k] = (a[k] || 0) + (Number(t[k]) || 0)); return a; }, {});
+
+    const adjRows = pr.adj.map(a=> '<tr data-adj="' + payEsc(a.id) + '"><td>' + payEsc(pr.names.get(a.profile_id) || '') + '</td><td>' + payEsc(a.name) +
+        (a.source === 'cash_advance' ? ' <span class="sp-tag muted">Cash advance</span>' : '') + '<div class="pay-muted">' + payEsc((a.kind === 'earning' ? PR_CATS_EARN : PR_CATS_DED)[a.category] || a.category) +
+        (a.kind === 'earning' ? (a.is_de_minimis ? ' \u00B7 de minimis ' + payEsc(a.de_minimis_code) : a.is_taxable ? ' \u00B7 taxable' : ' \u00B7 not taxable') : '') + '</div></td>' +
+        '<td class="num ' + (a.kind === 'deduction' ? 'pay-warn' : '') + '">' + (a.kind === 'deduction' ? '\u2212' : '+') + payPeso(a.amount) + '</td>' +
+        (editable ? '<td><button type="button" class="pay-rm" data-adj-rm="1" aria-label="Remove">\u00D7</button></td>' : '') + '</tr>').join('');
+    const people = (pr.people || []).map(id=> '<option value="' + payEsc(id) + '">' + payEsc(pr.names.get(id) || id) + '</option>').join('');
+
+    $('prRunBody').innerHTML =
+      '<div class="pay-banner ' + (r.status === 'released' || r.status === 'approved' ? '' : 'warn') + '">' + banner + (r.sent_back_note && r.status === 'computed' ? '<div><b>Sent back:</b> ' + payEsc(r.sent_back_note) + '</div>' : '') + '</div>' +
+      '<div class="pay-hint" style="margin:-6px 0 12px;">' + payEsc(PAY_FREQ[per.pay_frequency] || '') + ' \u00B7 ' + payEsc(payDate(per.period_start)) + ' to ' + payEsc(payDate(per.period_end)) + ' \u00B7 pay date ' + payEsc(payDate(per.pay_date)) +
+        (r.rule_labels ? '<br>Rules: ' + payEsc(r.rule_labels) : '') + '</div>' +
+      (r.headcount ? '<div class="pr-kpis"><div><span>Gross pay</span><b>' + payPeso(r.total_gross) + '</b></div><div><span>Net pay</span><b>' + payPeso(r.total_net) + '</b></div><div><span>Employer contributions</span><b>' + payPeso(r.total_employer) + '</b></div><div><span>Total cost</span><b>' + payPeso(r.total_cost) + '</b></div></div>' : '') +
+      (act.length ? '<div class="pay-actions">' + act.join('') + '</div>' : '') +
+      '<div id="prErrors"></div>' +
+      (pr.lines.length ? '<div class="po-sec"><div class="po-sec-title">Payroll register</div><div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Employee</th><th class="num">Gross</th><th class="num">SSS / PhilHealth / Pag-IBIG</th><th class="num">Tax</th><th class="num">Other deductions</th><th class="num">Net pay</th><th class="num">Employer share</th></tr></thead><tbody>' +
+        rows + '<tr class="pr-total"><td>Total</td><td class="num">' + payPeso(tot.grossPay) + '</td><td class="num">' + payPeso(tot.employeeMandatoryContributions) + '</td><td class="num">' + payPeso(tot.withholdingTax) + '</td><td class="num">' + payPeso(tot.voluntaryDeductions) + '</td><td class="num">' + payPeso(tot.netPay) + '</td><td class="num">' + payPeso(tot.employerContributions) + '</td></tr>' +
+        '</tbody></table></div><div class="pay-hint">Tap a person to open their payslip.</div></div>' : '') +
+      '<div class="po-sec"><div class="po-sec-title">One-off earnings &amp; deductions (this pay run only)</div>' +
+        (pr.adj.length ? '<div class="pay-table-wrap"><table class="pay-table"><tbody>' + adjRows + '</tbody></table></div>' : '<div class="pay-hint">None.</div>') +
+        (editable ? '<div class="po-grid" style="margin-top:10px;">' +
+          payField('po-c3', 'Person', '<select id="prA_who">' + people + '</select>') +
+          payField('po-c3', 'Type', '<select id="prA_kind"><option value="earning">Earning (+)</option><option value="deduction">Deduction (\u2212)</option></select>') +
+          payField('po-c3', 'Category', '<select id="prA_cat">' + payOpts(PR_CATS_EARN, 'BONUS') + '</select>') +
+          payField('po-c3', 'Amount (\u20B1)', '<input type="text" inputmode="decimal" id="prA_amt" placeholder="0.00">') +
+          payField('po-c6', 'Description', '<input type="text" id="prA_name" placeholder="e.g. Performance bonus, uniform deduction">') +
+          payField('po-c3', 'Tax', '<select id="prA_tax"><option value="auto">Per BIR rules</option><option value="taxable">Taxable</option><option value="exempt">Not taxable</option><option value="dm">De minimis\u2026</option></select>',
+            '13th month, bonuses &amp; other benefits: tax-free up to the yearly cap') +
+          payField('po-c3', 'De minimis type', '<select id="prA_dm" disabled><option value="">\u2014</option></select>') +
+          '<div class="po-c12"><button type="button" class="btn btn-primary" id="prA_add">+ Add to this pay run</button></div></div>' : '') +
+      '</div>';
+    if(editable) prFillDm();
+  }
+  async function prFillDm(){
+    // de minimis codes from the BIR rule in force
+    try{
+      const { data } = await db.from('payroll_rules').select('config, effective_from, effective_to, published_at').eq('kind', 'bir').not('published_at', 'is', null);
+      const pd = pr.period && pr.period.pay_date;
+      const cur = (data || []).find(x=> x.effective_from <= pd && (!x.effective_to || x.effective_to >= pd));
+      const codes = Object.keys((cur && cur.config && cur.config.de_minimis) || {});
+      if($('prA_dm')) $('prA_dm').innerHTML = '<option value="">\u2014</option>' + codes.map(c=> '<option value="' + payEsc(c) + '">' + payEsc(c.replace(/_/g, ' ').toLowerCase()) + '</option>').join('');
+    }catch(e){}
+  }
+  $('prRunBody').addEventListener('change', (e)=>{
+    if(e.target.id === 'prA_kind'){
+      const ded = e.target.value === 'deduction';
+      $('prA_cat').innerHTML = payOpts(ded ? PR_CATS_DED : PR_CATS_EARN, ded ? 'ADJUSTMENT' : 'BONUS');
+      $('prA_tax').disabled = ded; $('prA_dm').disabled = true;
+    }
+    if(e.target.id === 'prA_tax') $('prA_dm').disabled = e.target.value !== 'dm';
+  });
+  $('prRunBack').addEventListener('click', ()=>{ prShow('list'); prLoadList(); });
+  $('prRunBody').addEventListener('click', async (e)=>{
+    const tr = e.target.closest('tr[data-line]');
+    if(tr){ const l = pr.lines.find(x=> x.profile_id === tr.dataset.line); if(l) prPayslipPdf(l, pr.period, pr.names.get(l.profile_id)); return; }
+    if(e.target.closest('[data-adj-rm]')){
+      const a = pr.adj.find(x=> x.id === e.target.closest('tr').dataset.adj);
+      if(!a || !await uiConfirm('Remove \u201C' + a.name + '\u201D (' + payPeso(a.amount) + ') for ' + (pr.names.get(a.profile_id) || '') + '?' + (pr.run.status === 'computed' ? '\n\nThe pay run goes back to draft.' : ''))) return;
+      const { error } = await db.from('payroll_run_adjustments').delete().eq('id', a.id);
+      if(error){ toast('Couldn\u2019t remove: ' + payDbMsg(error)); return; }
+      prOpenRun(pr.run.id); return;
+    }
+    if(e.target.id === 'prA_add'){
+      const kind = $('prA_kind').value, tax = $('prA_tax').value, amt = payNum($('prA_amt').value), name = $('prA_name').value.trim();
+      const cat = $('prA_cat').value;
+      if(!(amt > 0)){ toast('Enter the amount'); return; }
+      if(!name){ toast('Enter a description'); return; }
+      if(tax === 'dm' && !$('prA_dm').value){ toast('Choose the de minimis type'); return; }
+      const autoTaxable = !['THIRTEENTH_MONTH', 'BONUS', 'OTHER_BENEFITS', 'REIMBURSEMENT'].includes(cat);
+      const row = { run_id:pr.run.id, profile_id:$('prA_who').value, kind, name, category:cat, amount:amt,
+        is_taxable: kind === 'earning' ? (tax === 'taxable' || (tax === 'auto' && autoTaxable)) : false,
+        is_de_minimis: kind === 'earning' && tax === 'dm', de_minimis_code: kind === 'earning' && tax === 'dm' ? $('prA_dm').value : null };
+      if(cat === 'REIMBURSEMENT') row.is_taxable = false;
+      const { error } = await db.from('payroll_run_adjustments').insert(row);
+      if(error){ toast('Couldn\u2019t add: ' + payDbMsg(error)); return; }
+      toast('Added' + (pr.run.status === 'computed' ? ' \u2014 compute again' : ''));
+      prOpenRun(pr.run.id); return;
+    }
+    const b = e.target.closest('[data-pr-act]');
+    if(!b) return;
+    const r = pr.run, act = b.dataset.prAct;
+    b.disabled = true;
+    try{
+      if(act === 'compute') await prCompute();
+      if(act === 'ca'){
+        const { data, error } = await db.rpc('payroll_run_add_cash_advances', { p_run:r.id });
+        if(error) throw error;
+        toast(data ? data + ' cash advance balance' + (data === 1 ? '' : 's') + ' added' : 'No unsettled cash advances for these people');
+      }
+      if(act === 'submit'){
+        if(!await uiConfirm('Submit this pay run for approval?\n\n' + r.headcount + ' people, net pay ' + payPeso(r.total_net) + '. It can\u2019t be changed while it waits.', { ok:'Submit' })) return;
+        const { error } = await db.rpc('payroll_run_submit', { p_run:r.id }); if(error) throw error;
+        toast('Submitted for approval');
+      }
+      if(act === 'back'){
+        const why = await uiPrompt('Send this pay run back?\n\nWhat needs fixing?', '', { ok:'Send back', multiline:false });
+        if(why == null) return;
+        if(!why.trim()){ toast('Say why it\u2019s being sent back'); return; }
+        const { error } = await db.rpc('payroll_run_send_back', { p_run:r.id, p_reason:why.trim() }); if(error) throw error;
+        toast('Sent back');
+      }
+      if(act === 'approve'){
+        if(!(await staffApprovalPrecheck('fin.payroll_approve', Number(r.total_net), r.computed_by))) return;
+        if(!await uiConfirm('Approve pay for ' + (pr.period && pr.period.label) + '?\n\n' + r.headcount + ' people \u00B7 net pay ' + payPeso(r.total_net) + ' \u00B7 total cost ' + payPeso(r.total_cost) + '.', { ok:'Approve' })) return;
+        const { error } = await db.rpc('payroll_run_approve', { p_run:r.id });
+        if(error){ if(error.hint === 'reauth_required' && await staffEnsureReauth()){ b.disabled = false; return b.click(); } throw error; }
+        toast('Pay run approved');
+      }
+      if(act === 'release'){
+        if(!await uiConfirm('Release this pay run?\n\nDo this once salaries have been paid out. Payslips appear in each person\u2019s My HR, cash advances included are marked settled, and loan balances go down. This can\u2019t be undone.', { ok:'Release' })) return;
+        const { data, error } = await db.rpc('payroll_run_release', { p_run:r.id }); if(error) throw error;
+        toast('Released' + (data && data.cash_advances_settled ? ' \u2014 ' + data.cash_advances_settled + ' cash advance' + (data.cash_advances_settled === 1 ? '' : 's') + ' settled' : ''));
+      }
+      if(act === 'delete'){
+        if(!await uiConfirm('Delete this pay run?\n\nIts adjustments and computed pay are removed. The timesheets stay locked.')) return;
+        const { error } = await db.rpc('payroll_run_delete', { p_run:r.id }); if(error) throw error;
+        toast('Pay run deleted'); prShow('list'); prLoadList(); return;
+      }
+      if(act === 'pdf'){ await prRegisterPdf(); return; }
+      if(act === 'xlsx'){ await prRegisterXlsx(); return; }
+      prOpenRun(r.id);
+    }catch(err){ toast('Couldn\u2019t do that: ' + payDbMsg(err)); }
+    finally{ b.disabled = false; }
+  });
+
+  async function prCompute(){
+    toast('Computing pay\u2026');
+    const { data, error } = await db.functions.invoke('payroll-compute', { body:{ runId: pr.run.id } });
+    let body = data;
+    if(error){
+      try{ body = error.context && typeof error.context.json === 'function' ? await error.context.json() : null; }catch(e){ body = null; }
+      if(!body){
+        const m = String(error.message || '');
+        throw new Error(/not found|404|Failed to send/i.test(m) ? 'The payroll-compute function isn\u2019t deployed yet \u2014 run: supabase functions deploy payroll-compute' : m);
+      }
+    }
+    if(body && body.error){
+      if(body.errors && body.errors.length){
+        $('prErrors').innerHTML = '<div class="pay-banner warn"><b>' + payEsc(body.error) + '</b>' + body.errors.map(x=> '<div>' + payEsc(x.name) + ': ' + payEsc(x.message) + '</div>').join('') + '</div>';
+      }
+      throw new Error(body.error);
+    }
+    toast('Computed: ' + (body.people || 0) + ' people, net pay ' + payPeso(body.totalNet));
+  }
+
+  // ---------------- payslip PDF ----------------
+  async function prPdfBase(title){
+    await loadAwesScript('jspdf', awesLibs.jspdf); await loadAwesScript('autotable', awesLibs.autotable);
+    await poLoadSettings().catch(()=>{});
+    const co = poSettingsData || {}, style = co.header_style || 'green';
+    const logo = co.logo_path ? await poLoadImage(co.logo_path).then(img=> poLogoForStyle(img, style)).catch(()=> null) : await poDefaultLogo(style).catch(()=> null);
+    const fonts = await poLoadFonts().catch(()=> null);
+    return { co, style, logo, fonts };
+  }
+  function prDocSetup(doc, base){
+    let F = 'helvetica', FB = ['helvetica', 'bold'];
+    if(base.fonts){ try{
+      doc.addFileToVFS('Inter-Regular.ttf', base.fonts.regular); doc.addFont('Inter-Regular.ttf', 'Inter', 'normal');
+      doc.addFileToVFS('Inter-Bold.ttf', base.fonts.bold); doc.addFont('Inter-Bold.ttf', 'InterBold', 'normal');
+      F = 'Inter'; FB = ['InterBold', 'normal'];
+    }catch(e){} }
+    return { F, FB, peso: F === 'Inter' ? '\u20B1' : 'PHP ' };
+  }
+  function prHeader(doc, base, fonts, title, sub){
+    const W = doc.internal.pageSize.getWidth(), M = 30, G = [21, 77, 52], green = base.style !== 'white';
+    if(green){ doc.setFillColor(...G); doc.rect(0, 0, W, 64, 'F'); } else { doc.setFillColor(...G); doc.rect(0, 61, W, 3, 'F'); }
+    if(base.logo && base.logo.w){ const r = Math.min(110 / base.logo.w, 32 / base.logo.h); try{ doc.addImage(base.logo.dataUrl, 'PNG', M, 16, base.logo.w * r, base.logo.h * r, 'pr-logo', 'FAST'); }catch(e){} }
+    doc.setTextColor(...(green ? [255, 255, 255] : G));
+    doc.setFont(fonts.FB[0], fonts.FB[1]); doc.setFontSize(15); doc.text(title, W - M, 30, { align:'right' });
+    doc.setFont(fonts.F, 'normal'); doc.setFontSize(8.5); doc.text(sub, W - M, 46, { align:'right' });
+  }
+  async function prPayslipPdf(line, per, name){
+    try{
+      const base = await prPdfBase();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit:'pt', format:'a4', compress:true });
+      const f = prDocSetup(doc, base);
+      const W = doc.internal.pageSize.getWidth(), M = 30, INK = [28, 34, 30], SUB = [96, 108, 101], G = [21, 77, 52], LINE = [216, 223, 219];
+      const res = line.result || {}, t = res.totals || {}, b = res.breakdown || {};
+      const money = (n)=> f.peso + Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+      prHeader(doc, base, f, 'PAYSLIP', (per ? per.label : '') + '   \u2022   ' + (base.co.company_name || ''));
+      let y = 88;
+      doc.setTextColor(...INK); doc.setFont(f.FB[0], f.FB[1]); doc.setFontSize(12); doc.text(String(name || ''), M, y);
+      doc.setFont(f.F, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...SUB);
+      const inp = line.input || {}, comp = (inp.employee && inp.employee.compensation) || {};
+      doc.text('Pay period ' + (per ? payDate(per.period_start) + ' \u2013 ' + payDate(per.period_end) : '') + '   \u2022   Pay date ' + (per ? payDate(per.pay_date) : '') +
+        (comp.rateType ? '   \u2022   ' + (PAY_RATE_TYPE[comp.rateType] || comp.rateType) + ' ' + money(comp.baseRate) : ''), M, y + 14);
+      y += 30;
+      const qty = (x)=> x.quantity != null && x.unit ? (Number(x.quantity).toLocaleString('en-PH', { maximumFractionDigits:2 }) + ' ' + String(x.unit).toLowerCase() + (x.unit === 'HOURS' || x.unit === 'DAYS' ? '' : '')) : '';
+      const earn = (b.earnings || []).map(x=> [x.name + (x.exemptAmount > 0 && x.taxableAmount === 0 ? ' (non-taxable)' : ''), qty(x), money(x.amount)]);
+      const ded = [].concat(b.employeeContributions || [], b.withholdingTax ? [b.withholdingTax] : [], b.voluntaryDeductions || []).map(x=> [x.name, '', money(x.amount)]);
+      const table = (head, body, total, startY, x, w)=>{
+        doc.autoTable({ startY, margin:{ left:x, right:W - x - w }, tableWidth:w,
+          head:[head], body: body.length ? body : [['\u2014', '', '']], foot:[total],
+          theme:'plain', styles:{ font:f.F, fontSize:8, cellPadding:{ top:3.5, bottom:3.5, left:4, right:4 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.4 } },
+          headStyles:{ font:f.F, fillColor:G, textColor:255, fontSize:7.5 }, footStyles:{ font:f.FB[0], fontStyle:'normal', textColor:INK, fillColor:[233, 243, 237] },
+          columnStyles:{ 1:{ halign:'right', cellWidth:60 }, 2:{ halign:'right', cellWidth:80 } },
+          didParseCell:(c)=>{ if(c.column.index > 0) c.cell.styles.halign = 'right'; } });
+        return doc.lastAutoTable.finalY;
+      };
+      const half = (W - M * 2 - 14) / 2;
+      const y1 = table(['EARNINGS', '', 'AMOUNT'], earn, ['Gross pay', '', money(t.grossPay)], y, M, half);
+      const y2 = table(['DEDUCTIONS', '', 'AMOUNT'], ded, ['Total deductions', '', money(t.totalDeductions)], y, M + half + 14, half);
+      y = Math.max(y1, y2) + 18;
+      doc.setFillColor(...G); doc.rect(M, y, W - M * 2, 34, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFont(f.FB[0], f.FB[1]); doc.setFontSize(11); doc.text('NET PAY', M + 12, y + 21);
+      doc.setFontSize(15); doc.text(money(t.netPay), W - M - 12, y + 22, { align:'right' });
+      y += 52;
+      doc.setTextColor(...SUB); doc.setFont(f.F, 'normal'); doc.setFontSize(7.5);
+      const er = (b.employerContributions || []).map(x=> x.name + ' ' + money(x.amount)).join('   \u2022   ');
+      if(er){ doc.text(doc.splitTextToSize('Employer contributions (not deducted from your pay): ' + er, W - M * 2), M, y); y += 20; }
+      doc.text('Taxable income this period ' + money(t.taxableIncome) + '   \u2022   Non-taxable earnings ' + money(t.nonTaxableEarnings) + (Number(t.deferredDeductions) ? '   \u2022   Carried to next pay ' + money(t.deferredDeductions) : ''), M, y); y += 12;
+      doc.text('Rules: ' + (res.ruleVersionId || ''), M, y);
+      doc.text('This payslip was generated by the AWES App.', M, doc.internal.pageSize.getHeight() - 20);
+      await openFileInPdfViewer(doc, 'Payslip-' + String(name || '').replace(/[^A-Za-z0-9]+/g, '-') + '-' + (per ? per.period_end : '') + '.pdf', 'Payslip \u2014 ' + (name || ''));
+    }catch(e){ console.error('payslip pdf', e); toast('Couldn\u2019t build the payslip: ' + (e && e.message ? e.message : e)); }
+  }
+
+  // ---------------- register ----------------
+  function prRegisterRows(){
+    return pr.lines.slice().sort((a, b)=> String(pr.names.get(a.profile_id) || '').localeCompare(String(pr.names.get(b.profile_id) || ''))).map(l=>{
+      const t = (l.result && l.result.totals) || {}, c = (l.result && l.result.contributions) || {};
+      const ee = (k)=> Number(c[k] && c[k].period && c[k].period.employee) || 0;
+      return [pr.names.get(l.profile_id) || '', Number(t.grossPay) || 0, ee('sss'), ee('philhealth'), ee('pagibig'), Number(t.withholdingTax) || 0,
+        Number(t.voluntaryDeductions) || 0, Number(t.netPay) || 0, Number(t.employerContributions) || 0];
+    });
+  }
+  const PR_REG_HEAD = ['Employee', 'Gross', 'SSS', 'PhilHealth', 'Pag-IBIG', 'Tax', 'Other deductions', 'Net pay', 'Employer share'];
+  async function prRegisterXlsx(){
+    try{
+      await loadAwesScript('xlsx', awesLibs.xlsx);
+      await poLoadSettings().catch(()=>{});
+      const rows = prRegisterRows();
+      const tot = PR_REG_HEAD.map((h, i)=> i === 0 ? 'Total' : rows.reduce((a, r)=> a + r[i], 0));
+      const aoa = [[(poSettingsData && poSettingsData.company_name) || ''], ['Payroll register \u2014 ' + pr.period.label], ['Pay date ' + payDate(pr.period.pay_date) + ' \u00B7 ' + (PR_STATUS[pr.run.status] || '')], [], PR_REG_HEAD].concat(rows, [tot]);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = PR_REG_HEAD.map((h, i)=> ({ wch: i === 0 ? 28 : 14 }));
+      for(let r = 5; r < aoa.length; r++) for(let c = 1; c < PR_REG_HEAD.length; c++){ const cell = ws[XLSX.utils.encode_cell({ r, c })]; if(cell && cell.t === 'n') cell.z = '#,##0.00'; }
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Register');
+      XLSX.writeFile(wb, 'Payroll-register-' + pr.period.period_end + '.xlsx');
+      toast('Excel file downloaded');
+    }catch(e){ toast('Couldn\u2019t create the Excel file: ' + (e && e.message ? e.message : e)); }
+  }
+  async function prRegisterPdf(){
+    try{
+      const base = await prPdfBase();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4', compress:true });
+      const f = prDocSetup(doc, base);
+      const M = 30, G = [21, 77, 52], INK = [28, 34, 30], LINE = [216, 223, 219];
+      const money = (n)=> Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+      const rows = prRegisterRows();
+      const tot = PR_REG_HEAD.map((h, i)=> i === 0 ? 'TOTAL (' + rows.length + ')' : money(rows.reduce((a, r)=> a + r[i], 0)));
+      const head = ()=> prHeader(doc, base, f, 'PAYROLL REGISTER', pr.period.label + '   \u2022   pay date ' + payDate(pr.period.pay_date) + '   \u2022   ' + (base.co.company_name || ''));
+      head();
+      doc.autoTable({ startY:82, margin:{ left:M, right:M, top:78, bottom:40 },
+        head:[PR_REG_HEAD.map(h=> h === 'Employee' ? h : h + ' (' + f.peso.trim() + ')')], body: rows.map(r=> r.map((v, i)=> i ? money(v) : v)), foot:[tot],
+        theme:'plain', styles:{ font:f.F, fontSize:8, cellPadding:{ top:4, bottom:4, left:4, right:4 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.4 } },
+        headStyles:{ font:f.F, fillColor:G, textColor:255, fontSize:7.5 }, footStyles:{ font:f.FB[0], fontStyle:'normal', fillColor:[233, 243, 237], textColor:INK },
+        columnStyles: Object.fromEntries(PR_REG_HEAD.map((h, i)=> [i, i ? { halign:'right' } : {}])),
+        didParseCell:(c)=>{ if((c.section === 'head' || c.section === 'foot') && c.column.index > 0) c.cell.styles.halign = 'right'; },
+        didDrawPage: head });
+      const H = doc.internal.pageSize.getHeight(), W = doc.internal.pageSize.getWidth();
+      const y = Math.min(doc.lastAutoTable.finalY + 40, H - 60);
+      doc.setFont(f.F, 'normal'); doc.setFontSize(8); doc.setTextColor(...INK);
+      [['Prepared by', 'computed_by'], ['Approved by', 'approved_by'], ['Released by', 'released_by']].forEach(([l], i)=>{
+        const x = M + i * ((W - M * 2) / 3);
+        doc.setDrawColor(...LINE); doc.line(x, y, x + 180, y); doc.text(l, x, y + 12);
+      });
+      await openFileInPdfViewer(doc, 'Payroll-register-' + pr.period.period_end + '.pdf', 'Payroll register \u2014 ' + pr.period.label);
+    }catch(e){ console.error('register pdf', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
+  }
+
+  // ---------------- My Payslips ----------------
+  async function prMyPayslipsShow(){
+    $('purchasingView').classList.remove('po-wide');
+    const box = $('prMyList');
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    if(!(await ensureCloud())){ box.innerHTML = '<div class="empty-state">Not connected.</div>'; return; }
+    try{
+      const l = await db.from('payroll_lines').select('*').eq('profile_id', currentUser.id).order('pay_date', { ascending:false }).limit(48);
+      if(l.error) throw l.error;
+      const lines = l.data || [];
+      if(!lines.length){ box.innerHTML = '<div class="empty-state">No payslips yet. They appear here once payroll is released.</div>'; return; }
+      const runs = await db.from('payroll_runs').select('id, period_id').in('id', lines.map(x=> x.run_id));
+      const per = await db.from('payroll_periods').select('*').in('id', (runs.data || []).map(x=> x.period_id));
+      const perByRun = new Map((runs.data || []).map(r=> [r.id, (per.data || []).find(p=> p.id === r.period_id)]));
+      pr.myLines = lines; pr.myPer = perByRun;
+      box.innerHTML = lines.map((x, i)=>{
+        const p = perByRun.get(x.run_id);
+        return '<div class="sp-row" data-i="' + i + '"><div class="sp-row-top"><div style="min-width:0;"><div class="sp-row-title">' + payEsc(p ? p.label : payDate(x.period_end)) + '</div>' +
+          '<div class="sp-row-sub">Paid ' + payEsc(payDate(x.pay_date)) + ' \u00B7 gross ' + payPeso(x.gross) + '</div></div>' +
+          '<div class="mt-row-price">' + payPeso(x.net) + '<div class="sp-row-sub">take-home</div></div></div>' +
+          '<div class="user-card-actions"><button type="button" class="primary" data-my-slip="1">View payslip</button></div></div>';
+      }).join('');
+    }catch(e){ box.innerHTML = '<div class="empty-state">' + (prMissing(e) ? 'Payslips aren\u2019t available yet.' : payEsc('Couldn\u2019t load payslips: ' + describeCloudError(e))) + '</div>'; }
+  }
+  $('prMyList').addEventListener('click', (e)=>{
+    const row = e.target.closest('.sp-row');
+    if(!row || !e.target.closest('[data-my-slip]')) return;
+    const l = pr.myLines[Number(row.dataset.i)];
+    prPayslipPdf(l, pr.myPer.get(l.run_id), currentUser.name);
+  });
+
+  // ---------------- Payroll Setup › Allowances & loans ----------------
+  async function prLoadRecurring(profileId){
+    const box = $('payEmpRecurring');
+    if(!box) return;
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    const { data, error } = await db.from('payroll_recurring_items').select('*').eq('profile_id', profileId).order('kind').order('code');
+    if(error){ box.innerHTML = '<div class="pay-hint">' + (prMissing(error) ? 'Available after migration 20261006_01_payroll_runs.sql.' : payEsc(describeCloudError(error))) + '</div>'; return; }
+    const ro = !payCanSetup();
+    pr.recur = data || [];
+    box.innerHTML = (pr.recur.length ? '<div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Item</th><th class="num">Each pay run</th><th class="num">Balance</th><th>Dates</th>' + (ro ? '' : '<th></th>') + '</tr></thead><tbody>' +
+      pr.recur.map(r=> '<tr data-rec="' + payEsc(r.id) + '"' + (r.is_active ? '' : ' style="opacity:.55;"') + '><td><b>' + payEsc(r.name) + '</b> <span class="pay-muted">' + payEsc(r.code) + '</span><div class="pay-muted">' +
+        (r.kind === 'earning' ? 'Earning \u00B7 ' + (r.is_de_minimis ? 'de minimis ' + payEsc(r.de_minimis_code) : r.is_taxable ? 'taxable' : 'not taxable') : 'Deduction \u00B7 ' + payEsc(PR_CATS_DED[r.category] || r.category)) + (r.is_active ? '' : ' \u00B7 stopped') + '</div></td>' +
+        '<td class="num">' + (r.kind === 'deduction' ? '\u2212' : '+') + payPeso(r.amount) + '</td><td class="num">' + (r.balance == null ? '\u2013' : payPeso(r.balance)) + '</td>' +
+        '<td class="pay-muted">' + payEsc((r.start_date ? 'from ' + payDate(r.start_date) : '') + (r.end_date ? ' until ' + payDate(r.end_date) : '')) + '</td>' +
+        (ro ? '' : '<td><button type="button" class="pay-link" data-rec-toggle="1">' + (r.is_active ? 'Stop' : 'Resume') + '</button> <button type="button" class="pay-rm" data-rec-del="1" aria-label="Delete">\u00D7</button></td>') + '</tr>').join('') +
+      '</tbody></table></div>' : '<div class="pay-hint">None. Add allowances paid every pay run, or loans deducted until paid off.</div>') +
+      (ro ? '' : '<div class="po-grid" style="margin-top:10px;">' +
+        payField('po-c3', 'Type', '<select id="prR_kind"><option value="earning">Allowance (+)</option><option value="deduction">Deduction / loan (\u2212)</option></select>') +
+        payField('po-c3', 'Name', '<input type="text" id="prR_name" placeholder="e.g. Transportation allowance">') +
+        payField('po-c3', 'Each pay run (\u20B1)', '<input type="text" inputmode="decimal" id="prR_amt">') +
+        payField('po-c3', 'Tax / balance', '<select id="prR_tax"><option value="taxable">Taxable</option><option value="exempt">Not taxable</option><option value="RICE_SUBSIDY">De minimis: rice</option><option value="LAUNDRY_ALLOWANCE">De minimis: laundry</option><option value="UNIFORM_ALLOWANCE">De minimis: uniform</option></select>' +
+          '<input type="text" inputmode="decimal" id="prR_bal" placeholder="Loan balance (\u20B1)" style="display:none;">') +
+        payField('po-c3', 'From (optional)', '<input type="date" id="prR_from">') +
+        payField('po-c3', 'Until (optional)', '<input type="date" id="prR_to">') +
+        '<div class="po-c6" style="align-self:end;"><button type="button" class="btn btn-secondary" id="prR_add" style="width:100%;">+ Add item</button></div></div>');
+  }
+  document.addEventListener('change', (e)=>{
+    if(e.target.id !== 'prR_kind') return;
+    const ded = e.target.value === 'deduction';
+    $('prR_tax').style.display = ded ? 'none' : ''; $('prR_bal').style.display = ded ? '' : 'none';
+  });
+  document.addEventListener('click', async (e)=>{
+    const box = e.target.closest('#payEmpRecurring');
+    if(!box || !pay.editing) return;
+    const pid = pay.editing.id;
+    if(e.target.id === 'prR_add'){
+      const kind = $('prR_kind').value, name = $('prR_name').value.trim(), amt = payNum($('prR_amt').value), tax = $('prR_tax').value;
+      if(!name){ toast('Enter a name'); return; }
+      if(!(amt > 0)){ toast('Enter the amount per pay run'); return; }
+      const bal = $('prR_bal').value.trim() === '' ? null : payNum($('prR_bal').value);
+      if(bal != null && !(bal >= 0)){ toast('The balance must be a number'); return; }
+      const code = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'ITEM';
+      const row = { profile_id:pid, kind, name, code: pr.recur && pr.recur.some(r=> r.code === code) ? code + '_' + (pr.recur.length + 1) : code,
+        category: kind === 'earning' ? 'ALLOWANCE' : (bal != null ? 'LOAN' : 'OTHER'), amount:amt,
+        is_taxable: kind === 'earning' && tax === 'taxable', is_de_minimis: kind === 'earning' && /^[A-Z_]+$/.test(tax) && tax !== 'taxable' && tax !== 'exempt',
+        de_minimis_code: kind === 'earning' && !['taxable', 'exempt'].includes(tax) ? tax : null,
+        balance: kind === 'deduction' ? bal : null, start_date: $('prR_from').value || null, end_date: $('prR_to').value || null };
+      const { error } = await db.from('payroll_recurring_items').insert(row);
+      if(error){ toast('Couldn\u2019t add: ' + payDbMsg(error)); return; }
+      toast('Added'); prLoadRecurring(pid); return;
+    }
+    const tr = e.target.closest('tr[data-rec]');
+    if(!tr) return;
+    const r = (pr.recur || []).find(x=> x.id === tr.dataset.rec);
+    if(e.target.closest('[data-rec-toggle]')){
+      const { error } = await db.from('payroll_recurring_items').update({ is_active: !r.is_active }).eq('id', r.id);
+      if(error){ toast('Couldn\u2019t save: ' + payDbMsg(error)); return; }
+      prLoadRecurring(pid);
+    }
+    if(e.target.closest('[data-rec-del]')){
+      if(!await uiConfirm('Delete \u201C' + r.name + '\u201D? Past payslips keep what was paid.')) return;
+      const { error } = await db.from('payroll_recurring_items').delete().eq('id', r.id);
+      if(error){ toast('Couldn\u2019t delete: ' + payDbMsg(error)); return; }
+      prLoadRecurring(pid);
+    }
+  });
 
 
 // ---------- Record Past Service (admin back-entry) ----------
@@ -25919,6 +26827,9 @@
     myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' },
     paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
+    payRuns:        { nav:'sbNavPayRuns',        title:'Pay Runs',             sub:'Compute, approve & release pay' },
+    myPayslips:     { nav:'',                    title:'My Payslips',          sub:'Your released payslips' },
+    payTimesheets:  { nav:'sbNavPayTimesheets',  title:'Timesheets',           sub:'Hours from DTR, OT approval & lock' },
     payRules:       { nav:'sbNavPayRules',       title:'Payroll Rules',        sub:'SSS, PhilHealth, Pag-IBIG, BIR & premiums' }
   };
   function showPurchasingView(key){
@@ -25977,6 +26888,9 @@
   });
   $('techNavDtr').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDtr'); showDtrView(); });
   $('techNavLeave').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavLeave'); showLeaveView(); });
+  // Payroll (payroll-runs.js): payslips for technicians; Finance's approval entry opens Pay Runs
+  $('techNavPayslips').addEventListener('click', ()=>{ closeMainMenu(); showPurchasingView('myPayslips'); setSidebarActive('techNavPayslips'); });
+  $('sbNavPayApprove').addEventListener('click', async ()=>{ closeMainMenu(); if(!(await ensureAdminAuthenticated())) return; showPurchasingView('payRuns'); setSidebarActive('sbNavPayApprove'); });
   $('techNavMessages').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavMessages'); showMessagesView(); });
   $('techNavDocuments').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('techNavDocuments'); showDocumentsView(); });
   $('techNavSettings').addEventListener('click', ()=>{ closeMainMenu(); showChangePasswordScreen(false); });
@@ -26570,6 +27484,10 @@
     'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
     // Payroll, Phase 1 — 20261004_01_payroll_foundation.sql
     'hr.payroll_setup', 'fin.payroll_rules',
+    // Payroll, Phase 2 — 20261005_01_payroll_timesheets.sql
+    'hr.timesheets',
+    // Payroll, Phase 3 — 20261006_01_payroll_runs.sql
+    'hr.payroll_runs', 'fin.payroll_approve',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -28146,6 +29064,7 @@
     bind('staffNavMyCash',  ()=>{ showCashAdvanceView(true, 'new'); setSidebarActive('staffNavMyCash'); });
     bind('staffNavMyLiq',   ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
     bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
+    bind('staffNavMyPayslips', ()=>{ showPurchasingView('myPayslips'); setSidebarActive('staffNavMyPayslips'); });
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -28196,6 +29115,9 @@
     'hr.leaves':           ()=> showLeaveView(),
     'hr.payroll_setup':    ()=> showPurchasingView('paySetup'),
     'fin.payroll_rules':   ()=> showPurchasingView('payRules'),
+    'hr.timesheets':       ()=> showPurchasingView('payTimesheets'),
+    'hr.payroll_runs':     ()=> showPurchasingView('payRuns'),
+    'fin.payroll_approve': ()=> showPurchasingView('payRuns'),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
     'adm.equipment':       ()=>{ admApplyStaffMode(); showEquipmentManagerView(); },
     'adm.announcements':   ()=>{ admApplyStaffMode(); annOpenAdmin(); },
@@ -28222,6 +29144,7 @@
   // screens (My Requests / Materials / Tools) are never for staff.
   function staffPurchPageAllowed(key){
     if(!isStaffUser()) return true;
+    if(key === 'myPayslips') return true;   // everyone's own payslips
     if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
     return purchStaffAllowed(key);
   }
@@ -28319,10 +29242,12 @@
   const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
-    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules' };
+    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs' };
   // May this user open purchasing page `key`? (Super Admin: always)
   function purchStaffAllowed(key){
     if(currentUser && currentUser.role === 'admin') return true;
+    // Pay Runs is shared by HR (prepare) and Finance (approve / release)
+    if(key === 'payRuns' && isStaffUser() && STAFF_READY_MODULES.includes('fin.payroll_approve') && can('fin.payroll_approve', 'view')) return true;
     const m = STAFF_PURCH_KEYS[key];
     return !!(m && isStaffUser() && STAFF_READY_MODULES.includes(m) && can(m, 'view'));
   }
@@ -28650,6 +29575,25 @@
       tl:{ p:'Sahod ng bawat technician at office staff: rate, schedule, rest day, government contributions, paraan ng pagbayad at government ID. Kasama rin ang listahan ng holiday at payroll settings ng kumpanya.',
            s:['Employees: pindutin ang Set up pay sa lahat ng may Not set up.', 'Ilagay ang uri ng rate at halaga, ang shift at rest day, saka i-save. Naitatala ang bawat pagbabago ng rate.', 'Holidays: idagdag ang mga holiday na may takdang petsa, saka ang mga nagbabago ayon sa proklamasyon.'],
            tip:'Makikita lang ang government ID ng may Edit access. Nakikita ng bawat empleyado ang sa kanya.' } },
+    'p.payTimesheets': { roles:['admin','staff'], module:'hr.timesheets', flow:'payroll', go:{ admin:'sbNavPayTimesheets', staff:'hr.timesheets' },
+      en:{ t:'Timesheets', p:'Each pay period\u2019s hours, worked out from DTR, approved leave, holidays and rest days: regular hours, lates, undertime, rest-day and holiday work, OT and night differential.',
+           s:['Open the pay period, then tap Build timesheets (rebuild after the period ends to pick up the last days).', 'Open each person: fix days in red (no time-out), approve OT, and correct anything wrong with a reason.', 'Mark each person reviewed. An approver then locks the period so payroll can use it.'],
+           tip:'OT is only paid once approved. A correction clears the person\u2019s review, so review last.' },
+      tl:{ p:'Oras ng bawat pay period, galing sa DTR, naaprubahang leave, holiday at rest day: regular na oras, late, undertime, trabaho sa rest day at holiday, OT at night differential.',
+           s:['Buksan ang pay period, saka pindutin ang Build timesheets (i-rebuild pagkatapos ng period para makuha ang huling araw).', 'Buksan ang bawat tao: ayusin ang mga araw na pula (walang time-out), aprubahan ang OT, at itama ang mali kasama ang dahilan.', 'Markahan ang bawat tao na reviewed. Ang approver ang magla-lock ng period para magamit sa payroll.'],
+           tip:'Babayaran lang ang OT kapag naaprubahan. Nabubura ang review kapag may itinama, kaya mag-review sa huli.' } },
+    'p.payRuns': { roles:['admin','staff'], module:'hr.payroll_runs', flow:'payroll', go:{ admin:'sbNavPayRuns', staff:'hr.payroll_runs' },
+      en:{ t:'Pay Runs', p:'Pay from locked timesheets. HR adds one-off items and computes; Finance approves and releases. Payslips then appear in each person\u2019s My HR.',
+           s:['Start the pay run for a locked period. Unsettled cash advances are added automatically.', 'Add bonuses, 13th month or other one-off items, then tap Compute pay and check each payslip.', 'Submit for approval. Finance approves, then releases once salaries are paid.'],
+           tip:'Any change after computing sends the run back to draft, so the approved numbers are always current.' },
+      tl:{ p:'Sahod mula sa naka-lock na timesheet. Ang HR ang nagdadagdag ng one-off at nagco-compute; ang Finance ang nag-aapruba at nagre-release. Lalabas ang payslip sa My HR ng bawat isa.',
+           s:['Simulan ang pay run ng naka-lock na period. Awtomatikong idinadagdag ang hindi pa naaayos na cash advance.', 'Idagdag ang bonus, 13th month o iba pang one-off, saka pindutin ang Compute pay at suriin ang bawat payslip.', 'I-submit para maaprubahan. Aaprubahan ng Finance, saka ire-release kapag naibigay na ang sahod.'],
+           tip:'Kapag may binago pagkatapos mag-compute, babalik ito sa draft para laging tama ang inaaprubahan.' } },
+    'p.myPayslips': { roles:['tech','staff'], flow:'payroll', go:{ tech:'techNavPayslips', staff:'@mypayslips' },
+      en:{ t:'My Payslips', p:'Your payslips, once payroll is released: earnings, deductions, contributions and take-home pay.',
+           s:['Open Payslips (My HR › My Payslips for office staff).', 'Tap View payslip to open it; download or share it from the viewer.'] },
+      tl:{ p:'Ang iyong mga payslip kapag na-release na ang payroll: kita, kaltas, kontribusyon at take-home pay.',
+           s:['Buksan ang Payslips (My HR › My Payslips para sa office staff).', 'Pindutin ang View payslip; i-download o i-share mula sa viewer.'] } },
     'p.payRules': { roles:['admin','staff'], module:'fin.payroll_rules', flow:'payroll', go:{ admin:'sbNavPayRules', staff:'fin.payroll_rules' },
       en:{ t:'Payroll Rules', p:'The rates pay runs use: SSS, PhilHealth, Pag-IBIG, BIR withholding tax and labor premiums (overtime, holiday, night differential).',
            s:['Tap New version and enter when it takes effect \u2014 a copy of the current version opens as a draft.', 'Change the figures, tap Check, then Save Draft.', 'An approver publishes it, naming the circular or wage order. The old version ends the day before.'],
@@ -28836,7 +29780,7 @@
     cash:       [{ en:'Request', tl:'Request' }, { en:'Approve', tl:'Aprubahan' }, { en:'Give cash', tl:'Ibigay ang cash' },
                  { en:'Liquidate', tl:'I-liquidate' }, { en:'Settle', tl:'Ayusin ang balanse' }],
     leave:      ['leave.mine', 'leave.office'],
-    payroll:    ['p.paySetup', 'p.payRules', { en:'Pay run', tl:'Pay run' }, { en:'Payslips', tl:'Payslip' }],
+    payroll:    ['p.paySetup', 'p.payTimesheets', 'p.payRules', 'p.payRuns', 'p.myPayslips'],
     people:     ['staff.team', 'staff.edit', 'staff.templates', 'staff.activity'],
     booking:    ['cp.requests', { en:'Scheduled', tl:'Naka-schedule' }, { en:'Service done', tl:'Tapos ang service' }, 'cp.units']
   };
@@ -29094,7 +30038,7 @@
     if(/^[a-z]+\.[a-z_]+$/.test(g)){ staffOpenModule(g); return true; }
     if(g.startsWith('@purch:')){ showPurchasingView(g.slice(7)); return true; }
     const fn = { '@home': ()=> showHome(), '@team': ()=> staffOpenTeam(), '@activity': ()=> staffOpenActivity(),
-                 '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true),
+                 '@inbox': ()=> staffOpenInbox(), '@myleave': ()=> showLeaveView(true), '@mypayslips': ()=> showPurchasingView('myPayslips'),
                  '@mydtr': ()=> showDtrView(true), '@mycash': ()=> showCashAdvanceView(true, 'new'),
                  '@attendance': ()=> staffOpenModule(can('hr.attendance', 'view') ? 'hr.attendance' : 'hr.staff_attendance'),
                  '@fn:leave': ()=> showLeaveView(), '@fn:cpHistory': ()=> cpShowScreen('History') }[g];

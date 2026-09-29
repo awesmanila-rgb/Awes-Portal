@@ -36,6 +36,10 @@
     'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
     // Payroll, Phase 1 — 20261004_01_payroll_foundation.sql
     'hr.payroll_setup', 'fin.payroll_rules',
+    // Payroll, Phase 2 — 20261005_01_payroll_timesheets.sql
+    'hr.timesheets',
+    // Payroll, Phase 3 — 20261006_01_payroll_runs.sql
+    'hr.payroll_runs', 'fin.payroll_approve',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -1612,6 +1616,7 @@
     bind('staffNavMyCash',  ()=>{ showCashAdvanceView(true, 'new'); setSidebarActive('staffNavMyCash'); });
     bind('staffNavMyLiq',   ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
     bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
+    bind('staffNavMyPayslips', ()=>{ showPurchasingView('myPayslips'); setSidebarActive('staffNavMyPayslips'); });
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -1662,6 +1667,9 @@
     'hr.leaves':           ()=> showLeaveView(),
     'hr.payroll_setup':    ()=> showPurchasingView('paySetup'),
     'fin.payroll_rules':   ()=> showPurchasingView('payRules'),
+    'hr.timesheets':       ()=> showPurchasingView('payTimesheets'),
+    'hr.payroll_runs':     ()=> showPurchasingView('payRuns'),
+    'fin.payroll_approve': ()=> showPurchasingView('payRuns'),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
     'adm.equipment':       ()=>{ admApplyStaffMode(); showEquipmentManagerView(); },
     'adm.announcements':   ()=>{ admApplyStaffMode(); annOpenAdmin(); },
@@ -1688,6 +1696,7 @@
   // screens (My Requests / Materials / Tools) are never for staff.
   function staffPurchPageAllowed(key){
     if(!isStaffUser()) return true;
+    if(key === 'myPayslips') return true;   // everyone's own payslips
     if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
     return purchStaffAllowed(key);
   }
@@ -1785,10 +1794,12 @@
   const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
-    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules' };
+    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs' };
   // May this user open purchasing page `key`? (Super Admin: always)
   function purchStaffAllowed(key){
     if(currentUser && currentUser.role === 'admin') return true;
+    // Pay Runs is shared by HR (prepare) and Finance (approve / release)
+    if(key === 'payRuns' && isStaffUser() && STAFF_READY_MODULES.includes('fin.payroll_approve') && can('fin.payroll_approve', 'view')) return true;
     const m = STAFF_PURCH_KEYS[key];
     return !!(m && isStaffUser() && STAFF_READY_MODULES.includes(m) && can(m, 'view'));
   }

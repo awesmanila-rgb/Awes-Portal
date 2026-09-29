@@ -242,6 +242,7 @@
         payField('po-c3', 'Pag-IBIG MID no.', '<input type="text" id="payG_pag" value="' + payEsc(g.pagibig_no) + '" placeholder="0000-0000-0000">') +
         '<div class="po-c12 pay-hint" id="payG_warn"></div>' +
       '</div></div>') +
+      '<div class="po-sec"><div class="po-sec-title">Allowances &amp; loans (every pay run)</div><div id="payEmpRecurring"></div></div>' +
       '<div class="po-sec"><div class="po-sec-title">Notes</div>' +
         '<div class="field"><textarea id="payE_notes" rows="2"' + dis + '>' + payEsc(e.notes) + '</textarea></div></div>';
     $('payEmpSave').style.display = ro ? 'none' : '';
@@ -249,6 +250,8 @@
     payIdWarn();
     window.scrollTo({ top:0 });
     payLoadHistory(id);
+    if(existing && typeof prLoadRecurring === 'function') prLoadRecurring(id);
+    else if($('payEmpRecurring')) $('payEmpRecurring').innerHTML = '<div class="pay-hint">Save the pay setup first, then add allowances and loans.</div>';
   }
   // same arithmetic the payroll engine uses (engine.ts), so what HR sees here is what pay runs will use
   function payEmpDerive(){
@@ -260,7 +263,10 @@
     if(type === 'MONTHLY'){ monthly = rate; daily = rate * 12 / days; hourly = daily / hours; }
     else if(type === 'DAILY'){ daily = rate; monthly = rate * days / 12; hourly = rate / hours; }
     else { hourly = rate; daily = rate * hours; monthly = daily * days / 12; }
-    el.innerHTML = '<b>' + payPeso(daily) + '</b>/day \u00B7 <b>' + payPeso(hourly) + '</b>/hour \u00B7 <b>' + payPeso(monthly) + '</b>/month equivalent';
+    const restN = $$('#payE_rest [data-rest]').filter(c=> c.checked).length;
+    const hint = restN === 2 && Math.abs(days - 313) < 1 ? '<div class="pay-warn">Two rest days a week usually means 261 working days a year, not 313.</div>'
+      : restN === 1 && Math.abs(days - 261) < 1 ? '<div class="pay-warn">One rest day a week usually means 313 working days a year, not 261.</div>' : '';
+    el.innerHTML = hint + '<b>' + payPeso(daily) + '</b>/day \u00B7 <b>' + payPeso(hourly) + '</b>/hour \u00B7 <b>' + payPeso(monthly) + '</b>/month equivalent';
     const mwe = $('payE_mwe').value === 'true', min = payNum($('payE_minWage').value);
     if(min > 0 && daily + 0.005 < min) el.innerHTML += '<div class="pay-warn">Below the regional minimum daily wage you entered (' + payPeso(min) + ').</div>';
     else if(mwe && min > 0 && daily > min + 0.005) el.innerHTML += '<div class="pay-warn">Marked as minimum wage earner but paid above the minimum \u2014 check the tax exemption.</div>';
@@ -279,7 +285,7 @@
     if(/^payE_(rate|days|hours|minWage)$/.test(e.target.id)) payEmpDerive();
     if(/^payG_/.test(e.target.id)) payIdWarn();
   });
-  $('payEmpForm').addEventListener('change', (e)=>{ if(/^payE_(rateType|mwe)$/.test(e.target.id)) payEmpDerive(); });
+  $('payEmpForm').addEventListener('change', (e)=>{ if(/^payE_(rateType|mwe)$/.test(e.target.id) || e.target.dataset.rest != null) payEmpDerive(); });
 
   async function payLoadHistory(id){
     const el = $('payEmpHistory');
@@ -454,9 +460,17 @@
           payField('po-c3', 'Minimum take-home pay (\u20B1)', '<input type="text" inputmode="decimal" id="payS_minNet" value="' + payEsc(s.minimum_net_pay) + '"' + dis + '>',
             'Loans and other deductions stop at this amount; the rest carries over.') +
           payField('po-c3', 'Grace period for lates (minutes)', '<input type="text" inputmode="numeric" id="payS_grace" value="' + payEsc(s.grace_minutes) + '"' + dis + '>') +
+          payField('po-c6', 'Company location (for local holidays)', '<input type="text" id="payS_locality" value="' + payEsc(s.holiday_locality || '') + '" placeholder="e.g. Quezon City"' + dis + '>',
+            'A holiday marked for this city or province counts for everyone. Leave blank to use national holidays only.') +
         '</div></div>' +
+        '<div class="po-sec"><div class="po-sec-title">Leave types</div><div id="payS_leave" class="pay-checks"><span class="pay-muted">Loading…</span></div>' +
+          '<div class="pay-hint">Ticked = paid. Timesheets use this for approved leave; a type not on this list is flagged for HR.</div></div>' +
         (s.updated_at ? '<div class="pay-hint">Last changed ' + payEsc(payWhen(s.updated_at)) + '</div>' : '');
       $('paySettingsSave').style.display = payCanSetup() ? '' : 'none';
+      const lt = await db.from('payroll_leave_types').select('*').order('sort');
+      $('payS_leave').innerHTML = lt.error ? '<span class="pay-muted">Available after migration 20261005_01_payroll_timesheets.sql.</span>' :
+        (lt.data || []).map(t=> '<label class="pay-chk"><input type="checkbox" data-leave="' + payEsc(t.name) + '"' + (t.is_paid ? ' checked' : '') + dis + '> ' + payEsc(t.name) + '</label>').join('');
+      pay.leaveTypes = lt.error ? null : (lt.data || []);
     }catch(e){ box.innerHTML = '<div class="empty-state">' + payErrHtml('Couldn\u2019t load settings: ', e) + '</div>'; }
   }
   $('paySettingsSave').addEventListener('click', async ()=>{
@@ -469,9 +483,17 @@
     if(!(row.default_hours_per_day > 0 && row.default_hours_per_day <= 24)){ toast('Hours a day must be between 1 and 24'); return; }
     if(!(row.minimum_net_pay >= 0)){ toast('Minimum take-home pay must be 0 or more'); return; }
     if(!(row.grace_minutes >= 0 && row.grace_minutes <= 120)){ toast('Grace period must be 0 to 120 minutes'); return; }
+    if(pay.leaveTypes) row.holiday_locality = $('payS_locality').value.trim();
     const { data, error } = await db.from('payroll_settings').update(row).eq('id', 1).select();
     if(error){ toast('Couldn\u2019t save: ' + payDbMsg(error)); return; }
     if(!data || !data.length){ toast('You don\u2019t have Edit access for this.'); return; }
+    for(const t of (pay.leaveTypes || [])){
+      const box = $$('#payS_leave [data-leave]').find(x=> x.dataset.leave === t.name);
+      if(box && box.checked !== t.is_paid){
+        const r = await db.from('payroll_leave_types').update({ is_paid: box.checked }).eq('name', t.name);
+        if(r.error){ toast('Couldn\u2019t save ' + t.name + ': ' + payDbMsg(r.error)); return; }
+      }
+    }
     toast('Payroll settings saved');
     payLoadSettings();
   });

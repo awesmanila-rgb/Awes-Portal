@@ -138,6 +138,9 @@
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
     // Payroll (payroll.js): Super Admin, or staff with that page
     if(key === 'paySetup' || key === 'payRules'){ if(currentUser && purchStaffAllowed(key)) payOnShow(key); return; }
+    if(key === 'myPayslips'){ if(currentUser) prMyPayslipsShow(); return; }
+    if(key === 'payRuns'){ if(currentUser && purchStaffAllowed(key)) prOnShow(); return; }
+    if(key === 'payTimesheets'){ if(currentUser && purchStaffAllowed(key)) tsOnShow(); return; }
     if(key === 'myStock'){ if(currentUser){ purchApplyStaffMode(); invShowMyStock(); } return; } // storekeeper / staff screen (quantities only)
     if(key === 'myMaterials'){ if(currentUser) invShowMyMaterials(); return; }
     // Movement screens: admins and storekeepers (the database decides who
