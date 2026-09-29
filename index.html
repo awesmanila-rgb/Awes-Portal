@@ -242,6 +242,7 @@ window.awesCss = {
       <button type="button" class="sidebar-link" id="staffNavMyLiq"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>My Liquidation</button>
       <button type="button" class="sidebar-link" id="staffNavMyReimb"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span>My Reimbursement</button>
       <button type="button" class="sidebar-link" id="staffNavMyPayslips"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h3"/></svg></span>My Payslips</button>
+      <button type="button" class="sidebar-link" id="staffNavErrandReq"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg></span>Errand Requests</button>
       <div class="sidebar-section-label">Account</div>
       <button type="button" class="sidebar-link" id="staffNavActivity"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><path d="M3.05 11a9 9 0 1 1 .5 4"/><path d="M3 4v5h5"/></svg></span>Activity</button>
       
@@ -312,6 +313,7 @@ window.awesCss = {
       <div class="sb-section" data-sb-key="administration">
         <button type="button" class="sidebar-section-label sb-section-toggle" aria-expanded="false" aria-controls="sbSec_administration"><span class="sb-title">Administration</span><span class="sb-dot" aria-hidden="true"></span><svg class="sb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
         <div class="sb-section-body" id="sbSec_administration"><div class="sb-section-inner">
+          <button type="button" class="sidebar-link" id="sbNavErrands"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg></span>Errands</button>
           <button type="button" class="sidebar-link" id="sbNavStock"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg></span>Stock on Hand</button>
           <button type="button" class="sidebar-link" id="sbNavWarehouses"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg></span>Warehouses</button>
           <button type="button" class="sidebar-link" id="sbNavReceive"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/></svg></span>Receive</button>
@@ -2858,6 +2860,19 @@ window.awesCss = {
   <div class="card purch-panel" id="purchPanel_myPayslips" style="display:none;">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h3"/></svg> My Payslips</span><span class="purch-head-right"></span></div>
     <div class="card-body"><div id="prMyList"><div class="empty-state">Loading…</div></div></div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_errands" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg> Errands</span><span class="purch-head-right"></span></div>
+    <div class="card-body"><div id="erManagerBody"><div class="empty-state">Loading…</div></div></div>
+  </div>
+  <div class="card purch-panel" id="purchPanel_myErrands" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg> My Errands</span><span class="purch-head-right"></span></div>
+    <div class="card-body"><div id="erMyBody"><div class="empty-state">Loading…</div></div></div>
+  </div>
+  <div class="card purch-panel" id="purchPanel_errandRequests" style="display:none;">
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg> Errand Requests</span><span class="purch-head-right"></span></div>
+    <div class="card-body"><div id="erReqBody"><div class="empty-state">Loading…</div></div></div>
   </div>
 
   <div class="card purch-panel" id="purchPanel_payRules" style="display:none;">
