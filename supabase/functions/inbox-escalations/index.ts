@@ -1,7 +1,8 @@
 // inbox-escalations — Supabase Edge Function (Round 3)
 //
-// Every 15 minutes: find inbox items that have waited past their
-// escalation time and notify, once each:
+// Every 15 minutes: notify, once each —
+//   level 0  a NEW item, to everyone whose Inbox it lands in (20261011_01)
+// and for items that have waited past their escalation time:
 //   level 1  the department's Heads (or the Super Admin if it has none)
 //   level 2  the Super Admin, at twice the escalation time
 // Response times are in inbox_sla (Super Admin: Inbox → Response times).
@@ -57,12 +58,16 @@ Deno.serve(async (req) => {
     const dead: string[] = [];
     for (const [userId, list] of byUser) {
       const top = list.slice().sort((a, b) => b.level - a.level || b.age_hours - a.age_hours)[0];
+      // level 0 = a new item just landed in their Inbox (20261011_01)
+      const allNew = list.every((d) => d.level === 0);
       const payload = JSON.stringify(list.length === 1
-        ? { title: (top.level === 2 ? 'Still waiting: ' : 'Overdue: ') + top.label,
-            body: [top.ref_label, top.title].filter(Boolean).join(' · ') + ' — waiting ' + waited(top.age_hours) + '. Open your Inbox.',
+        ? { title: (top.level === 2 ? 'Still waiting: ' : top.level === 1 ? 'Overdue: ' : 'New: ') + top.label,
+            body: [top.ref_label, top.title].filter(Boolean).join(' · ') +
+                  (top.level === 0 ? '. Open your Inbox.' : ' — waiting ' + waited(top.age_hours) + '. Open your Inbox.'),
             url: '/?inbox=1', tag: 'inbox-' + top.key }
-        : { title: list.length + ' items need attention',
-            body: 'Oldest: ' + top.label + ' (' + waited(top.age_hours) + '). Open your Inbox.',
+        : { title: allNew ? list.length + ' new items in your Inbox' : list.length + ' items need attention',
+            body: allNew ? list.map((d) => d.label).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(', ') + '. Open your Inbox.'
+                         : 'Oldest: ' + top.label + ' (' + waited(top.age_hours) + '). Open your Inbox.',
             url: '/?inbox=1', tag: 'inbox-batch-' + userId });
       const { data: subs } = await admin.from('push_subscriptions').select('*').eq('user_id', userId);
       await Promise.all((subs ?? []).map(async (s) => {
