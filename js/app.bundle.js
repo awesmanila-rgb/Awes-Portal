@@ -25780,13 +25780,16 @@
     const today = todayISO();
     const in7 = new Date(new Date(today + 'T00:00:00+08:00').getTime() + 7 * 86400000).toISOString().slice(0, 10);
     const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString();
-    const [srNew, mrs, pos, pms, reorder] = await Promise.all([
+    const [srNew, mrs, pos, pms, reorder, inbox] = await Promise.all([
       prioSafe(async ()=>{ const { data, error } = await db.from('service_requests').select('id, created_at, description, urgency, customer_id').eq('status', 'new').order('created_at'); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.from('material_requisitions').select('id, mrf_no, requester_name, requested_by, submitted_at, created_at').eq('status', 'submitted').order('submitted_at'); if(error) throw error; return data || []; }, []),
       // POs Purchasing submitted for approval (20261010_01)
       prioSafe(async ()=>{ const { data, error } = await db.from('purchase_orders').select('id, po_no, total, approval_requested_at, approval_requested_name, supplier_snapshot, suppliers(name)').eq('status', 'draft').not('approval_requested_at', 'is', null).order('approval_requested_at'); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.from('customer_equipment').select('id').gte('next_pm_date', today).lte('next_pm_date', in7); if(error) throw error; return data || []; }, []),
-      prioSafe(async ()=>{ const { data, error } = await db.rpc('inv_rpt_reorder', { p_days: 90 }); if(error) throw error; return (data || []).filter(r=> r.reorder); }, [])
+      prioSafe(async ()=>{ const { data, error } = await db.rpc('inv_rpt_reorder', { p_days: 90 }); if(error) throw error; return (data || []).filter(r=> r.reorder); }, []),
+      // Every Inbox item across departments (20261011_01) — the ones without
+      // their own rule below still show here, so nothing waiting is missed.
+      prioSafe(async ()=>{ const { data, error } = await db.rpc('inbox_items'); if(error) throw error; return Array.isArray(data) ? data : []; }, [])
     ]);
     // First few lines of each requisition, for the one-line summary.
     let mrItems = {};
@@ -25799,7 +25802,7 @@
     }
     const custNames = {};
     (customersCache || []).forEach(c=>{ custNames[c.id] = c.name; });
-    return { srNew, mrs, mrItems, pos, pms, reorder, custNames };
+    return { srNew, mrs, mrItems, pos, pms, reorder, custNames, inbox };
   }
 
   // ---- build the ranked list ----
@@ -25999,6 +26002,28 @@
     }
 
     // WATCH — chips
+    // Inbox items that no rule above already covers, grouped by kind.
+    const COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide',
+      'jo_review','report_signoff','sr_new','jo_late','jo_overdue','po_draft']);
+    const groups = {};
+    (extra.inbox || []).forEach(x=>{
+      if(!x || COVERED.has(x.kind) || /_endorse$/.test(x.kind || '')) return;
+      (groups[x.kind] = groups[x.kind] || []).push(x);
+    });
+    Object.keys(groups).forEach(kind=>{
+      const list = groups[kind].sort((a, b)=> (Number(b.age_hours) || 0) - (Number(a.age_hours) || 0));
+      const top = list[0];
+      // approvals and overdue work go to Today; escalated to Urgent
+      const tier = list.some(x=> x.state === 'escalated') ? 'urgent'
+        : (list.some(x=> x.state === 'overdue') || top.level === 'approve') ? 'today' : 'watch';
+      const open = (typeof STAFF_MODULE_OPENERS !== 'undefined' && STAFF_MODULE_OPENERS[top.module]) || null;
+      add(tier, {
+        key: 'inbox:' + kind, age: (Number(top.age_hours) || 0) * 3600000,
+        title: list.length === 1 ? top.label + (top.ref_label ? ' \u00B7 ' + top.ref_label : '') : list.length + ' \u00D7 ' + top.label,
+        sub: (top.title || '') + (list.length > 1 ? ' \u00B7 oldest' : '') + (top.age_hours ? ' \u00B7 ' + prioAge((Number(top.age_hours) || 0) * 3600000) : ''),
+        actions: open ? [{ label: 'Open', run: ()=> open() }] : [{ label: 'Inbox', run: ()=> staffOpenInbox() }]
+      });
+    });
     if((extra.reorder || []).length) add('watch', { key: 'reorder', title: extra.reorder.length + ' item' + (extra.reorder.length === 1 ? '' : 's') + ' below reorder level', actions: [{ label: 'Reorder report', run: ()=> showPurchasingView('invReports') }] });
     if((extra.pms || []).length) add('watch', { key: 'pm', title: extra.pms.length + ' PM' + (extra.pms.length === 1 ? '' : 's') + ' due this week', actions: [{ label: 'Calendar', run: ()=> showDispatchView('calendar') }] });
     (extra.pos || []).forEach(p=>{
