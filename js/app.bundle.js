@@ -5954,14 +5954,33 @@
   function clearInvalid(){
     document.querySelectorAll('.field.invalid').forEach(f=>f.classList.remove('invalid'));
   }
+  // The three fields a report can't be generated without. All three live
+  // in Section 1 (Customer's Information), but the form shows one section
+  // at a time and Generate sits on the last one — so on failure we say
+  // exactly what's missing and take the technician back to it, instead of
+  // a generic "fill required fields" with nothing red on screen.
   function validate(){
     clearInvalid();
-    let ok = true;
-    if(!$('custName').value.trim()){ $('f_custName').classList.add('invalid'); ok=false; }
-    if(!$('svcDate').value){ $('f_date').classList.add('invalid'); ok=false; }
+    const missing = [];
+    if(!$('custName').value.trim()){ $('f_custName').classList.add('invalid'); missing.push({ id:'custName', label:'Customer name' }); }
+    if(!$('svcDate').value){ $('f_date').classList.add('invalid'); missing.push({ id:'svcDate', label:'Service date' }); }
     const email = $('custEmail').value.trim();
-    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ $('f_custEmail').classList.add('invalid'); ok=false; }
-    return ok;
+    if(!email){ $('f_custEmail').classList.add('invalid'); missing.push({ id:'custEmail', label:'Customer email' }); }
+    else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ $('f_custEmail').classList.add('invalid'); missing.push({ id:'custEmail', label:'A valid customer email (' + email + ' isn\u2019t one)' }); }
+    validate.missing = missing;
+    return !missing.length;
+  }
+  // Toast what's missing and jump to the first one (Section 1).
+  function srShowMissing(action){
+    const missing = validate.missing || [];
+    if(!missing.length) return;
+    toast('Can\u2019t ' + action + ' yet \u2014 missing in Section 1: ' + missing.map(m=> m.label).join(', '));
+    try{
+      if(typeof srGoToSection === 'function' && $('sec1Card')) srGoToSection(1);
+      if($('custDetailsWrap')) $('custDetailsWrap').style.display = '';
+      const el = $(missing[0].id);
+      if(el){ setTimeout(()=>{ el.scrollIntoView({ behavior:'smooth', block:'center' }); try{ el.focus({ preventScroll:true }); }catch(e){} }, 250); }
+    }catch(e){}
   }
 
   // ---------- gather form data ----------
@@ -6877,7 +6896,7 @@
   if($('previewZoomReset')) $('previewZoomReset').addEventListener('click', ()=> setPreviewZoom(1));
 
   $('previewBtn').addEventListener('click', async ()=>{
-    if(!validate()){ toast('Please fill required fields before previewing'); return; }
+    if(!validate()){ srShowMissing('preview'); return; }
     $('previewBtn').disabled = true; $('previewBtn').textContent = 'Building preview…';
     try{
       const data = await gatherDataForOutput();
@@ -7025,7 +7044,7 @@
   }
 
   $('genPdfBtn').addEventListener('click', async ()=>{
-    if(!validate()){ toast('Please fill required fields'); return; }
+    if(!validate()){ srShowMissing('generate the report'); return; }
     $('genPdfBtn').disabled = true;
     $('genPdfBtn').textContent = 'Building PDF…';
     try{
@@ -9057,6 +9076,39 @@
     }catch(e){ console.error('time-in prefill failed', e); }
   }
 
+  // The customer record behind a job order, read FRESH from the database.
+  // customersCache is loaded once at sign-in, and a technician's app can stay
+  // signed in for days — so an email (or address) admin added after that
+  // was never picked up, and the report then refused to generate for want
+  // of an email that was actually on file. Matches by the ticket's
+  // customer id first, then by name (case / spacing-insensitive); falls
+  // back to the cached copy when offline.
+  async function srResolveTicketCustomer(ticket){
+    const norm = (v)=> String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const name = norm(ticket && ticket.custName);
+    const fromCache = ()=> (customersCache || []).find(c=> (ticket.custId && c.id === ticket.custId)) ||
+                           (customersCache || []).find(c=> norm(c.name) === name) || null;
+    if(await ensureCloud()){
+      try{
+        let row = null;
+        if(ticket.custId){
+          const r = await db.from('customers').select('*').eq('id', ticket.custId).maybeSingle();
+          if(!r.error) row = r.data;
+        }
+        if(!row && name){
+          const r = await db.from('customers').select('*').ilike('name', String(ticket.custName).trim()).limit(1);
+          if(!r.error && r.data && r.data.length) row = r.data[0];
+        }
+        if(row){
+          const c = customerRowToObj(row);
+          const i = (customersCache || []).findIndex(x=> x.id === c.id);
+          if(i >= 0) customersCache[i] = c; else if(customersCache) customersCache.push(c);
+          return c;
+        }
+      }catch(e){ console.warn('customer lookup failed, using cached copy', e); }
+    }
+    return fromCache();
+  }
   async function srApplyJobOrder(ticket, equipItem){
     resetForm();
     // A Job Order was actually picked — Customer's Info (and everything
@@ -9066,7 +9118,7 @@
     // Prefer a saved customer record when the name matches — it may have an
     // email on file (dispatch tickets don't capture one), which the report
     // needs for auto-send. Job-order-specific site/contact details still win.
-    const matched = customersCache.find(c=> c.name.toLowerCase() === (ticket.custName||'').trim().toLowerCase());
+    const matched = await srResolveTicketCustomer(ticket);
     if(matched){
       $('custName').value = matched.name;
       $('custAddress').value = matched.address||'';
@@ -9124,7 +9176,7 @@
   async function srApplyJobOrderBatch(ticket, equipItems){
     resetForm();
     $('sec1Card').style.display = '';
-    const matched = customersCache.find(c=> c.name.toLowerCase() === (ticket.custName||'').trim().toLowerCase());
+    const matched = await srResolveTicketCustomer(ticket);
     if(matched){
       $('custName').value = matched.name;
       $('custAddress').value = matched.address||'';
@@ -9715,6 +9767,14 @@
   // "Active service" hero to show who's on the job.
   async function dtFetchTicketTechNames(ticketId){
     if(!ticketId || !(await ensureCloud())) return [];
+    // Customers can't read dispatch_tickets, so they (and everyone) go
+    // through customer_ticket_tech_names(), which returns only the names —
+    // see 20261007_01_customer_ticket_tech_names.sql. The direct read below
+    // stays as the fallback until that migration is run.
+    try{
+      const { data, error } = await db.rpc('customer_ticket_tech_names', { p_ticket_id: ticketId });
+      if(!error) return Array.isArray(data) ? data : [];
+    }catch(e){}
     try{
       const { data, error } = await db.from('dispatch_tickets')
         .select('data').eq('id', ticketId).maybeSingle();

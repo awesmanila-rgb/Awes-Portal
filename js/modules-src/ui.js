@@ -473,14 +473,33 @@
   function clearInvalid(){
     document.querySelectorAll('.field.invalid').forEach(f=>f.classList.remove('invalid'));
   }
+  // The three fields a report can't be generated without. All three live
+  // in Section 1 (Customer's Information), but the form shows one section
+  // at a time and Generate sits on the last one — so on failure we say
+  // exactly what's missing and take the technician back to it, instead of
+  // a generic "fill required fields" with nothing red on screen.
   function validate(){
     clearInvalid();
-    let ok = true;
-    if(!$('custName').value.trim()){ $('f_custName').classList.add('invalid'); ok=false; }
-    if(!$('svcDate').value){ $('f_date').classList.add('invalid'); ok=false; }
+    const missing = [];
+    if(!$('custName').value.trim()){ $('f_custName').classList.add('invalid'); missing.push({ id:'custName', label:'Customer name' }); }
+    if(!$('svcDate').value){ $('f_date').classList.add('invalid'); missing.push({ id:'svcDate', label:'Service date' }); }
     const email = $('custEmail').value.trim();
-    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ $('f_custEmail').classList.add('invalid'); ok=false; }
-    return ok;
+    if(!email){ $('f_custEmail').classList.add('invalid'); missing.push({ id:'custEmail', label:'Customer email' }); }
+    else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ $('f_custEmail').classList.add('invalid'); missing.push({ id:'custEmail', label:'A valid customer email (' + email + ' isn\u2019t one)' }); }
+    validate.missing = missing;
+    return !missing.length;
+  }
+  // Toast what's missing and jump to the first one (Section 1).
+  function srShowMissing(action){
+    const missing = validate.missing || [];
+    if(!missing.length) return;
+    toast('Can\u2019t ' + action + ' yet \u2014 missing in Section 1: ' + missing.map(m=> m.label).join(', '));
+    try{
+      if(typeof srGoToSection === 'function' && $('sec1Card')) srGoToSection(1);
+      if($('custDetailsWrap')) $('custDetailsWrap').style.display = '';
+      const el = $(missing[0].id);
+      if(el){ setTimeout(()=>{ el.scrollIntoView({ behavior:'smooth', block:'center' }); try{ el.focus({ preventScroll:true }); }catch(e){} }, 250); }
+    }catch(e){}
   }
 
   // ---------- gather form data ----------

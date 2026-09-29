@@ -531,7 +531,7 @@
   if($('previewZoomReset')) $('previewZoomReset').addEventListener('click', ()=> setPreviewZoom(1));
 
   $('previewBtn').addEventListener('click', async ()=>{
-    if(!validate()){ toast('Please fill required fields before previewing'); return; }
+    if(!validate()){ srShowMissing('preview'); return; }
     $('previewBtn').disabled = true; $('previewBtn').textContent = 'Building preview…';
     try{
       const data = await gatherDataForOutput();
@@ -679,7 +679,7 @@
   }
 
   $('genPdfBtn').addEventListener('click', async ()=>{
-    if(!validate()){ toast('Please fill required fields'); return; }
+    if(!validate()){ srShowMissing('generate the report'); return; }
     $('genPdfBtn').disabled = true;
     $('genPdfBtn').textContent = 'Building PDF…';
     try{

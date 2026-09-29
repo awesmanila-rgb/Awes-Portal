@@ -693,6 +693,39 @@
     }catch(e){ console.error('time-in prefill failed', e); }
   }
 
+  // The customer record behind a job order, read FRESH from the database.
+  // customersCache is loaded once at sign-in, and a technician's app can stay
+  // signed in for days — so an email (or address) admin added after that
+  // was never picked up, and the report then refused to generate for want
+  // of an email that was actually on file. Matches by the ticket's
+  // customer id first, then by name (case / spacing-insensitive); falls
+  // back to the cached copy when offline.
+  async function srResolveTicketCustomer(ticket){
+    const norm = (v)=> String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const name = norm(ticket && ticket.custName);
+    const fromCache = ()=> (customersCache || []).find(c=> (ticket.custId && c.id === ticket.custId)) ||
+                           (customersCache || []).find(c=> norm(c.name) === name) || null;
+    if(await ensureCloud()){
+      try{
+        let row = null;
+        if(ticket.custId){
+          const r = await db.from('customers').select('*').eq('id', ticket.custId).maybeSingle();
+          if(!r.error) row = r.data;
+        }
+        if(!row && name){
+          const r = await db.from('customers').select('*').ilike('name', String(ticket.custName).trim()).limit(1);
+          if(!r.error && r.data && r.data.length) row = r.data[0];
+        }
+        if(row){
+          const c = customerRowToObj(row);
+          const i = (customersCache || []).findIndex(x=> x.id === c.id);
+          if(i >= 0) customersCache[i] = c; else if(customersCache) customersCache.push(c);
+          return c;
+        }
+      }catch(e){ console.warn('customer lookup failed, using cached copy', e); }
+    }
+    return fromCache();
+  }
   async function srApplyJobOrder(ticket, equipItem){
     resetForm();
     // A Job Order was actually picked — Customer's Info (and everything
@@ -702,7 +735,7 @@
     // Prefer a saved customer record when the name matches — it may have an
     // email on file (dispatch tickets don't capture one), which the report
     // needs for auto-send. Job-order-specific site/contact details still win.
-    const matched = customersCache.find(c=> c.name.toLowerCase() === (ticket.custName||'').trim().toLowerCase());
+    const matched = await srResolveTicketCustomer(ticket);
     if(matched){
       $('custName').value = matched.name;
       $('custAddress').value = matched.address||'';
@@ -760,7 +793,7 @@
   async function srApplyJobOrderBatch(ticket, equipItems){
     resetForm();
     $('sec1Card').style.display = '';
-    const matched = customersCache.find(c=> c.name.toLowerCase() === (ticket.custName||'').trim().toLowerCase());
+    const matched = await srResolveTicketCustomer(ticket);
     if(matched){
       $('custName').value = matched.name;
       $('custAddress').value = matched.address||'';
@@ -1351,6 +1384,14 @@
   // "Active service" hero to show who's on the job.
   async function dtFetchTicketTechNames(ticketId){
     if(!ticketId || !(await ensureCloud())) return [];
+    // Customers can't read dispatch_tickets, so they (and everyone) go
+    // through customer_ticket_tech_names(), which returns only the names —
+    // see 20261007_01_customer_ticket_tech_names.sql. The direct read below
+    // stays as the fallback until that migration is run.
+    try{
+      const { data, error } = await db.rpc('customer_ticket_tech_names', { p_ticket_id: ticketId });
+      if(!error) return Array.isArray(data) ? data : [];
+    }catch(e){}
     try{
       const { data, error } = await db.from('dispatch_tickets')
         .select('data').eq('id', ticketId).maybeSingle();
