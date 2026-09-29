@@ -46,7 +46,8 @@
     const [srNew, mrs, pos, pms, reorder] = await Promise.all([
       prioSafe(async ()=>{ const { data, error } = await db.from('service_requests').select('id, created_at, description, urgency, customer_id').eq('status', 'new').order('created_at'); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.from('material_requisitions').select('id, mrf_no, requester_name, requested_by, submitted_at, created_at').eq('status', 'submitted').order('submitted_at'); if(error) throw error; return data || []; }, []),
-      prioSafe(async ()=>{ const { data, error } = await db.from('purchase_orders').select('id, po_no, updated_at').eq('status', 'draft').lt('updated_at', twoDaysAgo).order('updated_at'); if(error) throw error; return data || []; }, []),
+      // POs Purchasing submitted for approval (20261010_01)
+      prioSafe(async ()=>{ const { data, error } = await db.from('purchase_orders').select('id, po_no, total, approval_requested_at, approval_requested_name, supplier_snapshot, suppliers(name)').eq('status', 'draft').not('approval_requested_at', 'is', null).order('approval_requested_at'); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.from('customer_equipment').select('id').gte('next_pm_date', today).lte('next_pm_date', in7); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.rpc('inv_rpt_reorder', { p_days: 90 }); if(error) throw error; return (data || []).filter(r=> r.reorder); }, [])
     ]);
@@ -263,7 +264,15 @@
     // WATCH — chips
     if((extra.reorder || []).length) add('watch', { key: 'reorder', title: extra.reorder.length + ' item' + (extra.reorder.length === 1 ? '' : 's') + ' below reorder level', actions: [{ label: 'Reorder report', run: ()=> showPurchasingView('invReports') }] });
     if((extra.pms || []).length) add('watch', { key: 'pm', title: extra.pms.length + ' PM' + (extra.pms.length === 1 ? '' : 's') + ' due this week', actions: [{ label: 'Calendar', run: ()=> showDispatchView('calendar') }] });
-    (extra.pos || []).slice(0, 3).forEach(p=> add('watch', { key: 'po:' + p.id, title: (p.po_no || 'PO') + ' still a draft (' + prioAge(prioSince(p.updated_at)) + ')', actions: [{ label: 'Open', run: ()=> showPurchasingView('purchaseOrders') }] }));
+    (extra.pos || []).forEach(p=>{
+      const age = prioSince(p.approval_requested_at);
+      add(age > 24 * 3600000 ? 'urgent' : 'today', {
+        key: 'poappr:' + p.id, age,
+        title: (p.po_no || 'PO') + ' waiting for approval \u00B7 \u20B1' + Number(p.total || 0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 }),
+        sub: ((p.suppliers && p.suppliers.name) || 'Supplier') + ' \u00B7 from ' + (p.approval_requested_name || 'Purchasing') + ' \u00B7 ' + prioAge(age),
+        actions: [{ label: 'Review', primary: true, run: ()=> showPurchasingView('purchaseOrders') }]
+      });
+    });
     const noDispatch = tickets.filter(t=> t.date === today && !t.dispatchTime && !dtIsTerminal(t));
     if(noDispatch.length) add('watch', { key: 'nodisp', title: noDispatch.length + ' JO' + (noDispatch.length === 1 ? '' : 's') + ' today without a dispatch time', actions: [{ label: 'Dispatch', run: ()=> showDispatchView('all') }] });
 

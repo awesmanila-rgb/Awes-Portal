@@ -18192,7 +18192,7 @@
 
   const PO_BUCKET = 'purchasing-assets';
   const PO_VAT_RATE = 0.12;
-  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, suppliers(name, trade_name), purchase_order_items(count)';
+  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, approval_requested_at, returned_at, suppliers(name, trade_name), purchase_order_items(count)';
 
   let poCache = [];
   let poStatusFilter = '';   // '' = all, else draft / issued / cancelled (status tabs)
@@ -18418,7 +18418,7 @@
   function poRenderList(){
     const q = ($('poSearch').value || '').trim().toLowerCase();
     const st = poStatusFilter;
-    const counts = poCache.reduce((a, r)=>{ a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+    const counts = poCache.reduce((a, r)=>{ a[r.status] = (a[r.status] || 0) + 1; if(poPending(r)) a.approval = (a.approval || 0) + 1; return a; }, {});
     document.querySelectorAll('#poStatusTabs .po-tab-count').forEach(el=>{
       const k = el.dataset.countFor;
       const n = k ? (counts[k] || 0) : poCache.length;
@@ -18428,13 +18428,14 @@
       ? [counts.draft ? counts.draft + ' draft' + (counts.draft > 1 ? 's' : '') : '', counts.issued ? counts.issued + ' issued' : ''].filter(Boolean).join(' · ')
       : '';
     const rows = poCache.filter(r=>{
-      if(st && r.status !== st) return false;
+      if(st === 'approval'){ if(!poPending(r)) return false; }
+      else if(st && r.status !== st) return false;
       if(!q) return true;
       return [r.po_no, poListSupplier(r), r.reference].join(' ').toLowerCase().includes(q);
     });
     const list = $('poList');
     if(!rows.length){
-      const tabName = { draft:'draft', issued:'issued', cancelled:'cancelled' }[st];
+      const tabName = { draft:'draft', issued:'issued', cancelled:'cancelled', approval:'waiting-for-approval' }[st];
       list.innerHTML = '<div class="empty-state">' + (poCache.length
         ? (tabName && !q ? 'No ' + tabName + ' purchase orders.' : 'No purchase orders match.')
         : 'No purchase orders yet. Tap <b>+ New Purchase Order</b> to create one.') + '</div>';
@@ -18444,7 +18445,8 @@
       const n = Array.isArray(r.purchase_order_items) && r.purchase_order_items[0] ? r.purchase_order_items[0].count : 0;
       return '<button type="button" class="mt-row' + (r.status === 'cancelled' ? ' inactive' : '') + '" data-id="' + escapeHtml(r.id) + '">' +
         '<div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(r.po_no || '—') + '</span>' +
-          escapeHtml(poListSupplier(r)) + ' <span class="po-status ' + escapeHtml(r.status) + '">' + escapeHtml(r.status) + '</span></div>' +
+          escapeHtml(poListSupplier(r)) + ' <span class="po-status ' + escapeHtml(poPending(r) ? 'approval' : r.status) + '">' +
+            escapeHtml(poPending(r) ? 'for approval' : (r.status === 'draft' && r.returned_at ? 'returned' : r.status)) + '</span></div>' +
           '<div class="sp-row-sub">' + escapeHtml([poDateLong(r.po_date), n + ' item' + (n === 1 ? '' : 's'), r.reference].filter(Boolean).join(' · ')) + '</div></div>' +
         '<div class="mt-row-price">₱' + poFmt(Number(r.ewt_amount) > 0 ? r.net_payable : r.total) +
           (Number(r.ewt_amount) > 0 ? '<div class="sp-row-sub">net of EWT</div>' : '') + '</div></button>';
@@ -18606,10 +18608,12 @@
   function poApplyMode(){
     const st = poEditing ? poEditing.status : 'draft';
     // Staff without Edit see drafts read-only too (the database refuses the write anyway)
-    poReadOnly = st !== 'draft' || !can('pur.purchase_orders', 'edit');
+    // A draft submitted for approval is locked until it's approved, returned or withdrawn (20261010_01)
+    const pending = poPending(poEditing);
+    poReadOnly = st !== 'draft' || pending || !can('pur.purchase_orders', 'edit');
     $('poSheetTitle').textContent = poEditing ? poEditing.po_no : 'New Purchase Order';
-    $('poSheetStatus').className = 'po-status ' + st;
-    $('poSheetStatus').textContent = poEditing ? st : 'unsaved';
+    $('poSheetStatus').className = 'po-status ' + (pending ? 'approval' : st);
+    $('poSheetStatus').textContent = poEditing ? (pending ? 'for approval' : st) : 'unsaved';
     const note = $('poLockedNote');
     if(st === 'issued'){
       note.className = 'po-locked-note';
@@ -18621,16 +18625,29 @@
       note.textContent = 'Cancelled ' + (poEditing.cancelled_at ? new Date(poEditing.cancelled_at).toLocaleString('en-PH') : '') +
         (poEditing.cancel_reason ? ' — Reason: ' + poEditing.cancel_reason : '');
       note.style.display = '';
+    }else if(pending){
+      note.className = 'po-locked-note approval';
+      note.textContent = 'Waiting for approval \u2014 submitted by ' + (poEditing.approval_requested_name || 'Purchasing') + ' ' +
+        new Date(poEditing.approval_requested_at).toLocaleString('en-PH') + '. Locked until it\u2019s approved, returned or withdrawn.';
+      note.style.display = '';
+    }else if(st === 'draft' && poEditing && poEditing.returned_at){
+      note.className = 'po-locked-note cancelled';
+      note.textContent = 'Returned by ' + (poEditing.returned_by_name || 'the approver') + ' ' + new Date(poEditing.returned_at).toLocaleString('en-PH') +
+        ': ' + (poEditing.returned_note || '') + ' \u2014 make the changes, then submit it again.';
+      note.style.display = '';
     }else note.style.display = 'none';
     $$('#poEditorView input, #poEditorView select, #poEditorView textarea, #poFulfilment button').forEach(el=>{ el.disabled = poReadOnly; });
     $('poAddItem').style.display = poReadOnly ? 'none' : '';
     // Staff: the approver printed on a PO is always whoever issues it — their
     // own linked signatory (set by the database at issue). Show that, locked.
+    // Staff: the approver printed on a PO is whoever approves & issues it —
+    // their own linked signatory, set by the database at issue.
     if(isStaffUser() && st === 'draft'){
       const mine = poMySignatory();
-      $('poApprovedBy').value = mine && can('pur.purchase_orders', 'approve') ? mine.id : '';
+      const iApprove = pending && can('pur.purchase_orders', 'approve') && !poIsMine(poEditing);
+      $('poApprovedBy').value = iApprove && mine ? mine.id : '';
       $('poApprovedBy').disabled = true;
-      $('poApprovedBy').title = 'Set automatically to whoever issues this PO';
+      $('poApprovedBy').title = 'Filled in with the approver\u2019s signature when the PO is approved';
     }else $('poApprovedBy').title = '';
     poRenderActions();
   }
@@ -18638,8 +18655,16 @@
     const st = poEditing ? poEditing.status : 'draft';
     const b = (id, label, cls)=> '<button type="button" class="btn ' + (cls || 'btn-secondary') + '" data-po-act="' + id + '">' + label + '</button>';
     let html = '';
-    if(st === 'draft'){
-      html = b('save', 'Save Draft') + b('preview', 'Preview PDF') + b('issue', 'Issue PO', 'btn-primary');
+    const pending = poPending(poEditing);
+    const admin = currentUser && currentUser.role === 'admin';
+    if(st === 'draft' && pending){
+      html = b('preview', 'Preview PDF');
+      if(admin || (can('pur.purchase_orders', 'approve') && !poIsMine(poEditing))) html += b('approve', '\u2713 Approve & Issue', 'btn-primary') + b('return', 'Return\u2026');
+      if(admin || (poEditing.approval_requested_by === currentUser.id)) html += b('withdraw', 'Withdraw');
+      html += b('duplicate', 'Duplicate');
+    }else if(st === 'draft'){
+      html = b('save', 'Save Draft') + b('preview', 'Preview PDF') + b('submit', 'Submit for Approval', 'btn-primary');
+      if(admin) html += b('issue', 'Issue Now');
       if(poEditing) html += b('duplicate', 'Duplicate') + b('delete', 'Delete Draft', 'danger');
     }else{
       html = b('preview', 'View PDF', 'btn-primary') + b('duplicate', 'Duplicate');
@@ -18648,7 +18673,7 @@
     // Staff: Edit for save/duplicate/delete, Approve for issue/cancel.
     if(isStaffUser()){
       const tmp = document.createElement('div'); tmp.innerHTML = html;
-      const need = { save:'edit', duplicate:'edit', delete:'edit', issue:'approve', cancel:'approve' };
+      const need = { save:'edit', duplicate:'edit', delete:'edit', submit:'edit', issue:'approve', approve:'approve', return:'approve', cancel:'approve' };
       tmp.querySelectorAll('[data-po-act]').forEach(el=>{
         const lv = need[el.dataset.poAct];
         if(lv && !can('pur.purchase_orders', lv)) el.remove();
@@ -19057,6 +19082,10 @@
       else if(act === 'preview') await poShowPdf('view');
       else if(act === 'duplicate') poDuplicate();
       else if(act === 'issue') await poIssue();
+      else if(act === 'submit') await poSubmitForApproval();
+      else if(act === 'approve') await poApproveIssue();
+      else if(act === 'return') await poReturnForChanges();
+      else if(act === 'withdraw') await poWithdraw();
       else if(act === 'cancel') await poCancel();
       else if(act === 'delete') await poDeleteDraft();
     }finally{ lock(false); }
@@ -19089,6 +19118,84 @@
       poLoadList({ silent:true }).then(ok=>{ if(ok) poRenderList(); });
       await poShowPdf('view');
     }catch(e){ purchFail('Couldn\u2019t issue the PO: ', e); }
+  }
+  // ---- approval (20261010_01): Purchasing submits, the approver issues ----
+  function poPending(r){ return !!(r && r.status === 'draft' && r.approval_requested_at); }
+  function poIsMine(r){ return !!(r && currentUser && r.created_by === currentUser.id); }
+  async function poReloadEditing(id){
+    const h = await db.from('purchase_orders').select('*').eq('id', id);
+    if(h.error) throw h.error;
+    poEditing = h.data[0];
+    poApplyMode(); poRenderItems();
+    poLoadList({ silent:true }).then(ok=>{ if(ok) poRenderList(); });
+  }
+  async function poSubmitForApproval(){
+    const err = poValidate();
+    if(err){ toast(err); return; }
+    if(!$('poSupplier').value){ toast('Choose a supplier before submitting'); return; }
+    if(!poCleanItems().filter(it=> it.description.trim()).length){ toast('Add at least one item before submitting'); return; }
+    const t = poCalc(poCleanItems(), $('poVatMode').value, poDiscountInput(), Number($('poEwt').value) || 0);
+    if(!await uiConfirm('Submit this PO for approval?\n\n' + poSupplierName(poCurrentSupplier()) + ' \u00B7 \u20B1' + poFmt(t.total) +
+      '. It\u2019s locked while it waits; the approver (Purchase Orders \u203A Approve, e.g. the Accounting head) approves & issues it or returns it to you.', { ok:'Submit' })) return;
+    const saved = await poSave({ quiet:true });
+    if(!saved) return;
+    try{
+      purchMarkOwn(saved.id);
+      const { error } = await db.rpc('po_submit_for_approval', { p_po: saved.id });
+      if(error) throw error;
+      await poReloadEditing(saved.id);
+      toast((poEditing.po_no || 'PO') + ' submitted for approval');
+      // push to everyone who can approve it
+      try{
+        const ids = await db.rpc('po_approver_ids');
+        (ids.data || []).map(x=> typeof x === 'string' ? x : (x && (x.po_approver_ids || x.id))).filter(Boolean).forEach(uid=>{
+          if(uid !== currentUser.id) notifyUser(uid, 'PO waiting for your approval',
+            (poEditing.po_no || 'A PO') + ' \u00B7 ' + poSupplierName(poCurrentSupplier()) + ' \u00B7 \u20B1' + poFmt(poEditing.total) + ' \u2014 from ' + (currentUser.name || 'Purchasing'), 'po-approval-' + saved.id);
+        });
+      }catch(e){}
+    }catch(e){ purchFail('Couldn\u2019t submit the PO: ', e); }
+  }
+  async function poApproveIssue(){
+    if(!poEditing) return;
+    if(!(await staffApprovalPrecheck('pur.purchase_orders', Number(poEditing.total), poEditing.created_by))) return;
+    if(isStaffUser() && !poMySignatory()){ toast('Your account isn\u2019t linked to a PO signatory yet \u2014 ask the admin to link you in PO Settings \u2192 Signatories'); return; }
+    if(!await uiConfirm('Approve and issue ' + (poEditing.po_no || 'this PO') + ' to ' + poSupplierName(poCurrentSupplier()) + ' for \u20B1' + poFmt(poEditing.total) +
+      (Number(poEditing.ewt_amount) > 0 ? ' (net payable \u20B1' + poFmt(poEditing.net_payable) + ' after EWT)' : '') +
+      '?\n\nYour signature is printed as \u201CApproved by\u201D. Once issued it\u2019s locked.', { ok:'Approve & Issue' })) return;
+    try{
+      purchMarkOwn(poEditing.id);
+      const { error } = await db.from('purchase_orders').update({ status:'issued' }).eq('id', poEditing.id);
+      if(error){ if(error.hint === 'reauth_required' && await staffEnsureReauth()) return poApproveIssue(); throw error; }
+      const by = poEditing.approval_requested_by;
+      await poReloadEditing(poEditing.id);
+      toast(poEditing.po_no + ' approved and issued');
+      if(by && by !== currentUser.id) notifyUser(by, 'PO approved', poEditing.po_no + ' was approved and issued by ' + (currentUser.name || 'the approver'), 'po-approved-' + poEditing.id);
+      await poShowPdf('view');
+    }catch(e){ purchFail('Couldn\u2019t approve the PO: ', e); }
+  }
+  async function poReturnForChanges(){
+    if(!poEditing) return;
+    const note = await uiPrompt('Return ' + (poEditing.po_no || 'this PO') + ' to ' + (poEditing.approval_requested_name || 'Purchasing') + '?\n\nWhat needs to change?', '', { ok:'Return', multiline:true });
+    if(note === null) return;
+    if(!note.trim()){ toast('Say what needs to change'); return; }
+    try{
+      const { data, error } = await db.rpc('po_return_for_changes', { p_po: poEditing.id, p_note: note.trim() });
+      if(error) throw error;
+      const no = poEditing.po_no;
+      await poReloadEditing(poEditing.id);
+      toast((no || 'PO') + ' returned');
+      if(data) notifyUser(data, 'PO returned for changes', (no || 'Your PO') + ': ' + note.trim(), 'po-returned-' + poEditing.id);
+    }catch(e){ purchFail('Couldn\u2019t return the PO: ', e); }
+  }
+  async function poWithdraw(){
+    if(!poEditing) return;
+    if(!await uiConfirm('Withdraw ' + (poEditing.po_no || 'this PO') + ' from approval?\n\nIt becomes an editable draft again; submit it again when you\u2019re done.', { ok:'Withdraw' })) return;
+    try{
+      const { error } = await db.rpc('po_withdraw_approval', { p_po: poEditing.id });
+      if(error) throw error;
+      await poReloadEditing(poEditing.id);
+      toast('Withdrawn \u2014 you can edit it again');
+    }catch(e){ purchFail('Couldn\u2019t withdraw: ', e); }
   }
   async function poCancel(){
     if(!poEditing) return;
@@ -25676,7 +25783,8 @@
     const [srNew, mrs, pos, pms, reorder] = await Promise.all([
       prioSafe(async ()=>{ const { data, error } = await db.from('service_requests').select('id, created_at, description, urgency, customer_id').eq('status', 'new').order('created_at'); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.from('material_requisitions').select('id, mrf_no, requester_name, requested_by, submitted_at, created_at').eq('status', 'submitted').order('submitted_at'); if(error) throw error; return data || []; }, []),
-      prioSafe(async ()=>{ const { data, error } = await db.from('purchase_orders').select('id, po_no, updated_at').eq('status', 'draft').lt('updated_at', twoDaysAgo).order('updated_at'); if(error) throw error; return data || []; }, []),
+      // POs Purchasing submitted for approval (20261010_01)
+      prioSafe(async ()=>{ const { data, error } = await db.from('purchase_orders').select('id, po_no, total, approval_requested_at, approval_requested_name, supplier_snapshot, suppliers(name)').eq('status', 'draft').not('approval_requested_at', 'is', null).order('approval_requested_at'); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.from('customer_equipment').select('id').gte('next_pm_date', today).lte('next_pm_date', in7); if(error) throw error; return data || []; }, []),
       prioSafe(async ()=>{ const { data, error } = await db.rpc('inv_rpt_reorder', { p_days: 90 }); if(error) throw error; return (data || []).filter(r=> r.reorder); }, [])
     ]);
@@ -25893,7 +26001,15 @@
     // WATCH — chips
     if((extra.reorder || []).length) add('watch', { key: 'reorder', title: extra.reorder.length + ' item' + (extra.reorder.length === 1 ? '' : 's') + ' below reorder level', actions: [{ label: 'Reorder report', run: ()=> showPurchasingView('invReports') }] });
     if((extra.pms || []).length) add('watch', { key: 'pm', title: extra.pms.length + ' PM' + (extra.pms.length === 1 ? '' : 's') + ' due this week', actions: [{ label: 'Calendar', run: ()=> showDispatchView('calendar') }] });
-    (extra.pos || []).slice(0, 3).forEach(p=> add('watch', { key: 'po:' + p.id, title: (p.po_no || 'PO') + ' still a draft (' + prioAge(prioSince(p.updated_at)) + ')', actions: [{ label: 'Open', run: ()=> showPurchasingView('purchaseOrders') }] }));
+    (extra.pos || []).forEach(p=>{
+      const age = prioSince(p.approval_requested_at);
+      add(age > 24 * 3600000 ? 'urgent' : 'today', {
+        key: 'poappr:' + p.id, age,
+        title: (p.po_no || 'PO') + ' waiting for approval \u00B7 \u20B1' + Number(p.total || 0).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 }),
+        sub: ((p.suppliers && p.suppliers.name) || 'Supplier') + ' \u00B7 from ' + (p.approval_requested_name || 'Purchasing') + ' \u00B7 ' + prioAge(age),
+        actions: [{ label: 'Review', primary: true, run: ()=> showPurchasingView('purchaseOrders') }]
+      });
+    });
     const noDispatch = tickets.filter(t=> t.date === today && !t.dispatchTime && !dtIsTerminal(t));
     if(noDispatch.length) add('watch', { key: 'nodisp', title: noDispatch.length + ' JO' + (noDispatch.length === 1 ? '' : 's') + ' today without a dispatch time', actions: [{ label: 'Dispatch', run: ()=> showDispatchView('all') }] });
 
