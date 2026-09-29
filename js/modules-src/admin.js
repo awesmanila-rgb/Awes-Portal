@@ -386,10 +386,10 @@
           '<button data-act="remove" class="danger">Remove</button>'+
         '</div>';
       card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-        if(!await uiConfirm('Remove this equipment record? This does not affect past reports.')) return;
+        if(!await uiConfirm('Delete this equipment record?\n\nPast service reports are kept (each keeps the unit details it was filed with); they just won\u2019t be linked to this unit any more. Its photos are removed.')) return;
         const ok = await cloudDeleteCustomerEquipment(e.id);
         if(ok){ toast('Removed'); renderCustomerEquipmentList(customerId); }
-        else toast('Could not remove');
+        else toast(cloudDeleteCustomerEquipment.lastError || 'Could not remove');
       });
       body.appendChild(card);
     });
@@ -628,10 +628,10 @@
       }
       if(equipListTab==='delete'){
         card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
-          if(!await uiConfirm('Remove this equipment record for '+e.customerName+'? This does not affect past reports.')) return;
+          if(!await uiConfirm('Delete '+(e.equipLocation || 'this unit')+' for '+e.customerName+'?\n\nPast service reports are kept (each keeps the unit details it was filed with); they just won\u2019t be linked to this unit any more. Its photos are removed.')) return;
           const ok = await cloudDeleteCustomerEquipment(e.id);
           if(ok){ toast('Removed'); renderEquipmentMasterList(); }
-          else toast('Could not remove');
+          else toast(cloudDeleteCustomerEquipment.lastError || 'Could not remove');
         });
       }
       body.appendChild(card);

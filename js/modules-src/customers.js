@@ -160,13 +160,27 @@
   // so the old offline path just dropped it from the in-memory cache and
   // reported success — the record was still on the server and reappeared on the
   // next refresh.
+  // Goes through customer_equipment_delete() (20261008_01), which unlinks
+  // past service reports first — a plain delete was refused by the
+  // database for any unit with history. Returns true, or a readable reason.
+  cloudDeleteCustomerEquipment.lastError = '';
   async function cloudDeleteCustomerEquipment(id){
-    if(!(await ensureCloud())) return false;
+    cloudDeleteCustomerEquipment.lastError = '';
+    if(!(await ensureCloud())){ cloudDeleteCustomerEquipment.lastError = 'You\u2019re offline \u2014 connect to delete equipment.'; return false; }
     try{
-      const { error } = await db.from('customer_equipment').delete().eq('id', id);
-      if(error) throw error;
+      const r = await db.rpc('customer_equipment_delete', { p_id: id });
+      if(r.error){
+        const missingFn = r.error.code === 'PGRST202' || /customer_equipment_delete/.test(String(r.error.message)) && /find|exist/i.test(String(r.error.message));
+        if(!missingFn) throw r.error;
+        const { error } = await db.from('customer_equipment').delete().eq('id', id);
+        if(error) throw error;
+      }
     }catch(e){
       console.error('delete equipment failed', describeCloudError(e));
+      const m = String((e && e.message) || '');
+      cloudDeleteCustomerEquipment.lastError = /foreign key|violates/i.test(m)
+        ? 'This unit has service history. Run migration 20261008_01_equipment_delete.sql in Supabase so it can be deleted.'
+        : m || 'Could not remove';
       return false;
     }
     currentEquipmentCache = currentEquipmentCache.filter(e=>e.id!==id);
