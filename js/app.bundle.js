@@ -11047,10 +11047,12 @@
     const sec = $('dtReassignSection');
     if(!sec) return;
     const isAdmin = dtCanDispatch();
-    const finalized = rec.status==='closed' || rec.status==='cancelled' || dtIsExpired(rec);
-    if(!isAdmin || finalized){ sec.style.display='none'; sec.innerHTML=''; return; }
+    // Completed counts as finalized too: every unit is reported or flagged,
+    // and technicians can't be replaced on a Completed job order.
+    const finalized = ['completed','closed','cancelled'].includes(dtEffectiveStatus(rec)) || dtIsExpired(rec);
+    if(!isAdmin || finalized){ sec.style.display='none'; return; }
 
-    const box = $('dtReassignList');
+    const box = sec.querySelector('#dtReassignList');
     const assignedIds = rec.assignedWorkerIds || [];
     const assignedNames = rec.assignedWorkerNames || [];
     if(assignedIds.length===0){ sec.style.display='none'; return; }
@@ -11531,7 +11533,12 @@
     }).join('');
 
     const exceptions = units.filter(it=> it.notDone).length;
-    $('dtReviewList').innerHTML = rows +
+    // Scoped lookup, not $(): this list is rebuilt on every open and $()
+    // caches the first node by id, so it kept writing into a detached
+    // element and the section stayed on "Loading…".
+    const reviewList = sec.querySelector('#dtReviewList');
+    if(!reviewList) return;
+    reviewList.innerHTML = rows +
       (exceptions>0
         ? '<div class="u-status" style="margin-top:6px;">'+exceptions+' unit(s) flagged. Use the thread below to sort it out with the technician, or close the job order and raise a follow-up for the remaining work.</div>'
         : '');
@@ -11545,6 +11552,16 @@
           // identical read-only view rather than a second, diverging one.
           const rec = await cloudGetReport(srNo);
           if(!rec){ toast('Could not load '+srNo); return; }
+          // Filed reports are view-only: show the PDF over the job order
+          // instead of opening the report form.
+          if(rec.completed && typeof buildPdf === 'function'){
+            const doc = await buildPdf(rec);
+            $('previewOverlay').querySelector('h3').textContent = srNo + (rec.custName ? ' \u2014 ' + rec.custName : '');
+            $('previewOkBtn').textContent = 'Close';
+            $('previewOverlay').classList.add('open');
+            await renderPdfPreview(doc, srNo + '.pdf');
+            return;
+          }
           // openReport switches the whole view, so the overlay has to go.
           // Remembering which job order we came from lets the report screen
           // offer a way back — reviewing five reports on one job order
@@ -11593,13 +11610,15 @@
       const reportStatus = it.reportSrNo
         ? ('Reported ('+escapeHtml(it.reportSrNo)+')')
         : (it.draftSrNo ? 'Draft saved' : 'Not started');
-      const checked = it.notDone ? 'checked' : '';
+      // Read-only: whether a unit's scope was done is the technician's call
+      // (they flag it while filing); the reviewer only reads and closes.
+      const state = it.reportSrNo ? '<span style="color:var(--green-dark);">\u2713 '+reportStatus+'</span>'
+        : it.notDone ? '<span style="color:var(--amber);">\u26A0 Scope not completed \u2014 flagged by '+escapeHtml(it.notDoneBy || 'the technician')+'</span>'+
+            '<div class="u-status">Reason: '+escapeHtml(it.notDoneReason || '\u2014')+'</div>'
+        : '<span style="color:var(--danger);">'+reportStatus+' \u2014 the technician still has to file the report or flag this unit</span>';
       return '<div class="dt-close-row" data-idx="'+i+'">'+
         '<div style="font-weight:600;">'+escapeHtml(dtEquipSummaryLine(it))+'</div>'+
-        '<div class="u-status" style="margin-bottom:6px;">'+reportStatus+'</div>'+
-        '<label class="chk"><input type="checkbox" class="dt-notdone-chk" '+checked+'><span>Scope not completed on this unit</span></label>'+
-        '<textarea class="dt-notdone-reason" rows="2" placeholder="Reason (e.g. parts needed, access denied, unit not operational)" '+
-          'style="display:'+(it.notDone ? '' : 'none')+';">'+escapeHtml(it.notDoneReason||'')+'</textarea>'+
+        '<div class="u-status">'+state+'</div>'+
       '</div>';
     }).join('');
   }
@@ -11943,38 +11962,9 @@
   }
   $('dtCloseSubmitBtn').addEventListener('click', async ()=>{
     if(!dtOverlayTicket) return;
-    const rows = $$('#dtCloseChecklist .dt-close-row');
+    // Units are taken exactly as the technicians left them — reported, or
+    // flagged not done with their reason. Nothing is changed at close.
     const equipmentList = (dtOverlayTicket.equipmentList||[]).slice();
-    for(let i=0; i<rows.length; i++){
-      const chk = rows[i].querySelector('.dt-notdone-chk');
-      const reasonEl = rows[i].querySelector('.dt-notdone-reason');
-      const notDone = chk.checked;
-      const reason = reasonEl.value.trim();
-      if(notDone && !reason){
-        toast('Add a reason for every unit marked "not completed"');
-        reasonEl.focus();
-        return;
-      }
-      const base = Object.assign({}, equipmentList[i]);
-      if(notDone){
-        base.notDone = true;
-        base.notDoneReason = reason;
-        // Preserve who flagged it and when if the technician already did so
-        // during the visit; stamp admin only when this is a new flag.
-        if(!equipmentList[i].notDone){
-          base.notDoneBy = currentUser ? (currentUser.name || 'Admin') : 'Admin';
-          base.notDoneAt = serverNowISO();
-        }
-      }else{
-        // Cleared outright rather than set to false — leaving notDoneBy /
-        // notDoneAt behind on an un-flagged unit meant the review section
-        // and the audit trail still showed a technician as having flagged
-        // a unit that is no longer flagged.
-        delete base.notDone; delete base.notDoneReason;
-        delete base.notDoneBy; delete base.notDoneAt;
-      }
-      equipmentList[i] = base;
-    }
     // Every unit must end up either REPORTED or FLAGGED. Unchecking a box
     // here used to leave a unit that has no Service Report and no reason —
     // closed out in limbo, which is exactly the hole the whole lifecycle
@@ -11983,7 +11973,7 @@
     // admin can uncheck a flag a technician set.
     const unresolved = equipmentList.filter(it=> !it.reportSrNo && !it.notDone);
     if(unresolved.length > 0){
-      toast(unresolved.length+' unit(s) have no Service Report — tick "Scope not completed" and give a reason, or ask the technician to file the report');
+      toast(unresolved.length+' unit(s) have no Service Report yet \u2014 ask the technician (thread below) to file it or flag the unit as not done');
       return;
     }
     const exceptionCount = equipmentList.filter(it=>it.notDone).length;
