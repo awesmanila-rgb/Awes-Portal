@@ -226,6 +226,21 @@
         actions: [{ label: 'Review', run: async ()=>{ await showDispatchView('all'); dtSetAdminFilter('completed'); } }]
       });
     }
+    // Filed reports no job-order close will sign off — Record Past Service,
+    // or filed after the job order closed (20261009_01). Same test as the
+    // database's service_report_needs_signoff().
+    const openSrNos = new Set();
+    tickets.filter(t=> ['open','preparing','acknowledged','in_progress','completed','scheduled'].includes(t.status))
+      .forEach(t=> (t.equipmentList || []).forEach(u=>{ if(u.reportSrNo) openSrNos.add(u.reportSrNo); }));
+    const toSign = (base.reports || []).filter(r=> r.completed && !r.signedOffAt && !openSrNos.has(r.srNo));
+    if(toSign.length){
+      add('today', {
+        key: 'srsignoff', age: 1,
+        title: toSign.length + ' service report' + (toSign.length === 1 ? '' : 's') + ' to sign off',
+        sub: 'Not covered by a job order close \u00B7 ' + (toSign.map(r=> r.srNo).filter(Boolean).sort()[0] || ''),
+        actions: [{ label: 'Review', primary: true, run: ()=> srOpenReviewQueue() }]
+      });
+    }
     const drafts = (base.reports || []).filter(r=> !r.completed);
     if(drafts.length){
       add('today', {

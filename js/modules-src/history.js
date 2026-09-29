@@ -16,9 +16,12 @@
         }
       }catch(e){}
     }
+    if(await ensureCloud()) await srLoadSignoffIds();
     if(onlyUserId) reports = reports.filter(d=> d.technicianId===onlyUserId);
     if(filter==='draft') reports = reports.filter(d=> !d.completed);
     else if(filter==='completed') reports = reports.filter(d=> d.completed);
+    else if(filter==='needs_review') reports = reports.filter(d=> srSignoffIds.has(d.id))
+      .sort((a, b)=> String(a.date).localeCompare(String(b.date)));
     // filter==='all' (or omitted) keeps everything, unfiltered.
     const q = (searchText||'').trim().toLowerCase();
     if(q) reports = reports.filter(d=> (d.custName||'').toLowerCase().includes(q) || (d.srNo||'').toLowerCase().includes(q));
@@ -26,6 +29,7 @@
       const emptyMsg = q ? 'No reports match "'+searchText.trim()+'".'
         : filter==='draft' ? 'No draft reports yet.'
         : filter==='completed' ? 'No completed reports yet.'
+        : filter==='needs_review' ? 'Nothing to sign off \u2014 every filed report is signed off or waiting for its job order to close.'
         : 'No saved reports yet.';
       list.innerHTML = '<div class="empty-state">'+emptyMsg+'</div>';
       return;
@@ -42,13 +46,27 @@
       // state (not the current tab) so it's also correct on the "All" tab,
       // which mixes drafts and completed reports in one list.
       const isDraft = !d.completed;
+      // Sign-off (20261009_01): closing the job order signs its reports off;
+      // the rest are signed off one by one on Needs Review.
+      const needsSignoff = srSignoffIds.has(d.id);
+      const canSignOff = needsSignoff && srCanReview() && !(d.technicianId===currentUser.id && currentUser.role!=='admin');
+      const reviewTag = !d.completed ? ''
+        : d.signedOffAt ? '<span class="hist-tag-approved" title="'+escapeHtml(d.signedOffVia==='legacy' ? 'Filed before sign-off was added' : 'Signed off by '+(d.signedOffByName||''))+'">\u2713 Signed off</span>'
+        : needsSignoff ? '<span class="hist-tag-review">Needs sign-off</span>'
+        : '<span class="hist-tag-wait" title="Signed off when its job order is closed">Awaiting job order close</span>';
       row.innerHTML =
         '<div class="hist-info"><b>'+escapeHtml(d.custName||'Untitled')+'</b>'+
         '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+
-          (d.backEntry ? '<span class="hist-tag-past" title="Recorded after the fact by '+escapeHtml(d.enteredByName||'admin')+'">Past service</span>' : '')+'</span></div>'+
+          (d.techName ? ' · '+escapeHtml(d.techName) : '')+reviewTag+
+          (d.backEntry ? '<span class="hist-tag-past" title="Recorded after the fact by '+escapeHtml(d.enteredByName||'admin')+'">Past service</span>' : '')+'</span>'+
+        '</div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button></div>');
+          : '<div class="hist-actions"><button data-act="view">View</button>'+
+              (canSignOff ? '<button data-act="signoff" class="primary">Sign off</button>' : '')+'</div>');
+      if(canSignOff){
+        row.querySelector('[data-act="signoff"]').addEventListener('click', (e)=>{ e.stopPropagation(); srSignOffReport(d); });
+      }
       if(isDraft){
         // "Continue" reopens the draft in the form so the technician can
         // finish filling it out and submit it — same underlying action as
@@ -192,13 +210,38 @@
   // tabs and a search bar. Reached via the "Service Reports" sidebar nav
   // item (see showServiceReportsManagerView in home.js). ----------
   let srMgrFilter = 'all';
+  let srMgrNextFilter = null;   // set by srOpenReviewQueue()
+  const srCanReview = ()=> currentUser && (currentUser.role==='admin' || (typeof can==='function' && can('ops.service_reports', 'approve')));
+  // Open Service Reports on the "To Review" tab (Needs you now, Inbox, overview tile)
+  async function srOpenReviewQueue(){
+    srMgrNextFilter = 'needs_review';
+    await showServiceReportsManagerView();
+  }
+  // Reports that no job-order close will sign off (Record Past Service, a
+  // report filed after its job order closed, or with no job order).
+  let srSignoffIds = new Set();
+  async function srLoadSignoffIds(){
+    try{
+      const { data, error } = await db.rpc('service_reports_to_sign_off');
+      srSignoffIds = new Set(error ? [] : (data || []).map(x=> typeof x === 'string' ? x : (x && (x.service_reports_to_sign_off || x.id))));
+    }catch(e){ srSignoffIds = new Set(); }
+  }
+  async function srSignOffReport(d){
+    if(!await uiConfirm('Sign off '+(d.srNo||'this report')+' for '+(d.custName||'the customer')+'?\n\nOpen it with View first if you haven\u2019t read it. Once signed off the customer can see it in their portal.', { ok:'Sign off' })) return;
+    const { error } = await db.rpc('service_report_sign_off', { p_id:d.id });
+    if(error){ toast('Couldn\u2019t sign off: '+(error.message||describeCloudError(error))); return; }
+    toast((d.srNo||'Report')+' signed off');
+    renderServiceReportsManagerList();
+    if(typeof prioRefreshSoon==='function') prioRefreshSoon();
+  }
   function renderServiceReportsManagerList(){
     loadHistory('historyList', srMgrFilter==='all' ? undefined : srMgrFilter, null, $('srMgrSearch').value);
   }
   async function openServiceReportsManagerPage(){
-    srMgrFilter = 'all';
+    srMgrFilter = srMgrNextFilter || 'all'; srMgrNextFilter = null;
     $('srMgrSearch').value = '';
-    $$('#srMgrFilterRow button').forEach(b=> b.classList.toggle('active', b.dataset.filter==='all'));
+    if($('srMgrNeedsReviewBtn')) $('srMgrNeedsReviewBtn').style.display = srCanReview() ? '' : 'none';
+    $$('#srMgrFilterRow button').forEach(b=> b.classList.toggle('active', b.dataset.filter===srMgrFilter));
     await renderServiceReportsManagerList();
   }
   $$('#srMgrFilterRow button').forEach(btn=>{

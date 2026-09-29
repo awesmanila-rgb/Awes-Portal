@@ -492,6 +492,13 @@
     data.backEntry     = !!row.back_entry;
     data.enteredByName = row.entered_by_name || '';
     data.enteredAt     = row.entered_at || '';
+    // Sign-off (20261009_01). Read-only here: set by the database when the
+    // job order is closed, or by service_report_sign_off() on Needs Review.
+    data.id              = row.id || null;
+    // Stored in the existing reviewed_at / reviewed_by columns (20260919_03).
+    data.signedOffAt     = row.reviewed_at || '';
+    data.signedOffByName = row.reviewed_by || '';
+    data.signedOffVia    = row.reviewed_by === 'Before sign-off' ? 'legacy' : '';
     return data;
   }
   // Legacy rows may hold {} (or a stray object) where a data-URL string was
@@ -7143,9 +7150,12 @@
         }
       }catch(e){}
     }
+    if(await ensureCloud()) await srLoadSignoffIds();
     if(onlyUserId) reports = reports.filter(d=> d.technicianId===onlyUserId);
     if(filter==='draft') reports = reports.filter(d=> !d.completed);
     else if(filter==='completed') reports = reports.filter(d=> d.completed);
+    else if(filter==='needs_review') reports = reports.filter(d=> srSignoffIds.has(d.id))
+      .sort((a, b)=> String(a.date).localeCompare(String(b.date)));
     // filter==='all' (or omitted) keeps everything, unfiltered.
     const q = (searchText||'').trim().toLowerCase();
     if(q) reports = reports.filter(d=> (d.custName||'').toLowerCase().includes(q) || (d.srNo||'').toLowerCase().includes(q));
@@ -7153,6 +7163,7 @@
       const emptyMsg = q ? 'No reports match "'+searchText.trim()+'".'
         : filter==='draft' ? 'No draft reports yet.'
         : filter==='completed' ? 'No completed reports yet.'
+        : filter==='needs_review' ? 'Nothing to sign off \u2014 every filed report is signed off or waiting for its job order to close.'
         : 'No saved reports yet.';
       list.innerHTML = '<div class="empty-state">'+emptyMsg+'</div>';
       return;
@@ -7169,13 +7180,27 @@
       // state (not the current tab) so it's also correct on the "All" tab,
       // which mixes drafts and completed reports in one list.
       const isDraft = !d.completed;
+      // Sign-off (20261009_01): closing the job order signs its reports off;
+      // the rest are signed off one by one on Needs Review.
+      const needsSignoff = srSignoffIds.has(d.id);
+      const canSignOff = needsSignoff && srCanReview() && !(d.technicianId===currentUser.id && currentUser.role!=='admin');
+      const reviewTag = !d.completed ? ''
+        : d.signedOffAt ? '<span class="hist-tag-approved" title="'+escapeHtml(d.signedOffVia==='legacy' ? 'Filed before sign-off was added' : 'Signed off by '+(d.signedOffByName||''))+'">\u2713 Signed off</span>'
+        : needsSignoff ? '<span class="hist-tag-review">Needs sign-off</span>'
+        : '<span class="hist-tag-wait" title="Signed off when its job order is closed">Awaiting job order close</span>';
       row.innerHTML =
         '<div class="hist-info"><b>'+escapeHtml(d.custName||'Untitled')+'</b>'+
         '<span>'+escapeHtml(d.srNo||'')+' · '+escapeHtml(d.date||'')+' · '+(d.completed?'Completed':'Draft')+
-          (d.backEntry ? '<span class="hist-tag-past" title="Recorded after the fact by '+escapeHtml(d.enteredByName||'admin')+'">Past service</span>' : '')+'</span></div>'+
+          (d.techName ? ' · '+escapeHtml(d.techName) : '')+reviewTag+
+          (d.backEntry ? '<span class="hist-tag-past" title="Recorded after the fact by '+escapeHtml(d.enteredByName||'admin')+'">Past service</span>' : '')+'</span>'+
+        '</div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button></div>');
+          : '<div class="hist-actions"><button data-act="view">View</button>'+
+              (canSignOff ? '<button data-act="signoff" class="primary">Sign off</button>' : '')+'</div>');
+      if(canSignOff){
+        row.querySelector('[data-act="signoff"]').addEventListener('click', (e)=>{ e.stopPropagation(); srSignOffReport(d); });
+      }
       if(isDraft){
         // "Continue" reopens the draft in the form so the technician can
         // finish filling it out and submit it — same underlying action as
@@ -7319,13 +7344,38 @@
   // tabs and a search bar. Reached via the "Service Reports" sidebar nav
   // item (see showServiceReportsManagerView in home.js). ----------
   let srMgrFilter = 'all';
+  let srMgrNextFilter = null;   // set by srOpenReviewQueue()
+  const srCanReview = ()=> currentUser && (currentUser.role==='admin' || (typeof can==='function' && can('ops.service_reports', 'approve')));
+  // Open Service Reports on the "To Review" tab (Needs you now, Inbox, overview tile)
+  async function srOpenReviewQueue(){
+    srMgrNextFilter = 'needs_review';
+    await showServiceReportsManagerView();
+  }
+  // Reports that no job-order close will sign off (Record Past Service, a
+  // report filed after its job order closed, or with no job order).
+  let srSignoffIds = new Set();
+  async function srLoadSignoffIds(){
+    try{
+      const { data, error } = await db.rpc('service_reports_to_sign_off');
+      srSignoffIds = new Set(error ? [] : (data || []).map(x=> typeof x === 'string' ? x : (x && (x.service_reports_to_sign_off || x.id))));
+    }catch(e){ srSignoffIds = new Set(); }
+  }
+  async function srSignOffReport(d){
+    if(!await uiConfirm('Sign off '+(d.srNo||'this report')+' for '+(d.custName||'the customer')+'?\n\nOpen it with View first if you haven\u2019t read it. Once signed off the customer can see it in their portal.', { ok:'Sign off' })) return;
+    const { error } = await db.rpc('service_report_sign_off', { p_id:d.id });
+    if(error){ toast('Couldn\u2019t sign off: '+(error.message||describeCloudError(error))); return; }
+    toast((d.srNo||'Report')+' signed off');
+    renderServiceReportsManagerList();
+    if(typeof prioRefreshSoon==='function') prioRefreshSoon();
+  }
   function renderServiceReportsManagerList(){
     loadHistory('historyList', srMgrFilter==='all' ? undefined : srMgrFilter, null, $('srMgrSearch').value);
   }
   async function openServiceReportsManagerPage(){
-    srMgrFilter = 'all';
+    srMgrFilter = srMgrNextFilter || 'all'; srMgrNextFilter = null;
     $('srMgrSearch').value = '';
-    $$('#srMgrFilterRow button').forEach(b=> b.classList.toggle('active', b.dataset.filter==='all'));
+    if($('srMgrNeedsReviewBtn')) $('srMgrNeedsReviewBtn').style.display = srCanReview() ? '' : 'none';
+    $$('#srMgrFilterRow button').forEach(b=> b.classList.toggle('active', b.dataset.filter===srMgrFilter));
     await renderServiceReportsManagerList();
   }
   $$('#srMgrFilterRow button').forEach(btn=>{
@@ -11667,18 +11717,18 @@
       // override (e.g. a tech is unavailable to complete the app flow).
       // Closing belongs to admin now — a technician opening this overlay
       // sees where the job order stands instead of a form they can't use.
-      if(!dtCanDispatch()){
+      if(!dtCanClose()){
         const st = dtEffectiveStatus(rec);
         const units = rec.equipmentList || [];
         const left = units.filter(it=> !it.reportSrNo && !it.notDone).length;
         const msg = st==='completed'
-          ? 'All units resolved. Admin is reviewing this job order and will close it.'
+          ? 'All units resolved. The Operations head reviews the reports and closes this job order.'
           : (left>0
               ? left+' unit(s) still need a Service Report, or to be flagged as not done.'
               : 'Acknowledge and arrive on site before filing reports for this job order.');
         $('dtCloseSection').innerHTML =
           '<div class="empty-state">'+icon('lock')+' '+escapeHtml(msg)+
-          '<br><span class="dt-jo-empty-sub">Job orders are closed by admin after review. Use the thread below if something needs sorting out.</span></div>';
+          '<br><span class="dt-jo-empty-sub">Job orders are closed by the Operations head after review \u2014 closing signs off the reports. Use the thread below if something needs sorting out.</span></div>';
         $('dtCloseSubmitBtn').style.display = 'none';
       }else{
         $('dtCloseSection').innerHTML =
@@ -11845,8 +11895,8 @@
       // function refuses, and guard_dispatch_worker_fields in the database
       // normalises a non-admin 'closed' write back to the old status. A
       // hidden button alone is not a permission.
-      if(!dtCanDispatch()){
-        toast('Only admin can close a job order'); return false;
+      if(!dtCanClose()){
+        toast('Only the Operations head (Dispatch \u203A Approve) can close a job order'); return false;
       }
       if(dtEffectiveStatus(rec)==='closed'){ toast('Already closed'); return false; }
       const merged = Object.assign({}, rec, {
@@ -25816,6 +25866,21 @@
         actions: [{ label: 'Review', run: async ()=>{ await showDispatchView('all'); dtSetAdminFilter('completed'); } }]
       });
     }
+    // Filed reports no job-order close will sign off — Record Past Service,
+    // or filed after the job order closed (20261009_01). Same test as the
+    // database's service_report_needs_signoff().
+    const openSrNos = new Set();
+    tickets.filter(t=> ['open','preparing','acknowledged','in_progress','completed','scheduled'].includes(t.status))
+      .forEach(t=> (t.equipmentList || []).forEach(u=>{ if(u.reportSrNo) openSrNos.add(u.reportSrNo); }));
+    const toSign = (base.reports || []).filter(r=> r.completed && !r.signedOffAt && !openSrNos.has(r.srNo));
+    if(toSign.length){
+      add('today', {
+        key: 'srsignoff', age: 1,
+        title: toSign.length + ' service report' + (toSign.length === 1 ? '' : 's') + ' to sign off',
+        sub: 'Not covered by a job order close \u00B7 ' + (toSign.map(r=> r.srNo).filter(Boolean).sort()[0] || ''),
+        actions: [{ label: 'Review', primary: true, run: ()=> srOpenReviewQueue() }]
+      });
+    }
     const drafts = (base.reports || []).filter(r=> !r.completed);
     if(drafts.length){
       add('today', {
@@ -26798,8 +26863,14 @@
     // Unreviewed Reports — completed drafts still waiting to be finished
     // (which is where the customer's acknowledgment sign-off happens).
     const draftReports = (reports||[]).filter(r=> !r.completed).length;
-    $('ovReportsValue').textContent = String(draftReports);
-    $('ovReportsSub').textContent = draftReports+' Service Report'+(draftReports===1?'':'s')+' Pending Sign-off';
+    const openSrNos = new Set();
+    (tickets||[]).filter(t=> ['open','preparing','acknowledged','in_progress','completed','scheduled'].includes(t.status))
+      .forEach(t=> (t.equipmentList||[]).forEach(u=>{ if(u.reportSrNo) openSrNos.add(u.reportSrNo); }));
+    const toSign = (reports||[]).filter(r=> r.completed && !r.signedOffAt && !openSrNos.has(r.srNo)).length;
+    $('ovReportsValue').textContent = String(toSign || draftReports);
+    $('ovReportsSub').textContent = toSign
+      ? toSign+' to Sign Off · '+draftReports+' Draft'+(draftReports===1?'':'s')
+      : draftReports+' Service Report'+(draftReports===1?'':'s')+' Pending Sign-off';
 
     // Service Requests — customer-filed, admin-only (service-requests.js).
     // srAdminInit() renders the value itself (and keeps it live afterward
@@ -26858,6 +26929,12 @@
     if(calCard){ calCard.style.display = ''; dtHomeCalTicketsCache = tickets || []; dtCalRender('homeCal', dtHomeCalTicketsCache); }
   }
   let dtHomeCalTicketsCache = [];
+  // Service Reports tile → the "To Review" queue when reports are waiting
+  $('ovReportsCard').addEventListener('click', async ()=>{
+    if(!(await ensureAdminAuthenticated())) return;
+    closeMainMenu();
+    if(/to Sign Off/.test($('ovReportsSub').textContent)) srOpenReviewQueue(); else showServiceReportsManagerView();
+  });
   $('homeCalPrevBtn').addEventListener('click', ()=>{ dtCalPrev('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
   $('homeCalNextBtn').addEventListener('click', ()=>{ dtCalNext('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
   $('homeCalTodayBtn').addEventListener('click', ()=>{ dtCalGoToday('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
@@ -28993,7 +29070,10 @@
     target.querySelectorAll('[data-filter]').forEach(b=> b.addEventListener('click', ()=>{ stfInbox.filter = b.dataset.filter; staffRenderInbox(); }));
     target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=>{
       // "…to endorse (your team)" items are handled on My Team
-      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam(); else staffOpenModule(b.dataset.open);
+      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam();
+      else if(b.dataset.kind === 'report_signoff') srOpenReviewQueue();
+      else if(b.dataset.kind === 'jo_review'){ showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); }); }
+      else staffOpenModule(b.dataset.open);
     }));
     const sla = target.querySelector('[data-act="sla"]'); if(sla) sla.addEventListener('click', ()=> staffOpenSla());
   }
@@ -29352,6 +29432,9 @@
   // Dispatch: who sees the office side, and who may act on job orders
   function dtIsDispatcher(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.dispatch', 'view'))); }
   function dtCanDispatch(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.dispatch', 'edit'))); }
+  // Reviewing and closing a job order is the Operations head's approval
+  // (Dispatch › Approve, 20261009_01); closing also signs off its reports.
+  function dtCanClose(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.dispatch', 'approve'))); }
   // Service requests: office side / may act
   function srIsOffice(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.service_requests', 'view'))); }
   function srCanManage(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.service_requests', 'edit'))); }

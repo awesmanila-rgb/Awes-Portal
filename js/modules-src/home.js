@@ -743,8 +743,14 @@
     // Unreviewed Reports — completed drafts still waiting to be finished
     // (which is where the customer's acknowledgment sign-off happens).
     const draftReports = (reports||[]).filter(r=> !r.completed).length;
-    $('ovReportsValue').textContent = String(draftReports);
-    $('ovReportsSub').textContent = draftReports+' Service Report'+(draftReports===1?'':'s')+' Pending Sign-off';
+    const openSrNos = new Set();
+    (tickets||[]).filter(t=> ['open','preparing','acknowledged','in_progress','completed','scheduled'].includes(t.status))
+      .forEach(t=> (t.equipmentList||[]).forEach(u=>{ if(u.reportSrNo) openSrNos.add(u.reportSrNo); }));
+    const toSign = (reports||[]).filter(r=> r.completed && !r.signedOffAt && !openSrNos.has(r.srNo)).length;
+    $('ovReportsValue').textContent = String(toSign || draftReports);
+    $('ovReportsSub').textContent = toSign
+      ? toSign+' to Sign Off · '+draftReports+' Draft'+(draftReports===1?'':'s')
+      : draftReports+' Service Report'+(draftReports===1?'':'s')+' Pending Sign-off';
 
     // Service Requests — customer-filed, admin-only (service-requests.js).
     // srAdminInit() renders the value itself (and keeps it live afterward
@@ -803,6 +809,12 @@
     if(calCard){ calCard.style.display = ''; dtHomeCalTicketsCache = tickets || []; dtCalRender('homeCal', dtHomeCalTicketsCache); }
   }
   let dtHomeCalTicketsCache = [];
+  // Service Reports tile → the "To Review" queue when reports are waiting
+  $('ovReportsCard').addEventListener('click', async ()=>{
+    if(!(await ensureAdminAuthenticated())) return;
+    closeMainMenu();
+    if(/to Sign Off/.test($('ovReportsSub').textContent)) srOpenReviewQueue(); else showServiceReportsManagerView();
+  });
   $('homeCalPrevBtn').addEventListener('click', ()=>{ dtCalPrev('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
   $('homeCalNextBtn').addEventListener('click', ()=>{ dtCalNext('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });
   $('homeCalTodayBtn').addEventListener('click', ()=>{ dtCalGoToday('homeCal'); dtCalRender('homeCal', dtHomeCalTicketsCache); });

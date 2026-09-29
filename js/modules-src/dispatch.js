@@ -3270,18 +3270,18 @@
       // override (e.g. a tech is unavailable to complete the app flow).
       // Closing belongs to admin now — a technician opening this overlay
       // sees where the job order stands instead of a form they can't use.
-      if(!dtCanDispatch()){
+      if(!dtCanClose()){
         const st = dtEffectiveStatus(rec);
         const units = rec.equipmentList || [];
         const left = units.filter(it=> !it.reportSrNo && !it.notDone).length;
         const msg = st==='completed'
-          ? 'All units resolved. Admin is reviewing this job order and will close it.'
+          ? 'All units resolved. The Operations head reviews the reports and closes this job order.'
           : (left>0
               ? left+' unit(s) still need a Service Report, or to be flagged as not done.'
               : 'Acknowledge and arrive on site before filing reports for this job order.');
         $('dtCloseSection').innerHTML =
           '<div class="empty-state">'+icon('lock')+' '+escapeHtml(msg)+
-          '<br><span class="dt-jo-empty-sub">Job orders are closed by admin after review. Use the thread below if something needs sorting out.</span></div>';
+          '<br><span class="dt-jo-empty-sub">Job orders are closed by the Operations head after review \u2014 closing signs off the reports. Use the thread below if something needs sorting out.</span></div>';
         $('dtCloseSubmitBtn').style.display = 'none';
       }else{
         $('dtCloseSection').innerHTML =
@@ -3448,8 +3448,8 @@
       // function refuses, and guard_dispatch_worker_fields in the database
       // normalises a non-admin 'closed' write back to the old status. A
       // hidden button alone is not a permission.
-      if(!dtCanDispatch()){
-        toast('Only admin can close a job order'); return false;
+      if(!dtCanClose()){
+        toast('Only the Operations head (Dispatch \u203A Approve) can close a job order'); return false;
       }
       if(dtEffectiveStatus(rec)==='closed'){ toast('Already closed'); return false; }
       const merged = Object.assign({}, rec, {

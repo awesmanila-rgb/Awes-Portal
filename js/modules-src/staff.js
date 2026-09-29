@@ -1385,7 +1385,10 @@
     target.querySelectorAll('[data-filter]').forEach(b=> b.addEventListener('click', ()=>{ stfInbox.filter = b.dataset.filter; staffRenderInbox(); }));
     target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=>{
       // "…to endorse (your team)" items are handled on My Team
-      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam(); else staffOpenModule(b.dataset.open);
+      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam();
+      else if(b.dataset.kind === 'report_signoff') srOpenReviewQueue();
+      else if(b.dataset.kind === 'jo_review'){ showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); }); }
+      else staffOpenModule(b.dataset.open);
     }));
     const sla = target.querySelector('[data-act="sla"]'); if(sla) sla.addEventListener('click', ()=> staffOpenSla());
   }
@@ -1744,6 +1747,9 @@
   // Dispatch: who sees the office side, and who may act on job orders
   function dtIsDispatcher(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.dispatch', 'view'))); }
   function dtCanDispatch(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.dispatch', 'edit'))); }
+  // Reviewing and closing a job order is the Operations head's approval
+  // (Dispatch › Approve, 20261009_01); closing also signs off its reports.
+  function dtCanClose(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.dispatch', 'approve'))); }
   // Service requests: office side / may act
   function srIsOffice(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.service_requests', 'view'))); }
   function srCanManage(){ return !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.service_requests', 'edit'))); }

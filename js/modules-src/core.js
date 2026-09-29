@@ -490,6 +490,13 @@
     data.backEntry     = !!row.back_entry;
     data.enteredByName = row.entered_by_name || '';
     data.enteredAt     = row.entered_at || '';
+    // Sign-off (20261009_01). Read-only here: set by the database when the
+    // job order is closed, or by service_report_sign_off() on Needs Review.
+    data.id              = row.id || null;
+    // Stored in the existing reviewed_at / reviewed_by columns (20260919_03).
+    data.signedOffAt     = row.reviewed_at || '';
+    data.signedOffByName = row.reviewed_by || '';
+    data.signedOffVia    = row.reviewed_by === 'Before sign-off' ? 'legacy' : '';
     return data;
   }
   // Legacy rows may hold {} (or a stray object) where a data-URL string was
