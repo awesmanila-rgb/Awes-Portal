@@ -461,6 +461,9 @@
       return hit ? (hit.a || null) : null;
     }
   }
+  function dtrLocationRequired(){
+    return !!(currentUser && currentUser.role === 'staff' && typeof can === 'function' && can('adm.my_errands', 'view'));
+  }
   function dtrGetLocation(){
     return new Promise((resolve)=>{
       if(!navigator.geolocation){ resolve(null); return; }
@@ -702,6 +705,8 @@
     $('dtrTimeInBtn').disabled = true;
     toast('Getting your location…');
     const loc = await dtrGetLocation();
+    // Messengers work in the field: their time in / out must carry a GPS location (20261012_01)
+    if(!loc && dtrLocationRequired()){ $('dtrTimeInBtn').disabled = false; toast('Turn on location \u2014 your time in / out has to record where you are'); return; }
     const now = new Date().toISOString();
     const rec = Object.assign({}, existing, {
       userId: currentUser.id, userName: currentUser.name, date: dateISO,
@@ -728,6 +733,8 @@
     $('dtrTimeOutBtn').disabled = true;
     toast('Getting your location…');
     const loc = await dtrGetLocation();
+    // Messengers work in the field: their time in / out must carry a GPS location (20261012_01)
+    if(!loc && dtrLocationRequired()){ $('dtrTimeOutBtn').disabled = false; toast('Turn on location \u2014 your time in / out has to record where you are'); return; }
     const now = new Date().toISOString();
     const rec = Object.assign({}, existing, { timeOut: now, timeOutLoc: loc });
     const res = await dtrSaveDay(currentUser.id, dateISO, rec);
@@ -753,6 +760,8 @@
     $('dtrOtTimeInBtn').disabled = true;
     toast('Getting your location…');
     const loc = await dtrGetLocation();
+    // Messengers work in the field: their time in / out must carry a GPS location (20261012_01)
+    if(!loc && dtrLocationRequired()){ $('dtrOtTimeInBtn').disabled = false; toast('Turn on location \u2014 your time in / out has to record where you are'); return; }
     const now = new Date().toISOString();
     const rec = Object.assign({}, existing, { otTimeIn: now, otTimeInLoc: loc });
     const res = await dtrSaveDay(currentUser.id, dateISO, rec);
@@ -773,6 +782,8 @@
     $('dtrOtTimeOutBtn').disabled = true;
     toast('Getting your location…');
     const loc = await dtrGetLocation();
+    // Messengers work in the field: their time in / out must carry a GPS location (20261012_01)
+    if(!loc && dtrLocationRequired()){ $('dtrOtTimeOutBtn').disabled = false; toast('Turn on location \u2014 your time in / out has to record where you are'); return; }
     const now = new Date().toISOString();
     const rec = Object.assign({}, existing, { otTimeOut: now, otTimeOutLoc: loc });
     const res = await dtrSaveDay(currentUser.id, dateISO, rec);

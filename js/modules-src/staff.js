@@ -40,6 +40,8 @@
     'hr.timesheets',
     // Payroll, Phase 3 — 20261006_01_payroll_runs.sql
     'hr.payroll_runs', 'fin.payroll_approve',
+    // Errands — 20261012_01
+    'adm.errands', 'adm.my_errands',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -1620,6 +1622,7 @@
     bind('staffNavMyLiq',   ()=>{ showCashAdvanceView(true, 'liquidate'); setSidebarActive('staffNavMyLiq'); });
     bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
     bind('staffNavMyPayslips', ()=>{ showPurchasingView('myPayslips'); setSidebarActive('staffNavMyPayslips'); });
+    bind('staffNavErrandReq', ()=>{ showPurchasingView('errandRequests'); setSidebarActive('staffNavErrandReq'); });
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -1672,6 +1675,8 @@
     'fin.payroll_rules':   ()=> showPurchasingView('payRules'),
     'hr.timesheets':       ()=> showPurchasingView('payTimesheets'),
     'hr.payroll_runs':     ()=> showPurchasingView('payRuns'),
+    'adm.errands':         ()=> showPurchasingView('errands'),
+    'adm.my_errands':      ()=> showPurchasingView('myErrands'),
     'fin.payroll_approve': ()=> showPurchasingView('payRuns'),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
     'adm.equipment':       ()=>{ admApplyStaffMode(); showEquipmentManagerView(); },
@@ -1699,7 +1704,7 @@
   // screens (My Requests / Materials / Tools) are never for staff.
   function staffPurchPageAllowed(key){
     if(!isStaffUser()) return true;
-    if(key === 'myPayslips') return true;   // everyone's own payslips
+    if(key === 'myPayslips' || key === 'errandRequests') return true;   // everyone's own payslips / errand requests
     if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
     return purchStaffAllowed(key);
   }
@@ -1800,7 +1805,7 @@
   const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
-    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs' };
+    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands' };
   // May this user open purchasing page `key`? (Super Admin: always)
   function purchStaffAllowed(key){
     if(currentUser && currentUser.role === 'admin') return true;
