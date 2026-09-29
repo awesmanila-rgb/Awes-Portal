@@ -110,6 +110,11 @@ select pg_temp.ok((select created_by = :S::uuid and prepared_by_id = '30000000-0
                      from public.purchase_orders where id = '30000000-0000-0000-0000-0000000000d1'),
                   'draft records who drafted it and pre-fills their signatory as preparer');
 
+-- Purchasing submits it for approval (20261010_01)
+select pg_temp.as_user(:S::uuid); set local role authenticated;
+select public.po_submit_for_approval('30000000-0000-0000-0000-0000000000d1');
+reset role;
+
 -- Sub tries to issue own PO
 select pg_temp.as_user(null); select public.staff_record_reauth(:S::uuid);
 select pg_temp.as_user(:S::uuid); set local role authenticated;
@@ -136,6 +141,7 @@ select pg_temp.as_user(:H::uuid); set local role authenticated;
 insert into public.purchase_orders (id, supplier_id) values ('30000000-0000-0000-0000-0000000000d2', '30000000-0000-0000-0000-000000000001');
 insert into public.purchase_order_items (po_id, description, qty, unit_price, material_id, code)
 values ('30000000-0000-0000-0000-0000000000d2', 'Probe copper pipe', 100, 300, '30000000-0000-0000-0000-0000000000a1', 'PRB-0001');
+select public.po_submit_for_approval('30000000-0000-0000-0000-0000000000d2');
 reset role;
 select pg_temp.as_user(:S::uuid); set local role authenticated;
 select pg_temp.fails($q$update public.purchase_orders set status = 'issued' where id = '30000000-0000-0000-0000-0000000000d2'$q$,
@@ -156,6 +162,9 @@ insert into public.purchase_orders (id, supplier_id, created_by) values ('300000
 insert into public.purchase_order_items (po_id, description, qty, unit_price, material_id, code)
 values ('30000000-0000-0000-0000-0000000000d3', 'Probe copper pipe', 1, 300, '30000000-0000-0000-0000-0000000000a1', 'PRB-0001');
 update public.purchase_orders set created_by = :S::uuid where id = '30000000-0000-0000-0000-0000000000d3';
+select pg_temp.as_user(:S::uuid); set local role authenticated;
+select public.po_submit_for_approval('30000000-0000-0000-0000-0000000000d3');
+reset role;
 select pg_temp.as_user(:H::uuid); set local role authenticated;
 select pg_temp.fails($q$update public.purchase_orders set status = 'issued', approved_by_id = '30000000-0000-0000-0000-0000000000c3' where id = '30000000-0000-0000-0000-0000000000d3'$q$,
        'linked to a PO signatory', 'unlinked staff cannot issue (no signature to print)');
