@@ -1851,6 +1851,56 @@
   // showing. extraBodyHtml (used by the technician's list — see
   // dtStepperHtml) is inserted at the very top of the body, above the rest
   // of the ticket's details.
+  // ---------- Job order timer ----------
+  // How long a job order has been running, on every card (admin list,
+  // technician list, the Open Job Order overlay):
+  //   En route  — since the first acknowledgement, until arrival
+  //   On site   — since arrival, still ticking until the last unit is resolved
+  //   Took      — arrival → completion, frozen once completed / closed
+  // Live cards tick once a minute (dtTimerTick). Colour: amber past a
+  // normal working day on site, red once it runs past the scheduled day.
+  function dtTimerDur(ms){
+    const m = Math.max(0, Math.floor(ms / 60000));
+    const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+    return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + String(mm).padStart(2, '0') + 'm' : mm + 'm';
+  }
+  function dtTimerState(r){
+    const st = dtEffectiveStatus(r);
+    const t = (v)=>{ const n = v ? new Date(v).getTime() : NaN; return isFinite(n) ? n : null; };
+    const arrived = t(r.arrivedAt), acked = t(r.acknowledgedAt), done = t(r.completedAt);
+    if((st === 'completed' || st === 'closed') && arrived && done && done >= arrived) return { label:'Took', start:arrived, end:done, live:false };
+    if(st === 'in_progress' && arrived) return { label:'On site', start:arrived, end:null, live:true };
+    if(st === 'acknowledged' && acked) return { label:'En route', start:acked, end:null, live:true };
+    return null;
+  }
+  function dtTimerLevel(r, ms, live){
+    if(!live) return '';
+    const endOfDay = r.date ? new Date(r.date + 'T23:59:59' + BUSINESS_TZ_OFFSET).getTime() : NaN;
+    if(isFinite(endOfDay) && dtNowMs() > endOfDay) return 'late';
+    return ms > 9 * 3600000 ? 'long' : '';
+  }
+  function dtTimerHtml(r){
+    const s = dtTimerState(r);
+    if(!s) return '';
+    const ms = (s.end || dtNowMs()) - s.start;
+    return ' <span class="jo-timer ' + dtTimerLevel(r, ms, s.live) + '"' +
+      (s.live ? ' data-jo-timer="' + s.start + '" data-jo-date="' + escapeHtml(r.date || '') + '" data-jo-label="' + s.label + '"' : '') +
+      ' title="' + (s.label === 'Took' ? 'Arrival to completion' : s.label === 'On site' ? 'Time since arrival at site' : 'Time since acknowledged') + '">' +
+      '\u23F1 ' + s.label + ' ' + dtTimerDur(ms) + '</span>';
+  }
+  function dtTimerTick(){
+    const now = dtNowMs();
+    document.querySelectorAll('[data-jo-timer]').forEach(el=>{
+      const ms = now - Number(el.dataset.joTimer);
+      el.textContent = '\u23F1 ' + el.dataset.joLabel + ' ' + dtTimerDur(ms);
+      el.classList.toggle('late', false); el.classList.toggle('long', false);
+      const lvl = dtTimerLevel({ date: el.dataset.joDate }, ms, true);
+      if(lvl) el.classList.add(lvl);
+    });
+  }
+  setInterval(dtTimerTick, 60000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) dtTimerTick(); });
+
   function dtCardHtml(r, forAdmin, extraBodyHtml, hideOpenBtn){
     const detailBody =
       (extraBodyHtml || '')+
@@ -1864,7 +1914,7 @@
     return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
-          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.dispatchTime ? (' · dispatch '+r.dispatchTime) : '')+(r.expectedTime ? (' · at site '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+(dtIsLateDispatch(r) ? ' <span class="status-pill" style="background:#FDE4D6; color:#9A3412;">Late</span>' : '')+'</div>'+
+          '<div class="u-status">'+dtCategoryTagHtml(r)+leaveFmtDate(r.date)+(r.dispatchTime ? (' · dispatch '+r.dispatchTime) : '')+(r.expectedTime ? (' · at site '+r.expectedTime) : '')+' · '+escapeHtml((r.assignedWorkerNames||[]).join(', '))+(dtIsLateDispatch(r) ? ' <span class="status-pill" style="background:#FDE4D6; color:#9A3412;">Late</span>' : '')+dtTimerHtml(r)+'</div>'+
           // Admin only, and outside jo-card-body on purpose: this has to be
           // readable without expanding the card, otherwise monitoring ten
           // live tickets still means ten taps.

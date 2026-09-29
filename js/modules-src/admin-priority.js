@@ -6,6 +6,8 @@
   // material requisitions, POs, PM dates, reorder). The server-side twin is
   // supabase/functions/admin-alerts (urgent push + 7:00 AM digest) — keep
   // the "late" rule in step with dtIsLateDispatch() in dispatch.js.
+  // "Overdue" (below) is in-app only: acknowledged / in-progress job
+  // orders whose scheduled day has passed without being completed.
   //
   // Quick approve: only where the whole decision fits on one line —
   // leave requests, and material requisitions approved exactly as
@@ -87,6 +89,40 @@
         title: (t.jobOrderNo || t.id) + ' expired — no one acknowledged',
         sub: (t.custName || 'Customer') + ' · raise a new job order if the visit is still needed',
         actions: [{ label: 'Open', primary: false, run: openTicket(t.id) }]
+      });
+    });
+    // URGENT — overdue: the crew acknowledged or arrived, but the scheduled
+    // day has passed and the job order is still open. Once work starts the
+    // date no longer expires a ticket (dtEffectiveStatus), so without this
+    // it would sit in Work in Progress indefinitely — normally because some
+    // units still have no Service Report (or "not done" flag).
+    tickets.filter(t=> t.date && t.date < today && ['acknowledged', 'in_progress'].includes(dtEffectiveStatus(t))).forEach(t=>{
+      const units = t.equipmentList || [];
+      const open = units.filter(u=> !u.reportSrNo && !u.notDone);
+      const endOfDay = new Date(t.date + 'T23:59:59' + BUSINESS_TZ_OFFSET).getTime();
+      const overdue = isFinite(endOfDay) ? Math.max(0, Date.now() - endOfDay) : 0;
+      const days = Math.max(1, Math.ceil(overdue / 86400000));
+      const st = dtEffectiveStatus(t) === 'in_progress' ? 'still Work in Progress' : 'still En Route, never arrived';
+      add('urgent', {
+        key: 'overdue:' + t.id, age: overdue + 1,
+        title: (t.jobOrderNo || t.id) + ' overdue ' + days + ' day' + (days === 1 ? '' : 's') + ' — ' + st,
+        sub: [t.custName || 'Customer', 'scheduled ' + leaveFmtDate(t.date),
+              units.length ? (open.length ? open.length + ' of ' + units.length + ' unit' + (units.length === 1 ? '' : 's') + ' without a service report' : 'all units reported — check the ticket')
+                           : 'no units on the ticket',
+              (t.assignedWorkerNames || []).join(', ') || 'no crew'].join(' · '),
+        actions: [{ label: 'Open job order', primary: true, run: openTicket(t.id) }]
+      });
+    });
+    // TODAY — on site for 10+ hours today with units still unreported
+    tickets.filter(t=> t.date === today && dtEffectiveStatus(t) === 'in_progress' && t.arrivedAt && prioSince(t.arrivedAt) > 10 * 3600000).forEach(t=>{
+      const units = t.equipmentList || [];
+      const open = units.filter(u=> !u.reportSrNo && !u.notDone);
+      if(!open.length) return;
+      add('today', {
+        key: 'long:' + t.id, age: prioSince(t.arrivedAt),
+        title: (t.jobOrderNo || t.id) + ' on site ' + prioAge(prioSince(t.arrivedAt)) + ' — ' + open.length + ' unit' + (open.length === 1 ? '' : 's') + ' not reported',
+        sub: (t.custName || 'Customer') + ' · ' + ((t.assignedWorkerNames || []).join(', ') || 'no crew'),
+        actions: [{ label: 'Open job order', run: openTicket(t.id) }]
       });
     });
     // URGENT — customer service requests nobody has acknowledged for 60+ min

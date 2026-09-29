@@ -4360,3 +4360,7 @@ body.ts-ro .ts-edit-only{ display:none !important; }
 .pr-kpis span{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.3px; color:var(--text-muted); }
 .pr-kpis b{ font-size:16px; }
 .pay-table tr.pr-total td{ font-weight:800; background:#F6F8F6; }
+/* Job order timer (dispatch.js dtTimerHtml) */
+.jo-timer{ display:inline-block; font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px; background:#E4F0F1; color:#1F6F7A; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.jo-timer.long{ background:#FDF1DC; color:#8A5A0E; }
+.jo-timer.late{ background:#FDE4D6; color:#9A3412; }
