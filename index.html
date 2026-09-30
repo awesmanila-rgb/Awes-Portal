@@ -826,6 +826,9 @@ window.awesCss = {
              cpRefreshNotifBell() in customer-portal.js. Opens My Requests
              (where per-job messaging lives) rather than a separate inbox;
              see the "chat model" note in cpNotifBell's click handler. -->
+        <!-- Updates (bell): every step of the customer's requests / reports,
+             from customer_updates (20261015_01) — see cpRenderUpdatesBell(). -->
+        <button type="button" id="cpUpdatesBell" class="cp-icon-btn" aria-label="Updates" title="Updates"></button>
         <button type="button" id="cpNotifBell" class="cp-icon-btn" style="display:none;" aria-label="Messages" title="Messages"></button>
         <!-- Profile menu — Account settings / Notifications / Sign out,
              replacing the old "tap avatar to jump straight to Profile"
@@ -891,6 +894,7 @@ window.awesCss = {
 
         <section>
           <div class="cph-sec"><h2 id="cpVisitTitle">Next visit</h2><a id="cpVisitMore" style="display:none;"></a></div>
+          <div id="cpUpdateStrip" style="display:none;"></div>
           <div class="cph-card" id="cpHero"></div>
         </section>
 

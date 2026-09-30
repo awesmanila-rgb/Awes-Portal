@@ -4426,3 +4426,18 @@ body.ts-ro .ts-edit-only{ display:none !important; }
 #sidebarAdminGroup.sb-drill .sb-current .sb-section-toggle::before{ content:'\2039'; font-size:20px; line-height:1; margin-right:6px; }
 @keyframes sbFwd{ from{ transform:translateX(28px); opacity:0; } to{ transform:none; opacity:1; } }
 @media (prefers-reduced-motion:reduce){ #sidebarAdminGroup.sb-drill .sb-current .sb-section-body{ animation:none; } }
+/* Customer portal Updates (customer-portal.js, 20261015_01) */
+#cpUpdatesBell{ position:relative; }
+.cp-count-badge{ position:absolute; top:-3px; right:-4px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:#ff754d; color:#fff; font-size:10px; font-weight:800; line-height:17px; text-align:center; border:2px solid var(--green-dark); }
+.cp-upd-banner{ margin-top:6px; padding:7px 10px; border-radius:9px; background:#E9F3EC; color:#1E5B3A; font-size:12.5px; line-height:1.4; }
+.cp-upd-banner.unread{ background:#FFF1E6; color:#8A4B16; }
+.cp-upd-when{ color:var(--text-muted); font-size:11.5px; white-space:nowrap; }
+.cp-upd-strip{ display:flex; gap:10px; align-items:flex-start; width:100%; text-align:left; margin-bottom:12px; padding:12px 14px; border:none; border-radius:14px; background:#FFF1E6; color:#6B3A0F; font-size:13px; line-height:1.4; cursor:pointer; }
+.cp-upd-strip svg{ width:20px; height:20px; flex:0 0 20px; margin-top:1px; }
+.cp-upd-list{ max-height:70vh; overflow-y:auto; }
+.cp-upd-item{ display:flex; gap:10px; width:100%; text-align:left; padding:12px 4px; border:none; border-bottom:1px solid var(--border); background:none; cursor:pointer; }
+.cp-upd-item .cp-upd-text{ display:flex; flex-direction:column; gap:2px; font-size:13px; }
+.cp-upd-item .cp-upd-text span{ color:var(--text-muted); }
+.cp-upd-dot{ flex:0 0 8px; height:8px; border-radius:50%; margin-top:6px; background:transparent; }
+.cp-upd-item.unread .cp-upd-dot{ background:#ff754d; }
+.cp-upd-item.unread b{ color:var(--text); }
