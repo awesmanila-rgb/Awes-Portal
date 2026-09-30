@@ -283,3 +283,59 @@ the `list-technicians` Edge Function, then apply Part 2.
   - New: Inverter upgrade payback, Unit converter (HP · TR · BTU/h · kW), Maintenance schedule (interval + next due date).
 - Inverter yes/no: uses the existing Compressor Type field (Inverter / Non-Inverter). Admin equipment detail now edits it as Inverter / Non-inverter / Not known; the customer portal loads it, shows it on the unit detail, and the calculators use it (customer can still set it for units with no type on record). No migration.
 - Desktop top bar brand: "AWES Customer Portal".
+
+
+## New: Technician Calculators (js/modules-src/tech-tools.js)
+
+A "Calculators" tile on the technician Home screen (Quick Actions) opens a
+new screen with the same visual design as the customer portal's Tools
+screen, reusing its calculator shell (`cpCalcShell` in customer-portal.js,
+now host-aware via `cpCalcHostTech`) so both stay in sync with one code path.
+
+Calculators:
+- **Ductulator** — round & rectangular duct sizing by velocity or by the
+  equal-friction method, using real duct airflow physics (Darcy-Weisbach
+  with the Swamee-Jain friction factor for galvanized duct), not a rough
+  curve fit. Rectangular sizing uses the ASHRAE/Huebscher equivalent-diameter
+  equation.
+- **Wire & breaker sizing** — exact sizing from a nameplate FLA/MCA, using
+  the 125%-of-FLA continuous-load rule (NEC 440 / PEC) against the standard
+  75°C copper THHN ampacity table.
+
+Reference tables:
+- **Heat load standards** — BTU/hr for people (sensible/latent by activity),
+  lighting (with ballast/driver factors), and common office equipment.
+- **Refrigerant pressures** — P-T chart for R-22, R-410A, R-32, R-134a,
+  R-290 and R-600a, computed from a Peng-Robinson equation of state fit to
+  each fluid's published boiling curve (typically within ~1–1.5% of a
+  manufacturer chart).
+- **Electrical standards** — typical breaker/wire ranges by HP/TR, plus
+  control and VRF communication wiring notes.
+- **Pipe sizing** — liquid/suction line OD by capacity, 1 HP to 10 TR.
+- **Troubleshooting & error codes** — symptom → likely cause → checks
+  (not cooling, electrical, noise, water/drainage), plus commonly seen
+  error-code meanings for Daikin, Carrier/Midea-built inverters, LG and
+  Samsung — all clearly flagged as typical/reference, not a substitute for
+  the specific unit's own nameplate or manual.
+
+### Accuracy review before merging (corrected in this version)
+
+- **Wire & breaker:** the ampacity table holds the **60°C** copper values (the safe default for circuits
+  up to 100 A under NEC 110.14(C)) but was labelled 75°C — label and help text corrected. Code
+  references fixed: wire at 125% of rated current is **NEC 440.32**; the breaker maximum is the
+  nameplate **MOCP** (up to 175%, NEC 440.22). The result now shows the maximum-breaker reminder.
+- **Refrigerant P-T chart:** replaced with reference values (CoolProp / REFPROP-grade equations of
+  state). The earlier values were within about 1%.
+- **Heat load (people):** rows re-matched to ASHRAE Fundamentals — "seated, light office work" was the
+  "seated, very light work" row; "heavy work" was really "moderate dancing"; standing latent was 200
+  (should be 250). Added office, restaurant and true heavy-work rows.
+- **Pipe sizing:** small splits were one size too big (e.g. 1 HP is 1/4" x 3/8", not 1/2" suction —
+  an oversized suction line hurts oil return); removed 1" (not a standard ACR size); added BTU/h.
+- **Electrical ranges (5–10 TR):** were about 20% low; recomputed at 1.0–1.3 kW input per TR.
+- **Error codes:** corrected several wrong meanings — Daikin (C9, J-series, U5), LG CH01/CH02/CH03/CH05,
+  Samsung E121/E162/E458, and the Midea-platform list.
+- **Ductulator:** math verified against a full Colebrook-White solution (matches to within 0.3%);
+  added a warning when a rectangular duct is flatter than 4:1.
+- **Icons:** the Ductulator, Pipe sizing and Heat load tiles used icons that don't exist in the app
+  (blank tiles) — added them.
+

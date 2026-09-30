@@ -520,6 +520,11 @@ window.awesCss = {
           <span class="th-tile-desc">Materials issued to you</span>
           <span class="th-tile-badge" id="techQaMyMatBadge" style="display:none;"></span>
         </button>
+        <button type="button" class="th-tile th-violet" id="techQaCalculators">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8"/><path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/></svg></span>
+          <span class="th-tile-label">Calculators</span>
+          <span class="th-tile-desc">Ductulator, standards &amp; troubleshooting</span>
+        </button>
         <button type="button" class="th-tile th-teal" id="techQaStock" style="display:none;">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg></span>
           <span class="th-tile-label">Warehouse stock</span>
@@ -1425,7 +1430,7 @@ window.awesCss = {
        flow. Tapping "View DTR" swaps this out for the read-only detail +
        history view below, scoped to that one technician. -->
   <div class="card" id="dtrAdminTableCard" style="display:none;">
-    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> <span id="dtrAdminTableTitle">Technician Attendance</span></span><span style="display:inline-flex; align-items:center; gap:12px;"><span class="purch-live" id="dtrLiveBadge" title="Updates automatically when technicians time in or out">Live</span><span id="dtrAttendanceDate" style="font-weight:600; opacity:.85;"></span></span></div>
+    <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg> Technician Attendance</span><span style="display:inline-flex; align-items:center; gap:12px;"><span class="purch-live" id="dtrLiveBadge" title="Updates automatically when technicians time in or out">Live</span><span id="dtrAttendanceDate" style="font-weight:600; opacity:.85;"></span></span></div>
     <div class="card-body">
       <div class="att-summary" id="dtrAttendanceSummary"></div>
       <div class="attendance-table-wrap">
@@ -3386,6 +3391,42 @@ window.awesCss = {
         <div class="po-hint">You sign first, then pass your phone to the receiver to sign.</div>
         <div class="po-actions"><button type="button" class="btn btn-primary" id="tlMineHoPost">Both Sign &amp; Hand Over</button></div>
       </div>
+    </div>
+  </div>
+</main>
+
+<!-- Technician Calculators — Ductulator, standards tables and
+     troubleshooting (tech-tools.js). Reuses the customer portal's own
+     .ct-* calculator screen and cpCalcShell()/cpField()/cpInput() etc.,
+     switched to draw into ttCalcTitle/ttCalcBody instead of
+     cpCalcTitle/cpCalcBody via cpCalcHostTech (see cpCalcShell in
+     customer-portal.js). Opened from the "Calculators" tile on Home. -->
+<main id="techToolsView" style="display:none;">
+  <div id="ttToolsScreen" class="ct">
+    <div class="ct-head">
+      <div class="ct-head-inner">
+        <h1>Calculators</h1>
+        <p>Duct sizing, standards tables and troubleshooting</p>
+        <label class="ct-search"><span id="ttSearchIc"></span><input type="search" id="ttSearch" placeholder="Search calculators and tables" autocomplete="off"></label>
+      </div>
+    </div>
+    <div class="ct-body">
+      <div class="ct-sec"><h2>Calculators</h2></div>
+      <div class="ct-calcs" id="ttCalcGrid"></div>
+      <div class="ct-sec"><h2>Standards &amp; reference</h2></div>
+      <div class="ct-calcs" id="ttTableGrid"></div>
+      <p class="ct-empty" id="ttGridEmpty" style="display:none;">Nothing matches your search.</p>
+    </div>
+  </div>
+  <div id="ttCalcScreen" class="ct" style="display:none;">
+    <div class="ct-head ct-head-sub">
+      <div class="ct-head-inner">
+        <button type="button" class="ct-back" id="ttCalcBackBtn">&lsaquo; Calculators</button>
+        <h1 id="ttCalcTitle">&nbsp;</h1>
+      </div>
+    </div>
+    <div class="ct-body ct-body-narrow">
+      <div id="ttCalcBody"></div>
     </div>
   </div>
 </main>

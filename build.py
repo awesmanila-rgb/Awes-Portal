@@ -7,7 +7,7 @@ MODULES = [
     "core.js", "equipment-photos.js", "auth.js", "service-report.js", "customers.js", "admin.js",
     "email.js", "ui.js", "pdf.js", "history.js", "leave.js", "dispatch.js", "service-requests.js",
     "cash-advance.js", "push.js", "purchasing.js", "purchase-orders.js", "requisitions.js", "inventory.js", "inventory-moves.js", "inventory-reports.js", "tools.js", "payroll.js", "payroll-timesheets.js", "payroll-runs.js", "errands.js", "back-entry.js", "admin-priority.js", "home.js", "staff.js", "guide-content.js", "guide.js", "tracker.js", "announcements.js",
-    "customer-portal.js", "customer-equipment-history.js"
+    "customer-portal.js", "tech-tools.js", "customer-equipment-history.js"
 ]
 # encoding="utf-8" is required here — without it, Python on Windows falls back
 # to the system's regional codepage (often cp1252), which crashes on the
