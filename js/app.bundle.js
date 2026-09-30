@@ -3977,7 +3977,9 @@
     const body = $('usersList');
     body.innerHTML = '<div class="empty-state">Loading…</div>';
     const cloudOn = await ensureCloud();
-    const users = (await cloudListUsers()) || [];
+    // Technicians are managed in Employees › Technicians now (employees.js);
+    // this sheet is the Customer Portal logins only.
+    const users = [];
     // Storekeeper setting (Inventory) — null if inventory isn't installed yet
     const invCtx = (cloudOn && typeof invLoadUsersContext === 'function') ? await invLoadUsersContext() : null;
     body.innerHTML = '';
@@ -3987,12 +3989,7 @@
       note.textContent = 'Not connected to Shared Cloud — user accounts are saved on this device only.';
       body.appendChild(note);
     }
-    if(users.length===0){
-      const empty = document.createElement('div');
-      empty.className = 'empty-state';
-      empty.textContent = 'No technicians added yet.';
-      body.appendChild(empty);
-    }
+
     users.sort((a,b)=> (a.name||'').localeCompare(b.name||'')).forEach(u=>{
       const r = u.restrictions || {};
       const active = u.active!==false;
@@ -4116,7 +4113,7 @@
     if(!customersCache || customersCache.length===0) await loadCustomers();
     const custLogins = await cloudListCustomerLogins();
     const custHeader = document.createElement('div');
-    custHeader.style.cssText = 'font-size:12px; font-weight:700; margin:18px 0 8px; padding-top:14px; border-top:1px solid var(--border); color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px;';
+    custHeader.style.cssText = 'font-size:12px; font-weight:700; margin:4px 0 8px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px;';
     custHeader.textContent = 'Customer Portal Logins';
     body.appendChild(custHeader);
     if(custLogins.length===0){
@@ -7427,6 +7424,10 @@
     closeMainMenu();
     if(!(await ensureAdminAuthenticated())) return;
     $('usersOverlay').classList.add('open');
+    // Customer Portal only now — technicians moved to Employees (employees.js)
+    if($('newUserRole').value !== 'customer'){ $('newUserRole').value = 'customer'; }
+    $('newUserRole').dispatchEvent(new Event('change'));
+    $('newUserRole').closest('.field').style.display = 'none';
     renderUsersList();
   });
   $('menuManageDropdowns').addEventListener('click', async ()=>{
@@ -25686,7 +25687,7 @@
         (groups[k] && groups[k].length && k !== 'history' ? ' <span class="po-tab-count">' + groups[k].length + '</span>' : '') + '</button>').join('') + '</div>';
     if(erCanEdit() && er.tab !== 'recurring') html += '<div class="pay-actions"><button type="button" class="btn btn-primary" data-er-new="1">+ New Errand</button></div>';
     if(er.tab === 'active' && late) html += '<div class="pay-banner warn"><b>' + late + ' overdue.</b> The Administration Head and the Super Admin have been alerted.</div>';
-    if(!er.messengers.length && erCanEdit()) html += '<div class="pay-banner warn">No messengers yet. In <b>Department Staff</b>, give the messenger account <b>Administration \u203A My Errands (Messenger)</b>.</div>';
+    if(!er.messengers.length && erCanEdit()) html += '<div class="pay-banner warn">No messengers yet. In <b>Employees</b>, give the messenger account <b>Administration \u203A My Errands (Messenger)</b>.</div>';
     if(er.tab === 'recurring'){ box.innerHTML = html + erRecurringHtml(); return; }
     const rows = groups[er.tab] || [];
     html += rows.length ? rows.map(e=> erRow(e)).join('') : '<div class="empty-state">' + ({ requests:'No requests waiting.', active:'No active errands.', review:'Nothing to review.', history:'Nothing yet.' }[er.tab]) + '</div>';
@@ -26024,7 +26025,7 @@
       ov.className = 'overlay open er-sig-ov';
       ov.innerHTML = '<div class="modal"><h3>' + erEsc(title) + '</h3>' +
         (er.messengers.length ? er.messengers.map(m=> '<label class="er-pick"><input type="radio" name="erPick" value="' + erEsc(m.id) + '"' + (m.id === current ? ' checked' : '') + '> ' + erEsc(m.name) + '</label>').join('')
-          : '<p class="pay-hint">No messengers set up yet (Department Staff \u203A Administration \u203A My Errands).</p>') +
+          : '<p class="pay-hint">No messengers set up yet (Employees \u203A Administration \u203A My Errands).</p>') +
         (allowNone ? '<label class="er-pick"><input type="radio" name="erPick" value=""' + (!current ? ' checked' : '') + '> Assign later</label>' : '') +
         '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-p="cancel">Cancel</button><button type="button" class="btn btn-primary" data-p="ok">OK</button></div></div>';
       document.body.appendChild(ov);
@@ -28676,6 +28677,8 @@
     'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
     // Payroll, Phase 1 — 20261004_01_payroll_foundation.sql
     'hr.payroll_setup', 'fin.payroll_rules',
+    // Technician accounts — 20261013_01
+    'ops.technicians',
     // Payroll, Phase 2 — 20261005_01_payroll_timesheets.sql
     'hr.timesheets',
     // Payroll, Phase 3 — 20261006_01_payroll_runs.sql
@@ -28894,7 +28897,7 @@
   // ---------------------------------------------------------------------
   const STAFF_PANELS = {
     home:     { nav:'sbNavDashboard',   title:'Home',             sub:'Your departments & access' },
-    team:     { nav:'',                 title:'Department Staff', sub:'Accounts, departments & page access' },
+    team:     { nav:'',                 title:'Employees',        sub:'Office staff & technicians' },
     edit:     { nav:'',                 title:'Staff Account',    sub:'Departments & page access' },
     activity: { nav:'',                 title:'Activity Log',     sub:'Who did what, and when' },
     preview:  { nav:'',                 title:'Preview',          sub:'What this user sees' },
@@ -28917,7 +28920,7 @@
     if($('homeBtn')) $('homeBtn').style.display = panel === 'home' ? 'none' : '';
     let title = p.title, sub = p.sub, nav = p.nav;
     if(panel === 'team'){
-      title = isStaffUser() ? 'My Team' : 'Department Staff';
+      title = isStaffUser() ? 'My Team' : 'Employees';
       nav = isStaffUser() ? 'staffNavTeam' : 'menuManageStaff';
       sub = isStaffUser() ? 'Your sub-users & their access' : sub;
     }
@@ -29114,8 +29117,12 @@
   // ---------------------------------------------------------------------
   let stfShowInactive = false;
 
+  // Employees page tab: 'staff' (office staff / My Team) or 'tech' (technicians, employees.js)
+  let stfEmpTab = 'staff';
   async function staffOpenTeam(){
+    if(currentUser && !(currentUser.role === 'admin' || staffIsHead()) && typeof empCanTechView === 'function' && empCanTechView()) return staffOpenTechnicians();
     if(!currentUser || !(currentUser.role === 'admin' || staffIsHead())){ toast('Only the admin or a department Head can manage staff'); return; }
+    if(stfEmpTab === 'tech' && typeof empCanTechView === 'function' && empCanTechView()) return staffOpenTechnicians();
     if(currentUser.role === 'admin' && !(await ensureAdminAuthenticated())) return;
     showStaffView('team');
     const target = $('staffPanel_team');
@@ -29137,6 +29144,7 @@
 
   function staffRenderTeam(){
     const target = $('staffPanel_team');
+    stfEmpTab = 'staff';
     const isSuper = currentUser.role === 'admin';
     const visible = stf.people.filter(p=> stfShowInactive || p.active);
     let listHtml = '';
@@ -29151,7 +29159,7 @@
       listHtml = visible.filter(p=> p.supervisor_id === currentUser.id).map(p=> staffPersonCardHtml(p)).join('');
     }
     const total = stf.people.filter(p=> p.active && (isSuper || p.supervisor_id === currentUser.id)).length;
-    target.innerHTML =
+    target.innerHTML = (typeof empTabsHtml === 'function' ? empTabsHtml('staff') : '') +
       '<div class="card"><div class="card-body">' +
         '<p class="stf-note" style="margin-top:0;">' + (isSuper
           ? 'Office staff accounts for Purchasing, Accounting &amp; Finance, Human Resources, Administration and Operations. A department Head (\u2605) can add sub-users under them, with no more access than their own.'
@@ -29164,6 +29172,7 @@
         '</div>' +
         '<div class="stf-list">' + (listHtml || '<div class="empty-state">' + (isSuper ? 'No staff accounts yet. Add a department Head first.' : 'No sub-users yet.') + '</div>') + '</div>' +
       '</div></div>';
+    if(typeof empBindTabs === 'function') empBindTabs(target);
     target.querySelector('[data-act="add"]').addEventListener('click', ()=> staffOpenEditor(null));
     const tb = target.querySelector('[data-act="templates"]'); if(tb) tb.addEventListener('click', ()=> staffOpenTemplates());
     if(!isSuper) staffRenderTeamHrCard(target);
@@ -29264,7 +29273,7 @@
     }).join('');
 
     target.innerHTML =
-      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 ' + (isStaffUser() ? 'My Team' : 'Department Staff') + '</button>' +
+      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 ' + (isStaffUser() ? 'My Team' : 'Employees') + '</button>' +
       (p && !p.active ? '<div class="stf-banner-off">This account is deactivated' + (p.deactivated_at ? ' since ' + escapeHtml(staffFmtDate(p.deactivated_at)) : '') + '. It cannot sign in.</div>' : '') +
       '<div class="card"><div class="card-head"><span>' + (isNew ? 'New ' + (isStaffUser() ? 'sub-user' : 'staff account') : 'Account') + '</span></div><div class="card-body">' +
         '<div class="field"><label>Full name</label><input type="text" data-f="name" value="' + escapeHtml(s.name) + '" placeholder="e.g. Maria Santos"></div>' +
@@ -29715,7 +29724,7 @@
     const target = $('staffPanel_templates');
     const count = (id)=> Object.values(stf.links).filter(x=> x === id).length;
     target.innerHTML =
-      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 Department Staff</button>' +
+      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 Employees</button>' +
       '<div class="card"><div class="card-body">' +
         '<p class="stf-note" style="margin-top:0;">A role template is a saved set of departments and page levels. Apply one when adding someone; people kept in sync update automatically when you change the template. Sub-users always get it cut down to their Head\u2019s own access.</p>' +
         '<div class="stf-toolbar"><button type="button" class="btn btn-primary" data-act="new">+ New Template</button></div>' +
@@ -30312,6 +30321,7 @@
     'hr.tech_profiles':    ()=> showDtrView(),
     'hr.leaves':           ()=> showLeaveView(),
     'hr.payroll_setup':    ()=> showPurchasingView('paySetup'),
+    'ops.technicians':     ()=> staffOpenTechnicians(),
     'fin.payroll_rules':   ()=> showPurchasingView('payRules'),
     'hr.timesheets':       ()=> showPurchasingView('payTimesheets'),
     'hr.payroll_runs':     ()=> showPurchasingView('payRuns'),
@@ -30520,6 +30530,262 @@
         : reason === 'over_limit' ? 'Above your approval limit of ' + staffFmtPeso(g.approve_limit) + ' \u2014 someone with a higher limit has to approve'
         : 'You don\u2019t have Approve access for this page');
     return false;
+  }
+
+
+  // =====================================================================
+  // Employees › Technicians (20261013_01)
+  //
+  // The old Users & Roles sheet created technicians; that moved here, next
+  // to Office Staff, so every employee account is managed in one place.
+  //   Super Admin, or staff with Operations › Technicians:
+  //     View — the list; Edit — add, edit, reset password, restrictions,
+  //     deactivate / reactivate, clear the DTR device lock.
+  //   Account changes go through admin-create-staff (tech_* actions), which
+  //   re-checks the access server-side. Storekeeper warehouses stay Super
+  //   Admin only. HR keeps the records: Technician Profile opens from here
+  //   for anyone with the HR pages.
+  // =====================================================================
+
+  const emp = { techs:[], locks:new Set(), inv:null, showInactive:false, q:'', open:null };
+  const empCanTechView = ()=> !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.technicians', 'view')));
+  const empCanTechEdit = ()=> !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.technicians', 'edit')));
+  const empIsSuper = ()=> !!currentUser && currentUser.role === 'admin';
+
+  // Tab strip shown above Office Staff / Technicians
+  function empTabsHtml(active){
+    const staffOk = empIsSuper() || staffIsHead();
+    if(!(staffOk && empCanTechView())) return '';
+    return '<div class="seg-tabs emp-tabs">' +
+      '<button type="button" class="seg-tab' + (active === 'staff' ? ' active' : '') + '" data-emp-tab="staff">' + (empIsSuper() ? 'Office Staff' : 'My Team') + '</button>' +
+      '<button type="button" class="seg-tab' + (active === 'tech' ? ' active' : '') + '" data-emp-tab="tech">Technicians</button></div>';
+  }
+  function empBindTabs(target){
+    target.querySelectorAll('[data-emp-tab]').forEach(b=> b.addEventListener('click', ()=>{
+      stfEmpTab = b.dataset.empTab;
+      if(stfEmpTab === 'tech') empRenderTechs(target); else staffRenderTeam();
+    }));
+  }
+
+  // Opener for staff with Operations › Technicians (sidebar page)
+  async function staffOpenTechnicians(){
+    if(!empCanTechView()){ toast('You don\u2019t have access to technician accounts'); return; }
+    if(currentUser.role === 'admin' && !(await ensureAdminAuthenticated())) return;
+    stfEmpTab = 'tech';
+    showStaffView('team');
+    setHeaderTitle('Employees', 'Technician accounts');
+    if(isStaffUser()) setSidebarActive(staffNavId('ops.technicians'));
+    const target = $('staffPanel_team');
+    target.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    if((empIsSuper() || staffIsHead()) && !(await staffLoadDirectory(true))){ /* office list is optional here */ }
+    empRenderTechs(target);
+  }
+
+  async function empLoadTechs(){
+    const [p, l] = await Promise.all([
+      db.from('profiles').select('id, name, username, active, restrictions, created_at').eq('role', 'technician').order('name'),
+      db.from('device_locks').select('technician_id')
+    ]);
+    if(p.error) throw p.error;
+    emp.techs = p.data || [];
+    emp.locks = new Set((l.data || []).map(x=> x.technician_id));
+    emp.inv = (empIsSuper() && typeof invLoadUsersContext === 'function') ? await invLoadUsersContext().catch(()=> null) : null;
+  }
+
+  function empRestrLabel(r){
+    r = r || {};
+    const f = [];
+    if(r.noHistory) f.push('No history'); if(r.noReport) f.push('No reports'); if(r.readOnly) f.push('Read-only');
+    return f.join(' \u00B7 ');
+  }
+
+  async function empRenderTechs(target, keepOpen){
+    target = target || $('staffPanel_team');
+    target.innerHTML = empTabsHtml('tech') + '<div class="empty-state">Loading technicians\u2026</div>';
+    empBindTabs(target);
+    try{ await empLoadTechs(); }
+    catch(e){ target.innerHTML = empTabsHtml('tech') + '<div class="empty-state">Couldn\u2019t load technicians: ' + escapeHtml(describeCloudError(e)) + '</div>'; empBindTabs(target); return; }
+    const edit = empCanTechEdit();
+    const q = emp.q.trim().toLowerCase();
+    const rows = emp.techs.filter(t=> (emp.showInactive || t.active !== false) &&
+      (!q || [t.name, t.username].some(v=> String(v || '').toLowerCase().includes(q))));
+    const activeN = emp.techs.filter(t=> t.active !== false).length;
+    target.innerHTML = empTabsHtml('tech') +
+      '<div class="card"><div class="card-body">' +
+        '<p class="stf-note" style="margin-top:0;">Field technicians (Operations). ' + (edit ? 'Add accounts, set sign-in details and restrictions, and deactivate anyone who leaves.' : 'View only.') +
+          ' Attendance, leave, violations and documents are kept by HR in each <b>Technician Profile</b>.</p>' +
+        '<div class="stf-toolbar">' +
+          (edit ? '<button type="button" class="btn btn-primary" data-emp="add">+ Add Technician</button>' : '') +
+          '<input type="search" class="emp-search" data-emp="q" placeholder="Search name or username" value="' + escapeHtml(emp.q) + '">' +
+          '<label class="sp-check"><input type="checkbox" data-emp="inactive"' + (emp.showInactive ? ' checked' : '') + '> Show deactivated</label>' +
+          '<span class="stf-count">' + activeN + ' active</span>' +
+        '</div>' +
+        '<div id="empAddBox"></div>' +
+        '<div class="stf-list">' + (rows.length ? rows.map(empTechRow).join('') : '<div class="empty-state">' + (emp.techs.length ? 'Nobody matches.' : 'No technicians yet.') + '</div>') + '</div>' +
+      '</div></div>';
+    empBindTabs(target);
+    const addBtn = target.querySelector('[data-emp="add"]');
+    if(addBtn) addBtn.addEventListener('click', ()=> empOpenAdd(target));
+    const qi = target.querySelector('[data-emp="q"]');
+    qi.addEventListener('input', ()=>{ emp.q = qi.value; clearTimeout(qi._t); qi._t = setTimeout(()=>{ empRenderTechsList(target); }, 200); });
+    target.querySelector('[data-emp="inactive"]').addEventListener('change', (e)=>{ emp.showInactive = e.target.checked; empRenderTechsList(target); });
+    target.querySelectorAll('[data-tech]').forEach(b=> b.addEventListener('click', ()=> empOpenTech(target, b.dataset.tech)));
+    if(keepOpen) empOpenTech(target, keepOpen);
+  }
+  // re-filter without reloading
+  function empRenderTechsList(target){
+    const q = emp.q.trim().toLowerCase();
+    const rows = emp.techs.filter(t=> (emp.showInactive || t.active !== false) &&
+      (!q || [t.name, t.username].some(v=> String(v || '').toLowerCase().includes(q))));
+    const list = target.querySelector('.stf-list');
+    list.innerHTML = rows.length ? rows.map(empTechRow).join('') : '<div class="empty-state">Nobody matches.</div>';
+    list.querySelectorAll('[data-tech]').forEach(b=> b.addEventListener('click', ()=> empOpenTech(target, b.dataset.tech)));
+  }
+  function empTechRow(t){
+    const active = t.active !== false;
+    const r = empRestrLabel(t.restrictions);
+    return '<button type="button" class="stf-person' + (active ? '' : ' stf-inactive') + '" data-tech="' + escapeHtml(t.id) + '">' +
+      '<span class="stf-avatar emp-tech-av">' + escapeHtml((t.name || '?').trim().charAt(0).toUpperCase()) + '</span>' +
+      '<span class="stf-person-main"><span class="stf-person-name">' + escapeHtml(t.name || '') + (active ? '' : ' <span class="stf-off">Deactivated</span>') + '</span>' +
+      '<span class="stf-person-sub">' + (t.username ? '@' + escapeHtml(t.username) : '<span style="color:var(--amber);">no username</span>') + ' \u00B7 Technician' +
+        (r ? ' \u00B7 ' + escapeHtml(r) : '') + (emp.locks.has(t.id) ? ' \u00B7 \uD83D\uDD12 DTR device' : '') +
+        (emp.inv && typeof invUserStatusLine === 'function' ? '' : '') + '</span></span>' +
+      '<span class="stf-chev">\u203A</span></button>';
+  }
+
+  // server call; falls back to the old function for the Super Admin when
+  // admin-create-staff hasn't been redeployed yet
+  async function empFn(body){
+    const { data, error } = await db.functions.invoke('admin-create-staff', { body });
+    let res = data;
+    if(error){
+      try{ res = error.context && typeof error.context.json === 'function' ? await error.context.json() : null; }catch(e){ res = null; }
+      if(!res) res = { error: error.message || 'Request failed' };
+    }
+    if(res && res.error && /Unknown action/i.test(res.error) && empIsSuper()){
+      return { legacy:true };
+    }
+    return res || {};
+  }
+
+  function empOpenAdd(target){
+    const box = target.querySelector('#empAddBox');
+    box.innerHTML = '<div class="po-sec emp-add"><div class="po-sec-title">New technician</div><div class="po-grid">' +
+      '<div class="field po-c6"><label>Full name <span class="req">*</span></label><input type="text" data-n="name" placeholder="e.g. Juan Dela Cruz"></div>' +
+      '<div class="field po-c6"><label>Username <span class="req">*</span></label><input type="text" data-n="username" autocapitalize="none" autocomplete="off" placeholder="e.g. juan.delacruz"></div>' +
+      '<div class="field po-c6"><label>Password <span class="req">*</span></label><input type="password" data-n="pw1" autocomplete="new-password" placeholder="At least 4 characters"></div>' +
+      '<div class="field po-c6"><label>Confirm password</label><input type="password" data-n="pw2" autocomplete="new-password"></div>' +
+      '</div><div class="pay-actions"><button type="button" class="btn btn-primary" data-n="save">Create Technician</button><button type="button" class="btn btn-secondary" data-n="cancel">Cancel</button></div></div>';
+    const g = (k)=> box.querySelector('[data-n="' + k + '"]');
+    g('name').focus();
+    g('cancel').addEventListener('click', ()=>{ box.innerHTML = ''; });
+    g('save').addEventListener('click', async ()=>{
+      const name = g('name').value.trim(), username = g('username').value.trim().toLowerCase(), pw = g('pw1').value;
+      if(!name){ toast('Enter the full name'); return; }
+      if(!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)){ toast('Username: 3\u201330 letters, numbers, dot, dash or underscore'); return; }
+      if(pw.length < 4){ toast('Password must be at least 4 characters'); return; }
+      if(pw !== g('pw2').value){ toast('Passwords don\u2019t match'); return; }
+      g('save').disabled = true;
+      let res = await empFn({ action:'tech_create', name, username, password:pw });
+      if(res.legacy){
+        // Super Admin, old deployment: the previous create path + username update
+        const r2 = await db.functions.invoke('admin-create-technician', { body:{ name, password:pw } });
+        res = r2.error ? { error: (r2.data && r2.data.error) || r2.error.message } : (r2.data || {});
+        if(res.id) await cloudSetUser(res.id, { username });
+      }
+      g('save').disabled = false;
+      if(res.error){ toast(res.error); return; }
+      toast('Added ' + name);
+      box.innerHTML = '';
+      empRenderTechs(target, res.id);
+    });
+  }
+
+  function empOpenTech(target, id){
+    const t = emp.techs.find(x=> x.id === id);
+    if(!t) return;
+    const edit = empCanTechEdit(), active = t.active !== false, r = t.restrictions || {};
+    const dis = edit ? '' : ' disabled';
+    const hrOk = empIsSuper() || (typeof hrIsReviewer === 'function' && (hrIsReviewer('hr.attendance') || hrIsReviewer('hr.leaves') || hrIsReviewer('hr.tech_profiles')));
+    const payOk = empIsSuper() || can('hr.payroll_setup', 'view');
+    const chk = (k, title, desc)=> '<label class="restrict-row"><input type="checkbox" data-t="' + k + '"' + (r[k] ? ' checked' : '') + dis + '>' +
+      '<span class="rtxt"><span class="rt-title">' + title + '</span><span class="rt-desc">' + desc + '</span></span></label>';
+    target.innerHTML = empTabsHtml('tech') +
+      '<div class="card"><div class="card-body">' +
+      '<button type="button" class="btn btn-secondary stf-back" data-t="back">\u2190 Technicians</button>' +
+      '<div class="emp-head"><span class="stf-avatar emp-tech-av">' + escapeHtml((t.name || '?').charAt(0).toUpperCase()) + '</span><div>' +
+        '<div class="stf-person-name">' + escapeHtml(t.name || '') + (active ? '' : ' <span class="stf-off">Deactivated</span>') + '</div>' +
+        '<div class="stf-person-sub">Technician \u00B7 Operations' + (emp.locks.has(t.id) ? ' \u00B7 \uD83D\uDD12 DTR locked to a device' : '') + '</div></div></div>' +
+      '<div class="pay-actions">' +
+        (hrOk ? '<button type="button" class="btn btn-secondary" data-t="profile">Technician Profile (HR records)</button>' : '') +
+        (payOk ? '<button type="button" class="btn btn-secondary" data-t="pay">Payroll Setup</button>' : '') +
+      '</div>' +
+      '<div class="po-sec"><div class="po-sec-title">Sign-in</div><div class="po-grid">' +
+        '<div class="field po-c6"><label>Full name</label><input type="text" data-t="name" value="' + escapeHtml(t.name || '') + '"' + dis + '></div>' +
+        '<div class="field po-c6"><label>Username</label><input type="text" data-t="username" autocapitalize="none" autocomplete="off" value="' + escapeHtml(t.username || '') + '"' + dis + '></div>' +
+        (edit ? '<div class="field po-c6"><label>New password (leave blank to keep)</label><input type="password" data-t="pw1" autocomplete="new-password"></div>' +
+                '<div class="field po-c6"><label>Confirm new password</label><input type="password" data-t="pw2" autocomplete="new-password"></div>' : '') +
+      '</div></div>' +
+      '<div class="po-sec"><div class="restrict-group"><h5>Restrictions</h5>' +
+        chk('noHistory', 'Block History access', 'Can\u2019t open History or view past reports.') +
+        chk('noReport', 'Block report generation', 'Can\u2019t preview, generate or share PDF reports.') +
+        chk('readOnly', 'Read-only', 'Can\u2019t save drafts, start new reports, or generate reports.') +
+      '</div></div>' +
+      (emp.inv && typeof invUserPanelHtml === 'function' ? '<div class="po-sec emp-inv">' + invUserPanelHtml(emp.inv, t.id) + '</div>' : '') +
+      (edit ? '<div class="pay-actions"><button type="button" class="btn btn-primary" data-t="save">Save Changes</button>' +
+          (emp.locks.has(t.id) ? '<button type="button" class="btn btn-secondary" data-t="unlock">Reset DTR device</button>' : '') +
+          '<button type="button" class="btn btn-secondary' + (active ? ' pay-danger' : '') + '" data-t="toggle">' + (active ? 'Deactivate\u2026' : 'Reactivate') + '</button></div>' : '') +
+      '</div></div>';
+    empBindTabs(target);
+    const g = (k)=> target.querySelector('[data-t="' + k + '"]');
+    g('back').addEventListener('click', ()=> empRenderTechs(target));
+    if(g('profile')) g('profile').addEventListener('click', ()=> techOpenProfile({ id:t.id, name:t.name }));
+    if(g('pay')) g('pay').addEventListener('click', ()=> showPurchasingView('paySetup'));
+    if(!edit) return;
+    if(g('unlock')) g('unlock').addEventListener('click', async ()=>{
+      if(!await uiConfirm('Reset ' + t.name + '\u2019s DTR device?\n\nUse this if they lost or replaced their phone \u2014 the next device they time in from becomes their device.', { ok:'Reset' })) return;
+      const ok = await clearDeviceLock(t.id);
+      toast(ok ? 'Device lock cleared for ' + t.name : 'Couldn\u2019t clear the device lock');
+      if(ok) empRenderTechs(target, t.id);
+    });
+    g('toggle').addEventListener('click', async ()=>{
+      if(active && !await uiConfirm('Deactivate ' + t.name + '?\n\nThey\u2019re signed out and can\u2019t sign in again. Their reports, attendance and history stay.', { ok:'Deactivate', danger:true })) return;
+      let res = await empFn({ action: active ? 'tech_deactivate' : 'tech_reactivate', userId:t.id });
+      if(res.legacy){ const ok = await cloudSetUser(t.id, { active: !active }); res = ok ? {} : { error:'Couldn\u2019t update' }; }
+      if(res.error){ toast(res.error); return; }
+      toast(active ? t.name + ' deactivated' : t.name + ' reactivated');
+      empRenderTechs(target, t.id);
+    });
+    g('save').addEventListener('click', async ()=>{
+      const name = g('name').value.trim(), username = g('username').value.trim().toLowerCase();
+      const pw1 = g('pw1').value, pw2 = g('pw2').value;
+      if(!name){ toast('Enter the full name'); return; }
+      if(!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)){ toast('Username: 3\u201330 letters, numbers, dot, dash or underscore'); return; }
+      if(pw1 || pw2){
+        if(pw1.length < 4){ toast('Password must be at least 4 characters'); return; }
+        if(pw1 !== pw2){ toast('Passwords don\u2019t match'); return; }
+      }
+      const restrictions = { noHistory:g('noHistory').checked, noReport:g('noReport').checked, readOnly:g('readOnly').checked };
+      g('save').disabled = true;
+      let res = await empFn({ action:'tech_update', userId:t.id, name, username, restrictions });
+      if(res.legacy){ const ok = await cloudSetUser(t.id, { name, username, restrictions }); res = ok ? {} : { error:'Couldn\u2019t save' }; }
+      if(!res.error && pw1){
+        let r2 = await empFn({ action:'tech_reset_password', userId:t.id, password:pw1 });
+        if(r2.legacy){
+          const x = await db.functions.invoke('admin-create-technician', { body:{ action:'reset_password', technicianId:t.id, password:pw1 } });
+          r2 = x.error || (x.data && x.data.error) ? { error:'Couldn\u2019t change the password' } : {};
+        }
+        if(r2.error) res = r2;
+      }
+      if(!res.error && emp.inv && typeof invSaveUserWarehouses === 'function'){
+        const ok = await invSaveUserWarehouses(emp.inv, t.id, target);
+        if(!ok) res = { error:'Saved, but the storekeeper warehouses couldn\u2019t be saved' };
+      }
+      g('save').disabled = false;
+      if(res.error){ toast(res.error); return; }
+      toast('Saved ' + name + (pw1 ? ' \u2014 password changed' : ''));
+      empRenderTechs(target, t.id);
+    });
   }
 
 
@@ -30889,12 +31155,12 @@
       en:{ t:'Dropdown Lists', p:'The pick-lists technicians choose from in the service report (findings, recommendations and more).', s:['Add, rename or remove entries.', 'Save — the report form uses them right away.'], tip:'' },
       tl:{ p:'Mga pagpipilian ng technician sa service report (findings, recommendations at iba pa).', s:['Magdagdag, magpalit ng pangalan o magtanggal.', 'I-save — gagamitin agad ng report form.'], tip:'' } },
     'users': { roles:['admin'], go:{ admin:'menuManageUsers' },
-      en:{ t:'Users & Roles', p:'Technician accounts, storekeepers and customer portal logins.', s:['Add a technician; set restrictions if needed.', 'Assign storekeepers to warehouses.', 'Create a customer portal login and link it to the customer.'], tip:'Office staff accounts are under Department Staff.' },
-      tl:{ p:'Mga account ng technician, storekeeper at login ng customer portal.', s:['Magdagdag ng technician; maglagay ng restriction kung kailangan.', 'Mag-assign ng storekeeper sa warehouse.', 'Gumawa ng login sa customer portal at i-link sa customer.'], tip:'Nasa Department Staff ang mga account ng office staff.' } },
-
-    // ------------------------------------------------------ DEPARTMENT STAFF
+      en:{ t:'Customer Portal', p:'Portal logins for customers, linked to their customer records.', s:['Add a portal login: pick the customer record(s), contact name, email and password.', 'Edit a login to change its linked records or password, or deactivate it.'],
+           tip:'Technicians and office staff are managed in Management \u203A Employees.' },
+      tl:{ p:'Login ng customer sa portal, naka-link sa kanilang customer record.', s:['Magdagdag ng login: piliin ang customer record, pangalan ng contact, email at password.', 'I-edit ang login para palitan ang naka-link na record o password, o i-deactivate.'],
+           tip:'Ang technician at office staff ay nasa Management \u203A Employees.' } },
     'staff.team': { roles:['admin','staff'], flow:'people', go:{ admin:'menuManageStaff', staff:'@team' },
-      en:{ t:'Department Staff / My Team', p:'Office staff accounts. The Super Admin creates department Heads; Heads add sub-users under them.',
+      en:{ t:'Employees / My Team', p:'Office staff and technician accounts (Technicians tab). Office staff: The Super Admin creates department Heads; Heads add sub-users under them.',
            s:['+ Add: name, username, temporary password, departments and page levels.', 'View sees a page, Edit also changes it, Approve also approves.', 'Heads: My team today shows who is in, and your team\u2019s leave and cash requests to endorse.', 'Heads: Delegate while away hands your approvals to a sub-user for set dates.'],
            tip:'A sub-user can never get more access than their Head.' },
       tl:{ p:'Mga account ng office staff. Ang Super Admin ang gumagawa ng department Head; ang Head ang nagdadagdag ng sub-user.',
@@ -31015,8 +31281,8 @@
       { sel:'#menuBtn', en:'On a phone, open the sidebar here.', tl:'Sa phone, dito buksan ang sidebar.' },
       { sel:'#sbNavDispatch', en:'Dispatch: create job orders and assign technicians.', tl:'Dispatch: gumawa ng job order at mag-assign ng technician.' },
       { sel:'#menuInbox', en:'Inbox: everything overdue across all departments.', tl:'Inbox: lahat ng overdue sa lahat ng department.' },
-      { sel:'#menuManageStaff', en:'Department Staff: create office staff and choose what each can do.', tl:'Department Staff: gumawa ng office staff at piliin ang kaya ng bawat isa.' },
-      { sel:'#menuManageUsers', en:'Users & Roles: technician accounts, storekeepers and customer logins.', tl:'Users & Roles: account ng technician, storekeeper at login ng customer.' }
+      { sel:'#menuManageStaff', en:'Employees: office staff and technician accounts, and what each can do.', tl:'Employees: account ng office staff at technician, at ang kaya ng bawat isa.' },
+      { sel:'#menuManageUsers', en:'Customer Portal: customer login accounts.', tl:'Customer Portal: login ng mga customer.' }
     ],
     staff: [
       { sel:null, en:'Welcome! Tap ? on any page for what it does and what comes next.', tl:'Maligayang pagdating! Pindutin ang ? sa kahit anong page para malaman ang gamit nito at ang kasunod.' },
@@ -31120,7 +31386,7 @@
     ['customers', { en:'Administration', tl:'Administration' }], ['custHistory', { en:'Administration', tl:'Administration' }],
     ['equipment', { en:'Administration', tl:'Administration' }], ['ann', { en:'Administration', tl:'Administration' }],
     ['dropdowns', { en:'Administration', tl:'Administration' }], ['users', { en:'Administration', tl:'Administration' }],
-    ['staff.', { en:'Department Staff', tl:'Department Staff' }], ['cp.', { en:'Customer Portal', tl:'Customer Portal' }]
+    ['staff.', { en:'Employees', tl:'Employees' }], ['cp.', { en:'Customer Portal', tl:'Customer Portal' }]
   ];
 
   const GD = { lang:'en', uid:null, prog:null, key:null, force:{}, saveT:null, obsT:null, tour:null, loading:false, checkAt:0 };
