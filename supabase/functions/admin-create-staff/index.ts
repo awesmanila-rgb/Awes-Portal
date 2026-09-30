@@ -226,9 +226,10 @@ async function loadTechnician(admin: SupabaseClient, id: unknown) {
   return data as { id: string; name: string | null; role: string; active: boolean; username: string | null };
 }
 
-function cleanRestrictions(r: unknown): Record<string, boolean> {
+// Restrictions are stored as three profile columns (no_history, no_report, read_only).
+function restrictionColumns(r: unknown): Record<string, boolean> {
   const o = (r && typeof r === 'object') ? r as Record<string, unknown> : {};
-  return { noHistory: !!o.noHistory, noReport: !!o.noReport, readOnly: !!o.readOnly };
+  return { no_history: !!o.noHistory, no_report: !!o.noReport, read_only: !!o.readOnly };
 }
 
 async function technicianAction(admin: SupabaseClient, caller: { id: string; isSuper: boolean; profile: Profile }, action: string, body: Record<string, unknown>) {
@@ -258,7 +259,7 @@ async function technicianAction(admin: SupabaseClient, caller: { id: string; isS
         if (eErr) throw eErr;
       }
       const { error: pErr } = await admin.from('profiles').upsert({
-        id: newId, name, role: 'technician', username, active: true, restrictions: {}
+        id: newId, name, role: 'technician', username, active: true
       }, { onConflict: 'id' });
       if (pErr) throw dbError(pErr);
       await log(admin, caller.id, 'technician.create', newId, username, { name });
@@ -286,7 +287,7 @@ async function technicianAction(admin: SupabaseClient, caller: { id: string; isS
         if (await usernameTaken(admin, username, t.id)) throw new HttpError(409, 'That username is already taken.', 'username_taken');
         patch.username = username;
       }
-      if (body.restrictions !== undefined) patch.restrictions = cleanRestrictions(body.restrictions);
+      if (body.restrictions !== undefined) Object.assign(patch, restrictionColumns(body.restrictions));
       if (!Object.keys(patch).length) return { id: t.id };
       const { error } = await admin.from('profiles').update(patch).eq('id', t.id);
       if (error) throw dbError(error);
