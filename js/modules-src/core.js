@@ -34,6 +34,8 @@
     megaphone:'<path d="M3 10v4a1 1 0 0 0 1 1h2l4 4 1-1-3-4h6l6 3V6l-6 3H6a1 1 0 0 0-1 1z"/>',
     key:'<circle cx="8" cy="15" r="4"/><path d="M10.5 12.5 20 3"/><path d="M17 6l2 2"/><path d="M14 9l2 2"/>',
     snowflake:'<path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/>',
+    ruler:'<path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/>',
+    flame:'<path d="M12 22c4 0 7-3 7-7 0-4-3-6-4-9-1 2-2 3-4 3 0-2 0-4-2-7-1 4-5 6-5 12 0 5 4 8 8 8z"/>',
     file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
     logOut:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
     wave:'<path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M14 11V5a1.5 1.5 0 0 1 3 0v8"/><path d="M17 13V8a1.5 1.5 0 0 1 3 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 15a1.4 1.4 0 0 1 2-2l2 1.8"/>',

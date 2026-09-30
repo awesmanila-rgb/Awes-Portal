@@ -22,6 +22,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('dtrView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -73,6 +74,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -107,6 +109,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -136,6 +139,7 @@
     if($('financeHrView')) $('financeHrView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('customerHistoryView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -168,6 +172,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -963,7 +968,7 @@
     document.body.classList.remove('dashboard-active');
     ['homeScreen','serviceReportView','leaveView','cashAdvanceView','dispatchView','dtrView',
      'equipmentManagerView','customersManagerView','serviceReportsManagerView','messagesView',
-     'documentsView','financeHrView','customerHistoryView','serviceRequestsView']
+     'documentsView','financeHrView','customerHistoryView','serviceRequestsView','techToolsView']
       .forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     $$('#purchasingView .purch-panel').forEach(el=>{ el.style.display = (el.id === 'purchPanel_'+key) ? '' : 'none'; });
     $('purchasingView').style.display = '';
@@ -1032,6 +1037,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('messagesView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -1093,6 +1099,7 @@
     $('messagesView').style.display = 'none';
     $('documentsView').style.display = '';
     if($('financeHrView')) $('financeHrView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
@@ -1146,6 +1153,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('customerHomeScreen').style.display = 'none';
     $('customerEquipmentDetailScreen').style.display = 'none';
     // Same belt-and-suspenders as doLogout() in auth.js — the newer
@@ -1243,6 +1251,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('serviceReportView').style.display = '';
     $('homeBtn').style.display = '';
     setHeaderTitle('Service Report', 'Field digital form');
@@ -1438,7 +1447,7 @@
     document.body.classList.remove('dashboard-active');
     ['homeScreen','serviceReportView','dtrView','leaveView','cashAdvanceView','dispatchView',
      'equipmentManagerView','customersManagerView','serviceReportsManagerView','messagesView',
-     'documentsView','customerHistoryView','serviceRequestsView','purchasingView'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+     'documentsView','customerHistoryView','serviceRequestsView','purchasingView','techToolsView'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
     $('financeHrView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';

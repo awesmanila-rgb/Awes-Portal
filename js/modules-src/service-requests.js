@@ -1069,6 +1069,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = '';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';

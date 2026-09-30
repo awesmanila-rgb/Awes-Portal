@@ -1527,19 +1527,33 @@
   }
 
   // ---- shared calculator screen parts ----
+  // The same calculators are reused by the technician Tools screen
+  // (tech-tools.js). `cpCalcHostTech` is switched on for the duration of one
+  // calculator's render so it draws into the technician panel instead of the
+  // customer one. Customer-only calls to action (Book maintenance, Request a
+  // quote...) are left out there — a technician can't raise a customer request.
+  let cpCalcHostTech = false;
   function cpCalcShell(id, o){
-    $live('cpCalcTitle').textContent = o.title;
-    $live('cpCalcBody').innerHTML =
+    const tech = cpCalcHostTech;
+    const title = $live(tech ? 'ttCalcTitle' : 'cpCalcTitle');
+    const body = $live(tech ? 'ttCalcBody' : 'cpCalcBody');
+    // Both panels use the same inner ids (ctResult, ctCta ...), so the panel
+    // that is not in use is emptied to keep every id unique.
+    const other = $live(tech ? 'cpCalcBody' : 'ttCalcBody');
+    if(other) other.innerHTML = '';
+    const cta = tech ? '' : o.cta;
+    title.textContent = o.title;
+    body.innerHTML =
       '<div class="ct-result" id="ctResult"></div>'+
       '<div class="ct-card ct-form">'+o.form+'</div>'+
       (o.extra || '')+
       '<details class="ct-how"><summary>How this is calculated</summary><div>'+o.how+'</div></details>'+
-      (o.cta ? '<button type="button" class="ct-cta" id="ctCta">'+o.cta+'</button>' : '');
-    if(o.cta && o.onCta) $live('ctCta').onclick = o.onCta;
+      (cta ? '<button type="button" class="ct-cta" id="ctCta">'+cta+'</button>' : '');
+    if(cta && o.onCta) $live('ctCta').onclick = o.onCta;
     const run = ()=>{ try{ o.calc(); }catch(e){ console.error('calc failed', e); } };
-    $live('cpCalcBody').oninput = run;
-    $live('cpCalcBody').onchange = run;
-    $live('cpCalcBody').onclick = (e)=>{
+    body.oninput = run;
+    body.onchange = run;
+    body.onclick = (e)=>{
       const seg = e.target.closest('[data-seg]');
       if(seg){
         const group = seg.parentElement;
@@ -1550,7 +1564,8 @@
       }
     };
     run();
-    cpShowCalcScreen();
+    if(tech){ if(typeof ttShowDetail === 'function') ttShowDetail(); }
+    else cpShowCalcScreen();
   }
   function cpSeg(id, options, value){
     return '<div class="ct-seg" id="'+id+'" data-value="'+value+'">'+options.map(([v,l])=>

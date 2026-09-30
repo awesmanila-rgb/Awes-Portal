@@ -3863,6 +3863,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('dispatchView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
@@ -3919,6 +3920,7 @@
     $('customerHistoryView').style.display = 'none';
     $('serviceRequestsView').style.display = 'none';
     if($('purchasingView')) $('purchasingView').style.display = 'none';
+    if($('techToolsView')) $('techToolsView').style.display = 'none';
     $('leaveView').style.display = '';
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
