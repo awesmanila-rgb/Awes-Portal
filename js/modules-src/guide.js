@@ -46,7 +46,7 @@
     ['customers', { en:'Administration', tl:'Administration' }], ['custHistory', { en:'Administration', tl:'Administration' }],
     ['equipment', { en:'Administration', tl:'Administration' }], ['ann', { en:'Administration', tl:'Administration' }],
     ['dropdowns', { en:'Administration', tl:'Administration' }], ['users', { en:'Administration', tl:'Administration' }],
-    ['staff.', { en:'Department Staff', tl:'Department Staff' }], ['cp.', { en:'Customer Portal', tl:'Customer Portal' }]
+    ['staff.', { en:'Employees', tl:'Employees' }], ['cp.', { en:'Customer Portal', tl:'Customer Portal' }]
   ];
 
   const GD = { lang:'en', uid:null, prog:null, key:null, force:{}, saveT:null, obsT:null, tour:null, loading:false, checkAt:0 };

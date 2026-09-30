@@ -364,12 +364,12 @@
       en:{ t:'Dropdown Lists', p:'The pick-lists technicians choose from in the service report (findings, recommendations and more).', s:['Add, rename or remove entries.', 'Save — the report form uses them right away.'], tip:'' },
       tl:{ p:'Mga pagpipilian ng technician sa service report (findings, recommendations at iba pa).', s:['Magdagdag, magpalit ng pangalan o magtanggal.', 'I-save — gagamitin agad ng report form.'], tip:'' } },
     'users': { roles:['admin'], go:{ admin:'menuManageUsers' },
-      en:{ t:'Users & Roles', p:'Technician accounts, storekeepers and customer portal logins.', s:['Add a technician; set restrictions if needed.', 'Assign storekeepers to warehouses.', 'Create a customer portal login and link it to the customer.'], tip:'Office staff accounts are under Department Staff.' },
-      tl:{ p:'Mga account ng technician, storekeeper at login ng customer portal.', s:['Magdagdag ng technician; maglagay ng restriction kung kailangan.', 'Mag-assign ng storekeeper sa warehouse.', 'Gumawa ng login sa customer portal at i-link sa customer.'], tip:'Nasa Department Staff ang mga account ng office staff.' } },
-
-    // ------------------------------------------------------ DEPARTMENT STAFF
+      en:{ t:'Customer Portal', p:'Portal logins for customers, linked to their customer records.', s:['Add a portal login: pick the customer record(s), contact name, email and password.', 'Edit a login to change its linked records or password, or deactivate it.'],
+           tip:'Technicians and office staff are managed in Management \u203A Employees.' },
+      tl:{ p:'Login ng customer sa portal, naka-link sa kanilang customer record.', s:['Magdagdag ng login: piliin ang customer record, pangalan ng contact, email at password.', 'I-edit ang login para palitan ang naka-link na record o password, o i-deactivate.'],
+           tip:'Ang technician at office staff ay nasa Management \u203A Employees.' } },
     'staff.team': { roles:['admin','staff'], flow:'people', go:{ admin:'menuManageStaff', staff:'@team' },
-      en:{ t:'Department Staff / My Team', p:'Office staff accounts. The Super Admin creates department Heads; Heads add sub-users under them.',
+      en:{ t:'Employees / My Team', p:'Office staff and technician accounts (Technicians tab). Office staff: The Super Admin creates department Heads; Heads add sub-users under them.',
            s:['+ Add: name, username, temporary password, departments and page levels.', 'View sees a page, Edit also changes it, Approve also approves.', 'Heads: My team today shows who is in, and your team\u2019s leave and cash requests to endorse.', 'Heads: Delegate while away hands your approvals to a sub-user for set dates.'],
            tip:'A sub-user can never get more access than their Head.' },
       tl:{ p:'Mga account ng office staff. Ang Super Admin ang gumagawa ng department Head; ang Head ang nagdadagdag ng sub-user.',
@@ -490,8 +490,8 @@
       { sel:'#menuBtn', en:'On a phone, open the sidebar here.', tl:'Sa phone, dito buksan ang sidebar.' },
       { sel:'#sbNavDispatch', en:'Dispatch: create job orders and assign technicians.', tl:'Dispatch: gumawa ng job order at mag-assign ng technician.' },
       { sel:'#menuInbox', en:'Inbox: everything overdue across all departments.', tl:'Inbox: lahat ng overdue sa lahat ng department.' },
-      { sel:'#menuManageStaff', en:'Department Staff: create office staff and choose what each can do.', tl:'Department Staff: gumawa ng office staff at piliin ang kaya ng bawat isa.' },
-      { sel:'#menuManageUsers', en:'Users & Roles: technician accounts, storekeepers and customer logins.', tl:'Users & Roles: account ng technician, storekeeper at login ng customer.' }
+      { sel:'#menuManageStaff', en:'Employees: office staff and technician accounts, and what each can do.', tl:'Employees: account ng office staff at technician, at ang kaya ng bawat isa.' },
+      { sel:'#menuManageUsers', en:'Customer Portal: customer login accounts.', tl:'Customer Portal: login ng mga customer.' }
     ],
     staff: [
       { sel:null, en:'Welcome! Tap ? on any page for what it does and what comes next.', tl:'Maligayang pagdating! Pindutin ang ? sa kahit anong page para malaman ang gamit nito at ang kasunod.' },

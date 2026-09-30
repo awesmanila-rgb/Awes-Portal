@@ -291,6 +291,10 @@
     closeMainMenu();
     if(!(await ensureAdminAuthenticated())) return;
     $('usersOverlay').classList.add('open');
+    // Customer Portal only now — technicians moved to Employees (employees.js)
+    if($('newUserRole').value !== 'customer'){ $('newUserRole').value = 'customer'; }
+    $('newUserRole').dispatchEvent(new Event('change'));
+    $('newUserRole').closest('.field').style.display = 'none';
     renderUsersList();
   });
   $('menuManageDropdowns').addEventListener('click', async ()=>{

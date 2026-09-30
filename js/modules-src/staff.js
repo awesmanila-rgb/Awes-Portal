@@ -36,6 +36,8 @@
     'hr.attendance', 'hr.staff_attendance', 'hr.leaves', 'hr.tech_profiles',
     // Payroll, Phase 1 — 20261004_01_payroll_foundation.sql
     'hr.payroll_setup', 'fin.payroll_rules',
+    // Technician accounts — 20261013_01
+    'ops.technicians',
     // Payroll, Phase 2 — 20261005_01_payroll_timesheets.sql
     'hr.timesheets',
     // Payroll, Phase 3 — 20261006_01_payroll_runs.sql
@@ -254,7 +256,7 @@
   // ---------------------------------------------------------------------
   const STAFF_PANELS = {
     home:     { nav:'sbNavDashboard',   title:'Home',             sub:'Your departments & access' },
-    team:     { nav:'',                 title:'Department Staff', sub:'Accounts, departments & page access' },
+    team:     { nav:'',                 title:'Employees',        sub:'Office staff & technicians' },
     edit:     { nav:'',                 title:'Staff Account',    sub:'Departments & page access' },
     activity: { nav:'',                 title:'Activity Log',     sub:'Who did what, and when' },
     preview:  { nav:'',                 title:'Preview',          sub:'What this user sees' },
@@ -277,7 +279,7 @@
     if($('homeBtn')) $('homeBtn').style.display = panel === 'home' ? 'none' : '';
     let title = p.title, sub = p.sub, nav = p.nav;
     if(panel === 'team'){
-      title = isStaffUser() ? 'My Team' : 'Department Staff';
+      title = isStaffUser() ? 'My Team' : 'Employees';
       nav = isStaffUser() ? 'staffNavTeam' : 'menuManageStaff';
       sub = isStaffUser() ? 'Your sub-users & their access' : sub;
     }
@@ -474,8 +476,12 @@
   // ---------------------------------------------------------------------
   let stfShowInactive = false;
 
+  // Employees page tab: 'staff' (office staff / My Team) or 'tech' (technicians, employees.js)
+  let stfEmpTab = 'staff';
   async function staffOpenTeam(){
+    if(currentUser && !(currentUser.role === 'admin' || staffIsHead()) && typeof empCanTechView === 'function' && empCanTechView()) return staffOpenTechnicians();
     if(!currentUser || !(currentUser.role === 'admin' || staffIsHead())){ toast('Only the admin or a department Head can manage staff'); return; }
+    if(stfEmpTab === 'tech' && typeof empCanTechView === 'function' && empCanTechView()) return staffOpenTechnicians();
     if(currentUser.role === 'admin' && !(await ensureAdminAuthenticated())) return;
     showStaffView('team');
     const target = $('staffPanel_team');
@@ -497,6 +503,7 @@
 
   function staffRenderTeam(){
     const target = $('staffPanel_team');
+    stfEmpTab = 'staff';
     const isSuper = currentUser.role === 'admin';
     const visible = stf.people.filter(p=> stfShowInactive || p.active);
     let listHtml = '';
@@ -511,7 +518,7 @@
       listHtml = visible.filter(p=> p.supervisor_id === currentUser.id).map(p=> staffPersonCardHtml(p)).join('');
     }
     const total = stf.people.filter(p=> p.active && (isSuper || p.supervisor_id === currentUser.id)).length;
-    target.innerHTML =
+    target.innerHTML = (typeof empTabsHtml === 'function' ? empTabsHtml('staff') : '') +
       '<div class="card"><div class="card-body">' +
         '<p class="stf-note" style="margin-top:0;">' + (isSuper
           ? 'Office staff accounts for Purchasing, Accounting &amp; Finance, Human Resources, Administration and Operations. A department Head (\u2605) can add sub-users under them, with no more access than their own.'
@@ -524,6 +531,7 @@
         '</div>' +
         '<div class="stf-list">' + (listHtml || '<div class="empty-state">' + (isSuper ? 'No staff accounts yet. Add a department Head first.' : 'No sub-users yet.') + '</div>') + '</div>' +
       '</div></div>';
+    if(typeof empBindTabs === 'function') empBindTabs(target);
     target.querySelector('[data-act="add"]').addEventListener('click', ()=> staffOpenEditor(null));
     const tb = target.querySelector('[data-act="templates"]'); if(tb) tb.addEventListener('click', ()=> staffOpenTemplates());
     if(!isSuper) staffRenderTeamHrCard(target);
@@ -624,7 +632,7 @@
     }).join('');
 
     target.innerHTML =
-      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 ' + (isStaffUser() ? 'My Team' : 'Department Staff') + '</button>' +
+      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 ' + (isStaffUser() ? 'My Team' : 'Employees') + '</button>' +
       (p && !p.active ? '<div class="stf-banner-off">This account is deactivated' + (p.deactivated_at ? ' since ' + escapeHtml(staffFmtDate(p.deactivated_at)) : '') + '. It cannot sign in.</div>' : '') +
       '<div class="card"><div class="card-head"><span>' + (isNew ? 'New ' + (isStaffUser() ? 'sub-user' : 'staff account') : 'Account') + '</span></div><div class="card-body">' +
         '<div class="field"><label>Full name</label><input type="text" data-f="name" value="' + escapeHtml(s.name) + '" placeholder="e.g. Maria Santos"></div>' +
@@ -1075,7 +1083,7 @@
     const target = $('staffPanel_templates');
     const count = (id)=> Object.values(stf.links).filter(x=> x === id).length;
     target.innerHTML =
-      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 Department Staff</button>' +
+      '<button type="button" class="btn btn-secondary stf-back" data-act="back">\u2190 Employees</button>' +
       '<div class="card"><div class="card-body">' +
         '<p class="stf-note" style="margin-top:0;">A role template is a saved set of departments and page levels. Apply one when adding someone; people kept in sync update automatically when you change the template. Sub-users always get it cut down to their Head\u2019s own access.</p>' +
         '<div class="stf-toolbar"><button type="button" class="btn btn-primary" data-act="new">+ New Template</button></div>' +
@@ -1672,6 +1680,7 @@
     'hr.tech_profiles':    ()=> showDtrView(),
     'hr.leaves':           ()=> showLeaveView(),
     'hr.payroll_setup':    ()=> showPurchasingView('paySetup'),
+    'ops.technicians':     ()=> staffOpenTechnicians(),
     'fin.payroll_rules':   ()=> showPurchasingView('payRules'),
     'hr.timesheets':       ()=> showPurchasingView('payTimesheets'),
     'hr.payroll_runs':     ()=> showPurchasingView('payRuns'),

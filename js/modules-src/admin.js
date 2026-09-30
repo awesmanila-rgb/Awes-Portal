@@ -19,7 +19,9 @@
     const body = $('usersList');
     body.innerHTML = '<div class="empty-state">Loading…</div>';
     const cloudOn = await ensureCloud();
-    const users = (await cloudListUsers()) || [];
+    // Technicians are managed in Employees › Technicians now (employees.js);
+    // this sheet is the Customer Portal logins only.
+    const users = [];
     // Storekeeper setting (Inventory) — null if inventory isn't installed yet
     const invCtx = (cloudOn && typeof invLoadUsersContext === 'function') ? await invLoadUsersContext() : null;
     body.innerHTML = '';
@@ -29,12 +31,7 @@
       note.textContent = 'Not connected to Shared Cloud — user accounts are saved on this device only.';
       body.appendChild(note);
     }
-    if(users.length===0){
-      const empty = document.createElement('div');
-      empty.className = 'empty-state';
-      empty.textContent = 'No technicians added yet.';
-      body.appendChild(empty);
-    }
+
     users.sort((a,b)=> (a.name||'').localeCompare(b.name||'')).forEach(u=>{
       const r = u.restrictions || {};
       const active = u.active!==false;
@@ -158,7 +155,7 @@
     if(!customersCache || customersCache.length===0) await loadCustomers();
     const custLogins = await cloudListCustomerLogins();
     const custHeader = document.createElement('div');
-    custHeader.style.cssText = 'font-size:12px; font-weight:700; margin:18px 0 8px; padding-top:14px; border-top:1px solid var(--border); color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px;';
+    custHeader.style.cssText = 'font-size:12px; font-weight:700; margin:4px 0 8px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px;';
     custHeader.textContent = 'Customer Portal Logins';
     body.appendChild(custHeader);
     if(custLogins.length===0){

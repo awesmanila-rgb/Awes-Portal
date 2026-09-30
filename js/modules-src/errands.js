@@ -183,7 +183,7 @@
         (groups[k] && groups[k].length && k !== 'history' ? ' <span class="po-tab-count">' + groups[k].length + '</span>' : '') + '</button>').join('') + '</div>';
     if(erCanEdit() && er.tab !== 'recurring') html += '<div class="pay-actions"><button type="button" class="btn btn-primary" data-er-new="1">+ New Errand</button></div>';
     if(er.tab === 'active' && late) html += '<div class="pay-banner warn"><b>' + late + ' overdue.</b> The Administration Head and the Super Admin have been alerted.</div>';
-    if(!er.messengers.length && erCanEdit()) html += '<div class="pay-banner warn">No messengers yet. In <b>Department Staff</b>, give the messenger account <b>Administration \u203A My Errands (Messenger)</b>.</div>';
+    if(!er.messengers.length && erCanEdit()) html += '<div class="pay-banner warn">No messengers yet. In <b>Employees</b>, give the messenger account <b>Administration \u203A My Errands (Messenger)</b>.</div>';
     if(er.tab === 'recurring'){ box.innerHTML = html + erRecurringHtml(); return; }
     const rows = groups[er.tab] || [];
     html += rows.length ? rows.map(e=> erRow(e)).join('') : '<div class="empty-state">' + ({ requests:'No requests waiting.', active:'No active errands.', review:'Nothing to review.', history:'Nothing yet.' }[er.tab]) + '</div>';
@@ -521,7 +521,7 @@
       ov.className = 'overlay open er-sig-ov';
       ov.innerHTML = '<div class="modal"><h3>' + erEsc(title) + '</h3>' +
         (er.messengers.length ? er.messengers.map(m=> '<label class="er-pick"><input type="radio" name="erPick" value="' + erEsc(m.id) + '"' + (m.id === current ? ' checked' : '') + '> ' + erEsc(m.name) + '</label>').join('')
-          : '<p class="pay-hint">No messengers set up yet (Department Staff \u203A Administration \u203A My Errands).</p>') +
+          : '<p class="pay-hint">No messengers set up yet (Employees \u203A Administration \u203A My Errands).</p>') +
         (allowNone ? '<label class="er-pick"><input type="radio" name="erPick" value=""' + (!current ? ' checked' : '') + '> Assign later</label>' : '') +
         '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-p="cancel">Cancel</button><button type="button" class="btn btn-primary" data-p="ok">OK</button></div></div>';
       document.body.appendChild(ov);
