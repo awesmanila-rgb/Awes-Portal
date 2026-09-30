@@ -30583,11 +30583,12 @@
 
   async function empLoadTechs(){
     const [p, l] = await Promise.all([
-      db.from('profiles').select('id, name, username, active, restrictions, created_at').eq('role', 'technician').order('name'),
+      db.from('profiles').select('id, name, username, active, no_history, no_report, read_only').eq('role', 'technician').order('name'),
       db.from('device_locks').select('technician_id')
     ]);
     if(p.error) throw p.error;
-    emp.techs = p.data || [];
+    // restrictions live in three profile columns (see cloudSetUser in auth.js)
+    emp.techs = (p.data || []).map(t=> Object.assign(t, { restrictions:{ noHistory:!!t.no_history, noReport:!!t.no_report, readOnly:!!t.read_only } }));
     emp.locks = new Set((l.data || []).map(x=> x.technician_id));
     emp.inv = (empIsSuper() && typeof invLoadUsersContext === 'function') ? await invLoadUsersContext().catch(()=> null) : null;
   }
