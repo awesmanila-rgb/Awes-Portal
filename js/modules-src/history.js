@@ -231,6 +231,9 @@
     const { error } = await db.rpc('service_report_sign_off', { p_id:d.id });
     if(error){ toast('Couldn\u2019t sign off: '+(error.message||describeCloudError(error))); return; }
     toast((d.srNo||'Report')+' signed off');
+    if(d.customerId && typeof notifyCustomer === 'function'){
+      notifyCustomer(d.customerId, 'Your service report is ready', (d.srNo || 'Service report') + ' is now in your portal.', 'sr-ready-'+(d.srNo||''));
+    }
     renderServiceReportsManagerList();
     if(typeof prioRefreshSoon==='function') prioRefreshSoon();
   }

@@ -205,6 +205,7 @@
   // as one consistent system — stroke="currentColor" so each icon just
   // picks up whatever color its container sets.
   const CP_ICON = {
+    bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
     chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
     home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg>',
     grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
@@ -938,6 +939,10 @@
       .on('postgres_changes', { event:'*', schema:'public', table:'customer_equipment', filter:'customer_id=eq.'+customerId }, onChange)
       .on('postgres_changes', { event:'*', schema:'public', table:'service_reports', filter:'customer_id=eq.'+customerId }, onChange)
       .on('postgres_changes', { event:'*', schema:'public', table:'service_requests', filter:'customer_id=eq.'+customerId }, onRequestChange)
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'customer_updates', filter:'customer_id=eq.'+customerId }, (p)=>{
+        if(p && p.new && p.new.title) toast(p.new.title);
+        onRequestChange();
+      })
       .subscribe();
     if(!cpRealtimePollTimer) cpRealtimePollTimer = setInterval(()=>{ onChange(); onRequestChange(); }, 30000);
   }
@@ -962,6 +967,7 @@
   async function cpRefreshRequestsBadge(customerId){
     const rows = await srListForCustomer(customerId);
     cpMyRequestsCache = rows;
+    await cpLoadUpdates();
     cpRefreshNotifBell(rows);
     renderCustomerHero(rows);
   }
@@ -1128,6 +1134,7 @@
           '<div class="cp-row-sub">'+escapeHtml(r.description||'')+'</div>'+
           '<div class="cp-row-sub">'+fmtDateTime(r.createdAt)+
             (r.feeAmount!=null ? ' · Quote: ₱'+escapeHtml(String(r.feeAmount)) : '')+'</div>'+
+          cpUpdateBannerHtml(r.id)+
         '</div>'+
         '<span class="status-pill '+cpReqStatusPillClass(r)+'">'+escapeHtml(srStatusLabel(r.status))+'</span>'+
       '</div>'
@@ -2200,3 +2207,85 @@
     cpRenderAccountPickerCards();
   }
   attachPullToRefresh('customerAccountPickerScreen', cpRefreshAccountPicker);
+
+  // =====================================================================
+  // Updates — the bell (20261015_01). customer_updates is written by the
+  // database at every step (acknowledged, fee / schedule proposed,
+  // technician scheduled / on the way / arrived, completed, closed,
+  // cancelled, office messages, report signed off). The bell shows the
+  // unread count; the list marks them read; the newest update on a request
+  // shows as a banner on its card (and the home strip) for 24 hours.
+  // =====================================================================
+  let cpUpdates = [];
+  async function cpLoadUpdates(){
+    if(!db || !currentUser || currentUser.role !== 'customer') return;
+    try{
+      const { data, error } = await db.from('customer_updates').select('*').order('created_at', { ascending:false }).limit(60);
+      if(!error) cpUpdates = data || [];
+    }catch(e){}
+    cpRenderUpdatesBell();
+    cpRenderUpdateStrip();
+  }
+  const cpUpdRecent = (u)=> u && (Date.now() - new Date(u.created_at).getTime()) < 24 * 3600e3;
+  function cpUpdWhen(ts){
+    const ms = Date.now() - new Date(ts).getTime();
+    if(ms < 60e3) return 'just now';
+    if(ms < 3600e3) return Math.round(ms / 60e3) + ' min ago';
+    if(ms < 24 * 3600e3) return Math.round(ms / 3600e3) + ' h ago';
+    return new Date(ts).toLocaleString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+  }
+  function cpUpdateBannerHtml(requestId){
+    const u = cpUpdates.find(x=> String(x.request_id) === String(requestId));
+    if(!cpUpdRecent(u)) return '';
+    return '<div class="cp-upd-banner' + (u.read_at ? '' : ' unread') + '"><b>' + escapeHtml(u.title) + '</b>' + (u.body ? ' \u2014 ' + escapeHtml(u.body) : '') +
+      ' <span class="cp-upd-when">' + escapeHtml(cpUpdWhen(u.created_at)) + '</span></div>';
+  }
+  function cpRenderUpdatesBell(){
+    const b = $('cpUpdatesBell');
+    if(!b) return;
+    const n = cpUpdates.filter(u=> !u.read_at).length;
+    b.innerHTML = CP_ICON.bell + (n ? '<span class="cp-count-badge">' + (n > 9 ? '9+' : n) + '</span>' : '');
+    b.setAttribute('aria-label', n ? n + ' new update' + (n === 1 ? '' : 's') : 'Updates');
+  }
+  function cpRenderUpdateStrip(){
+    const el = $('cpUpdateStrip');
+    if(!el) return;
+    const u = cpUpdates.find(x=> !x.read_at && cpUpdRecent(x));
+    if(!u){ el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = '';
+    el.innerHTML = '<button type="button" class="cp-upd-strip">' + CP_ICON.bell + '<span><b>' + escapeHtml(u.title) + '</b>' +
+      (u.body ? '<br>' + escapeHtml(u.body) : '') + '<span class="cp-upd-when"> \u00B7 ' + escapeHtml(cpUpdWhen(u.created_at)) + '</span></span></button>';
+    el.firstChild.onclick = ()=> cpOpenUpdate(u);
+  }
+  function cpOpenUpdate(u){
+    if(!u) return;
+    if(!u.read_at){ db.rpc('customer_updates_mark_read', { p_ids:[u.id] }).then(()=>{ u.read_at = new Date().toISOString(); cpRenderUpdatesBell(); cpRenderUpdateStrip(); }); }
+    if(u.request_id){
+      const req = (cpMyRequestsCache || []).find(r=> String(r.id) === String(u.request_id));
+      if(req && typeof srOpenDetail === 'function'){ srOpenDetail(req); return; }
+      cpShowScreen('Requests'); return;
+    }
+    if(u.kind === 'report'){ cpShowScreen('History', 'Visits'); }
+  }
+  function cpOpenUpdates(){
+    const old = document.getElementById('cpUpdatesSheet'); if(old) old.remove();
+    const ov = document.createElement('div');
+    ov.className = 'overlay open'; ov.id = 'cpUpdatesSheet';
+    ov.innerHTML = '<div class="sheet"><div class="sheet-head"><h3>Updates</h3><button type="button" class="sheet-close" data-close="1">&times;</button></div>' +
+      '<div class="cp-upd-list">' + (cpUpdates.length ? cpUpdates.map(u=> '<button type="button" class="cp-upd-item' + (u.read_at ? '' : ' unread') + '" data-u="' + escapeHtml(u.id) + '">' +
+        '<span class="cp-upd-dot"></span><span class="cp-upd-text"><b>' + escapeHtml(u.title) + '</b>' + (u.body ? '<span>' + escapeHtml(u.body) + '</span>' : '') +
+        '<span class="cp-upd-when">' + escapeHtml(cpUpdWhen(u.created_at)) + '</span></span></button>').join('')
+        : '<div class="empty-state">No updates yet. You\u2019ll see each step of your requests here.</div>') + '</div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', (e)=>{
+      if(e.target === ov || e.target.closest('[data-close]')){ ov.remove(); return; }
+      const it = e.target.closest('[data-u]');
+      if(it){ const u = cpUpdates.find(x=> x.id === it.dataset.u); ov.remove(); cpOpenUpdate(u); }
+    });
+    const unread = cpUpdates.filter(u=> !u.read_at).map(u=> u.id);
+    if(unread.length) db.rpc('customer_updates_mark_read', { p_ids:unread }).then(()=>{
+      const now = new Date().toISOString(); cpUpdates.forEach(u=>{ if(unread.includes(u.id)) u.read_at = now; });
+      cpRenderUpdatesBell(); cpRenderUpdateStrip();
+    });
+  }
+  $('cpUpdatesBell').addEventListener('click', cpOpenUpdates);

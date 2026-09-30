@@ -464,6 +464,9 @@
         cancel_requested: false, cancel_requested_reason: null, cancel_requested_at: null
       }).eq('id', request.id);
       if(error) throw error;
+      if(request && request.customerId && typeof notifyCustomer === 'function'){
+        notifyCustomer(request.customerId, 'Your request was cancelled', reason || 'Contact the office for details.', 'sr-cancel-'+request.id);
+      }
       if(request.linkedDispatchTicketId && typeof dtCancelTicket === 'function'){
         dtCancelTicket(request.linkedDispatchTicketId, reason).catch(()=>{});
       }
@@ -821,6 +824,9 @@
       };
       if(adminEl.querySelector('#srAdminNoFeeBtn')) adminEl.querySelector('#srAdminNoFeeBtn').onclick = async ()=>{
         const ok = await srAcknowledgeNoFee(request.id);
+        if(ok && request.customerId && typeof notifyCustomer === 'function'){
+          notifyCustomer(request.customerId, 'We received your request', 'The office has acknowledged it and will send the fee or schedule shortly.', 'sr-ack-'+request.id);
+        }
         if(ok){ toast('Acknowledged'); srCloseDetail(); srRenderQueueList(); } else toast('Could not save — try again');
       };
       if(adminEl.querySelector('#srAdminProposeScheduleBtn')) adminEl.querySelector('#srAdminProposeScheduleBtn').onclick = async ()=>{

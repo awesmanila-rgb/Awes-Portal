@@ -495,6 +495,7 @@
     // Sign-off (20261009_01). Read-only here: set by the database when the
     // job order is closed, or by service_report_sign_off() on Needs Review.
     data.id              = row.id || null;
+    data.customerId      = row.customer_id || null;
     // Stored in the existing reviewed_at / reviewed_by columns (20260919_03).
     data.signedOffAt     = row.reviewed_at || '';
     data.signedOffByName = row.reviewed_by || '';

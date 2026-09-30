@@ -3504,7 +3504,7 @@
       }
       if(!stillHasWork && rec.custId && typeof notifyCustomer === 'function'){
         notifyCustomer(rec.custId, 'Your service is complete',
-          'The work has been finished and closed out. Thank you!', 'jo-done');
+          'The work has been finished and your service report is ready in the portal. Thank you!', 'jo-done');
       }
       return true;
     }catch(e){
