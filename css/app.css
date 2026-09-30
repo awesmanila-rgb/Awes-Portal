@@ -4399,3 +4399,9 @@ body.ts-ro .ts-edit-only{ display:none !important; }
 .er-sig-canvas{ width:100%; height:200px; border:2px dashed var(--border); border-radius:10px; background:#fff; touch-action:none; }
 .er-pick{ display:flex; gap:8px; align-items:center; padding:9px 4px; border-top:1px solid var(--border); font-weight:600; }
 .er-pick input{ width:auto; margin:0; }
+/* Employees › Technicians (employees.js) */
+.emp-tabs{ margin-bottom:12px; }
+.emp-search{ flex:1 1 180px; min-width:140px; max-width:280px; padding:8px 10px !important; margin:0 !important; }
+.emp-tech-av{ background:#E4F0F1 !important; color:#1F6F7A !important; }
+.emp-head{ display:flex; gap:12px; align-items:center; margin:12px 0; }
+.emp-add{ margin-top:12px; }
