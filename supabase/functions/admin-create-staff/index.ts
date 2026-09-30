@@ -2,6 +2,7 @@
 //
 // WHO CAN CALL WHAT
 //   Super Admin (profiles.role = 'admin'): every action, for any staff user.
+//   Technicians (tech_* actions): Super Admin or Operations › Technicians › Edit.
 //   Department Head (staff, is_head in some department, no supervisor):
 //     create / update_access / update_profile / change_username /
 //     reset_password / deactivate / reactivate — ONLY for their own
@@ -198,6 +199,124 @@ async function deactivateOne(admin: SupabaseClient, userId: string, actor: strin
 
 // ---------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// Technician accounts (20261013_01)
+//   tech_create           { name, username, password }
+//   tech_update           { userId, name?, username?, restrictions? }
+//   tech_reset_password   { userId, password }
+//   tech_deactivate / tech_reactivate   { userId }
+// A technician signs in with <profile id>@awes-app.local (see techEmail()
+// in the app), so the Auth user is created with that address.
+// ---------------------------------------------------------------------
+const MIN_TECH_PASSWORD = 4;
+const techEmail = (id: string) => `${id}@awes-app.local`;
+
+async function canManageTechnicians(admin: SupabaseClient, caller: { id: string; isSuper: boolean; profile: Profile }): Promise<boolean> {
+  if (caller.isSuper) return true;
+  if (caller.profile.role !== 'staff') return false;
+  const { data } = await admin.from('staff_access').select('level, expires_at')
+    .eq('user_id', caller.id).eq('module_key', 'ops.technicians').maybeSingle();
+  return !!data && Number(data.level) >= 2 && (!data.expires_at || new Date(data.expires_at as string) > new Date());
+}
+
+async function loadTechnician(admin: SupabaseClient, id: unknown) {
+  const { data, error } = await admin.from('profiles')
+    .select('id, name, role, active, username').eq('id', String(id || '')).maybeSingle();
+  if (error || !data || data.role !== 'technician') throw new HttpError(404, 'Technician account not found.', 'not_found');
+  return data as { id: string; name: string | null; role: string; active: boolean; username: string | null };
+}
+
+function cleanRestrictions(r: unknown): Record<string, boolean> {
+  const o = (r && typeof r === 'object') ? r as Record<string, unknown> : {};
+  return { noHistory: !!o.noHistory, noReport: !!o.noReport, readOnly: !!o.readOnly };
+}
+
+async function technicianAction(admin: SupabaseClient, caller: { id: string; isSuper: boolean; profile: Profile }, action: string, body: Record<string, unknown>) {
+  if (!(await canManageTechnicians(admin, caller))) {
+    throw new HttpError(403, 'You need Operations › Technicians (Edit) to manage technician accounts.', 'forbidden');
+  }
+
+  if (action === 'tech_create') {
+    const name = String(body.name || '').trim();
+    if (!name) throw new HttpError(400, 'Full name is required.', 'bad_request');
+    const username = normUsername(body.username);
+    const password = String(body.password ?? '');
+    if (password.length < MIN_TECH_PASSWORD) throw new HttpError(400, `Password must be at least ${MIN_TECH_PASSWORD} characters.`, 'bad_password');
+    if (await usernameTaken(admin, username)) throw new HttpError(409, 'That username is already taken.', 'username_taken');
+
+    const wantId = crypto.randomUUID();
+    const { data: created, error: cErr } = await admin.auth.admin.createUser({
+      id: wantId, email: techEmail(wantId), password, email_confirm: true,
+      user_metadata: { role: 'technician', username }
+    } as never);
+    if (cErr || !created?.user) throw cErr || new Error('Could not create the account.');
+    const newId = created.user.id;
+    try {
+      // If this Auth version ignored the requested id, re-point the email at the real one.
+      if (newId !== wantId) {
+        const { error: eErr } = await admin.auth.admin.updateUserById(newId, { email: techEmail(newId), email_confirm: true });
+        if (eErr) throw eErr;
+      }
+      const { error: pErr } = await admin.from('profiles').upsert({
+        id: newId, name, role: 'technician', username, active: true, restrictions: {}
+      }, { onConflict: 'id' });
+      if (pErr) throw dbError(pErr);
+      await log(admin, caller.id, 'technician.create', newId, username, { name });
+    } catch (e) {
+      await admin.from('profiles').delete().eq('id', newId).then(() => {}, () => {});
+      await admin.auth.admin.deleteUser(newId).catch(() => {});
+      throw e;
+    }
+    return { id: newId, username };
+  }
+
+  const t = await loadTechnician(admin, body.userId);
+  const label = t.username || t.name || '';
+
+  switch (action) {
+    case 'tech_update': {
+      const patch: Record<string, unknown> = {};
+      if (body.name !== undefined) {
+        const name = String(body.name || '').trim();
+        if (!name) throw new HttpError(400, 'Full name is required.', 'bad_request');
+        patch.name = name;
+      }
+      if (body.username !== undefined) {
+        const username = normUsername(body.username);
+        if (await usernameTaken(admin, username, t.id)) throw new HttpError(409, 'That username is already taken.', 'username_taken');
+        patch.username = username;
+      }
+      if (body.restrictions !== undefined) patch.restrictions = cleanRestrictions(body.restrictions);
+      if (!Object.keys(patch).length) return { id: t.id };
+      const { error } = await admin.from('profiles').update(patch).eq('id', t.id);
+      if (error) throw dbError(error);
+      await log(admin, caller.id, 'technician.update', t.id, label, patch);
+      return { id: t.id };
+    }
+    case 'tech_reset_password': {
+      const password = String(body.password ?? '');
+      if (password.length < MIN_TECH_PASSWORD) throw new HttpError(400, `Password must be at least ${MIN_TECH_PASSWORD} characters.`, 'bad_password');
+      const { error } = await admin.auth.admin.updateUserById(t.id, { password });
+      if (error) throw error;
+      await log(admin, caller.id, 'technician.reset_password', t.id, label);
+      return { id: t.id };
+    }
+    case 'tech_deactivate': {
+      await deactivateOne(admin, t.id, caller.id);
+      await log(admin, caller.id, 'technician.deactivate', t.id, label);
+      return { id: t.id };
+    }
+    case 'tech_reactivate': {
+      await setBanned(admin, t.id, false);
+      const { error } = await admin.from('profiles').update({ active: true, deactivated_at: null, deactivated_by: null }).eq('id', t.id);
+      if (error) throw dbError(error);
+      await log(admin, caller.id, 'technician.reactivate', t.id, label);
+      return { id: t.id };
+    }
+  }
+  throw new HttpError(400, `Unknown action: ${action}`, 'bad_request');
+}
+
 async function handle(req: Request): Promise<Record<string, unknown>> {
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
@@ -227,6 +346,11 @@ async function handle(req: Request): Promise<Record<string, unknown>> {
     if (rErr) throw dbError(rErr);
     return { ok: true, validForMinutes: REAUTH_MINUTES };
   }
+
+  // ---- technicians (20261013_01) ---------------------------------------
+  // Super Admin, or staff with Operations › Technicians at Edit (the
+  // Operations Head). HR keeps the records side (Technician Profiles).
+  if (action.startsWith('tech_')) return await technicianAction(admin, caller, action, body);
 
   if (!caller.isSuper && !caller.isHead) throw new HttpError(403, 'Only the Super Admin or a department Head can manage staff.', 'forbidden');
 
