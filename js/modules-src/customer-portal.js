@@ -471,6 +471,25 @@
     more.textContent = others>0 ? '+'+others+' more' : '';
     more.onclick = ()=> cpShowScreen('Requests');
 
+    // A request that isn't a visit yet (new → schedule proposed) still gets
+    // the card, with its latest update, so the customer sees it moving.
+    const pending = !subject && rows.filter(r=> ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed'].includes(r.status))
+      .sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
+    if(pending){
+      $('cpVisitTitle').textContent = 'Your request';
+      const eqP = cpFindEquip(pending.equipmentId);
+      const step = { new:'Waiting for the office to acknowledge', acknowledged:'Acknowledged \u2014 the office will send the fee or schedule shortly',
+        fee_proposed:'Service fee proposed \u2014 tap to accept or decline', fee_accepted:'Fee accepted \u2014 the office will propose a schedule',
+        schedule_proposed:'Schedule proposed \u2014 tap to confirm' }[pending.status];
+      cpSetHtml(hero,
+        '<div class="cph-row-top"><span class="cph-ic">'+CP_ICON.chat+'</span>'+
+        '<div class="cph-text"><p class="cph-title">'+escapeHtml(srStatusLabel(pending.status))+'</p>'+
+        '<p class="cph-sub">'+escapeHtml(step)+'</p>'+
+        '<p class="cph-sub">'+(eqP ? escapeHtml(equipDisplayName(eqP))+' \u00B7 ' : '')+escapeHtml(String(pending.description||'').slice(0, 80))+'</p>'+
+        cpUpdateBannerHtml(pending.id)+'</div></div>');
+      hero.onclick = ()=>{ if(typeof srOpenDetail === 'function') srOpenDetail(pending); };
+      return;
+    }
     if(!subject){
       const next = cpEquipment.filter(eq=> eq.nextPmDate && daysUntil(eq.nextPmDate)>=0)
         .sort((a,b)=> a.nextPmDate.localeCompare(b.nextPmDate))[0];
@@ -2225,6 +2244,16 @@
     }catch(e){}
     cpRenderUpdatesBell();
     cpRenderUpdateStrip();
+    // the request list / home card may have drawn before the updates arrived
+    const list = $('cpReqHistoryList');
+    if(list && cpMyRequestsCache && list.querySelector('.cp-row')){
+      list.querySelectorAll('.cp-row').forEach(row=>{
+        const body = row.querySelector('.cp-row-body'); if(!body) return;
+        const old = body.querySelector('.cp-upd-banner'); if(old) old.remove();
+        const html = cpUpdateBannerHtml(row.dataset.reqId);
+        if(html) body.insertAdjacentHTML('beforeend', html);
+      });
+    }
   }
   const cpUpdRecent = (u)=> u && (Date.now() - new Date(u.created_at).getTime()) < 24 * 3600e3;
   function cpUpdWhen(ts){
