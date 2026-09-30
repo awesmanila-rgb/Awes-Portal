@@ -29,6 +29,7 @@
     $('homeBtn').style.display = '';
     setHeaderTitle(forceMine === true ? 'My Attendance' : 'Online DTR', 'Daily Time Record');
     window.scrollTo({top:0});
+    if(typeof techHubShowInDtr === 'function') techHubShowInDtr(hrIsReviewer() && forceMine !== true);
     if(hrIsReviewer() && forceMine !== true){
       hrApplyStaffMode();
       // Admin has no DTR of their own — DTR is per-technician. Land on the
@@ -949,6 +950,11 @@
     myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' },
     paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
+    admPermits:     { nav:'sbNavAdmPermits',     title:'Permits & Licenses',   sub:'Registrations, licenses & expiry alerts' },
+    admVehicles:    { nav:'sbNavAdmVehicles',    title:'Vehicles',             sub:'Trip tickets, fuel, PMS, OR/CR & insurance' },
+    admContracts:   { nav:'sbNavAdmContracts',   title:'Contracts',            sub:'Customer, supplier & lease contracts' },
+    admBills:       { nav:'sbNavAdmBills',       title:'Bills & Utilities',    sub:'Monthly bills & payments' },
+    admAssets:      { nav:'sbNavAdmAssets',      title:'Office Assets',        sub:'Equipment issued to staff' },
     errands:        { nav:'sbNavErrands',        title:'Errands',              sub:'Messenger errands, transmittals & recurring' },
     myErrands:      { nav:'',                    title:'My Errands',           sub:'Your errands for today' },
     errandRequests: { nav:'',                    title:'Errand Requests',      sub:'Ask Administration for a messenger' },
@@ -1452,11 +1458,14 @@
     $('footerBar').style.display = 'none';
     $('metaBar').style.display = 'none';
     $('homeBtn').style.display = '';
-    setHeaderTitle('Finance & HR', 'Attendance, cash advance & leave');
+    setHeaderTitle('Finance & HR', 'Attendance, leave, cash advance & payslips');
     if(typeof techSetNavActive === 'function') techSetNavActive('finance');
     window.scrollTo({top:0});
   }
   $('techFhAttendance').addEventListener('click', ()=> showDtrView());
+  // Payslips (payroll-runs.js) — technicians have the bottom nav, not the
+  // sidebar, so this tile is their way in.
+  $('techFhPayslips').addEventListener('click', ()=> showPurchasingView('myPayslips'));
   $('techFhCashAdvance').addEventListener('click', ()=> showCashAdvanceView());
   $('techFhLeave').addEventListener('click', ()=> showLeaveView());
   $('techFhLiquidation').addEventListener('click', async ()=>{

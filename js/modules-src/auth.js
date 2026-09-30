@@ -348,6 +348,8 @@
       sbLastActiveId = activeId;
       const sec = active && active.closest('.sb-section');
       if(sec && sbState[sec.dataset.sbKey] === 'closed'){ delete sbState[sec.dataset.sbKey]; sbSaveState(); }
+      // forward view: follow the page you're on into its section
+      if(sec && group.classList.contains('sb-drill') && !sec.classList.contains('sb-current')) sbDrillInto(sec);
     }
     group.querySelectorAll('.sb-section').forEach(sec=>{
       const st = sbState[sec.dataset.sbKey];
@@ -356,8 +358,9 @@
       const open = hover || st === 'open' || (st !== 'closed' && hasActive);
       sec.classList.toggle('open', open);
       sec.classList.toggle('pinned', st === 'open');
+      sec.classList.toggle('has-current', hasActive);
       const t = sec.querySelector('.sb-section-toggle');
-      if(t) t.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if(t) t.setAttribute('aria-expanded', sec.classList.contains('sb-current') ? 'true' : 'false');
       const alert = Array.from(sec.querySelectorAll('.sidebar-badge')).some(b=>{
         const n = b.textContent.trim();
         return b.style.display !== 'none' && n !== '' && n !== '0';
@@ -375,49 +378,41 @@
   // the pointer.
   function sbRefitSoon(){ clearTimeout(sbRefitTimer); sbRefitTimer = setTimeout(fitSidebarNav, 240); }
 
+  function sbDrillInto(sec){
+    const group = document.getElementById('sidebarAdminGroup');
+    group.querySelectorAll('.sb-section.sb-current').forEach(x=> x.classList.remove('sb-current'));
+    sec.classList.add('sb-current');
+    group.classList.add('sb-drill');
+    const t = sec.querySelector('.sb-section-toggle'); if(t) t.setAttribute('aria-expanded', 'true');
+    const nav = group.closest('nav') || group.parentElement; if(nav) nav.scrollTop = 0;
+    const first = sec.querySelector('.sidebar-link'); if(first && document.activeElement === t) first.focus({ preventScroll:true });
+    sbRefitSoon();
+  }
+  function sbDrillBack(){
+    const group = document.getElementById('sidebarAdminGroup');
+    const cur = group.querySelector('.sb-section.sb-current');
+    group.classList.remove('sb-drill');
+    group.querySelectorAll('.sb-section.sb-current').forEach(x=>{ x.classList.remove('sb-current'); const t = x.querySelector('.sb-section-toggle'); if(t) t.setAttribute('aria-expanded', 'false'); });
+    if(cur){ const t = cur.querySelector('.sb-section-toggle'); if(t) t.focus({ preventScroll:true }); }
+    sbRefitSoon();
+  }
   function initSidebarSections(){
     const group = document.getElementById('sidebarAdminGroup');
     if(!group || group.dataset.sbInit) return;
     group.dataset.sbInit = '1';
 
+    // Forward (drill-in) navigation: the sidebar lists the section names;
+    // tapping one slides FORWARD to that section's pages, with a Back row at
+    // the top. Replaces the old open-downward accordion.
     group.addEventListener('click', (e)=>{
       const t = e.target.closest('.sb-section-toggle');
       if(!t) return;
       const sec = t.closest('.sb-section');
-      const key = sec.dataset.sbKey;
-      const hovering = sec.classList.contains('sb-hover') && !sec.classList.contains('sb-hover-off');
-      if(sbState[key] === 'open' || (sec.classList.contains('open') && !hovering)){
-        // pinned, or open only because it holds the current page → close
-        sbState[key] = 'closed';
-        sec.classList.add('sb-hover-off');   // stay closed even though the pointer is still here
-      }else{
-        sbState[key] = 'open';
-        sec.classList.remove('sb-hover-off');
-      }
-      sbSaveState();
-      sbSyncSections();
-      sbRefitSoon();
+      if(group.classList.contains('sb-drill') && sec.classList.contains('sb-current')) sbDrillBack();
+      else sbDrillInto(sec);
     });
-
-    group.querySelectorAll('.sb-section').forEach(sec=>{
-      const t = sec.querySelector('.sb-section-toggle');
-      let leaveTimer = null;
-      t.addEventListener('pointerenter', (e)=>{
-        if(e.pointerType !== 'mouse') return;
-        clearTimeout(leaveTimer);
-        if(sec.classList.contains('sb-hover-off')) return;
-        sec.classList.add('sb-hover');
-        sbSyncSections();
-      });
-      sec.addEventListener('pointerenter', (e)=>{ if(e.pointerType === 'mouse') clearTimeout(leaveTimer); });
-      sec.addEventListener('pointerleave', (e)=>{
-        if(e.pointerType !== 'mouse') return;
-        clearTimeout(leaveTimer);
-        leaveTimer = setTimeout(()=>{
-          sec.classList.remove('sb-hover', 'sb-hover-off');
-          sbSyncSections();
-        }, 250);
-      });
+    group.addEventListener('keydown', (e)=>{
+      if(e.key === 'Escape' && group.classList.contains('sb-drill')){ sbDrillBack(); }
     });
 
     // Follow the rest of the app without touching it: setSidebarActive()

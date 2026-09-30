@@ -140,6 +140,7 @@
     if(key === 'paySetup' || key === 'payRules'){ if(currentUser && purchStaffAllowed(key)) payOnShow(key); return; }
     if(key === 'myPayslips'){ if(currentUser) prMyPayslipsShow(); return; }
     if(key === 'errandRequests'){ if(currentUser) erOnShow(key); return; }
+    if(/^adm(Permits|Vehicles|Contracts|Bills|Assets)$/.test(key)){ if(currentUser && purchStaffAllowed(key)) admOnShow(key.slice(3).toLowerCase()); return; }
     if(key === 'errands' || key === 'myErrands'){ if(currentUser && purchStaffAllowed(key)) erOnShow(key); return; }
     if(key === 'payRuns'){ if(currentUser && purchStaffAllowed(key)) prOnShow(); return; }
     if(key === 'payTimesheets'){ if(currentUser && purchStaffAllowed(key)) tsOnShow(); return; }

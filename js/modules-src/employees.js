@@ -17,19 +17,40 @@
   const empCanTechEdit = ()=> !!currentUser && (currentUser.role === 'admin' || (isStaffUser() && can('ops.technicians', 'edit')));
   const empIsSuper = ()=> !!currentUser && currentUser.role === 'admin';
 
-  // Tab strip shown above Office Staff / Technicians
+  // Tab strip for the Technicians page / Employees:
+  //   staff — Office Staff (Super Admin) or My Team (a Head)
+  //   tech  — technician accounts (Operations › Technicians)
+  //   att   — Attendance & Records: the HR technician attendance table, where
+  //           each technician's Profile (records) opens (HR › Technician
+  //           Attendance / Technician Profiles). Staff only — the Super Admin
+  //           reaches it from HR › Attendance.
+  const empCanAttView = ()=> !!currentUser && isStaffUser() && (can('hr.attendance', 'view') || can('hr.tech_profiles', 'view'));
   function empTabsHtml(active){
-    const staffOk = empIsSuper() || staffIsHead();
-    if(!(staffOk && empCanTechView())) return '';
-    return '<div class="seg-tabs emp-tabs">' +
-      '<button type="button" class="seg-tab' + (active === 'staff' ? ' active' : '') + '" data-emp-tab="staff">' + (empIsSuper() ? 'Office Staff' : 'My Team') + '</button>' +
-      '<button type="button" class="seg-tab' + (active === 'tech' ? ' active' : '') + '" data-emp-tab="tech">Technicians</button></div>';
+    const tabs = [];
+    if(empIsSuper() || staffIsHead()) tabs.push(['staff', empIsSuper() ? 'Office Staff' : 'My Team']);
+    if(empCanTechView()) tabs.push(['tech', empIsSuper() ? 'Technicians' : 'Accounts']);
+    if(empCanAttView()) tabs.push(['att', 'Attendance & Records']);
+    if(tabs.length < 2) return '';
+    return '<div class="seg-tabs emp-tabs">' + tabs.map(([k, l])=>
+      '<button type="button" class="seg-tab' + (active === k ? ' active' : '') + '" data-emp-tab="' + k + '">' + l + '</button>').join('') + '</div>';
   }
   function empBindTabs(target){
     target.querySelectorAll('[data-emp-tab]').forEach(b=> b.addEventListener('click', ()=>{
-      stfEmpTab = b.dataset.empTab;
-      if(stfEmpTab === 'tech') empRenderTechs(target); else staffRenderTeam();
+      const t = b.dataset.empTab;
+      if(t === 'att'){ dtrSetPeopleMode('tech'); showDtrView(); setSidebarActive(staffNavId('hr.attendance')); return; }
+      stfEmpTab = t;
+      if(t === 'tech'){ if($('dtrView').style.display !== 'none') staffOpenTechnicians(); else empRenderTechs(target); }
+      else staffOpenTeam();
     }));
+  }
+  // Same strip on top of the HR technician attendance page (dtrView)
+  function techHubShowInDtr(show){
+    const box = $('techHubTabs');
+    if(!box) return;
+    const html = show && isStaffUser() ? empTabsHtml('att') : '';
+    box.innerHTML = html;
+    box.style.display = html ? '' : 'none';
+    if(html){ empBindTabs(box); setHeaderTitle('Technicians', 'Attendance & records'); }
   }
 
   // Opener for staff with Operations › Technicians (sidebar page)
@@ -38,7 +59,7 @@
     if(currentUser.role === 'admin' && !(await ensureAdminAuthenticated())) return;
     stfEmpTab = 'tech';
     showStaffView('team');
-    setHeaderTitle('Employees', 'Technician accounts');
+    setHeaderTitle(isStaffUser() && !staffIsHead() ? 'Technicians' : 'Employees', 'Technician accounts');
     if(isStaffUser()) setSidebarActive(staffNavId('ops.technicians'));
     const target = $('staffPanel_team');
     target.innerHTML = '<div class="empty-state">Loading\u2026</div>';

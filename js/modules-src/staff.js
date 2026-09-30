@@ -44,6 +44,8 @@
     'hr.payroll_runs', 'fin.payroll_approve',
     // Errands — 20261012_01
     'adm.errands', 'adm.my_errands',
+    // Administration — 20261014_01
+    'adm.permits', 'adm.vehicles', 'adm.contracts', 'adm.bills', 'adm.assets',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -461,11 +463,23 @@
       staffLoadDirectory().then(ok=>{ if(ok && stf.modules.length) staffRenderSidebar(); });
     }
     if(pagesEl){
-      const keys = STAFF_READY_MODULES.filter(k=> can(k, 'view'));
-      pagesEl.innerHTML = keys.map(k=>{
+      // Technician Attendance, Technician Profiles and Technicians are one
+      // page — a single "Technicians" entry with tabs (employees.js).
+      const keys = [];
+      STAFF_READY_MODULES.filter(k=> can(k, 'view')).forEach(k=>{
+        const kk = STAFF_TECH_HUB.includes(k) ? 'tech.hub' : k;
+        if(!keys.includes(kk)) keys.push(kk);
+      });
+      // Grouped under the same headings as the admin sidebar (index.html)
+      const btn = (k)=>{
+        if(k === 'tech.hub') return '<button type="button" class="sidebar-link" id="' + staffNavId(k) + '" data-staff-open="tech.hub">Technicians</button>';
         const m = stfModule(k);
-        return '<button type="button" class="sidebar-link" id="' + staffNavId(k) + '" data-staff-open="' + escapeHtml(k) + '">' + escapeHtml(m ? m.label : k) + '</button>';
-      }).join('');
+        return '<button type="button" class="sidebar-link" id="' + staffNavId(k) + '" data-staff-open="' + escapeHtml(k) + '">' + escapeHtml(STAFF_NAV_LABELS[k] || (m ? m.label : k)) + '</button>';
+      };
+      const groups = {};
+      keys.forEach(k=>{ const g = staffNavGroup(k); (groups[g] = groups[g] || []).push(k); });
+      pagesEl.innerHTML = STAFF_NAV_GROUPS.filter(g=> groups[g]).map(g=>
+        '<div class="sidebar-sub-label">' + escapeHtml(g) + '</div>' + groups[g].map(btn).join('')).join('');
     }
     if($('staffNavTeam')) $('staffNavTeam').style.display = staffIsHead() ? '' : 'none';
     if(typeof fitSidebarNav === 'function') fitSidebarNav();
@@ -1649,7 +1663,20 @@
   })();
 
   // Each opened page → the screen that already shows it.
-  function staffNavId(key){ return 'staffNavMod_' + String(key).replace(/[^a-z0-9]/gi, '_'); }
+  const STAFF_TECH_HUB = ['hr.attendance', 'hr.tech_profiles', 'ops.technicians'];
+  // Staff sidebar headings — same order and names as the admin sidebar
+  const STAFF_NAV_GROUPS = ['Operations', 'Customers', 'Purchasing', 'Inventory', 'Tools', 'Human Resources', 'Finance', 'Administration', 'System'];
+  function staffNavGroup(k){
+    if(k === 'tech.hub') return (can('hr.attendance', 'view') || can('hr.tech_profiles', 'view')) ? 'Human Resources' : 'Operations';
+    if(k === 'adm.customers' || k === 'adm.equipment') return 'Customers';
+    if(k === 'adm.dropdowns') return 'System';
+    const pre = String(k).split('.')[0];
+    return { ops:'Operations', pur:'Purchasing', inv:'Inventory', tools:'Tools', hr:'Human Resources', fin:'Finance', adm:'Administration' }[pre] || 'Operations';
+  }
+  // Shorter sidebar names (the access catalog keeps its full labels)
+  const STAFF_NAV_LABELS = { 'ops.dispatch':'Dispatch', 'adm.equipment':'Equipment', 'pur.materials':'Materials', 'pur.suppliers':'Suppliers',
+    'pur.requisitions':'Material Requisitions', 'hr.staff_attendance':'Office Staff Attendance', 'adm.my_errands':'My Errands', 'adm.announcements':'Memos & Announcements' };
+  function staffNavId(key){ if(STAFF_TECH_HUB.includes(key)) key = 'tech.hub'; return 'staffNavMod_' + String(key).replace(/[^a-z0-9]/gi, '_'); }
   const STAFF_MODULE_OPENERS = {
     'pur.materials':       ()=> showPurchasingView('materials'),
     'pur.suppliers':       ()=> showPurchasingView('suppliers'),
@@ -1685,6 +1712,11 @@
     'hr.timesheets':       ()=> showPurchasingView('payTimesheets'),
     'hr.payroll_runs':     ()=> showPurchasingView('payRuns'),
     'adm.errands':         ()=> showPurchasingView('errands'),
+    'adm.permits':         ()=> showPurchasingView('admPermits'),
+    'adm.vehicles':        ()=> showPurchasingView('admVehicles'),
+    'adm.contracts':       ()=> showPurchasingView('admContracts'),
+    'adm.bills':           ()=> showPurchasingView('admBills'),
+    'adm.assets':          ()=> showPurchasingView('admAssets'),
     'adm.my_errands':      ()=> showPurchasingView('myErrands'),
     'fin.payroll_approve': ()=> showPurchasingView('payRuns'),
     'adm.customers':       ()=>{ admApplyStaffMode(); showCustomersManagerView(); },
@@ -1801,6 +1833,11 @@
     return isStaffUser() && !!(currentUser.access && currentUser.access.see_costs);
   }
   function staffOpenModule(key){
+    if(key === 'tech.hub'){   // Technicians: Attendance & Records first, else Accounts
+      const k = ['hr.attendance', 'hr.tech_profiles', 'ops.technicians'].find(x=> can(x, 'view'));
+      if(!k){ toast('This page isn\u2019t open yet'); return; }
+      key = k;
+    }
     const fn = STAFF_MODULE_OPENERS[key];
     if(typeof fn === 'function' && STAFF_READY_MODULES.includes(key) && can(key, 'view')){
       Promise.resolve(fn()).then(()=> setSidebarActive(staffNavId(key)));
@@ -1814,7 +1851,8 @@
   const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
-    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands' };
+    paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands',
+    admPermits:'adm.permits', admVehicles:'adm.vehicles', admContracts:'adm.contracts', admBills:'adm.bills', admAssets:'adm.assets' };
   // May this user open purchasing page `key`? (Super Admin: always)
   function purchStaffAllowed(key){
     if(currentUser && currentUser.role === 'admin') return true;
