@@ -33369,16 +33369,20 @@
     if(status==='completed' || status==='closed') return 4;
     return 1; // schedule_confirmed / preparing / dispatched
   }
+  // Each step is one column — dot on top, its label centred underneath —
+  // so the labels always line up with their dots (the old version laid the
+  // labels out separately and they drifted). Connectors are drawn between
+  // the columns by CSS (.cph-step::before).
   function cpTrackHtml(status){
     const cur = cpTrackIdx(status);
-    let dots = '<div class="cph-track">';
-    CP_TRACK.forEach((_, i)=>{
-      if(i) dots += '<span class="cph-track-ln'+(i<=cur ? ' on' : '')+'"></span>';
-      dots += '<span class="cph-track-dot'+(i<cur || (i===cur && cur===4) ? ' on' : i===cur ? ' now' : '')+'">'+(i<cur || (i===cur && cur===4) ? CP_ICON.check : (i+1))+'</span>';
-    });
-    dots += '</div><div class="cph-track-lb">'+CP_TRACK.map((l,i)=> '<span'+(i===cur ? ' class="now"' : '')+'>'+l+'</span>').join('')+'</div>';
-    return dots;
+    return '<div class="cph-steps">' + CP_TRACK.map((l, i)=>{
+      const done = i < cur || (i === cur && cur === 4), now = i === cur && !done;
+      return '<div class="cph-step' + (done ? ' on' : now ? ' now' : '') + (i <= cur ? ' reached' : '') + '">' +
+        '<span class="cph-track-dot' + (done ? ' on' : now ? ' now' : '') + '">' + (done ? CP_ICON.check : (i + 1)) + '</span>' +
+        '<span class="cph-step-lb">' + l + '</span></div>';
+    }).join('') + '</div>';
   }
+
   function cpVisitWhen(r){
     const d = r.proposedScheduleDate || r.requestedDate;
     return d ? cpRelDay(d)+(r.proposedScheduleTime ? ' · '+escapeHtml(r.proposedScheduleTime) : '') : 'Date to be confirmed';
@@ -33475,7 +33479,11 @@
       '<span class="cph-unit-img">'+(url ? '<img src="'+escapeHtml(url)+'" alt="" loading="lazy">' : CP_ICON.unit)+'</span>'+
       '<span class="cph-text"><span class="cph-unit-name">'+cpEquipLabel(eq)+'</span>'+
       (spec ? '<span class="cph-sub">'+spec+'</span>' : '')+'<span class="cph-sub">'+last+'</span></span>'+
-      '<span class="cph-pill cph-pill-'+pm.tone+'">'+pm.pill+'</span></button>';
+      // Status as a small icon (only when it needs attention) + an arrow to
+      // open the unit; the wording stays available to screen readers.
+      '<span class="cph-unit-go" aria-label="'+escapeHtml(pm.pill)+'" title="'+escapeHtml(pm.pill)+'">'+
+        (pm.tone === 'danger' ? '<span class="cph-st cph-st-danger">!</span>' : pm.tone === 'warn' ? '<span class="cph-st cph-st-warn">'+CP_ICON.clock+'</span>' : '')+
+        '<span class="cph-chev">\u203A</span></span></button>';
   }
   function cpRenderUnitsSection(){
     const c = cpUnitCounts();
@@ -33956,7 +33964,9 @@
     // Dot = unread messages from the office. Fee / schedule decisions have
     // their own "Needs your action" cards and the bell, so not repeated here.
     const unreadMsg = (typeof cpUpdates !== 'undefined') && cpUpdates.some(u=> u.kind === 'message' && !u.read_at);
-    bell.style.display = '';
+    // The header now carries only the bell (office messages are in its
+    // Updates list and in each request); the chat icon stays hidden.
+    bell.style.display = 'none';
     bell.innerHTML = CP_ICON.chat + (unreadMsg ? '<span class="cp-badge-dot"></span>' : '');
   }
   $('cpNotifBell').addEventListener('click', ()=>{
