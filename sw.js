@@ -1032,7 +1032,7 @@
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
 // v182 — customer home redesign (green mobile) + launch splash, merged.
-const CACHE_NAME = 'awes-sr-v182';
+const CACHE_NAME = 'awes-sr-v183';
 
 // Split into two lists on purpose.
 //
