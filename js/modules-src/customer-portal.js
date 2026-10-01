@@ -464,6 +464,7 @@
     const upcoming = rows.filter(r=> r.status==='schedule_confirmed')
       .sort((a,b)=> String(a.proposedScheduleDate||a.requestedDate||'').localeCompare(String(b.proposedScheduleDate||b.requestedDate||'')));
     const subject = live[0] || upcoming[0] || null;
+    cpHeroReqId = subject ? subject.id : null;
     const others = live.length + upcoming.length - (subject ? 1 : 0);
     $('cpVisitTitle').textContent = subject && live.length ? 'Current visit' : 'Next visit';
     const more = $('cpVisitMore');
@@ -473,9 +474,10 @@
 
     // A request that isn't a visit yet (new → schedule proposed) still gets
     // the card, with its latest update, so the customer sees it moving.
-    const pending = !subject && rows.filter(r=> ['new','acknowledged','fee_proposed','fee_accepted','schedule_proposed'].includes(r.status))
+    const pending = !subject && rows.filter(r=> ['new','acknowledged','fee_accepted'].includes(r.status) && r.feeStatus !== 'proposed')
       .sort((a,b)=> String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
     if(pending){
+      cpHeroReqId = pending.id;
       $('cpVisitTitle').textContent = 'Your request';
       const eqP = cpFindEquip(pending.equipmentId);
       const step = { new:'Waiting for the office to acknowledge', acknowledged:'Acknowledged \u2014 the office will send the fee or schedule shortly',
@@ -541,7 +543,7 @@
     return '<button type="button" class="cph-unit" data-equip-id="'+escapeHtml(String(eq.id))+'">'+
       '<span class="cph-unit-img">'+(url ? '<img src="'+escapeHtml(url)+'" alt="" loading="lazy">' : CP_ICON.unit)+'</span>'+
       '<span class="cph-text"><span class="cph-unit-name">'+cpEquipLabel(eq)+'</span>'+
-      '<span class="cph-sub">'+(spec ? spec+' · ' : '')+last+'</span></span>'+
+      (spec ? '<span class="cph-sub">'+spec+'</span>' : '')+'<span class="cph-sub">'+last+'</span></span>'+
       '<span class="cph-pill cph-pill-'+pm.tone+'">'+pm.pill+'</span></button>';
   }
   function cpRenderUnitsSection(){
@@ -562,7 +564,7 @@
     const attention = cpEquipment.filter(eq=> eq.status.key==='overdue' || eq.status.key==='due-soon')
       .sort((a,b)=> (a.status.key==='overdue' ? 0 : 1) - (b.status.key==='overdue' ? 0 : 1) || String(a.nextPmDate).localeCompare(String(b.nextPmDate)));
     const shown = (attention.length ? attention : cpEquipment).slice(0, 3);
-    $('cpUnitsSectionTitle').textContent = attention.length ? 'Units needing maintenance' : 'Your units';
+    $('cpUnitsSectionTitle').textContent = attention.length ? 'Units needing maintenance' : 'My units';
     // The status line says only what's true: "nothing overdue" is only
     // claimed when every unit actually has a PM date.
     const statusLine = attention.length ? ''
@@ -959,7 +961,6 @@
       .on('postgres_changes', { event:'*', schema:'public', table:'service_reports', filter:'customer_id=eq.'+customerId }, onChange)
       .on('postgres_changes', { event:'*', schema:'public', table:'service_requests', filter:'customer_id=eq.'+customerId }, onRequestChange)
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'customer_updates', filter:'customer_id=eq.'+customerId }, (p)=>{
-        if(p && p.new && p.new.title) toast(p.new.title);
         onRequestChange();
       })
       .subscribe();
@@ -988,7 +989,8 @@
     cpMyRequestsCache = rows;
     await cpLoadUpdates();
     cpRefreshNotifBell(rows);
-    renderCustomerHero(rows);
+    await renderCustomerHero(rows);
+    cpRenderUpdateStrip();   // after the home card, so it doesn't repeat it
   }
 
   // Header chat/notification icon — the intended entry point into
@@ -1020,11 +1022,21 @@
   function cpRefreshNotifBell(rows){
     const bell = $('cpNotifBell');
     if(!bell) return;
-    const needsAttention = rows.filter(r=> r.feeStatus==='proposed' || r.status==='schedule_proposed').length;
+    // Dot = unread messages from the office. Fee / schedule decisions have
+    // their own "Needs your action" cards and the bell, so not repeated here.
+    const unreadMsg = (typeof cpUpdates !== 'undefined') && cpUpdates.some(u=> u.kind === 'message' && !u.read_at);
     bell.style.display = '';
-    bell.innerHTML = CP_ICON.chat + (needsAttention>0 ? '<span class="cp-badge-dot"></span>' : '');
+    bell.innerHTML = CP_ICON.chat + (unreadMsg ? '<span class="cp-badge-dot"></span>' : '');
   }
-  $('cpNotifBell').addEventListener('click', cpOpenCentralChat);
+  $('cpNotifBell').addEventListener('click', ()=>{
+    // opening the chat reads the office's messages — clear their updates too
+    const ids = (typeof cpUpdates !== 'undefined' ? cpUpdates : []).filter(u=> u.kind === 'message' && !u.read_at).map(u=> u.id);
+    if(ids.length) db.rpc('customer_updates_mark_read', { p_ids:ids }).then(()=>{
+      const now = new Date().toISOString(); cpUpdates.forEach(u=>{ if(ids.includes(u.id)) u.read_at = now; });
+      cpRenderUpdatesBell(); cpRenderUpdateStrip(); cpRefreshNotifBell(cpMyRequestsCache || []);
+    });
+    cpOpenCentralChat();
+  });
 
   // ---------- Header profile menu ----------
   // Account settings / Notifications / Sign out — see the redesign spec's
@@ -2236,6 +2248,7 @@
   // shows as a banner on its card (and the home strip) for 24 hours.
   // =====================================================================
   let cpUpdates = [];
+  let cpHeroReqId = null;   // the request the home card is showing (renderCustomerHero)
   async function cpLoadUpdates(){
     if(!db || !currentUser || currentUser.role !== 'customer') return;
     try{
@@ -2279,7 +2292,11 @@
   function cpRenderUpdateStrip(){
     const el = $('cpUpdateStrip');
     if(!el) return;
-    const u = cpUpdates.find(x=> !x.read_at && cpUpdRecent(x));
+    // Not repeated: the request already on the home card, and fee / schedule
+    // proposals that have a "Needs your action" card.
+    const actionReq = new Set((cpMyRequestsCache || []).filter(r=> r.feeStatus === 'proposed' || r.status === 'schedule_proposed').map(r=> String(r.id)));
+    const u = cpUpdates.find(x=> !x.read_at && cpUpdRecent(x) &&
+      String(x.request_id) !== String(cpHeroReqId) && !actionReq.has(String(x.request_id)));
     if(!u){ el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = '';
     el.innerHTML = '<button type="button" class="cp-upd-strip">' + CP_ICON.bell + '<span><b>' + escapeHtml(u.title) + '</b>' +
