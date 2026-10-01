@@ -1031,7 +1031,8 @@
 // Also carries v111 (expired job orders no longer show the customer an
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
-const CACHE_NAME = 'awes-sr-v180';
+// v182 — customer home redesign (green mobile) + launch splash, merged.
+const CACHE_NAME = 'awes-sr-v182';
 
 // Split into two lists on purpose.
 //
@@ -1047,6 +1048,7 @@ const LOCAL_SHELL = [
   './index.html',
   './manifest.json',
   './logo.png',
+  './logo-white.png',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',

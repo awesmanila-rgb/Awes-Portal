@@ -4441,3 +4441,69 @@ body.ts-ro .ts-edit-only{ display:none !important; }
 .cp-upd-dot{ flex:0 0 8px; height:8px; border-radius:50%; margin-top:6px; background:transparent; }
 .cp-upd-item.unread .cp-upd-dot{ background:#ff754d; }
 .cp-upd-item.unread b{ color:var(--text); }
+
+/* =====================================================================
+   Customer home — green mobile redesign (white header, sage account
+   pill, rounded banner, dark-green Current Visit card, round unit photos,
+   rounded bottom nav). Overrides the earlier .cph rules; markup hooks and
+   JS ids are unchanged.
+   ===================================================================== */
+.cph{ background:#fff; --cph-deep:#2B8200; --cph-sage:#DCEBE3; --cph-ink:#1C2A17; }
+.cph .cp-header.cp-header-soft{ background:#fff; border-radius:0; min-height:0; padding-top:14px; padding-bottom:4px; }
+.cph .cph-brand{ gap:12px; font-size:17px; font-weight:500; color:var(--cph-ink); }
+.cph .cph-brand img{ width:44px; height:44px; border-radius:0; }
+.cph .cp-icon-btn{ background:transparent; border:none; color:var(--cph-ink); }
+.cph .cp-icon-btn svg{ width:26px; height:26px; }
+.cph .cph-hello{ background:#fff; border-bottom:none; padding-top:6px; padding-bottom:8px; }
+.cph .cph-greet{ font-size:28px; margin:10px 0 18px; }
+.cph .cph-viewing-lbl{ margin:0 0 8px; font-size:15px; color:var(--cph-ink); }
+.cph .cph-acct{ display:flex; width:100%; justify-content:space-between; height:46px; padding:0 20px;
+  background:var(--cph-sage); border:none; border-radius:999px; font-size:18px; font-weight:500; color:var(--cph-ink); }
+.cph .cph-acct-caret{ color:#3FB08A; font-size:24px; line-height:1; }
+
+.cph .cph-banner{ margin-top:18px; border-radius:24px; background:linear-gradient(90deg,#0A9208 0%,#66CC59 100%); }
+
+.cph .cph-sec h2{ font-size:20px; }
+.cph .cph-sec a{ color:var(--cph-ink); font-weight:500; }
+.cph .cph-visit{ display:flex; flex-direction:column; min-height:270px; margin-bottom:12px; padding:20px 20px 22px;
+  background:var(--cph-deep); color:#fff; border-radius:24px; }
+.cph .cph-visit .cph-sec{ margin:0 0 8px; }
+.cph .cph-visit .cph-sec h2, .cph .cph-visit .cph-sec a{ color:#fff; }
+.cph .cph-visit #cpHero{ flex:1; display:flex; flex-direction:column; margin:0; padding:0; background:none; border:none; }
+.cph .cph-visit .cph-title, .cph .cph-visit .cph-tech-name{ color:#fff; }
+.cph .cph-visit .cph-sub, .cph .cph-visit .cph-note{ color:rgba(255,255,255,.85); }
+.cph .cph-visit .cph-note, .cph .cph-visit .cph-tech{ background:rgba(255,255,255,.14); }
+.cph .cph-visit .cph-icon-btn{ background:rgba(255,255,255,.18); border-color:transparent; color:#fff; }
+.cph .cph-visit .cph-link-btn{ color:#fff; text-decoration:underline; align-self:flex-start; }
+.cph .cph-visit .cph-track{ margin-top:auto; padding-top:20px; }
+.cph .cph-visit .cph-track-dot{ width:28px; height:28px; background:transparent; border:2px solid #fff; color:#fff; }
+.cph .cph-visit .cph-track-dot.on{ background:#fff; color:var(--cph-deep); }
+.cph .cph-visit .cph-track-dot.now{ background:#fff; color:var(--cph-deep); box-shadow:0 0 0 4px rgba(255,255,255,.28); }
+.cph .cph-visit .cph-track-ln{ background:rgba(255,255,255,.55); }
+.cph .cph-visit .cph-track-ln.on{ background:#fff; }
+.cph .cph-visit .cph-track-lb{ color:rgba(255,255,255,.85); }
+.cph .cph-visit .cph-track-lb .now{ color:#fff; }
+
+.cph .cph-act{ border-radius:18px; }
+.cph .cph-units{ padding:0; background:none; border:none; }
+.cph .cph-unit{ gap:16px; padding:12px 0; border-bottom:none; }
+.cph .cph-unit-img{ width:64px; height:64px; border-radius:50%; }
+.cph .cph-unit-name{ font-size:18px; }
+.cph .cph-unit .cph-sub{ white-space:normal; font-size:13.5px; color:var(--cph-ink); }
+
+@media (max-width:999px){
+  #cpNav{ border-top:none; border-radius:20px 20px 0 0; box-shadow:0 -4px 18px rgba(0,0,0,.07); padding-top:10px; }
+  #cpNav .cp-nav-btn{ gap:4px; font-size:11.5px; color:#3F7F1F; }
+  #cpNav .cp-nav-btn svg{ width:26px; height:26px; }
+  #cpNav .cp-nav-btn.active{ color:#1F6A00; font-weight:700; }
+}
+.cph .cph-greet{ font-size:24px; }
+.cph .cp-header.cp-header-soft{ border-bottom:none; box-shadow:none; }
+.cph .cph-visit{ margin-top:18px; }
+/* Redesign × things added since (bell, updates, "Your request" card) */
+.cph .cp-count-badge{ border-color:#fff; }
+.cph .cph-visit .cp-upd-banner{ background:rgba(255,255,255,.16); color:#fff; }
+.cph .cph-visit .cp-upd-banner.unread{ background:#fff; color:#1C2A17; }
+.cph .cph-visit .cp-upd-banner .cp-upd-when{ color:inherit; opacity:.75; }
+.cph .cph-visit .cph-ic{ background:rgba(255,255,255,.18); color:#fff; }
+.cph .cp-upd-strip{ border-radius:18px; }

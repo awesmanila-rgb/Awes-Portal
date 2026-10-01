@@ -142,8 +142,22 @@ window.awesCss = {
 </script>
 <link rel="stylesheet" href="css/app.css">
 
+<style id="awesSplashCss">
+#awesSplash{position:fixed;inset:0;z-index:2147483000;background:#4E9B33;display:flex;align-items:center;justify-content:center;transition:opacity .45s ease,visibility .45s}
+#awesSplash.hide{opacity:0;visibility:hidden}
+#awesSplash img{width:140px;height:auto;animation:awesSplashIn .6s ease both}
+@keyframes awesSplashIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#awesSplash,#awesSplash img{transition:none;animation:none}}
+</style>
 </head>
 <body>
+<div id="awesSplash" aria-hidden="true"><img src="logo-white.png" alt=""></div>
+<script>
+(function(){var s=document.getElementById('awesSplash');if(!s)return;var t0=Date.now(),done=false;
+function hide(){if(done)return;done=true;setTimeout(function(){s.classList.add('hide');setTimeout(function(){if(s.parentNode)s.parentNode.removeChild(s);},600);},Math.max(0,900-(Date.now()-t0)));}
+if(document.readyState==='complete')hide();else window.addEventListener('load',hide);setTimeout(hide,4000);})();
+</script>
+
 
 <!-- Shown when a new version of the app has been fetched in the background
      (see the service worker registration/update logic near the bottom of
@@ -849,6 +863,7 @@ window.awesCss = {
 
   <div class="cph-hello">
     <p class="cph-greet"><span id="cpGreetTod">Good day</span>, <span id="cpGreetingName">there</span></p>
+    <p class="cph-viewing-lbl">You are viewing</p>
     <button type="button" class="cph-acct" id="cpAcctChip"><span id="cpGreetSub">Loading your units…</span><span class="cph-acct-caret" id="cpAcctCaret" style="display:none;">▾</span></button>
   </div>
 
@@ -893,9 +908,11 @@ window.awesCss = {
         </section>
 
         <section>
-          <div class="cph-sec"><h2 id="cpVisitTitle">Next visit</h2><a id="cpVisitMore" style="display:none;"></a></div>
           <div id="cpUpdateStrip" style="display:none;"></div>
-          <div class="cph-card" id="cpHero"></div>
+          <div class="cph-visit">
+            <div class="cph-sec"><h2 id="cpVisitTitle">Current visit</h2><a id="cpVisitMore" style="display:none;"></a></div>
+            <div class="cph-card" id="cpHero"></div>
+          </div>
         </section>
 
         <div class="cph-actions">
@@ -905,8 +922,8 @@ window.awesCss = {
         </div>
 
         <section>
-          <div class="cph-sec"><h2 id="cpUnitsSectionTitle">Your units</h2><a id="cpUnitsViewAllLink">See all</a></div>
-          <div class="cph-card">
+          <div class="cph-sec"><h2 id="cpUnitsSectionTitle">My units</h2><a id="cpUnitsViewAllLink">See all</a></div>
+          <div class="cph-card cph-units">
             <div class="cph-sum" id="cpUnitSummary"></div>
             <div id="cpUnitScroll"></div>
           </div>
