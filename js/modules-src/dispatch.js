@@ -1525,7 +1525,10 @@
         customerId: custId,
         equipmentId: singleEquipId,
         ticketId: id,
-        description: $('dtRemarks').value.trim() || ('Scheduled service visit — '+jobOrderNo),
+        // Deliberately NOT the ticket's Special Instruction / Remarks box:
+        // that field is for the technician only, and this description is
+        // rendered on the customer's status card and request history.
+        description: 'Scheduled service visit \u2014 '+jobOrderNo,
         requestedDate: $('dtDate').value || null
       }).then(row=>{
         // Silent failure here is what makes this look like "dispatch just
