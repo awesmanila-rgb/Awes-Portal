@@ -912,6 +912,14 @@
     setSidebarActive('menuManageReports');
     showServiceReportsManagerView();
   });
+  // Operations -> Record Past Service: opens the Service Report page straight
+  // on its Record Past Service tab (admin back-entry, see back-entry.js).
+  $('sbNavPastService').addEventListener('click', ()=>{
+    closeMainMenu();
+    setSidebarActive('sbNavPastService');
+    showServiceReport();
+    srShowTab('backentry');
+  });
   $('menuManageCustomers').addEventListener('click', async ()=>{
     closeMainMenu();
     setSidebarActive('menuManageCustomers');
