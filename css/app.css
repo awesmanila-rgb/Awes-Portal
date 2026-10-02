@@ -4707,3 +4707,22 @@ body.ts-ro .ts-edit-only{ display:none !important; }
   #cpNav.cp-nav-v2 .cp-nav-btn{ gap:2px; padding:8px 0; border-radius:20px; font-size:12px; font-weight:600; }
   #cpNav.cp-nav-v2 .cp-nav-btn.active{ background:rgba(15,90,64,.11); font-weight:700; }
 }
+
+
+/* ---- Expandable service-report summary (history.js: reportSummaryHtml / rsToggle) ---- */
+.hist-item.has-summary{display:block;}
+.hist-row-head{display:flex; justify-content:space-between; align-items:center; gap:10px;}
+.hist-sum-btn .ic{width:12px; height:12px; vertical-align:-2px; transition:transform .15s;}
+.hist-item.open .hist-sum-btn .ic,
+tr.open .hist-sum-btn .ic{transform:rotate(180deg);}
+.rs-summary{margin-top:10px; padding-top:2px; border-top:1px solid var(--border); cursor:default; text-align:left;}
+.rs-summary .cp-visit-section:first-child{margin-top:10px;}
+.rs-summary .cp-visit-pdf-btn{margin-top:12px;}
+.rs-in-table{margin-top:0; border-top:none; padding:2px 4px 12px;}
+.rs-detail-row > td{background:var(--bg); padding:0 12px;}
+.cph-rep{border-bottom:1px solid var(--border);}
+.cph-rep:last-child{border-bottom:none;}
+.cph-rep .cph-li{border-bottom:none;}
+.cph-rep.open .cph-li{padding-bottom:4px;}
+.rs-inline{margin:0 0 12px 0; padding:0 4px 4px 42px; border-top:none;}
+.cp-row.open .cp-row-chev{transform:rotate(90deg);}
