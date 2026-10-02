@@ -1035,7 +1035,7 @@
 // Bumped to v185 — customer Home design refresh (css/app.css "Customer home v2"
 // block, cph-v2 / cp-nav-v2 classes and the Google Fonts <link> in index.html).
 // Fonts are cached by the cache-first CDN branch below. No script/data changes.
-const CACHE_NAME = 'awes-sr-v187';
+const CACHE_NAME = 'awes-sr-v188';
 
 // Split into two lists on purpose.
 //
