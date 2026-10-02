@@ -504,20 +504,17 @@
         '<td>'+escapeHtml(svcText)+'</td>'+
         '<td>'+escapeHtml(fmtDate(d.date)||'—')+'</td>'+
         '<td>'+escapeHtml(d.srNo||'—')+'</td>'+
-        '<td><button type="button" class="att-view-btn" data-act="view">View</button></td>';
-      row.querySelector('[data-act="view"]').addEventListener('click', async ()=>{
-        try{
-          const doc = await buildPdf(d);
-          $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
-          $('previewOkBtn').textContent = 'Close';
-          $('previewOverlay').classList.add('open');
-          await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
-        }catch(err){
-          console.error('view report failed', err);
-          toast('Could not open this report');
-        }
-      });
+        '<td><button type="button" class="att-view-btn hist-sum-btn" data-act="view">Summary '+icon('caretDown')+'</button></td>';
+      row.style.cursor = 'pointer';
+      // Click expands a summary row underneath; the PDF is the button inside it.
+      const detail = document.createElement('tr');
+      detail.className = 'rs-detail-row';
+      detail.style.display = 'none';
+      detail.innerHTML = '<td colspan="4"><div class="rs-summary rs-in-table"></div></td>';
+      const panel = detail.querySelector('.rs-summary');
+      row.addEventListener('click', ()=> rsToggle(row, panel, d, ()=> rsPreviewReport(d), detail));
       body.appendChild(row);
+      body.appendChild(detail);
     });
   }
 

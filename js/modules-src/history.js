@@ -1,4 +1,59 @@
-// ---------- history ----------
+// ---------- shared: expandable service-report summary ----------
+  // Every service-report list in the app (Report History, a unit's service
+  // history, a job order's filed reports, the customer portal) expands a row
+  // to this summary on click instead of jumping straight into the PDF. The
+  // PDF stays one tap away via the button at the bottom of the summary.
+  function rsAsList(v){
+    if(Array.isArray(v)) return v;
+    if(typeof v === 'string' && v.trim()) return [v];
+    return [];
+  }
+  // Accepts either row shape: the camelCase report from rowToReport() (recs,
+  // servicesDone) or the raw snake_case columns the customer portal selects
+  // (recommendations, services_done).
+  function reportSummaryHtml(r){
+    r = r || {};
+    return '<div class="cp-visit-section"><b>Findings / Evaluation</b>'+cpFmtList(rsAsList(r.findings))+'</div>'+
+      '<div class="cp-visit-section"><b>Recommendations</b>'+cpFmtList(rsAsList(r.recommendations || r.recs))+'</div>'+
+      '<div class="cp-visit-section"><b>Services Done</b>'+cpFmtList(rsAsList(r.services_done || r.servicesDone))+'</div>'+
+      '<div class="cp-visit-section"><b>Materials Used</b>'+cpFmtList(rsAsList(r.materials))+'</div>';
+  }
+  function rsMount(panel, report, openPdf){
+    panel.innerHTML = reportSummaryHtml(report)+
+      '<button type="button" class="cp-visit-pdf-btn">'+icon('file')+' View Full Report (PDF)</button>';
+    panel.querySelector('.cp-visit-pdf-btn').addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const b = e.currentTarget; b.disabled = true;
+      try{ await openPdf(); } finally { b.disabled = false; }
+    });
+  }
+  // wrap gets the "open" class (caret rotation); panel holds the summary;
+  // showEl is whatever actually gets shown/hidden when it differs from the
+  // panel (e.g. the <tr> around it in a table). Built lazily, once.
+  function rsToggle(wrap, panel, report, openPdf, showEl){
+    const el = showEl || panel;
+    const opening = el.style.display === 'none';
+    if(opening && !panel.dataset.ready){ rsMount(panel, report, openPdf); panel.dataset.ready = '1'; }
+    el.style.display = opening ? '' : 'none';
+    wrap.classList.toggle('open', opening);
+    wrap.setAttribute('aria-expanded', String(opening));
+  }
+  // The full report in the shared PDF preview overlay (completed reports are
+  // meant to be looked at, not re-edited).
+  async function rsPreviewReport(d, title){
+    try{
+      const doc = await buildPdf(d);
+      $('previewOverlay').querySelector('h3').textContent = title || (d.custName ? d.custName : 'Report');
+      $('previewOkBtn').textContent = 'Close';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
+    }catch(err){
+      console.error('view report failed', err);
+      toast('Could not open this report');
+    }
+  }
+
+  // ---------- history ----------
   async function loadHistory(containerId, filter, onlyUserId, searchText){
     const list = $(containerId || 'historyList');
     list.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -62,7 +117,7 @@
         '</div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button>'+
+          : '<div class="hist-actions"><button data-act="view" class="hist-sum-btn" aria-label="Show summary">Summary '+icon('caretDown')+'</button>'+
               (canSignOff ? '<button data-act="signoff" class="primary">Sign off</button>' : '')+'</div>');
       if(canSignOff){
         row.querySelector('[data-act="signoff"]').addEventListener('click', (e)=>{ e.stopPropagation(); srSignOffReport(d); });
@@ -98,26 +153,18 @@
           }catch(err){ console.error('delete draft failed', err); toast('Could not delete this draft'); }
         });
       }else{
-        // "View" opens the completed report as a PDF preview (reusing the same
-        // preview overlay the form uses before signing) rather than dropping
-        // the technician back into the editable form — a completed report is
-        // meant to be looked at, not re-edited.
-        row.querySelector('[data-act="view"]').addEventListener('click', async (e)=>{
-          e.stopPropagation();
-          try{
-            const doc = await buildPdf(d);
-            // Reuse the pre-signing preview overlay, but relabel it — this is
-            // a completed report being viewed, not a draft on its way to
-            // signatures, so the default "Continue to Signatures" copy doesn't apply.
-            $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
-            $('previewOkBtn').textContent = 'Close';
-            $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
-          }catch(err){
-            console.error('view report failed', err);
-            toast('Could not open this report');
-          }
-        });
+        // A completed report expands in place to its summary (findings,
+        // recommendations, services done, materials) instead of jumping
+        // straight into the PDF; the PDF is the button inside the summary.
+        const head = document.createElement('div');
+        head.className = 'hist-row-head';
+        while(row.firstChild) head.appendChild(row.firstChild);
+        const panel = document.createElement('div');
+        panel.className = 'rs-summary';
+        panel.style.display = 'none';
+        row.classList.add('has-summary');
+        row.appendChild(head); row.appendChild(panel);
+        head.addEventListener('click', ()=> rsToggle(row, panel, d, ()=> rsPreviewReport(d)));
       }
       list.appendChild(row);
     });

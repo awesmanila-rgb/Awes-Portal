@@ -3070,8 +3070,10 @@
                 '</div>'+
               '</div>'+
               '<button type="button" class="btn btn-secondary dt-review-open" data-sr="'+escapeHtml(it.reportSrNo)+'" '+
-                'style="flex:none; padding:6px 12px; font-size:12px;">Open</button>'+
+                'data-label="'+((rp && rp.completed) ? 'Summary' : 'Open')+'" '+
+                'style="flex:none; padding:6px 12px; font-size:12px;">'+((rp && rp.completed) ? 'Summary' : 'Open')+'</button>'+
             '</div>'+
+            '<div class="rs-summary" style="display:none;"></div>'+
           '</div>';
       }
       if(it.notDone){
@@ -3102,20 +3104,20 @@
     sec.querySelectorAll('.dt-review-open').forEach(btn=>{
       btn.onclick = async ()=>{
         const srNo = btn.dataset.sr;
+        const block = btn.closest('.leave-comment');
+        const panel = block && block.querySelector('.rs-summary');
+        // Summary already loaded once: just collapse/expand it.
+        if(panel && panel.dataset.ready){ rsToggle(block, panel); return; }
         btn.disabled = true; btn.textContent = 'Opening…';
         try{
           // Same path the Report History list uses, so admin lands in the
           // identical read-only view rather than a second, diverging one.
           const rec = await cloudGetReport(srNo);
           if(!rec){ toast('Could not load '+srNo); return; }
-          // Filed reports are view-only: show the PDF over the job order
-          // instead of opening the report form.
-          if(rec.completed && typeof buildPdf === 'function'){
-            const doc = await buildPdf(rec);
-            $('previewOverlay').querySelector('h3').textContent = srNo + (rec.custName ? ' \u2014 ' + rec.custName : '');
-            $('previewOkBtn').textContent = 'Close';
-            $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc, srNo + '.pdf');
+          // Filed reports are view-only: expand their summary in place; the
+          // full PDF is the button inside it.
+          if(rec.completed && panel){
+            rsToggle(block, panel, rec, ()=> rsPreviewReport(rec, srNo + (rec.custName ? ' \u2014 ' + rec.custName : '')));
             return;
           }
           // openReport switches the whole view, so the overlay has to go.
@@ -3130,7 +3132,7 @@
           console.error('open ticket report failed', describeCloudError(e));
           toast('Could not open '+srNo);
         }finally{
-          btn.disabled = false; btn.textContent = 'Open';
+          btn.disabled = false; btn.textContent = btn.dataset.label || 'Open';
         }
       };
     });

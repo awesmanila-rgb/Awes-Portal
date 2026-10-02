@@ -622,6 +622,10 @@
   }
 
   // ---- Recent service reports ----
+  function cpFindReport(srNo, reportId){
+    return cpReports.find(x=> reportId && String(x.id)===String(reportId))
+        || cpReports.find(x=> srNo && x.sr_no===srNo) || {};
+  }
   function cpRenderReports(){
     const done = cpReports.filter(r=> r.completed !== false).slice(0, 3);
     cpSetHtml($('cpRecentActivity'), done.length ? done.map(r=>{
@@ -629,16 +633,23 @@
       const eq = r.equipment_id ? cpFindEquip(r.equipment_id) : null;
       const unit = eq ? equipDisplayName(eq) : (r.equip_location || r.equip_type || 'Service visit');
       const title = (cat || 'Service visit')+' · '+unit;
-      return '<div class="cph-li" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(String(r.id||''))+'">'+
+      return '<div class="cph-rep"><div class="cph-li" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(String(r.id||''))+'">'+
         '<span class="cph-ic cph-ic-muted">'+CP_ICON.receipt+'</span>'+
         '<span class="cph-text" data-open="1"><span class="cph-li-title">'+escapeHtml(title)+'</span>'+
         '<span class="cph-sub">'+escapeHtml(cpFmtShort(r.date))+(r.sr_no ? ' · '+escapeHtml(r.sr_no) : '')+(r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</span></span>'+
-        '<button type="button" class="cph-icon-btn" data-dl="1" aria-label="Download PDF" title="Download PDF">'+CP_ICON.download+'</button></div>';
+        '<button type="button" class="cph-icon-btn" data-dl="1" aria-label="Download PDF" title="Download PDF">'+CP_ICON.download+'</button></div>'+
+        '<div class="rs-summary rs-inline" style="display:none;"></div></div>';
     }).join('') : '<p class="cph-empty">Reports from completed visits will appear here.</p>');
     $('cpRecentActivity').onclick = (e)=>{
+      // The summary's own "View Full Report (PDF)" button.
+      if(e.target.closest('.cp-visit-pdf-btn')) return;
       const row = e.target.closest('[data-report-id]'); if(!row) return;
-      if(e.target.closest('[data-dl]')) cpDownloadReport(row.dataset.srNo, row.dataset.reportId);
-      else if(typeof openCustomerReportPreview==='function') openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId);
+      if(e.target.closest('[data-dl]')){ cpDownloadReport(row.dataset.srNo, row.dataset.reportId); return; }
+      // Tapping the row expands its summary; the PDF is inside it.
+      const wrap = row.closest('.cph-rep'); const panel = wrap && wrap.querySelector('.rs-summary');
+      if(!panel) return;
+      rsToggle(wrap, panel, cpFindReport(row.dataset.srNo, row.dataset.reportId),
+        ()=> openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId));
     };
   }
   // Straight-to-file download (the preview overlay stays one tap away on
@@ -1458,7 +1469,16 @@
       row.style.cursor = 'pointer';
       row.onclick = ()=>{
         if(row.dataset.srNo || row.dataset.reportId){
-          if(typeof openCustomerReportPreview==='function') openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId);
+          // A visit expands in place to its summary; the PDF is inside it.
+          let panel = row.nextElementSibling;
+          if(!(panel && panel.classList.contains('rs-inline'))){
+            panel = document.createElement('div');
+            panel.className = 'rs-summary rs-inline';
+            panel.style.display = 'none';
+            row.after(panel);
+          }
+          rsToggle(row, panel, cpFindReport(row.dataset.srNo, row.dataset.reportId),
+            ()=> openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId));
         } else if(row.dataset.reqId){
           const req = cpMyRequestsCache.find(r=> String(r.id)===row.dataset.reqId);
           if(req && typeof srOpenDetail==='function') srOpenDetail(req);
