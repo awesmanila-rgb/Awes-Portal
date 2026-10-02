@@ -4458,20 +4458,17 @@
         '<td>'+escapeHtml(svcText)+'</td>'+
         '<td>'+escapeHtml(fmtDate(d.date)||'—')+'</td>'+
         '<td>'+escapeHtml(d.srNo||'—')+'</td>'+
-        '<td><button type="button" class="att-view-btn" data-act="view">View</button></td>';
-      row.querySelector('[data-act="view"]').addEventListener('click', async ()=>{
-        try{
-          const doc = await buildPdf(d);
-          $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
-          $('previewOkBtn').textContent = 'Close';
-          $('previewOverlay').classList.add('open');
-          await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
-        }catch(err){
-          console.error('view report failed', err);
-          toast('Could not open this report');
-        }
-      });
+        '<td><button type="button" class="att-view-btn hist-sum-btn" data-act="view">Summary '+icon('caretDown')+'</button></td>';
+      row.style.cursor = 'pointer';
+      // Click expands a summary row underneath; the PDF is the button inside it.
+      const detail = document.createElement('tr');
+      detail.className = 'rs-detail-row';
+      detail.style.display = 'none';
+      detail.innerHTML = '<td colspan="4"><div class="rs-summary rs-in-table"></div></td>';
+      const panel = detail.querySelector('.rs-summary');
+      row.addEventListener('click', ()=> rsToggle(row, panel, d, ()=> rsPreviewReport(d), detail));
       body.appendChild(row);
+      body.appendChild(detail);
     });
   }
 
@@ -7127,7 +7124,62 @@
   });
 
 
-// ---------- history ----------
+// ---------- shared: expandable service-report summary ----------
+  // Every service-report list in the app (Report History, a unit's service
+  // history, a job order's filed reports, the customer portal) expands a row
+  // to this summary on click instead of jumping straight into the PDF. The
+  // PDF stays one tap away via the button at the bottom of the summary.
+  function rsAsList(v){
+    if(Array.isArray(v)) return v;
+    if(typeof v === 'string' && v.trim()) return [v];
+    return [];
+  }
+  // Accepts either row shape: the camelCase report from rowToReport() (recs,
+  // servicesDone) or the raw snake_case columns the customer portal selects
+  // (recommendations, services_done).
+  function reportSummaryHtml(r){
+    r = r || {};
+    return '<div class="cp-visit-section"><b>Findings / Evaluation</b>'+cpFmtList(rsAsList(r.findings))+'</div>'+
+      '<div class="cp-visit-section"><b>Recommendations</b>'+cpFmtList(rsAsList(r.recommendations || r.recs))+'</div>'+
+      '<div class="cp-visit-section"><b>Services Done</b>'+cpFmtList(rsAsList(r.services_done || r.servicesDone))+'</div>'+
+      '<div class="cp-visit-section"><b>Materials Used</b>'+cpFmtList(rsAsList(r.materials))+'</div>';
+  }
+  function rsMount(panel, report, openPdf){
+    panel.innerHTML = reportSummaryHtml(report)+
+      '<button type="button" class="cp-visit-pdf-btn">'+icon('file')+' View Full Report (PDF)</button>';
+    panel.querySelector('.cp-visit-pdf-btn').addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const b = e.currentTarget; b.disabled = true;
+      try{ await openPdf(); } finally { b.disabled = false; }
+    });
+  }
+  // wrap gets the "open" class (caret rotation); panel holds the summary;
+  // showEl is whatever actually gets shown/hidden when it differs from the
+  // panel (e.g. the <tr> around it in a table). Built lazily, once.
+  function rsToggle(wrap, panel, report, openPdf, showEl){
+    const el = showEl || panel;
+    const opening = el.style.display === 'none';
+    if(opening && !panel.dataset.ready){ rsMount(panel, report, openPdf); panel.dataset.ready = '1'; }
+    el.style.display = opening ? '' : 'none';
+    wrap.classList.toggle('open', opening);
+    wrap.setAttribute('aria-expanded', String(opening));
+  }
+  // The full report in the shared PDF preview overlay (completed reports are
+  // meant to be looked at, not re-edited).
+  async function rsPreviewReport(d, title){
+    try{
+      const doc = await buildPdf(d);
+      $('previewOverlay').querySelector('h3').textContent = title || (d.custName ? d.custName : 'Report');
+      $('previewOkBtn').textContent = 'Close';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
+    }catch(err){
+      console.error('view report failed', err);
+      toast('Could not open this report');
+    }
+  }
+
+  // ---------- history ----------
   async function loadHistory(containerId, filter, onlyUserId, searchText){
     const list = $(containerId || 'historyList');
     list.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -7191,7 +7243,7 @@
         '</div>'+
         (isDraft
           ? '<div class="hist-actions"><button data-act="continue">Continue</button><button data-act="delete" class="danger">Delete</button></div>'
-          : '<div class="hist-actions"><button data-act="view">View</button>'+
+          : '<div class="hist-actions"><button data-act="view" class="hist-sum-btn" aria-label="Show summary">Summary '+icon('caretDown')+'</button>'+
               (canSignOff ? '<button data-act="signoff" class="primary">Sign off</button>' : '')+'</div>');
       if(canSignOff){
         row.querySelector('[data-act="signoff"]').addEventListener('click', (e)=>{ e.stopPropagation(); srSignOffReport(d); });
@@ -7227,26 +7279,18 @@
           }catch(err){ console.error('delete draft failed', err); toast('Could not delete this draft'); }
         });
       }else{
-        // "View" opens the completed report as a PDF preview (reusing the same
-        // preview overlay the form uses before signing) rather than dropping
-        // the technician back into the editable form — a completed report is
-        // meant to be looked at, not re-edited.
-        row.querySelector('[data-act="view"]').addEventListener('click', async (e)=>{
-          e.stopPropagation();
-          try{
-            const doc = await buildPdf(d);
-            // Reuse the pre-signing preview overlay, but relabel it — this is
-            // a completed report being viewed, not a draft on its way to
-            // signatures, so the default "Continue to Signatures" copy doesn't apply.
-            $('previewOverlay').querySelector('h3').textContent = d.custName ? d.custName : 'Report';
-            $('previewOkBtn').textContent = 'Close';
-            $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc, (d.srNo||'service-report')+'.pdf');
-          }catch(err){
-            console.error('view report failed', err);
-            toast('Could not open this report');
-          }
-        });
+        // A completed report expands in place to its summary (findings,
+        // recommendations, services done, materials) instead of jumping
+        // straight into the PDF; the PDF is the button inside the summary.
+        const head = document.createElement('div');
+        head.className = 'hist-row-head';
+        while(row.firstChild) head.appendChild(row.firstChild);
+        const panel = document.createElement('div');
+        panel.className = 'rs-summary';
+        panel.style.display = 'none';
+        row.classList.add('has-summary');
+        row.appendChild(head); row.appendChild(panel);
+        head.addEventListener('click', ()=> rsToggle(row, panel, d, ()=> rsPreviewReport(d)));
       }
       list.appendChild(row);
     });
@@ -11530,8 +11574,10 @@
                 '</div>'+
               '</div>'+
               '<button type="button" class="btn btn-secondary dt-review-open" data-sr="'+escapeHtml(it.reportSrNo)+'" '+
-                'style="flex:none; padding:6px 12px; font-size:12px;">Open</button>'+
+                'data-label="'+((rp && rp.completed) ? 'Summary' : 'Open')+'" '+
+                'style="flex:none; padding:6px 12px; font-size:12px;">'+((rp && rp.completed) ? 'Summary' : 'Open')+'</button>'+
             '</div>'+
+            '<div class="rs-summary" style="display:none;"></div>'+
           '</div>';
       }
       if(it.notDone){
@@ -11562,20 +11608,20 @@
     sec.querySelectorAll('.dt-review-open').forEach(btn=>{
       btn.onclick = async ()=>{
         const srNo = btn.dataset.sr;
+        const block = btn.closest('.leave-comment');
+        const panel = block && block.querySelector('.rs-summary');
+        // Summary already loaded once: just collapse/expand it.
+        if(panel && panel.dataset.ready){ rsToggle(block, panel); return; }
         btn.disabled = true; btn.textContent = 'Opening…';
         try{
           // Same path the Report History list uses, so admin lands in the
           // identical read-only view rather than a second, diverging one.
           const rec = await cloudGetReport(srNo);
           if(!rec){ toast('Could not load '+srNo); return; }
-          // Filed reports are view-only: show the PDF over the job order
-          // instead of opening the report form.
-          if(rec.completed && typeof buildPdf === 'function'){
-            const doc = await buildPdf(rec);
-            $('previewOverlay').querySelector('h3').textContent = srNo + (rec.custName ? ' \u2014 ' + rec.custName : '');
-            $('previewOkBtn').textContent = 'Close';
-            $('previewOverlay').classList.add('open');
-            await renderPdfPreview(doc, srNo + '.pdf');
+          // Filed reports are view-only: expand their summary in place; the
+          // full PDF is the button inside it.
+          if(rec.completed && panel){
+            rsToggle(block, panel, rec, ()=> rsPreviewReport(rec, srNo + (rec.custName ? ' \u2014 ' + rec.custName : '')));
             return;
           }
           // openReport switches the whole view, so the overlay has to go.
@@ -11590,7 +11636,7 @@
           console.error('open ticket report failed', describeCloudError(e));
           toast('Could not open '+srNo);
         }finally{
-          btn.disabled = false; btn.textContent = 'Open';
+          btn.disabled = false; btn.textContent = btn.dataset.label || 'Open';
         }
       };
     });
@@ -33568,6 +33614,10 @@
   }
 
   // ---- Recent service reports ----
+  function cpFindReport(srNo, reportId){
+    return cpReports.find(x=> reportId && String(x.id)===String(reportId))
+        || cpReports.find(x=> srNo && x.sr_no===srNo) || {};
+  }
   function cpRenderReports(){
     const done = cpReports.filter(r=> r.completed !== false).slice(0, 3);
     cpSetHtml($('cpRecentActivity'), done.length ? done.map(r=>{
@@ -33575,16 +33625,23 @@
       const eq = r.equipment_id ? cpFindEquip(r.equipment_id) : null;
       const unit = eq ? equipDisplayName(eq) : (r.equip_location || r.equip_type || 'Service visit');
       const title = (cat || 'Service visit')+' · '+unit;
-      return '<div class="cph-li" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(String(r.id||''))+'">'+
+      return '<div class="cph-rep"><div class="cph-li" data-sr-no="'+escapeHtml(r.sr_no||'')+'" data-report-id="'+escapeHtml(String(r.id||''))+'">'+
         '<span class="cph-ic cph-ic-muted">'+CP_ICON.receipt+'</span>'+
         '<span class="cph-text" data-open="1"><span class="cph-li-title">'+escapeHtml(title)+'</span>'+
         '<span class="cph-sub">'+escapeHtml(cpFmtShort(r.date))+(r.sr_no ? ' · '+escapeHtml(r.sr_no) : '')+(r.technician_name ? ' · '+escapeHtml(r.technician_name) : '')+'</span></span>'+
-        '<button type="button" class="cph-icon-btn" data-dl="1" aria-label="Download PDF" title="Download PDF">'+CP_ICON.download+'</button></div>';
+        '<button type="button" class="cph-icon-btn" data-dl="1" aria-label="Download PDF" title="Download PDF">'+CP_ICON.download+'</button></div>'+
+        '<div class="rs-summary rs-inline" style="display:none;"></div></div>';
     }).join('') : '<p class="cph-empty">Reports from completed visits will appear here.</p>');
     $('cpRecentActivity').onclick = (e)=>{
+      // The summary's own "View Full Report (PDF)" button.
+      if(e.target.closest('.cp-visit-pdf-btn')) return;
       const row = e.target.closest('[data-report-id]'); if(!row) return;
-      if(e.target.closest('[data-dl]')) cpDownloadReport(row.dataset.srNo, row.dataset.reportId);
-      else if(typeof openCustomerReportPreview==='function') openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId);
+      if(e.target.closest('[data-dl]')){ cpDownloadReport(row.dataset.srNo, row.dataset.reportId); return; }
+      // Tapping the row expands its summary; the PDF is inside it.
+      const wrap = row.closest('.cph-rep'); const panel = wrap && wrap.querySelector('.rs-summary');
+      if(!panel) return;
+      rsToggle(wrap, panel, cpFindReport(row.dataset.srNo, row.dataset.reportId),
+        ()=> openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId));
     };
   }
   // Straight-to-file download (the preview overlay stays one tap away on
@@ -34404,7 +34461,16 @@
       row.style.cursor = 'pointer';
       row.onclick = ()=>{
         if(row.dataset.srNo || row.dataset.reportId){
-          if(typeof openCustomerReportPreview==='function') openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId);
+          // A visit expands in place to its summary; the PDF is inside it.
+          let panel = row.nextElementSibling;
+          if(!(panel && panel.classList.contains('rs-inline'))){
+            panel = document.createElement('div');
+            panel.className = 'rs-summary rs-inline';
+            panel.style.display = 'none';
+            row.after(panel);
+          }
+          rsToggle(row, panel, cpFindReport(row.dataset.srNo, row.dataset.reportId),
+            ()=> openCustomerReportPreview(row.dataset.srNo, row.dataset.reportId));
         } else if(row.dataset.reqId){
           const req = cpMyRequestsCache.find(r=> String(r.id)===row.dataset.reqId);
           if(req && typeof srOpenDetail==='function') srOpenDetail(req);
