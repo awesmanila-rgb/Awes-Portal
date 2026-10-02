@@ -129,7 +129,7 @@
       pad.clear();
       if(data) pad.fromData(data);
     }
-    const pad = new SignaturePad(canvas, {penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)'});
+    const pad = new SignaturePad(canvas, {penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)'});
     pad.addEventListener('beginStroke', ()=>{ $(phId).style.display='none'; });
     window.addEventListener('resize', resize);
     setTimeout(resize, 50);

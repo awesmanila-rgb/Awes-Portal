@@ -187,7 +187,7 @@
     });
   }
 
-  const TRACKER_DOT = { live: '#1F7A50', idle: '#B9791F', stale: '#8A8F8A' };
+  const TRACKER_DOT = { live: '#17714F', idle: '#B9791F', stale: '#8A8F8A' };
 
   function trackerFmtAgo(iso){
     if(!iso) return 'never';
@@ -235,8 +235,8 @@
   function trackerPopupHtml(name, row){
     return '<div style="font:13px -apple-system,BlinkMacSystemFont,sans-serif;">'+
       '<b>'+escapeHtml(name)+'</b><br>'+
-      '<span style="color:#5C6B62;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
-      (row.accuracy != null ? '<br><span style="color:#5C6B62;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
+      '<span style="color:#58695F;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
+      (row.accuracy != null ? '<br><span style="color:#58695F;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
     '</div>';
   }
 

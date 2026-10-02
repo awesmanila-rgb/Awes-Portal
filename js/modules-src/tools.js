@@ -88,7 +88,7 @@
         await loadAwesScript('signature', awesLibs.signature);
         const c = $('tlSignCanvas'), r = Math.max(window.devicePixelRatio || 1, 1);
         c.width = c.offsetWidth * r; c.height = c.offsetHeight * r; c.getContext('2d').scale(r, r);
-        tlPad = new SignaturePad(c, { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+        tlPad = new SignaturePad(c, { penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)' });
       }catch(e){ toast('Signature tool couldn\u2019t load — check the connection'); tlSignDone(null); }
     });
   }

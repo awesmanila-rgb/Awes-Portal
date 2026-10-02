@@ -693,7 +693,7 @@
   function loginBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
+    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> showRoleChooser());
     return back;
@@ -750,7 +750,7 @@
   function loginStaffBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
+    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> renderStaffRoleChooser());
     return back;

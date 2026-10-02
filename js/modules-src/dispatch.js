@@ -1712,10 +1712,10 @@
     // stage is labelled for what each side is meant to do with it.
     if(status==='completed'){
       const label = (dtIsDispatcher()) ? 'For Review' : 'Completed';
-      return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: '+label+'</span>';
+      return '<span class="status-pill" style="background:#E3EFE6; color:#17714F;">Status: '+label+'</span>';
     }
     if(status==='in_progress') return '<span class="status-pill" style="background:#E4F0F1; color:#1F6F7A;">Status: Work in Progress</span>';
-    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCEAE0; color:var(--green-dark);">Status: En Route</span>';
+    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCE8E0; color:var(--green-dark);">Status: En Route</span>';
     if(status==='preparing') return '<span class="status-pill" style="background:#FBF0DC; color:#B9791F;">Status: Preparing</span>';
     // Future-dated: deliberately no "Status:" prefix — it isn't in the
     // lifecycle yet, it's just booked.
@@ -3585,7 +3585,7 @@
       const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
         '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
-        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#E6EEE8')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
       '</div>';
     }).join('');
     list.scrollTop = list.scrollHeight;
@@ -3772,7 +3772,7 @@
   // change; anything unmatched falls back to grey at the call site.
   const DT_CAL_STATUS_COLORS = {
     scheduled:'#8A9089', preparing:'#B9791F', open:'#B9791F',
-    acknowledged:'#1F7A50', in_progress:'#1F6F7A', completed:'#154D34',
+    acknowledged:'#17714F', in_progress:'#1F6F7A', completed:'#0F5A40',
     closed:'#8A9089', expired:'#B3402D', cancelled:'#B3402D'
   };
   const dtCalStates = {};

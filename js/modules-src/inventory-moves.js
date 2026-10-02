@@ -730,7 +730,7 @@
       window.scrollTo({ top:0 });
       if(!signed){
         await loadAwesScript('signature', awesLibs.signature);
-        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)' });
         invSigFit();
       }
     }catch(e){ purchFail('Couldn\u2019t open the slip: ', e); }

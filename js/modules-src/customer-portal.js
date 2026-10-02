@@ -344,7 +344,7 @@
     const first = String(currentUser.name||'').trim().split(/\s+/)[0];
     $('cpGreetingName').textContent = first || 'there';
   }
-  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
+  const CP_AVATAR_COLORS = ['#0F5A40','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
   function cpAvatarColor(name){
     let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
     return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
