@@ -3496,7 +3496,8 @@
       // isn't finished; admin carves the remainder off with Continue
       // Tomorrow (dtContinueClosedTicket).
       if(!stillHasWork && typeof srMarkClosedByTicket === 'function'){
-        srMarkClosedByTicket(ticketId).catch(()=>{});
+        const cardClosed = await srMarkClosedByTicket(ticketId).catch(()=>false);
+        if(!cardClosed) toast('Job order closed, but the customer\u2019s request card did not update \u2014 check the request in Service Requests');
       }
       if(typeof notifyAdmins === 'function'){
         notifyAdmins(stillHasWork ? 'Job order closed with remaining work' : 'Job order completed',

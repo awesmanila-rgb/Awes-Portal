@@ -276,13 +276,24 @@
   }
 
   // Admin's review-and-close step, the last stage the customer sees. Only
-  // moves a request that already reached 'completed', so a job order can't
-  // be closed out while work is still open against it.
+  // asked for when no unit was left not done (see dtCloseTicket).
+  //
+  // The request normally reached 'completed' earlier, from a separate
+  // fire-and-forget call when the technician finished. If that call was lost
+  // the close below would match nothing, so bring it to 'completed' first
+  // (a no-op when it is already there), then close it. Returns true only when
+  // the linked request(s) really read back as closed/cancelled, so the caller
+  // can tell the admin when the customer's card did not move.
   async function srMarkClosedByTicket(ticketId){
     if(!(await ensureCloud())) return false;
     try{
+      await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'completed' });
       const { data, error } = await db.rpc('sync_service_request_ticket_status', { p_ticket_id: ticketId, p_new_status: 'closed' });
       if(error) throw error;
+      try{
+        const { data: rows, error: e2 } = await db.from('service_requests').select('status').eq('linked_dispatch_ticket_id', ticketId);
+        if(!e2 && rows && rows.length) return rows.every(r=> r.status==='closed' || r.status==='cancelled');
+      }catch(_e){ /* read not permitted — fall back to the RPC's answer */ }
       return !!data;
     }catch(e){ console.error('close-sync service request failed', describeCloudError(e)); return false; }
   }
