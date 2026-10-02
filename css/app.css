@@ -4585,52 +4585,125 @@ body.ts-ro .ts-edit-only{ display:none !important; }
 }
 
 /* =====================================================================
-   Customer home v2 — polish layer (CSS only)
-   Scoped to #customerHomeScreen.cph.cph-v2: no markup, ids or JS changed.
-   To roll back, remove the "cph-v2" class from #customerHomeScreen in
-   index.html (or delete this block).
+   Customer home v2 — design refresh (CSS only)
+   Scoped to #customerHomeScreen.cph.cph-v2 and #cpNav.cp-nav-v2. No ids or
+   JS changed. Roll back by removing "cph-v2" from #customerHomeScreen and
+   "cp-nav-v2" from #cpNav in index.html (or delete this block).
 
-   What it does: mint canvas with white, softly-shadowed cards instead of
-   white-on-white hairlines; one green for primary actions, banner and the
-   Current Visit card (they were three different greens); keyboard focus
-   rings; hover on tappable rows; readable minimum type size.
+   Look: pine green + amber accent, Bricolage Grotesque headings over
+   Plus Jakarta Sans, mint canvas with white shadowed cards, segmented
+   progress bar on the visit card, floating pill nav on phones.
+   Fonts come from the Google Fonts <link> in index.html; every font stack
+   falls back to the app's existing system stack if they don't load.
    ===================================================================== */
-.cph.cph-v2{ --cph-canvas:#F1F7F3; --cph-shadow:0 1px 2px rgba(15,60,40,.06), 0 4px 16px rgba(15,60,40,.05); background:var(--cph-canvas); }
+.cph.cph-v2{
+  --cph-deep:#0F5A40; --cph-deep-2:#0B4531; --cph-green:#0F5A40; --cph-sage:#E3EFE6;
+  --cph-accent:#F2B84B; --cph-canvas:#F1F7F3; --cph-line:#DCE8E0; --cph-muted:#58695F; --cph-ink:#12221A;
+  --cph-head:"Bricolage Grotesque","Plus Jakarta Sans","Google Sans",Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --cph-shadow:0 1px 2px rgba(15,60,40,.06), 0 4px 16px rgba(15,60,40,.05);
+  background:var(--cph-canvas);
+  font-family:"Plus Jakarta Sans","Google Sans","Product Sans",Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+}
+.cph.cph-v2 :is(button,select,input){ font-family:inherit; }
 .cph.cph-v2 .cp-header.cp-header-soft,
 .cph.cph-v2 .cph-hello{ background:var(--cph-canvas); }
 
-/* Account pill: white on the canvas so it reads as tappable */
-.cph.cph-v2 .cph-acct{ background:#fff; box-shadow:var(--cph-shadow); }
+/* Type: display font for headings and numbers */
+.cph.cph-v2 :is(.cph-greet,.cph-sec h2,.cph-brand span,.cph-title,.cph-sum-item b){ font-family:var(--cph-head); }
 
-/* Cards: shadow instead of a hairline. Severity borders on .cph-action
-   (warn / danger) are kept, they carry meaning. */
+/* Header */
+.cph.cph-v2 .cph-brand{ gap:10px; }
+.cph.cph-v2 .cph-brand img{ width:34px; height:34px; border-radius:11px; }
+.cph.cph-v2 .cph-brand span{ font-size:18px; font-weight:800; letter-spacing:-.01em; }
+.cph.cph-v2 .cp-icon-btn{ width:44px; height:44px; border-radius:50%; background:#fff; box-shadow:var(--cph-shadow); color:var(--cph-ink); display:grid; place-items:center; }
+.cph.cph-v2 .cp-icon-btn svg{ width:22px; height:22px; }
+
+/* Greeting + account pill */
+.cph.cph-v2 .cph-greet{ font-size:clamp(28px,8vw,34px); line-height:1.1; font-weight:800; letter-spacing:-.02em; margin:8px 0 12px; }
+.cph.cph-v2 .cph-acct{ display:inline-flex; width:auto; max-width:100%; height:auto; padding:8px 14px; gap:8px; font-size:14px; font-weight:600; background:#fff; box-shadow:var(--cph-shadow); }
+
+/* Section headings */
+.cph.cph-v2 .cph-sec{ margin:32px 2px 10px; }
+.cph.cph-v2 .cph-sec h2{ font-size:21px; font-weight:700; letter-spacing:-.02em; }
+.cph.cph-v2 .cph-sec a{ color:var(--cph-deep); font-weight:700; padding:6px 0; }
+
+/* Cards: shadow instead of hairline. Severity borders on .cph-action are kept. */
 .cph.cph-v2 .cph-card:not(.cph-action):not(#cpHero){ border:0; border-radius:20px; box-shadow:var(--cph-shadow); }
 .cph.cph-v2 .cph-card.cph-action{ border-radius:20px; box-shadow:var(--cph-shadow); }
 .cph.cph-v2 .cph-card.cph-list{ padding:4px 18px; }
 
-/* Current Visit: same green as primary actions, plus lift */
-.cph.cph-v2 .cph-visit{ box-shadow:0 10px 28px rgba(43,110,15,.22); }
+/* Current / Next visit */
+.cph.cph-v2 .cph-visit{
+  position:relative; overflow:hidden; min-height:0; margin-bottom:32px; padding:24px; border-radius:24px;
+  background:linear-gradient(160deg,var(--cph-deep),var(--cph-deep-2)); box-shadow:0 10px 28px rgba(15,90,64,.22);
+}
+.cph.cph-v2 .cph-visit::before{
+  content:""; position:absolute; right:-30px; top:-10px; width:240px; height:150px; opacity:.14; pointer-events:none;
+  background:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 240 150%22 fill=%22none%22 stroke=%22white%22 stroke-width=%221.2%22 stroke-linecap=%22round%22%3E%3Cpath d=%22M0 40C50 10 90 70 140 40S210 20 240 40%22/%3E%3Cpath d=%22M0 70C50 40 90 100 140 70S210 50 240 70%22/%3E%3Cpath d=%22M0 100C50 70 90 130 140 100S210 80 240 100%22/%3E%3Cpath d=%22M0 130C50 100 90 160 140 130S210 110 240 130%22/%3E%3C/svg%3E") no-repeat center/contain;
+}
+.cph.cph-v2 .cph-visit > *{ position:relative; }
+.cph.cph-v2 .cph-visit .cph-sec{ margin:0 0 4px; }
+/* "Current visit" label becomes the amber badge */
+.cph.cph-v2 .cph-visit .cph-sec h2{ display:inline-block; background:var(--cph-accent); color:#2A1D00; font:700 12.5px/1.4 "Plus Jakarta Sans","Google Sans",Roboto,-apple-system,"Segoe UI",sans-serif; letter-spacing:0; padding:3px 10px; border-radius:999px; }
+.cph.cph-v2 .cph-visit .cph-sec a{ color:#fff; opacity:.9; }
+.cph.cph-v2 .cph-visit .cph-title{ font-size:28px; line-height:1.1; font-weight:800; letter-spacing:-.02em; margin:10px 0 4px; color:#fff; }
+.cph.cph-v2 .cph-visit .cph-sub{ font-size:15px; color:rgba(255,255,255,.88); }
 
-/* Banner: fallback fill matches the brand green while images load */
-.cph.cph-v2 .cph-banner{ background:linear-gradient(135deg,var(--cph-deep),var(--cph-green)); box-shadow:var(--cph-shadow); }
+/* Progress: five segments instead of numbered dots (same markup) */
+.cph.cph-v2 .cph-visit #cpHero .cph-steps{ order:1; gap:6px; margin-top:auto; padding-top:24px; }
+.cph.cph-v2 .cph-visit .cph-step{ align-items:stretch; text-align:left; gap:8px; }
+.cph.cph-v2 .cph-visit .cph-step::before{ display:none; }
+.cph.cph-v2 .cph-visit .cph-step .cph-track-dot{ width:100%; height:6px; border:0; border-radius:3px; background:rgba(255,255,255,.25); color:transparent; font-size:0; box-shadow:none; overflow:hidden; }
+.cph.cph-v2 .cph-visit .cph-step .cph-track-dot svg{ display:none; }
+.cph.cph-v2 .cph-visit .cph-step.reached .cph-track-dot{ background:#fff; }
+.cph.cph-v2 .cph-visit .cph-step-lb{ font-size:12px; font-weight:600; color:rgba(255,255,255,.78); }
+.cph.cph-v2 .cph-visit .cph-step.now .cph-step-lb{ color:#fff; font-weight:700; }
 
-/* Quick actions: one primary, two secondary */
-.cph.cph-v2 .cph-act{ border:0; border-radius:20px; box-shadow:var(--cph-shadow); transition:transform .12s, background-color .15s; }
+/* Technician row sits under the progress bar */
+.cph.cph-v2 .cph-visit #cpHero .cph-tech{ order:2; background:none; border-radius:0; border-top:1px solid rgba(255,255,255,.2); margin:22px 0 0; padding:20px 0 0; }
+.cph.cph-v2 .cph-visit .cph-avatar{ width:44px; height:44px; }
+.cph.cph-v2 .cph-visit .cph-icon-btn{ width:44px; height:44px; border-radius:50%; background:rgba(255,255,255,.16); border:0; color:#fff; }
+.cph.cph-v2 .cph-visit .cph-icon-btn:hover{ background:rgba(255,255,255,.26); }
+.cph.cph-v2 .cph-visit #cpHero .cph-note{ order:3; }
+.cph.cph-v2 .cph-visit #cpHero .cph-link-btn{ order:4; margin-top:16px; }
+
+/* Banner */
+.cph.cph-v2 .cph-banner{ border-radius:24px; background:linear-gradient(135deg,var(--cph-deep),var(--cph-green)); box-shadow:var(--cph-shadow); }
+
+/* Quick actions: icon tile on top, label at the bottom. Book stays primary. */
+.cph.cph-v2 .cph-act{
+  align-items:flex-start; justify-content:space-between; text-align:left; gap:18px; min-height:104px; padding:16px;
+  border:0; border-radius:20px; background:#fff; box-shadow:var(--cph-shadow); font-size:14px; font-weight:700; line-height:1.25;
+  transition:transform .12s ease, background-color .15s ease;
+}
+.cph.cph-v2 .cph-act-ic{ width:40px; height:40px; border-radius:12px; background:var(--cph-canvas); display:grid; place-items:center; }
 .cph.cph-v2 .cph-act-primary{ background:var(--cph-deep); color:#fff; }
-.cph.cph-v2 .cph-act:active{ transform:scale(.98); }
+.cph.cph-v2 .cph-act-primary .cph-act-ic{ background:rgba(255,255,255,.16); color:#fff; }
+.cph.cph-v2 .cph-act:active{ transform:scale(.97); }
 .cph.cph-v2 .cph-act-primary:active{ background:var(--cph-deep); filter:brightness(.92); }
 
-/* Units: each unit is its own white card on the canvas */
+/* Units */
+.cph.cph-v2 .cph-sum-item{ border-radius:16px; }
 .cph.cph-v2 .cph-unit{ background:#fff; border-radius:20px; padding:12px 16px 12px 12px; margin-top:8px; box-shadow:var(--cph-shadow); transition:background-color .15s; }
-.cph.cph-v2 .cph-unit-img{ border-radius:16px; }
+.cph.cph-v2 .cph-unit-img{ border-radius:16px; background:var(--cph-canvas); color:var(--cph-deep); }
 
-/* Type floor */
-.cph.cph-v2 .cph-step-lb{ font-size:12px; }
-
-/* Hover only where a real pointer exists; focus ring for keyboard users */
+/* Hover only where a real pointer exists; focus rings for keyboard users */
 @media (hover:hover){
-  .cph.cph-v2 .cph-unit:hover{ background:color-mix(in srgb,var(--cph-green) 6%,#fff); }
-  .cph.cph-v2 .cph-act:not(.cph-act-primary):hover{ background:color-mix(in srgb,var(--cph-green) 6%,#fff); }
+  .cph.cph-v2 .cph-unit:hover,
+  .cph.cph-v2 .cph-act:not(.cph-act-primary):hover{ background:color-mix(in srgb,var(--cph-deep) 8%,#fff); }
 }
-.cph.cph-v2 :is(button,a,select):focus-visible{ outline:2px solid var(--cph-green); outline-offset:2px; }
-.cph.cph-v2 .cph-visit :is(button,a):focus-visible{ outline-color:#fff; }
+.cph.cph-v2 :is(button,a,select):focus-visible{ outline:3px solid var(--cph-deep); outline-offset:2px; }
+.cph.cph-v2 .cph-visit :is(button,a):focus-visible{ outline-color:var(--cph-accent); }
+
+/* Customer nav: same pine family; floating pill on phones */
+#cpNav.cp-nav-v2 .cp-nav-btn{ color:#58695F; }
+#cpNav.cp-nav-v2 .cp-nav-btn.active{ color:#0F5A40; }
+@media (max-width:999px){
+  #cpNav.cp-nav-v2{
+    left:12px; right:12px; bottom:calc(8px + env(safe-area-inset-bottom,0px)); max-width:406px; margin:0 auto; padding:6px;
+    border:1px solid #DCE8E0; border-radius:26px; background:rgba(241,247,243,.92);
+    -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); box-shadow:0 8px 30px rgba(10,40,25,.12);
+  }
+  #cpNav.cp-nav-v2 .cp-nav-btn{ gap:2px; padding:8px 0; border-radius:20px; font-size:12px; font-weight:600; }
+  #cpNav.cp-nav-v2 .cp-nav-btn.active{ background:rgba(15,90,64,.11); font-weight:700; }
+}
