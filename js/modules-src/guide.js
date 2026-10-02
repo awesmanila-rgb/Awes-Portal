@@ -3,7 +3,8 @@
   //
   //   * works out which page is on screen (for every kind of user)
   //   * "About this page" card at the top of it, with a "Where this fits"
-  //     flow strip; × closes it for that page, ? in the header brings it back
+  //     flow strip. Hidden by default: the one floating ? (bottom-right, on
+  //     every page) shows it, and × or tapping ? again hides it
   //   * Help & Guide: every page this person can open, searchable
   //   * first-run tour per role, and a getting-started checklist on home
   //   * English / Tagalog toggle everywhere
@@ -239,7 +240,7 @@
         const t = ev.target.closest('[data-gd-lang],[data-gd-close],[data-gd-go],[data-gd-help]');
         if(!t) return;
         if(t.dataset.gdLang) return gdSetLang(t.dataset.gdLang);
-        if(t.hasAttribute('data-gd-close')){ if(GD.key && GD.prog){ GD.prog.closed[GD.key] = true; delete GD.force[GD.key]; gdSave(); } return gdRender(true); }
+        if(t.hasAttribute('data-gd-close')){ if(GD.key) delete GD.force[GD.key]; return gdRender(true); }
         if(t.dataset.gdGo) return gdGo(t.dataset.gdGo);
         if(t.hasAttribute('data-gd-help')) return gdOpenHelp();
       });
@@ -258,14 +259,12 @@
   }
   function gdRender(forceRedraw){
     const card = gdCard();
-    const btn = gdEl('gdHelpBtn');
-    // only write when it changes — every style write wakes the observer
-    const want = currentUser && GD.prog ? '' : 'none';
-    if(btn && btn.style.display !== want) btn.style.display = want;
+    // The floating ? is the only help icon, and it is on every page for a
+    // signed-in user (not during the first-run tour, which dims the screen).
+    // Only write when it changes — every style write wakes the observer.
     const fab = gdEl('gdHelpFab');
     if(fab){
-      const headerOn = !!(btn && want === '' && btn.getBoundingClientRect().width > 0);
-      const fwant = want === '' && !headerOn && !(GD.tour) ? '' : 'none';
+      const fwant = currentUser && GD.prog && !GD.tour ? '' : 'none';
       if(fab.style.display !== fwant) fab.style.display = fwant;
     }
     if(!currentUser || !GD.prog){ card.remove(); GD.key = null; return; }
@@ -276,10 +275,10 @@
       if(key && !GD.prog.seen[key]){ GD.prog.seen[key] = true; gdSave(); GD.checkAt = 0; }
       forceRedraw = true;
     }
-    const on = !!(key && (GD.force[key] || !GD.prog.closed[key]));
-    if(btn && btn.classList.contains('on') !== on) btn.classList.toggle('on', on);
+    // Hidden unless the person tapped ? on this page.
+    const on = !!(key && GD.force[key]);
     if(fab && fab.classList.contains('on') !== on) fab.classList.toggle('on', on);
-    if(!key || (GD.prog.closed[key] && !GD.force[key]) || !d.host){ card.remove(); return; }
+    if(!on || !d.host){ card.remove(); return; }
     if(forceRedraw || card.dataset.key !== key || card.dataset.lang !== GD.lang){
       card.innerHTML = gdCardHtml(key);
       card.dataset.key = key; card.dataset.lang = GD.lang;
@@ -316,7 +315,6 @@
         if(t.dataset.gdGo) return gdGo(t.dataset.gdGo);
         if(t.hasAttribute('data-gd-x')) return gdCloseHelp();
         if(t.hasAttribute('data-gd-replay')){ gdCloseHelp(); return gdStartTour(true); }
-        if(t.hasAttribute('data-gd-reset')){ GD.prog.closed = {}; GD.force = {}; gdSave(); gdCloseHelp(); gdRender(true); toast(GD.lang === 'tl' ? 'Ipinapakita ulit ang mga tip' : 'Page tips will show again'); }
       });
       h.addEventListener('input', (ev)=>{ if(ev.target.matches('[data-gd-search]')) gdRenderHelpList(ev.target.value); });
     }
@@ -333,8 +331,7 @@
       '<button type="button" class="gd-x" data-gd-x aria-label="Close">\u00D7</button>';
     h.querySelector('.gd-help-body').innerHTML =
       '<input type="search" class="gd-search" data-gd-search placeholder="' + escapeHtml(gdL(GD_UI.search)) + '" value="' + escapeHtml(q) + '">' +
-      '<div class="gd-help-actions"><button type="button" class="btn btn-secondary" data-gd-replay>' + escapeHtml(gdL(GD_UI.replay)) + '</button>' +
-      '<button type="button" class="btn btn-secondary" data-gd-reset>' + escapeHtml(gdL(GD_UI.resetTips)) + '</button></div>' +
+      '<div class="gd-help-actions"><button type="button" class="btn btn-secondary" data-gd-replay>' + escapeHtml(gdL(GD_UI.replay)) + '</button></div>' +
       '<p class="gd-note">' + escapeHtml(gdL(GD_UI.langNote)) + '</p><div class="gd-help-list"></div>';
     gdRenderHelpList(q);
   }
@@ -496,44 +493,13 @@
   function gdHelpClick(){
     if(!GD.key){ gdOpenHelp(); return; }
     const shown = !!(gdEl('gdCard') && gdEl('gdCard').parentNode);
-    if(shown){ GD.prog.closed[GD.key] = true; delete GD.force[GD.key]; gdSave(); }
+    if(shown) delete GD.force[GD.key];
     else GD.force[GD.key] = true;
     gdRender(true);
     if(!shown) setTimeout(()=>{ const c = gdEl('gdCard'); if(c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 40);
   }
-  function gdAddHelpLinks(){
-    const mk = (id, cls)=>{
-      const b = document.createElement('button');
-      b.type = 'button'; b.id = id; b.className = cls;
-      b.innerHTML = '<span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>' + 'Help &amp; Guide';
-      b.addEventListener('click', ()=>{ if(typeof closeMainMenu === 'function') closeMainMenu(); gdOpenHelp(); });
-      return b;
-    };
-    [['menuChangePin', 'menuGuide'], ['staffNavPassword', 'staffNavGuide'], ['techNavSettings', 'techNavGuide']].forEach(([after, id])=>{
-      const a = gdEl(after);
-      if(a && !gdEl(id)) a.parentNode.insertBefore(mk(id, a.className), a.nextSibling);
-    });
-    const prof = gdEl('customerProfileScreen');
-    if(prof && !gdEl('cpGuideBtn')){
-      const b = document.createElement('button');
-      b.type = 'button'; b.id = 'cpGuideBtn'; b.className = 'btn btn-secondary gd-cp-help';
-      b.textContent = 'Help & Guide';
-      b.addEventListener('click', gdOpenHelp);
-      gdInsertTop(prof, b);
-    }
-  }
-
   (function gdWire(){
-    const actions = document.querySelector('.app-top .top-actions');
-    if(actions && !gdEl('gdHelpBtn')){
-      const b = document.createElement('button');
-      b.className = 'icon-btn gd-help-btn'; b.id = 'gdHelpBtn'; b.type = 'button';
-      b.setAttribute('aria-label', 'About this page'); b.textContent = '?'; b.style.display = 'none';
-      b.addEventListener('click', gdHelpClick);
-      actions.insertBefore(b, actions.firstChild);
-    }
-    // The header is hidden on wide screens (sidebar layout) and in the
-    // customer portal — there, the same ? floats in the corner instead.
+    // One floating ? on every page — no header button, no menu entries.
     if(!gdEl('gdHelpFab')){
       const f = document.createElement('button');
       f.type = 'button'; f.id = 'gdHelpFab'; f.className = 'gd-help-fab'; f.textContent = '?';
@@ -541,7 +507,6 @@
       f.addEventListener('click', gdHelpClick);
       document.body.appendChild(f);
     }
-    gdAddHelpLinks();
 
     // Follow sign-in / sign-out and every screen change
     const tick = async ()=>{
