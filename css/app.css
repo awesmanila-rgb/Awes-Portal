@@ -4507,3 +4507,130 @@ body.ts-ro .ts-edit-only{ display:none !important; }
 .cph .cph-visit .cp-upd-banner .cp-upd-when{ color:inherit; opacity:.75; }
 .cph .cph-visit .cph-ic{ background:rgba(255,255,255,.18); color:#fff; }
 .cph .cp-upd-strip{ border-radius:18px; }
+
+/* =====================================================================
+   Customer home — colour & type system (applied over the green redesign)
+
+   Colour, 60 · 30 · 10:
+     60  white surfaces + ink text          #FFFFFF / #1C2A17
+     30  greens — one family:  deep #2B6E0F (Current Visit card, active nav),
+         primary #3E8E1E (links, headings accents), sage #E3EFE6 (account
+         pill, soft fills)
+     10  accent coral #E8673C — ONLY for things that need the customer
+         (unread count, overdue), amber #B7791F for "due soon".
+   Type (one scale, three weights — 400 body · 600 labels · 700 headings):
+     greeting 24/700 · section 18/700 · card title 17/700 · item 15/600 ·
+     body 14/400 · meta 12.5/400 · step label 11.5/600
+   ===================================================================== */
+.cph{ --cph-ink:#1C2A17; --cph-muted:#5E6E62; --cph-deep:#2B6E0F; --cph-green:#3E8E1E; --cph-sage:#E3EFE6;
+      --cph-coral:#E8673C; --cph-amber:#B7791F; color:var(--cph-ink); }
+.cph .cph-brand{ font-size:16px; font-weight:600; color:var(--cph-ink); }
+.cph .cph-brand img{ width:38px; height:38px; }
+.cph .cph-greet{ font-size:24px; font-weight:700; letter-spacing:-.02em; margin:8px 0 14px; color:var(--cph-ink); }
+.cph .cph-viewing-lbl{ font-size:12.5px; font-weight:600; color:var(--cph-muted); text-transform:uppercase; letter-spacing:.06em; margin:0 0 6px; }
+.cph .cph-acct{ height:44px; font-size:15px; font-weight:600; background:var(--cph-sage); color:var(--cph-ink); }
+.cph .cph-acct-caret{ color:var(--cph-green); font-size:20px; }
+.cph .cph-sec h2{ font-size:18px; font-weight:700; letter-spacing:-.01em; color:var(--cph-ink); }
+.cph .cph-sec a{ font-size:13.5px; font-weight:600; color:var(--cph-green); }
+.cph .cph-title{ font-size:17px; font-weight:700; line-height:1.3; }
+.cph .cph-sub{ font-size:14px; font-weight:400; color:var(--cph-muted); line-height:1.45; }
+.cph .cph-tech-name{ font-size:15px; font-weight:600; }
+.cph .cph-tech .cph-sub{ font-size:12.5px; }
+.cph .cph-note{ font-size:13px; }
+
+/* Current Visit card: deep green, white text, softer secondary text */
+.cph .cph-visit{ background:var(--cph-deep); border-radius:22px; }
+.cph .cph-visit .cph-sec h2{ font-size:18px; color:#fff; }
+.cph .cph-visit .cph-sec a{ color:#fff; opacity:.9; }
+.cph .cph-visit .cph-title{ color:#fff; }
+.cph .cph-visit .cph-sub{ color:rgba(255,255,255,.82); }
+.cph .cph-visit .cph-link-btn{ font-size:14px; font-weight:600; color:#fff; }
+
+/* Progress: one column per step — dot above, label centred under it */
+.cph-steps{ display:grid; grid-template-columns:repeat(5, 1fr); margin-top:16px; }
+.cph-step{ position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px; }
+.cph-step::before{ content:''; position:absolute; top:13px; right:50%; width:100%; height:2px; background:var(--border); z-index:0; }
+.cph-step:first-child::before{ display:none; }
+.cph-step.reached::before{ background:var(--green); }
+.cph-step .cph-track-dot{ position:relative; z-index:1; width:28px; height:28px; }
+.cph-step-lb{ font-size:11.5px; font-weight:600; color:var(--text-muted); line-height:1.2; }
+.cph-step.now .cph-step-lb, .cph-step.on:last-child .cph-step-lb{ color:var(--green-dark); }
+.cph .cph-visit .cph-steps{ margin-top:auto; padding-top:20px; }
+.cph .cph-visit .cph-step::before{ background:rgba(255,255,255,.4); }
+.cph .cph-visit .cph-step.reached::before{ background:#fff; }
+.cph .cph-visit .cph-step-lb{ color:rgba(255,255,255,.8); }
+.cph .cph-visit .cph-step.now .cph-step-lb{ color:#fff; font-weight:700; }
+
+/* Units: name / spec / last service, then status icon + arrow */
+.cph .cph-unit-name{ font-size:15px; font-weight:600; color:var(--cph-ink); }
+.cph .cph-unit .cph-sub{ font-size:12.5px; color:var(--cph-muted); }
+.cph .cph-unit-img{ width:56px; height:56px; }
+.cph-unit-go{ display:inline-flex; align-items:center; gap:8px; flex:none; margin-left:auto; }
+.cph-chev{ font-size:26px; line-height:1; color:#9AA79D; font-weight:400; }
+.cph-st{ width:24px; height:24px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:14px; font-weight:800; color:#fff; }
+.cph-st svg{ width:14px; height:14px; }
+.cph-st-danger{ background:var(--cph-coral, #E8673C); }
+.cph-st-warn{ background:var(--cph-amber, #B7791F); }
+
+/* Header: just the bell, at the far right */
+.cph #cpNotifBell, .cph #cpProfileMenuWrap{ display:none !important; }
+.cph .cp-header-actions{ margin-left:auto; }
+.cph #cpUpdatesBell{ color:var(--cph-ink); }
+.cph .cp-count-badge{ background:var(--cph-coral); }
+
+/* Bottom nav: one green family */
+@media (max-width:999px){
+  #cpNav .cp-nav-btn{ font-size:11.5px; font-weight:500; color:var(--cph-muted, #5E6E62); }
+  #cpNav .cp-nav-btn.active{ color:var(--cph-deep, #2B6E0F); font-weight:700; }
+}
+
+/* =====================================================================
+   Customer home v2 — polish layer (CSS only)
+   Scoped to #customerHomeScreen.cph.cph-v2: no markup, ids or JS changed.
+   To roll back, remove the "cph-v2" class from #customerHomeScreen in
+   index.html (or delete this block).
+
+   What it does: mint canvas with white, softly-shadowed cards instead of
+   white-on-white hairlines; one green for primary actions, banner and the
+   Current Visit card (they were three different greens); keyboard focus
+   rings; hover on tappable rows; readable minimum type size.
+   ===================================================================== */
+.cph.cph-v2{ --cph-canvas:#F1F7F3; --cph-shadow:0 1px 2px rgba(15,60,40,.06), 0 4px 16px rgba(15,60,40,.05); background:var(--cph-canvas); }
+.cph.cph-v2 .cp-header.cp-header-soft,
+.cph.cph-v2 .cph-hello{ background:var(--cph-canvas); }
+
+/* Account pill: white on the canvas so it reads as tappable */
+.cph.cph-v2 .cph-acct{ background:#fff; box-shadow:var(--cph-shadow); }
+
+/* Cards: shadow instead of a hairline. Severity borders on .cph-action
+   (warn / danger) are kept, they carry meaning. */
+.cph.cph-v2 .cph-card:not(.cph-action):not(#cpHero){ border:0; border-radius:20px; box-shadow:var(--cph-shadow); }
+.cph.cph-v2 .cph-card.cph-action{ border-radius:20px; box-shadow:var(--cph-shadow); }
+.cph.cph-v2 .cph-card.cph-list{ padding:4px 18px; }
+
+/* Current Visit: same green as primary actions, plus lift */
+.cph.cph-v2 .cph-visit{ box-shadow:0 10px 28px rgba(43,110,15,.22); }
+
+/* Banner: fallback fill matches the brand green while images load */
+.cph.cph-v2 .cph-banner{ background:linear-gradient(135deg,var(--cph-deep),var(--cph-green)); box-shadow:var(--cph-shadow); }
+
+/* Quick actions: one primary, two secondary */
+.cph.cph-v2 .cph-act{ border:0; border-radius:20px; box-shadow:var(--cph-shadow); transition:transform .12s, background-color .15s; }
+.cph.cph-v2 .cph-act-primary{ background:var(--cph-deep); color:#fff; }
+.cph.cph-v2 .cph-act:active{ transform:scale(.98); }
+.cph.cph-v2 .cph-act-primary:active{ background:var(--cph-deep); filter:brightness(.92); }
+
+/* Units: each unit is its own white card on the canvas */
+.cph.cph-v2 .cph-unit{ background:#fff; border-radius:20px; padding:12px 16px 12px 12px; margin-top:8px; box-shadow:var(--cph-shadow); transition:background-color .15s; }
+.cph.cph-v2 .cph-unit-img{ border-radius:16px; }
+
+/* Type floor */
+.cph.cph-v2 .cph-step-lb{ font-size:12px; }
+
+/* Hover only where a real pointer exists; focus ring for keyboard users */
+@media (hover:hover){
+  .cph.cph-v2 .cph-unit:hover{ background:color-mix(in srgb,var(--cph-green) 6%,#fff); }
+  .cph.cph-v2 .cph-act:not(.cph-act-primary):hover{ background:color-mix(in srgb,var(--cph-green) 6%,#fff); }
+}
+.cph.cph-v2 :is(button,a,select):focus-visible{ outline:2px solid var(--cph-green); outline-offset:2px; }
+.cph.cph-v2 .cph-visit :is(button,a):focus-visible{ outline-color:#fff; }

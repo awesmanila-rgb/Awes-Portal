@@ -1032,7 +1032,10 @@
 // active service - needs 20260919_02_card_info_expiry.sql), v110, v109,
 // v108 and v104 (Record Past Service - needs 20260919_01_report_back_entry.sql).
 // v182 — customer home redesign (green mobile) + launch splash, merged.
-const CACHE_NAME = 'awes-sr-v183';
+// Bumped to v184 — customer Home visual polish (css/app.css "Customer home v2"
+// block + the cph-v2 class on #customerHomeScreen in index.html). CSS/markup
+// class only; no script or data changes.
+const CACHE_NAME = 'awes-sr-v184';
 
 // Split into two lists on purpose.
 //
