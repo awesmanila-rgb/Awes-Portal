@@ -4749,3 +4749,21 @@ header.app-top{ background:linear-gradient(160deg,var(--pine),var(--pine-deep));
 .sb-section-toggle:focus-visible{ outline-color:var(--accent); }
 input:focus, textarea:focus, select:focus{ outline-color:var(--pine); border-color:var(--pine); }
 ::selection{ background:var(--sage); color:var(--text); }
+
+/* ---- Floating ? must never cover the bottom bars ----
+   Technician: sits above the bottom tab bar (+ the Save/footer bar when it
+   is showing). --tech-nav-h / --tech-footer-h are kept equal to the bars'
+   real heights by home.js (nav height already includes the safe-area inset).
+   On desktop (>=1000px) the tab bar moves to the top, so only the footer
+   bar needs clearing. Admin has no bottom tab bar, only the footer bar. */
+body.role-tech .gd-help-fab{
+  bottom:calc(var(--tech-nav-h, 64px) + var(--tech-footer-h, 0px) + 12px);
+}
+body.role-admin .gd-help-fab{
+  bottom:calc(var(--tech-footer-h, 0px) + 18px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width:1000px){
+  body.role-tech .gd-help-fab{
+    bottom:calc(var(--tech-footer-h, 0px) + 18px + env(safe-area-inset-bottom, 0px));
+  }
+}
