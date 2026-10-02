@@ -9888,7 +9888,9 @@
   // "Active service" hero to show who's on the job.
   async function dtFetchTicketTechNames(ticketId){
     if(!ticketId || !(await ensureCloud())) return [];
-    // Customers can't read dispatch_tickets, so they (and everyone) go
+    // Returns the technician(s) who can create this ticket's service report
+    // (falling back to the assigned crew if none were designated) — NOT the
+    // whole crew. Customers can't read dispatch_tickets, so they (and everyone) go
     // through customer_ticket_tech_names(), which returns only the names —
     // see 20261007_01_customer_ticket_tech_names.sql. The direct read below
     // stays as the fallback until that migration is run.
@@ -9900,7 +9902,11 @@
       const { data, error } = await db.from('dispatch_tickets')
         .select('data').eq('id', ticketId).maybeSingle();
       if(error) throw error;
-      return (data && data.data && data.data.assignedWorkerNames) || [];
+      const t = data && data.data;
+      // Same rule as the RPC: the technician(s) who will file the service
+      // report are the face of the job; fall back to the crew list only
+      // when the ticket has no designated reporter.
+      return (t && ((t.reportAllowedWorkerNames && t.reportAllowedWorkerNames.length) ? t.reportAllowedWorkerNames : t.assignedWorkerNames)) || [];
     }catch(e){ console.error('fetch ticket technicians failed', describeCloudError(e)); return []; }
   }
 
