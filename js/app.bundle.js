@@ -28465,6 +28465,14 @@
     setSidebarActive('menuManageReports');
     showServiceReportsManagerView();
   });
+  // Operations -> Record Past Service: opens the Service Report page straight
+  // on its Record Past Service tab (admin back-entry, see back-entry.js).
+  $('sbNavPastService').addEventListener('click', ()=>{
+    closeMainMenu();
+    setSidebarActive('sbNavPastService');
+    showServiceReport();
+    srShowTab('backentry');
+  });
   $('menuManageCustomers').addEventListener('click', async ()=>{
     closeMainMenu();
     setSidebarActive('menuManageCustomers');
@@ -31434,7 +31442,7 @@
            s:['Draft: ituloy ang report na hindi pa naisu-submit.', 'Completed: buksan ang naisumiteng report o ang PDF nito.'],
            tip:'Tapusin ang draft sa parehong araw para ma-bill ng office ang trabaho.' } },
 
-    'sr.backentry': { roles:['admin','staff'], module:'ops.past_service', flow:'service', go:{ staff:'ops.past_service' },
+    'sr.backentry': { roles:['admin','staff'], module:'ops.past_service', flow:'service', go:{ admin:'sbNavPastService', staff:'ops.past_service' },
       en:{ t:'Record Past Service', p:'Key in work that was already done without a report in the app, so the customer\u2019s history is complete.',
            s:['Choose the technician who did the work and the customer.', 'Pick the units, the date, and what was done.', 'Save — it appears in the customer\u2019s history marked as past service.'],
            tip:'Use this for old paper reports when you first move a customer into the app.' },
