@@ -2134,7 +2134,7 @@
   function loginBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
+    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> showRoleChooser());
     return back;
@@ -2191,7 +2191,7 @@
   function loginStaffBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
+    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> renderStaffRoleChooser());
     return back;
@@ -2875,7 +2875,7 @@
       pad.clear();
       if(data) pad.fromData(data);
     }
-    const pad = new SignaturePad(canvas, {penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)'});
+    const pad = new SignaturePad(canvas, {penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)'});
     pad.addEventListener('beginStroke', ()=>{ $(phId).style.display='none'; });
     window.addEventListener('resize', resize);
     setTimeout(resize, 50);
@@ -10216,10 +10216,10 @@
     // stage is labelled for what each side is meant to do with it.
     if(status==='completed'){
       const label = (dtIsDispatcher()) ? 'For Review' : 'Completed';
-      return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: '+label+'</span>';
+      return '<span class="status-pill" style="background:#E3EFE6; color:#17714F;">Status: '+label+'</span>';
     }
     if(status==='in_progress') return '<span class="status-pill" style="background:#E4F0F1; color:#1F6F7A;">Status: Work in Progress</span>';
-    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCEAE0; color:var(--green-dark);">Status: En Route</span>';
+    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCE8E0; color:var(--green-dark);">Status: En Route</span>';
     if(status==='preparing') return '<span class="status-pill" style="background:#FBF0DC; color:#B9791F;">Status: Preparing</span>';
     // Future-dated: deliberately no "Status:" prefix — it isn't in the
     // lifecycle yet, it's just booked.
@@ -12089,7 +12089,7 @@
       const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
         '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
-        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#E6EEE8')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
       '</div>';
     }).join('');
     list.scrollTop = list.scrollHeight;
@@ -12276,7 +12276,7 @@
   // change; anything unmatched falls back to grey at the call site.
   const DT_CAL_STATUS_COLORS = {
     scheduled:'#8A9089', preparing:'#B9791F', open:'#B9791F',
-    acknowledged:'#1F7A50', in_progress:'#1F6F7A', completed:'#154D34',
+    acknowledged:'#17714F', in_progress:'#1F6F7A', completed:'#0F5A40',
     closed:'#8A9089', expired:'#B3402D', cancelled:'#B3402D'
   };
   const dtCalStates = {};
@@ -12997,7 +12997,7 @@
       const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
         '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
-        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#E6EEE8')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
       '</div>';
     }).join('');
     list.scrollTop = list.scrollHeight;
@@ -14317,7 +14317,7 @@
     if(!row) return;
     row.scrollIntoView({behavior:'smooth', block:'center'});
     row.style.transition = 'background-color 0.3s';
-    row.style.backgroundColor = '#DFF3E3';
+    row.style.backgroundColor = '#E3EFE6';
     setTimeout(()=>{ row.style.backgroundColor = ''; }, 1400);
   }
 
@@ -22251,7 +22251,7 @@
       window.scrollTo({ top:0 });
       if(!signed){
         await loadAwesScript('signature', awesLibs.signature);
-        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)' });
         invSigFit();
       }
     }catch(e){ purchFail('Couldn\u2019t open the slip: ', e); }
@@ -22876,7 +22876,7 @@
         await loadAwesScript('signature', awesLibs.signature);
         const c = $('tlSignCanvas'), r = Math.max(window.devicePixelRatio || 1, 1);
         c.width = c.offsetWidth * r; c.height = c.offsetHeight * r; c.getContext('2d').scale(r, r);
-        tlPad = new SignaturePad(c, { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+        tlPad = new SignaturePad(c, { penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)' });
       }catch(e){ toast('Signature tool couldn\u2019t load — check the connection'); tlSignDone(null); }
     });
   }
@@ -32615,7 +32615,7 @@
     });
   }
 
-  const TRACKER_DOT = { live: '#1F7A50', idle: '#B9791F', stale: '#8A8F8A' };
+  const TRACKER_DOT = { live: '#17714F', idle: '#B9791F', stale: '#8A8F8A' };
 
   function trackerFmtAgo(iso){
     if(!iso) return 'never';
@@ -32663,8 +32663,8 @@
   function trackerPopupHtml(name, row){
     return '<div style="font:13px -apple-system,BlinkMacSystemFont,sans-serif;">'+
       '<b>'+escapeHtml(name)+'</b><br>'+
-      '<span style="color:#5C6B62;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
-      (row.accuracy != null ? '<br><span style="color:#5C6B62;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
+      '<span style="color:#58695F;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
+      (row.accuracy != null ? '<br><span style="color:#58695F;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
     '</div>';
   }
 
@@ -33307,7 +33307,7 @@
     const first = String(currentUser.name||'').trim().split(/\s+/)[0];
     $('cpGreetingName').textContent = first || 'there';
   }
-  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
+  const CP_AVATAR_COLORS = ['#0F5A40','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
   function cpAvatarColor(name){
     let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
     return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
