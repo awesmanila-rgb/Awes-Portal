@@ -1,3 +1,7 @@
+// Bumped to v196 — admin Job Order progress now lists the whole crew as chips
+// (green check = acknowledged, amber = not yet acknowledged). Re-fetch
+// js/app.bundle.js again.
+//
 // Bumped to v195 — technician My Job Order cards and the Home tiles now name
 // the teammates who still have to acknowledge ("Waiting for X" / "Also to
 // acknowledge: X"). Re-fetch js/app.bundle.js again.
@@ -1047,7 +1051,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v195';
+const CACHE_NAME = 'awes-sr-v196';
 
 // Split into two lists on purpose.
 //
