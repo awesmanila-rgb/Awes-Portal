@@ -10544,26 +10544,30 @@
     if(r.arrivedAt && resolved<units) bits.push('on site');
     if(status==='completed') bits.push('waiting on your review');
 
-    // WHO hasn't acknowledged, by name. The count above says how many are
-    // outstanding; this says who to chase. Matched by id, never by position
-    // in acknowledgedBy — that array can hold someone who was replaced, and
-    // counting it by length would hide the person actually still owing an
-    // acknowledgement. assignedWorkerNames runs parallel to assignedWorkerIds.
-    // Hidden once the job order is Completed/Closed, when it no longer matters.
+    // Full crew roster with each technician's acknowledgement state, so admin
+    // sees everyone on the job order and who is still outstanding at a glance.
+    // Matched by id, never by position in acknowledgedBy — that array can hold
+    // someone who was replaced, and counting it by length would hide the
+    // person actually still owing an acknowledgement. assignedWorkerNames runs
+    // parallel to assignedWorkerIds. Hidden once Completed/Closed.
     const ackedSet = new Set(r.acknowledgedBy||[]);
     const idList = r.assignedWorkerIds||[], nameList = r.assignedWorkerNames||[];
-    const pendingNames = idList
-      .map((id,i)=> ackedSet.has(id) ? null : (nameList[i] || 'Technician'))
-      .filter(Boolean);
-    const pendingHtml = (pendingNames.length && status!=='completed' && status!=='closed')
-      ? '<div class="u-status jo-pending-ack" style="font-size:10.5px; margin-top:2px; color:var(--amber, #B8860B);">'+
-          '<b>Not yet acknowledged:</b> '+escapeHtml(pendingNames.join(', '))+'</div>'
+    const chipBase = 'display:inline-block; font-size:10.5px; padding:1px 7px; border-radius:10px; margin:2px 4px 0 0;';
+    const crewHtml = (idList.length && status!=='completed' && status!=='closed')
+      ? '<div class="jo-crew-ack" style="margin-top:3px;">'+
+          idList.map((id,i)=>{
+            const nm = escapeHtml(nameList[i] || 'Technician');
+            return ackedSet.has(id)
+              ? '<span class="jo-ack-chip jo-ack-yes" style="'+chipBase+' background:var(--green-light); color:var(--green-dark);">\u2713 '+nm+'</span>'
+              : '<span class="jo-ack-chip jo-ack-no" style="'+chipBase+' background:var(--amber-light); color:var(--amber); font-weight:600;">'+nm+' \u00b7 not yet acknowledged</span>';
+          }).join('')+
+        '</div>'
       : '';
 
     return '<div class="jo-admin-progress" style="margin-top:6px;">'+
         '<div style="display:flex; gap:3px; margin-bottom:3px;">'+bar+'</div>'+
         (bits.length ? '<div class="u-status" style="font-size:10.5px;">'+escapeHtml(bits.join(' · '))+'</div>' : '')+
-        pendingHtml+
+        crewHtml+
       '</div>';
   }
 
