@@ -4767,3 +4767,235 @@ body.role-admin .gd-help-fab{
     bottom:calc(var(--tech-footer-h, 0px) + 18px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* =====================================================================
+   Admin dashboard v2 (CSS + one additive panel)
+   Scoped to body.role-admin #adminDash.adm-v2, body.role-admin
+   .admin-sidebar.adm-v2 and the dashboard top bar. Every existing card keeps
+   its id, markup and handlers; this re-places and restyles them and adds one
+   panel (#prioBoardCard, rendered by admin-priority.js) plus a status line
+   (#admStatusLine). Roll back by removing "adm-v2" from #adminDash and
+   #adminSidebar in index.html (the board then simply stays hidden-looking
+   unstyled — also remove #prioBoardCard / #admStatusLine for a full revert).
+   ===================================================================== */
+body.role-admin{ --av2-ink:#12221A; --av2-muted:#58695F; --av2-line:#DCE8E0; --av2-paper:#F1F7F3; --av2-pine:#0F5A40; --av2-tint:#E3EFE6; --av2-fire:#C8402B; --av2-amber:#F2B84B; --av2-blue:#2A63B0;
+  --av2-head:"Bricolage Grotesque","Plus Jakarta Sans","Google Sans",Roboto,-apple-system,"Segoe UI",sans-serif; }
+body.role-admin:has(#adminDash.adm-v2){ background:var(--av2-paper); }
+body.role-admin:has(#adminDash.adm-v2) .dashboard-topbar{ background:transparent; padding-bottom:4px; align-items:flex-end; }
+
+/* Sidebar: deeper pine, amber marker on the active link */
+body.role-admin .admin-sidebar.adm-v2{ background:linear-gradient(180deg,#0F5A40,#0B4531); }
+body.role-admin .admin-sidebar.adm-v2 .sidebar-link.active{ background:rgba(255,255,255,.12); box-shadow:inset 3px 0 0 var(--av2-amber); }
+body.role-admin .admin-sidebar.adm-v2 .sidebar-brand-name{ font-family:var(--av2-head); font-weight:800; }
+
+/* Top bar: the status line is the headline */
+body.role-admin:has(#adminDash.adm-v2) .dt-greeting-title{ font-size:14px; font-weight:600; color:var(--av2-muted); }
+.adm-status{ font:800 clamp(26px,3.4vw,40px)/1.06 var(--av2-head,inherit); letter-spacing:-.025em; color:var(--av2-ink,#14211B); margin:2px 0 6px; max-width:24ch; }
+.adm-status:empty{ display:none; }
+
+/* Layout: counts, then board beside the queue, then the rest */
+body.role-admin #adminDash.adm-v2{
+  grid-template-columns:minmax(0,1.9fr) minmax(300px,1fr);
+  grid-template-areas:
+    "jo    jo"
+    "board prio"
+    "ptech ov"
+    "jobs  act"
+    "jobs  chart"
+    "track avail"
+    "week  cal"
+    "qa    qa"
+    "ann   ann";
+}
+body.role-admin #prioBoardCard{ grid-area:board; }
+@media (max-width:1100px){
+  body.role-admin #adminDash.adm-v2{ grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:"jo jo" "board board" "prio prio" "ptech ptech" "ov ov" "jobs jobs" "act chart" "track track" "avail avail" "week week" "cal cal" "qa qa" "ann ann"; }
+}
+@media (max-width:640px){
+  body.role-admin #adminDash.adm-v2{ grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"jo" "board" "prio" "ptech" "ov" "jobs" "act" "chart" "track" "avail" "week" "cal" "qa" "ann"; }
+}
+
+/* Panels: hairline border, no heavy header bar */
+body.role-admin #adminDash.adm-v2 > .card,
+body.role-admin #adminDash.adm-v2 #dashTwoCol > .card{ border:1px solid var(--av2-line); border-radius:14px; box-shadow:none; background:#fff; }
+body.role-admin #adminDash.adm-v2 .card-head{ background:none; color:var(--av2-ink); border:0; border-radius:0; padding:16px 20px 2px;
+  font:700 18px/1.25 var(--av2-head); letter-spacing:-.01em; text-transform:none; }
+body.role-admin #adminDash.adm-v2 .card-head svg{ color:var(--av2-pine); }
+body.role-admin #adminDash.adm-v2 .card-head button{ color:var(--av2-pine) !important; font-weight:700; }
+
+/* Job Orders stat cards become the counts strip under the headline */
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard{ background:none; border:0; border-top:1px solid var(--av2-line); border-bottom:1px solid var(--av2-line); border-radius:0; padding:6px 0; }
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .card-head{ display:none; }
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .card-body{ padding:8px 0; }
+body.role-admin #adminDash.adm-v2 .overview-stat{ background:#fff; border:1px solid var(--av2-line); border-radius:12px; box-shadow:none; }
+body.role-admin #adminDash.adm-v2 .overview-stat-value{ font-family:var(--av2-head); font-weight:800; letter-spacing:-.02em; }
+body.role-admin #adminDash.adm-v2 .ov-icon-chip{ background:var(--av2-tint); color:var(--av2-pine); }
+body.role-admin #adminDash.adm-v2 #ovLateCard{ border-color:var(--av2-fire); }
+body.role-admin #adminDash.adm-v2 #ovLateValue{ color:var(--av2-fire); }
+
+/* Dispatch board */
+.adm-b-wrap{ overflow-x:auto; margin:0 -4px; padding:0 4px 4px; }
+.adm-b{ min-width:720px; position:relative; padding-top:24px; --n:11; }
+.adm-b-hours,.adm-b-lane{ display:grid; grid-template-columns:132px 1fr; }
+.adm-b-hours > div:last-child{ display:flex; }
+.adm-b-hours span{ flex:1; font-size:12px; color:var(--av2-muted); padding-bottom:6px; }
+.adm-b-who{ position:sticky; left:0; z-index:2; background:#fff; display:flex; align-items:center; gap:9px; padding-right:8px; min-width:0; }
+.adm-b-av{ width:30px; height:30px; border-radius:50%; display:grid; place-items:center; color:#fff; font-weight:700; font-size:11px; flex:none; }
+.adm-b-who b{ display:block; font-weight:700; font-size:13px; line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.adm-b-who small{ font-size:12px; color:var(--av2-muted); }
+.adm-b-lane{ border-top:1px solid var(--av2-line); }
+.adm-b-track{ position:relative; height:64px; background:repeating-linear-gradient(90deg,transparent 0 calc(100%/var(--n) - 1px),var(--av2-line) calc(100%/var(--n) - 1px) calc(100%/var(--n))); }
+.adm-b-job{ position:absolute; top:8px; bottom:8px; border:0; border-radius:8px; padding:5px 9px; overflow:hidden; text-align:left; cursor:pointer;
+  font:inherit; font-size:12px; line-height:1.25; background:#E3EFE6; color:var(--av2-ink); box-shadow:inset 3px 0 0 #8EA79A; transition:transform .12s; }
+.adm-b-job b{ display:block; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.adm-b-job span{ display:block; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.adm-b-job:hover{ transform:translateY(-1px); }
+.adm-b-job[aria-pressed="true"]{ outline:2px solid var(--av2-ink); outline-offset:1px; }
+.adm-b-job.en{ background:#FBEBC8; box-shadow:inset 3px 0 0 var(--av2-amber); }
+.adm-b-job.on{ background:#D9E6F7; box-shadow:inset 3px 0 0 var(--av2-blue); }
+.adm-b-job.done{ background:var(--av2-pine); color:#fff; box-shadow:none; }
+.adm-b-job.late{ background:var(--av2-fire); color:#fff; box-shadow:none; animation:admBRing 1.6s ease-out 1 .4s; }
+@keyframes admBRing{ 0%{ box-shadow:0 0 0 0 rgba(214,64,43,.55); } 100%{ box-shadow:0 0 0 12px rgba(214,64,43,0); } }
+.adm-b-now{ position:absolute; top:24px; bottom:0; width:2px; background:var(--av2-fire); z-index:3; pointer-events:none; }
+.adm-b-now::before{ content:attr(data-t); position:absolute; top:-22px; left:50%; transform:translateX(-50%); background:var(--av2-fire); color:#fff; font-size:11px; font-weight:700; border-radius:99px; padding:1px 7px; white-space:nowrap; }
+.adm-b-detail{ margin-top:12px; padding:12px 14px; border-radius:10px; background:var(--av2-paper); display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+.adm-b-detail:empty{ display:none; }
+.adm-b-detail b{ font:700 15px var(--av2-head); }
+.adm-b-detail small{ display:block; color:var(--av2-muted); font-size:13px; }
+.adm-b-key{ display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:12px; font-size:12px; color:var(--av2-muted); }
+.adm-b-key i{ display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:-1px; }
+.adm-b-note{ margin-top:10px; font-size:12.5px; color:var(--av2-muted); }
+@media (prefers-reduced-motion:reduce){ .adm-b-job, .adm-b-job.late{ animation:none; transition:none; } }
+.adm-b-open{ border:0; border-radius:8px; padding:9px 16px; font:700 13px inherit; font-family:inherit; background:var(--av2-pine); color:#fff; cursor:pointer; }
+.adm-b-open:hover{ filter:brightness(1.08); }
+.adm-b-open:focus-visible,.adm-b-job:focus-visible{ outline:3px solid var(--av2-pine); outline-offset:2px; }
+/* v2 polish found while rendering: sentence-case stat labels, pine action buttons */
+body.role-admin #adminDash.adm-v2 .overview-stat-title{ text-transform:none; letter-spacing:0; font-size:13px; font-weight:600; color:var(--av2-muted); }
+body.role-admin #adminDash.adm-v2 .prio-btn.primary{ background:var(--av2-pine); border-color:var(--av2-pine); }
+
+/* =====================================================================
+   Customer home v3 — layout from customer_portal_home_redesign.html
+   Scoped to #customerHomeScreen.cph.cph-v3 and #cpNav.cp-nav-v2. Builds on
+   the v2 tokens (--cph-*). Roll back by removing "cph-v3" from
+   #customerHomeScreen (the v2 look returns; the markup still works).
+
+   Phone order: Action needed, Current visit, Quick actions (2 x 3), Recent
+   reports, My units, Upcoming maintenance, Help, banner. From 1000px the
+   two columns apply instead (left: act / visit / tiles / units, right:
+   reports / maintenance / help / banner).
+   ===================================================================== */
+.cph.cph-v3{ --cph-hair:#DCE8E0; --cph-gut:16px; }
+@media (min-width:1000px){ .cph.cph-v3{ --cph-gut:24px; } }
+
+/* Header row: amber avatar + greeting, bells on the right. Header, account
+   pill and body share one 1200px container and one gutter so they line up. */
+.cph.cph-v3 .cp-header.cp-header-soft{ padding:18px 0 6px; min-height:0; border:0; box-shadow:none; }
+.cph.cph-v3 .cp-header-inner{ display:flex; align-items:center; gap:10px; max-width:1200px; margin:0 auto; padding:0 var(--cph-gut); box-sizing:border-box; }
+.cph-who{ display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+.cph-who .cp-profile-menu-wrap{ flex:none; }
+.cph.cph-v3 #cpProfileMenuWrap{ display:block !important; }
+.cph.cph-v3 .cp-avatar{ flex:none; width:38px; height:38px; border:0; background:var(--cph-accent); color:#2A1D00; font-size:13px; font-weight:700; letter-spacing:.2px; }
+.cph.cph-v3 .cph-greet{ margin:0; display:flex; flex-direction:column; min-width:0; line-height:1.25; }
+.cph.cph-v3 .cph-greet-sm{ font-size:12px; font-weight:500; color:var(--cph-muted); }
+.cph.cph-v3 .cph-greet-name{ font-family:var(--cph-head); font-size:16px; font-weight:700; letter-spacing:-.01em; color:var(--cph-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cph.cph-v3 .cp-header-actions{ display:flex; align-items:center; gap:8px; flex:none; margin-left:auto; }
+.cph.cph-v3 .cp-icon-btn{ width:38px; height:38px; background:#fff; border:1px solid var(--cph-hair); box-shadow:none; }
+.cph.cph-v3 .cp-icon-btn svg{ width:19px; height:19px; }
+.cph.cph-v3 .cp-profile-menu{ left:0; right:auto; }
+
+/* Account pill */
+.cph.cph-v3 .cph-hello{ padding:4px var(--cph-gut) 10px; max-width:1200px; margin:0 auto; box-sizing:border-box; background:none; }
+.cph.cph-v3 .cph-viewing-lbl{ display:none; }
+.cph.cph-v3 .cph-acct{ display:inline-flex; align-items:center; gap:6px; height:auto; width:auto; max-width:100%; padding:5px 12px; border:0; box-shadow:none; background:var(--cph-sage); color:#0B4531; border-radius:999px; font-size:12px; font-weight:600; }
+.cph.cph-v3 .cph-acct-caret{ color:#0B4531; font-size:13px; }
+
+/* Body + ordering. Columns dissolve on phones so sections can be reordered. */
+.cph.cph-v3 .cph-body{ padding:0 var(--cph-gut) calc(104px + env(safe-area-inset-bottom,0px)); }
+.cph.cph-v3 .cph-grid{ display:flex; flex-direction:column; gap:0; }
+.cph.cph-v3 .cph-col{ display:contents; }
+.cph.cph-v3 .cph-skel{ order:0; }
+.cph.cph-v3 .cphs-action{ order:1; } .cph.cph-v3 .cphs-visit{ order:2; } .cph.cph-v3 .cphs-acts{ order:3; }
+.cph.cph-v3 .cphs-reports{ order:4; } .cph.cph-v3 .cphs-units{ order:5; } .cph.cph-v3 .cphs-pm{ order:6; }
+.cph.cph-v3 .cphs-support{ order:7; } .cph.cph-v3 .cphs-banner{ order:8; }
+.cph.cph-v3.cph-loading .cph-col > :not(.cph-skel){ display:none !important; }
+@media (min-width:1000px){
+  .cph.cph-v3 .cph-body{ padding-bottom:40px; }
+  .cph.cph-v3 .cph-grid{ display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:0 24px; align-items:start; }
+  .cph.cph-v3 .cph-col{ display:block; min-width:0; }
+  /* both columns start on the same line whichever section leads */
+  .cph.cph-v3 .cphs-action .cph-sec, .cph.cph-v3 .cphs-reports .cph-sec{ margin-top:12px; }
+  .cph.cph-v3 .cphs-visit .cph-visit{ margin-top:12px; }
+}
+
+/* Section headings */
+.cph.cph-v3 .cph-sec{ margin:20px 2px 8px; align-items:baseline; }
+.cph.cph-v3 .cph-sec h2{ font-size:15px; font-weight:700; letter-spacing:-.01em; }
+.cph.cph-v3 .cph-sec a, .cph.cph-v3 .cph-sec-note{ font-size:12px; font-weight:600; color:var(--cph-deep); }
+.cph.cph-v3 .cph-sec .cph-danger-txt{ color:var(--danger); }
+
+/* Cards: white with a hairline, no shadow */
+.cph.cph-v3 .cph-card:not(.cph-action):not(#cpHero){ border:1px solid var(--cph-hair); border-radius:18px; box-shadow:none; }
+.cph.cph-v3 .cph-card.cph-action{ border-radius:18px; box-shadow:none; }
+.cph.cph-v3 .cph-card.cph-list{ padding:2px 12px; }
+.cph.cph-v3 .cphs-action .cph-sec{ margin-top:8px; }
+
+/* Current visit: pine card */
+.cph.cph-v3 .cph-visit{ margin:8px 0 0; padding:16px; border-radius:22px; box-shadow:none; }
+.cph.cph-v3 .cph-visit .cph-sec{ margin:0; align-items:center; }
+.cph.cph-v3 .cph-visit .cph-sec h2{ font-size:11px; font-weight:700; padding:3px 10px; }
+.cph.cph-v3 .cph-visit .cph-sec a{ font-size:11px; color:rgba(255,255,255,.85); }
+.cph.cph-v3 .cph-visit .cph-title{ font-size:19px; font-weight:700; line-height:1.2; margin:12px 0 2px; letter-spacing:-.01em; }
+.cph.cph-v3 .cph-visit .cph-sub{ font-size:13px; }
+.cph.cph-v3 .cph-visit #cpHero .cph-steps{ gap:4px; padding-top:14px; margin-top:0; }
+.cph.cph-v3 .cph-visit .cph-step .cph-track-dot{ height:5px; }
+.cph.cph-v3 .cph-visit .cph-step-lb{ display:none; }
+.cph.cph-v3 .cph-visit .cph-stepnote{ order:1; margin:7px 0 0; font-size:12px; font-weight:600; color:rgba(255,255,255,.92); }
+.cph.cph-v3 .cph-visit #cpHero .cph-tech{ margin:14px 0 0; padding:12px 0 0; border-top:1px solid rgba(255,255,255,.2); order:2; }
+.cph.cph-v3 .cph-visit #cpHero .cph-steps{ order:1; }
+.cph.cph-v3 .cph-visit .cph-avatar{ width:36px; height:36px; font-size:12px; }
+.cph.cph-v3 .cph-visit .cph-icon-btn{ width:36px; height:36px; }
+.cph.cph-v3 .cph-visit .cph-tech-name{ font-size:14px; font-weight:700; }
+.cph.cph-v3 .cph-visit .cph-tech .cph-sub{ font-size:11px; color:rgba(255,255,255,.75); }
+.cph.cph-v3 .cph-visit .cph-row-top .cph-ic{ background:rgba(255,255,255,.16); color:#fff; }
+.cph.cph-v3 .cph-visit .cph-row-top .cph-title{ margin-top:0; }
+.cph.cph-v3 .cph-visit #cpHero > .cph-row-top{ margin-top:14px; align-items:center; }
+
+/* Quick actions: 2 x 3 tiles, icon circle on the left */
+.cph.cph-v3 .cph-actions{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:14px 0 2px; }
+.cph.cph-v3 .cph-act{
+  flex-direction:row; align-items:center; justify-content:flex-start; gap:10px; min-height:0; padding:11px; text-align:left;
+  background:#fff; border:1px solid var(--cph-hair); border-radius:16px; box-shadow:none; color:var(--cph-ink);
+}
+.cph.cph-v3 .cph-act-ic{ width:34px; height:34px; border-radius:50%; flex:none; background:var(--cph-sage); color:var(--cph-deep); display:grid; place-items:center; }
+.cph.cph-v3 .cph-act-ic.cph-danger-txt{ color:var(--danger); background:#FBE9E5; }
+.cph.cph-v3 .cph-act-ic svg{ width:18px; height:18px; }
+.cph.cph-v3 .cph-act-tx{ display:flex; flex-direction:column; min-width:0; }
+.cph.cph-v3 .cph-act-tx b{ font-size:13px; font-weight:700; line-height:1.2; }
+.cph.cph-v3 .cph-act-tx small{ font-size:11px; font-weight:500; color:var(--cph-muted); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cph.cph-v3 .cph-act-primary{ background:var(--cph-deep); border-color:var(--cph-deep); color:#fff; }
+.cph.cph-v3 .cph-act-primary .cph-act-ic{ background:var(--cph-accent); color:#2A1D00; }
+.cph.cph-v3 .cph-act-primary .cph-act-tx small{ color:rgba(255,255,255,.78); }
+
+/* Units + list rows follow the same hairline language */
+.cph.cph-v3 .cph-unit{ border:1px solid var(--cph-hair); box-shadow:none; border-radius:16px; }
+.cph.cph-v3 .cph-sum-item{ border-radius:14px; }
+.cph.cph-v3 .cph-ic{ border-radius:50%; width:34px; height:34px; background:var(--cph-sage); color:var(--cph-deep); }
+.cph.cph-v3 .cph-ic svg{ width:18px; height:18px; }
+.cph.cph-v3 .cph-ic-warn{ background:#FBF0DC; color:#8A5A0F; } .cph.cph-v3 .cph-ic-danger{ background:#FBE3DF; color:var(--danger); }
+.cph.cph-v3 .cph-ic-muted{ background:var(--cph-sage); color:var(--cph-deep); }
+.cph.cph-v3 .cphs-banner{ margin:20px 0 4px; border-radius:20px; }
+
+/* Bottom bar (phones): full-width white bar, amber marker over the active tab */
+@media (max-width:999px){
+  #cpNav.cp-nav-v2{
+    left:0; right:0; bottom:0; max-width:none; margin:0; padding:0 6px env(safe-area-inset-bottom,0px);
+    border:0; border-top:1px solid #DCE8E0; border-radius:0; background:#fff;
+    -webkit-backdrop-filter:none; backdrop-filter:none; box-shadow:none;
+  }
+  #cpNav.cp-nav-v2 .cp-nav-btn{ position:relative; gap:2px; padding:9px 0 8px; border-radius:0; font-size:11px; font-weight:500; background:none; }
+  #cpNav.cp-nav-v2 .cp-nav-btn.active{ background:none; color:#0F5A40; font-weight:700; }
+  #cpNav.cp-nav-v2 .cp-nav-btn.active::before{ content:""; position:absolute; top:0; left:50%; width:22px; height:3px; margin-left:-11px; border-radius:0 0 3px 3px; background:#F2B84B; }
+  body.role-customer .gd-help-fab{ bottom:calc(74px + env(safe-area-inset-bottom,0px)); background:#0B4531; color:#F2B84B; border:2px solid #F1F7F3; }
+}

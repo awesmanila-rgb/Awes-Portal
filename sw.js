@@ -1035,7 +1035,11 @@
 // Bumped to v185 — customer Home design refresh (css/app.css "Customer home v2"
 // block, cph-v2 / cp-nav-v2 classes and the Google Fonts <link> in index.html).
 // Fonts are cached by the cache-first CDN branch below. No script/data changes.
-const CACHE_NAME = 'awes-sr-v191';
+// v193 — customer home v3 (layout from customer_portal_home_redesign.html: cph-v3 css block,
+// 2 x 3 quick actions, reordered sections, bottom bar).
+// Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
+// dispatch board + status line in admin-priority.js).
+const CACHE_NAME = 'awes-sr-v193';
 
 // Split into two lists on purpose.
 //

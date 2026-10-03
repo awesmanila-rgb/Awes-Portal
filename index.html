@@ -207,7 +207,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
      accounts and before login, so the plain mobile header below still
      drives that experience unchanged. -->
 <div class="app-shell" id="appShell">
-<aside class="admin-sidebar" id="adminSidebar">
+<aside class="admin-sidebar adm-v2" id="adminSidebar">
   <div class="sidebar-brand">
     <div class="sidebar-brand-mark"><img src="logo.png" alt="Awes"></div>
     <div class="sidebar-brand-text">
@@ -410,6 +410,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
 <div class="dashboard-topbar" id="dashboardTopbar">
   <div class="dt-greeting">
     <div class="dt-greeting-title" id="dtGreetingTitle">Good day, Admin! <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V6a1.5 1.5 0 0 1 3 0v5"/><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"/><path d="M14 11V5a1.5 1.5 0 0 1 3 0v8"/><path d="M17 13V8a1.5 1.5 0 0 1 3 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-5-2.7L4 15a1.4 1.4 0 0 1 2-2l2 1.8"/></svg></div>
+    <div class="adm-status" id="admStatusLine" aria-live="polite"></div>
     <div class="dt-greeting-sub">Here's what's happening with your field operations today.</div>
   </div>
   <div class="dt-actions">
@@ -560,7 +561,19 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
        body.role-admin #adminDash in app.css). Nothing is recreated, so no
        flow changes. For technicians the grid rules do not apply at all and
        this wrapper is a plain block, so their home screen is untouched. -->
-  <div id="adminDash">
+  <div id="adminDash" class="adm-v2">
+  <!-- Today's dispatch board (admin-priority.js, prioRenderBoard): today's job
+       orders by technician on a time axis. Read-only view of data the page
+       already loads; clicking a block opens the existing job order. -->
+  <div class="card" id="prioBoardCard" style="display:none;">
+    <div class="card-head"><span>Today's dispatch board</span><button type="button" class="adm-head-link" id="prioBoardOpen">Open dispatch &rsaquo;</button></div>
+    <div class="card-body">
+      <div class="adm-b-wrap"><div class="adm-b" id="prioBoard"><div class="empty-state">Loading…</div></div></div>
+      <div class="adm-b-detail" id="prioBoardDetail" aria-live="polite"></div>
+      <div class="adm-b-key"><span><i style="background:#E3EFE6"></i>Scheduled</span><span><i style="background:#FBEBC8"></i>En route</span><span><i style="background:#D9E6F7"></i>On site</span><span><i style="background:#0F5A40"></i>Done</span><span><i style="background:#D6402B"></i>Late</span></div>
+      <div class="adm-b-note" id="prioBoardNote"></div>
+    </div>
+  </div>
   <!-- Admin homepage priority list + technicians today (admin-priority.js).
        Ranked by urgency, then oldest first; quick approve for leave and
        as-requested material requisitions only. -->
@@ -825,7 +838,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
 </div>
 
 <!-- Customer Portal — shown instead of #homeScreen when currentUser.role === 'customer'. -->
-<div id="customerHomeScreen" class="home-screen cp-screen cph cph-v2 cph-loading" style="display:none;">
+<div id="customerHomeScreen" class="home-screen cp-screen cph cph-v2 cph-v3 cph-loading" style="display:none;">
 
   <!-- Customer homepage (redesign). Header: company mark + bell/profile
        menu, then the greeting and the account chip (which replaces the old
@@ -835,23 +848,10 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
        customer-portal.js. -->
   <div class="cp-header cp-header-soft">
     <div class="cp-header-inner">
-      <div>
-        <div class="cph-brand"><img src="logo.png" alt=""><span>AWES Customer Portal</span></div>
-      </div>
-      <div class="cp-header-actions">
-        <!-- Notification bell doubles as the global chat entry point — see
-             cpRefreshNotifBell() in customer-portal.js. Opens My Requests
-             (where per-job messaging lives) rather than a separate inbox;
-             see the "chat model" note in cpNotifBell's click handler. -->
-        <!-- Updates (bell): every step of the customer's requests / reports,
-             from customer_updates (20261015_01) — see cpRenderUpdatesBell(). -->
-        <button type="button" id="cpUpdatesBell" class="cp-icon-btn" aria-label="Updates" title="Updates"></button>
-        <button type="button" id="cpNotifBell" class="cp-icon-btn" style="display:none;" aria-label="Messages" title="Messages"></button>
-        <!-- Profile menu — Account settings / Notifications / Sign out,
-             replacing the old "tap avatar to jump straight to Profile"
-             behavior (see cpToggleProfileMenu() in customer-portal.js).
-             The Profile tab in the shared nav still works too; this is
-             just a faster path to the same screens plus sign-out. -->
+      <!-- v3: avatar (opens the profile menu) + greeting on the left, bells on
+           the right. Same ids as before; the AWES mark now lives in the
+           desktop nav bar (.cp-nav-brand) and the sign-in screen. -->
+      <div class="cph-who">
         <div class="cp-profile-menu-wrap" id="cpProfileMenuWrap">
           <button type="button" id="cpAvatarBtn" class="cp-avatar" title="Profile" aria-haspopup="true" aria-expanded="false">?</button>
           <div class="cp-profile-menu" id="cpProfileMenu" style="display:none;" role="menu">
@@ -860,12 +860,20 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
             <button type="button" role="menuitem" data-menu-action="signout">Sign out</button>
           </div>
         </div>
+        <p class="cph-greet"><span class="cph-greet-sm" id="cpGreetTod">Good day</span><span class="cph-greet-name" id="cpGreetingName">there</span></p>
+      </div>
+      <div class="cp-header-actions">
+        <!-- Updates (bell): every step of the customer's requests / reports,
+             from customer_updates (20261015_01) — see cpRenderUpdatesBell().
+             The second bell doubles as the global chat entry point — see
+             cpRefreshNotifBell(). -->
+        <button type="button" id="cpUpdatesBell" class="cp-icon-btn" aria-label="Updates" title="Updates"></button>
+        <button type="button" id="cpNotifBell" class="cp-icon-btn" style="display:none;" aria-label="Messages" title="Messages"></button>
       </div>
     </div>
   </div>
 
   <div class="cph-hello">
-    <p class="cph-greet"><span id="cpGreetTod">Good day</span>, <span id="cpGreetingName">there</span></p>
     <p class="cph-viewing-lbl">You are viewing</p>
     <button type="button" class="cph-acct" id="cpAcctChip"><span id="cpGreetSub">Loading your units…</span><span class="cph-acct-caret" id="cpAcctCaret" style="display:none;">▾</span></button>
   </div>
@@ -883,20 +891,15 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
     </div>
   </div>
 
+  <!-- v3 order on phones: Action needed → Current visit → Quick actions →
+       Recent reports → My units → Upcoming maintenance → Help → banner
+       (the .cphs-* classes carry the order; on wide screens the two
+       columns below apply instead). -->
   <div class="cp-content cph-body">
     <div class="push-prompt" id="pushPromptCust" style="display:none;"></div>
 
     <div class="cph-grid">
       <div class="cph-col">
-        <!-- Marketing banner — auto-sliding. Slides come from CP_BANNERS in
-             customer-portal.js (image + where a tap goes); images live in
-             img/banners/. The frame keeps a fixed 12:5 shape so nothing below
-             it moves while images load or slides change. -->
-        <section class="cph-banner" id="cpBanner" aria-roledescription="carousel" aria-label="AWES services">
-          <div class="cph-banner-track" id="cpBannerTrack"></div>
-          <div class="cph-banner-dots" id="cpBannerDots" role="tablist" aria-label="Choose slide"></div>
-        </section>
-
         <!-- Shown only on the first load of an account, instead of empty
              sections that fill in one by one. -->
         <div class="cph-skel" aria-hidden="true">
@@ -905,12 +908,12 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
           <div class="cph-skel-line" style="width:30%"></div><div class="cph-skel-card cph-skel-tall"></div>
         </div>
 
-        <section id="cpActionWrap" style="display:none;">
+        <section id="cpActionWrap" class="cphs-action" style="display:none;">
           <div class="cph-sec"><h2>Action needed</h2><span class="cph-sec-note cph-danger-txt" id="cpActionCount"></span></div>
           <div id="cpActionList"></div>
         </section>
 
-        <section>
+        <section class="cphs-visit">
           <div id="cpUpdateStrip" style="display:none;"></div>
           <div class="cph-visit">
             <div class="cph-sec"><h2 id="cpVisitTitle">Current visit</h2><a id="cpVisitMore" style="display:none;"></a></div>
@@ -918,35 +921,51 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
           </div>
         </section>
 
-        <div class="cph-actions">
-          <button type="button" class="cph-act cph-act-primary" id="cpRequestServiceBtn"><span class="cph-act-ic" id="cpActBookIc"></span>Book a service</button>
-          <button type="button" class="cph-act" id="cpReportProblemBtn"><span class="cph-act-ic cph-danger-txt" id="cpActProblemIc"></span>Report a problem</button>
-          <button type="button" class="cph-act" id="cpMessageUsBtn"><span class="cph-act-ic cph-accent-txt" id="cpActMsgIc"></span>Message us</button>
+        <!-- Quick actions: 2 x 3. The three originals keep their ids; units,
+             history and quotes are shortcuts to screens that already exist. -->
+        <div class="cph-actions cphs-acts">
+          <button type="button" class="cph-act cph-act-primary" id="cpRequestServiceBtn"><span class="cph-act-ic" id="cpActBookIc"></span><span class="cph-act-tx"><b>Book a service</b><small>Request a visit</small></span></button>
+          <button type="button" class="cph-act" id="cpReportProblemBtn"><span class="cph-act-ic cph-danger-txt" id="cpActProblemIc"></span><span class="cph-act-tx"><b>Report problem</b><small>Something is wrong</small></span></button>
+          <button type="button" class="cph-act" id="cpActUnitsBtn"><span class="cph-act-ic" id="cpActUnitsIc"></span><span class="cph-act-tx"><b>My equipment</b><small id="cpActUnitsSub">Your units</small></span></button>
+          <button type="button" class="cph-act" id="cpActHistoryBtn"><span class="cph-act-ic" id="cpActHistoryIc"></span><span class="cph-act-tx"><b>History</b><small>Visits and requests</small></span></button>
+          <button type="button" class="cph-act" id="cpMessageUsBtn"><span class="cph-act-ic cph-accent-txt" id="cpActMsgIc"></span><span class="cph-act-tx"><b>Message us</b><small>Chat with the office</small></span></button>
+          <button type="button" class="cph-act" id="cpActQuotesBtn"><span class="cph-act-ic" id="cpActQuotesIc"></span><span class="cph-act-tx"><b>Quotes</b><small>Fees &amp; quotes</small></span></button>
         </div>
 
-        <section>
+
+        <!-- Marketing banner — auto-sliding. Slides come from CP_BANNERS in
+             customer-portal.js (image + where a tap goes); images live in
+             img/banners/. The frame keeps a fixed 12:5 shape so nothing below
+             it moves while images load or slides change. -->
+        <section class="cph-banner cphs-banner" id="cpBanner" aria-roledescription="carousel" aria-label="AWES services">
+          <div class="cph-banner-track" id="cpBannerTrack"></div>
+          <div class="cph-banner-dots" id="cpBannerDots" role="tablist" aria-label="Choose slide"></div>
+        </section>
+      </div>
+
+      <div class="cph-col">
+        <section class="cphs-reports">
+          <div class="cph-sec"><h2>Recent service reports</h2><a id="cpActivityFullHistoryLink">Full history</a></div>
+          <div class="cph-card cph-list" id="cpRecentActivity"></div>
+        </section>
+
+        <section class="cphs-units">
           <div class="cph-sec"><h2 id="cpUnitsSectionTitle">My units</h2><a id="cpUnitsViewAllLink">See all</a></div>
           <div class="cph-card cph-units">
             <div class="cph-sum" id="cpUnitSummary"></div>
             <div id="cpUnitScroll"></div>
           </div>
         </section>
-      </div>
 
-      <div class="cph-col">
-        <section id="cpPmWrap" style="display:none;">
+        <section id="cpPmWrap" class="cphs-pm" style="display:none;">
           <div class="cph-sec"><h2>Upcoming maintenance</h2><span class="cph-sec-note">Next 90 days</span></div>
           <div class="cph-card cph-list" id="cpPmList"></div>
         </section>
 
-        <section>
-          <div class="cph-sec"><h2>Recent service reports</h2><a id="cpActivityFullHistoryLink">Full history</a></div>
-          <div class="cph-card cph-list" id="cpRecentActivity"></div>
-        </section>
-
-        <section>
+        <section class="cphs-support">
           <div class="cph-card cph-support" id="cpSupportCard"></div>
         </section>
+
       </div>
     </div>
   </div>
