@@ -1,3 +1,24 @@
+// Bumped to v200 — page title and admin sidebar heading are now "AWES Management
+// Portal"; the sidebar logo is the white one on the green sidebar; the Job
+// Orders status tiles moved under the dispatch board beside "Needs you now" (as a
+// framed card) so there is no empty space below the board. Re-fetch index.html/css/app.css/
+// js/app.bundle.js.
+//
+// Bumped to v199 — admin dashboard: when the live tracker or recent activity
+// panel is not shown, its neighbour now takes the full row instead of leaving a
+// gap (css/app.css). Re-fetch css/app.css.
+//
+// Bumped to v198 — admin sidebar redesign: pinned daily pages (Inbox, Dispatch,
+// Service Requests, Service Reports) with live counts, section rows with icons
+// and counts, sub-labels in long sections, optional collapsed icon rail, quieter
+// footer (index.html, css/app.css "Admin sidebar v4", auth.js,
+// admin-priority.js). Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
+// Bumped to v197 — admin dashboard re-laid out to the approved sketch: dispatch
+// board | Needs you now, live tracker | Technicians status table, job order
+// progress tracking | Recent activity (css/app.css "Admin dashboard v3",
+// index.html, js/modules-src/admin-priority.js). Re-fetch css + bundle.
+//
 // Bumped to v196 — admin Job Order progress now lists the whole crew as chips
 // (green check = acknowledged, amber = not yet acknowledged). Re-fetch
 // js/app.bundle.js again.
@@ -1051,7 +1072,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v196';
+const CACHE_NAME = 'awes-sr-v200';
 
 // Split into two lists on purpose.
 //

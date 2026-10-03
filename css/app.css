@@ -4998,3 +4998,260 @@ body.role-admin #adminDash.adm-v2 .prio-btn.primary{ background:var(--av2-pine);
   #cpNav.cp-nav-v2 .cp-nav-btn.active::before{ content:""; position:absolute; top:0; left:50%; width:22px; height:3px; margin-left:-11px; border-radius:0 0 3px 3px; background:#F2B84B; }
   body.role-customer .gd-help-fab{ bottom:calc(74px + env(safe-area-inset-bottom,0px)); background:#0B4531; color:#F2B84B; border:2px solid #F1F7F3; }
 }
+
+/* =====================================================================
+   Admin dashboard v3 — layout from the approved sketch
+   ---------------------------------------------------------------------
+   Top bar (greeting + priority message | search + bell) is unchanged.
+   Below it, in the order drawn:
+     Today's dispatch board   |  Needs you now
+     Live tracker             |  Technicians status (table)
+     Job order progress       |  Recent activity
+   Every other panel that was on the page keeps its markup and handlers and
+   simply follows underneath, so nothing is lost. Scoped to the same
+   selector as v2 and placed after it, so it takes precedence.
+   ===================================================================== */
+body.role-admin #adminDash.adm-v2{
+  grid-template-columns:repeat(6, minmax(0,1fr));
+  grid-template-areas:
+    "board board board board prio  prio"
+    "jo    jo    jo    jo    prio  prio"
+    "track track ptech ptech ptech ptech"
+    "prog  prog  prog  prog  act   act"
+    "ov    ov    ov    ov    ov    ov"
+    "jobs  jobs  jobs  jobs  chart chart"
+    "week  week  week  week  cal   cal"
+    "avail avail qa    qa    qa    qa"
+    "ann   ann   ann   ann   ann   ann";
+}
+body.role-admin #prioProgressCard{ grid-area:prog; }
+body.role-admin #adminDash.adm-v2 #homeTrackerCard .tracker-map{ min-height:300px; }
+@media (max-width:1100px){
+  body.role-admin #adminDash.adm-v2{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    grid-template-areas:
+      "prio  prio"
+      "board board"
+      "ptech ptech"
+      "prog  prog"
+      "track act"
+      "jo    jo"
+      "ov    ov"
+      "jobs  jobs"
+      "chart chart"
+      "week  week"
+      "cal   cal"
+      "avail avail"
+      "qa    qa"
+      "ann   ann";
+  }
+}
+@media (max-width:640px){
+  body.role-admin #adminDash.adm-v2{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-areas:"prio" "board" "ptech" "prog" "track" "act" "jo" "ov" "jobs" "chart" "week" "cal" "avail" "qa" "ann";
+  }
+}
+
+/* Technicians status table. Grid rows, not <table>, so a technician with no
+   job order can use one wide cell for their status instead of three dashes.
+   Scrolls sideways inside its own box rather than squeezing on small screens. */
+.ptt-scroll{ overflow-x:auto; }
+.ptt{ min-width:500px; }
+.ptt-row{ display:grid; grid-template-columns:minmax(90px,1.25fr) minmax(78px,1fr) 66px minmax(86px,1fr) 66px 84px;
+  gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid var(--av2-line,#E6EEE8); font-size:13px; }
+.ptt-row:last-child{ border-bottom:none; }
+.ptt-head{ font-size:11.5px; font-weight:700; color:var(--av2-muted,#58695F); padding-top:2px; }
+.ptt-name, .ptt-jo, .ptp-jo, .ptp-more{ background:none; border:0; padding:0; font:inherit; text-align:left; cursor:pointer; color:inherit; }
+.ptt-name{ font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ptt-jo{ font-weight:600; color:var(--av2-pine,#0F5A40); }
+.ptt-name:hover, .ptt-jo:hover, .ptp-jo:hover{ text-decoration:underline; }
+.ptt-span{ grid-column:4 / span 3; display:flex; align-items:center; gap:8px; min-width:0; }
+.ptt-span small{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted,#6B7A71); font-size:12px; }
+.ptt-dim{ color:var(--text-muted,#8A958E); }
+.prio-pill-yes{ background:#d9f0e2; color:#0F5A40; }
+.prio-pill-wait{ background:#FBEBC8; color:#8A5A00; }
+
+/* Job order progress tracking */
+.ptp-item{ padding:10px 0; border-bottom:1px solid var(--av2-line,#E6EEE8); }
+.ptp-item:first-child{ padding-top:2px; }
+.ptp-item:last-of-type{ border-bottom:none; }
+.ptp-head{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.ptp-jo{ font-weight:700; font-size:13.5px; color:var(--av2-ink,#12221A); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ptp-time{ font-size:12px; color:var(--text-muted,#6B7A71); white-space:nowrap; }
+.ptp-more{ margin-top:8px; font-size:13px; font-weight:700; color:var(--av2-pine,#0F5A40); }
+
+/* =====================================================================
+   Admin sidebar v4 — redesigned navigation
+   ---------------------------------------------------------------------
+   * Daily pages (Inbox, Dispatch, Service Requests, Service Reports) are
+     pinned at the top, one tap away, each with a live count.
+   * Section rows now look like pages: icon, name, a count of what is
+     waiting inside, and a chevron. Tapping one still slides forward to
+     its pages (initSidebarSections in auth.js is unchanged).
+   * Long sections get small sub-labels so six pages don't read as one list.
+   * Desktop only: a collapse button turns the sidebar into a 72px icon
+     rail (body.sb-collapsed, set by sbSetRail in auth.js; remembered).
+   Scoped to body.role-admin #adminSidebar, so technician, staff and
+   customer sidebars are untouched.
+   ===================================================================== */
+body.role-admin #adminSidebar #sidebarAdminGroup .sb-section-toggle{
+  width:100%; margin:0; padding:10px 12px; gap:11px; border-radius:10px;
+  text-transform:none; letter-spacing:0; font-size:12px; font-weight:600; line-height:1.25;
+  color:rgba(255,255,255,.9);
+}
+body.role-admin #adminSidebar #sidebarAdminGroup .sb-section-toggle:hover{ background:rgba(255,255,255,.1); color:#fff; }
+body.role-admin #adminSidebar .sb-ico{ width:20px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; opacity:.9; }
+body.role-admin #adminSidebar .sb-ico svg{ width:17px; height:17px; }
+body.role-admin #adminSidebar .sb-caret{ opacity:.55; }
+body.role-admin #adminSidebar #sidebarAdminGroup .sb-dot{ display:none !important; }
+body.role-admin #adminSidebar #sidebarAdminGroup .sb-section.has-current:not(.sb-current) .sb-title::after{ content:none; }
+body.role-admin #adminSidebar #sidebarAdminGroup .sb-section.has-current:not(.sb-current) > .sb-section-toggle{
+  background:rgba(255,255,255,.12); color:#fff; box-shadow:inset 3px 0 0 var(--av2-amber,#F2B84B);
+}
+
+/* counts: one amber pill, red for something late */
+body.role-admin #adminSidebar .sidebar-badge,
+body.role-admin #adminSidebar .sb-count{
+  background:#F2B84B; color:#412402; font-size:10.5px; font-weight:800; line-height:1;
+  border-radius:999px; min-width:18px; height:18px; padding:0 6px;
+  display:inline-flex; align-items:center; justify-content:center; margin-left:auto; flex-shrink:0;
+}
+body.role-admin #adminSidebar .sb-count{ margin-left:0; }
+body.role-admin #adminSidebar .sb-count:empty{ display:none; }
+body.role-admin #adminSidebar .sidebar-badge.is-late{ background:#E5533D; color:#fff; }
+body.role-admin #adminSidebar #sidebarAdminGroup .sb-title{ flex:1; }
+body.role-admin #adminSidebar #sidebarAdminGroup:not(.sb-drill) .sb-count{ margin-left:auto; }
+
+/* pinned daily pages and the Manage label */
+body.role-admin #adminSidebar .sb-top-links{ padding-bottom:6px; margin-bottom:2px; border-bottom:1px solid rgba(255,255,255,.14); }
+body.role-admin #adminSidebar .sb-manage-label{ margin:10px 12px 4px; font-size:10.5px; }
+body.role-admin #adminSidebar #sidebarAdminGroup.sb-drill .sb-manage-label{ display:none; }
+body.role-admin #adminSidebar .sb-sub{
+  font-size:10.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+  color:rgba(255,255,255,.5); padding:10px 12px 3px;
+}
+body.role-admin #adminSidebar .sb-sub:first-child{ padding-top:2px; }
+
+/* the open section's header (back row) */
+body.role-admin #adminSidebar #sidebarAdminGroup.sb-drill .sb-current .sb-section-toggle{
+  margin-bottom:6px; padding-bottom:10px; border-radius:0; background:none; box-shadow:none;
+  border-bottom:1px solid rgba(255,255,255,.15); font-size:13px; color:#fff;
+}
+body.role-admin #adminSidebar #sidebarAdminGroup.sb-drill .sb-current .sb-count{ display:none; }
+
+/* footer: connection status becomes a quiet dot under the name */
+body.role-admin #adminSidebar .sidebar-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
+body.role-admin #adminSidebar .sidebar-account{ gap:9px; }
+body.role-admin #adminSidebar .sidebar-logout{ width:32px; height:32px; }
+body.role-admin #adminSidebar .sidebar-logout svg{ width:17px; height:17px; }
+body.role-admin #adminSidebar .sidebar-cloud-btn,
+body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected{
+  align-self:flex-start; width:auto; margin:0 0 0 49px; padding:0; background:none; border:0;
+  display:flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:rgba(255,255,255,.7);
+}
+body.role-admin #adminSidebar .sidebar-cloud-btn svg{ display:none; }
+body.role-admin #adminSidebar .sidebar-cloud-btn::before{ content:""; width:7px; height:7px; border-radius:50%; background:#F2B84B; flex-shrink:0; }
+body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ background:#6FD08C; }
+
+/* ---------- Collapsed icon rail (desktop and tablet landscape) ---------- */
+@media (min-width:1000px){
+  body.role-admin #adminSidebar{ transition:width .18s ease; }
+  body.role-admin .main-wrap{ transition:margin-left .18s ease; }
+  body.role-admin.sb-collapsed #adminSidebar{ width:72px; padding:14px 8px; }
+  body.role-admin.sb-collapsed .main-wrap{ margin-left:72px; }
+  body.role-admin.sb-collapsed .footer-bar{ left:72px; }
+
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-brand{ justify-content:center; padding:2px 0 12px; }
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-brand-text,
+  body.role-admin.sb-collapsed #adminSidebar .sb-title,
+  body.role-admin.sb-collapsed #adminSidebar .sb-caret,
+  body.role-admin.sb-collapsed #adminSidebar .sb-manage-label,
+  body.role-admin.sb-collapsed #adminSidebar .sb-sub,
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-account-text{ display:none; }
+
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-link,
+  body.role-admin.sb-collapsed #adminSidebar #sidebarAdminGroup .sb-section-toggle{
+    position:relative; justify-content:center; padding:10px 0; gap:0; font-size:0;
+  }
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-link .menu-ico{ font-size:19px; width:auto; }
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-link .menu-ico svg{ width:19px; height:19px; }
+  body.role-admin.sb-collapsed #adminSidebar .sb-ico svg{ width:19px; height:19px; }
+
+  /* counts become dots on the icon */
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-badge,
+  body.role-admin.sb-collapsed #adminSidebar .sb-count{
+    position:absolute; top:6px; right:14px; margin:0; min-width:0; width:9px; height:9px; padding:0;
+    font-size:0; border:2px solid #0D5039; box-sizing:content-box;
+  }
+
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-account{ flex-direction:column; gap:8px; }
+  body.role-admin.sb-collapsed #adminSidebar .sb-collapse-btn svg{ transform:rotate(180deg); }
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-cloud-btn{ margin:0 auto; font-size:0; }
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-cloud-btn::before{ width:8px; height:8px; }
+}
+@media (max-width:999px){ body.role-admin #sbCollapseBtn{ display:none !important; } }
+@media (prefers-reduced-motion:reduce){
+  body.role-admin #adminSidebar, body.role-admin .main-wrap{ transition:none; }
+}
+
+/* Admin dashboard v3 — if the live tracker or recent activity is not shown
+   (it only loads for some sessions), the panel beside it takes the whole row
+   instead of leaving a hole. Desktop grid only; the narrower layouts above
+   already stack. */
+@media (min-width:1101px){
+  body.role-admin #adminDash.adm-v2:has(#homeTrackerCard:is([style*="display:none"],[style*="display: none"])){
+    grid-template-areas:
+      "board board board board prio  prio"
+    "jo    jo    jo    jo    prio  prio"
+      "ptech ptech ptech ptech ptech ptech"
+      "prog  prog  prog  prog  act   act"
+        "ov    ov    ov    ov    ov    ov"
+      "jobs  jobs  jobs  jobs  chart chart"
+      "week  week  week  week  cal   cal"
+      "avail avail qa    qa    qa    qa"
+      "ann   ann   ann   ann   ann   ann";
+  }
+  body.role-admin #adminDash.adm-v2:has(#homeActivityCard:is([style*="display:none"],[style*="display: none"])){
+    grid-template-areas:
+      "board board board board prio  prio"
+    "jo    jo    jo    jo    prio  prio"
+      "track track ptech ptech ptech ptech"
+      "prog  prog  prog  prog  prog  prog"
+        "ov    ov    ov    ov    ov    ov"
+      "jobs  jobs  jobs  jobs  chart chart"
+      "week  week  week  week  cal   cal"
+      "avail avail qa    qa    qa    qa"
+      "ann   ann   ann   ann   ann   ann";
+  }
+  body.role-admin #adminDash.adm-v2:has(#homeTrackerCard:is([style*="display:none"],[style*="display: none"])):has(#homeActivityCard:is([style*="display:none"],[style*="display: none"])){
+    grid-template-areas:
+      "board board board board prio  prio"
+    "jo    jo    jo    jo    prio  prio"
+      "ptech ptech ptech ptech ptech ptech"
+      "prog  prog  prog  prog  prog  prog"
+        "ov    ov    ov    ov    ov    ov"
+      "jobs  jobs  jobs  jobs  chart chart"
+      "week  week  week  week  cal   cal"
+      "avail avail qa    qa    qa    qa"
+      "ann   ann   ann   ann   ann   ann";
+  }
+}
+
+/* White logo on the green sidebar: the mark no longer sits on a white tile. */
+body.role-admin #adminSidebar .sidebar-brand-mark{ background:transparent; border-radius:0; width:46px; height:46px; }
+body.role-admin #adminSidebar .sidebar-brand-mark img{ object-fit:contain; }
+body.role-admin.sb-collapsed #adminSidebar .sidebar-brand-mark{ width:40px; height:40px; }
+
+/* Under the dispatch board, the Job Orders status tiles (Service Requests,
+   Dispatch Status, Late, Expired, To review): the numbers to act on, right
+   beside "Needs you now" instead of a full-width row further down. */
+/* In the v2 design this card was a bare counts strip under the headline. Under
+   the dispatch board it is a normal card again: header, frame, three even
+   columns (tiles that are hidden at zero simply leave the row). */
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard{
+  background:#fff; border:1px solid var(--av2-line); border-radius:14px; padding:0;
+}
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .card-head{ display:flex; }
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .card-body{ padding:var(--adm-pad, 18px); }
+body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .overview-grid{ grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); }
