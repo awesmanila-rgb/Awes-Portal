@@ -1,3 +1,11 @@
+// Bumped to v195 — technician My Job Order cards and the Home tiles now name
+// the teammates who still have to acknowledge ("Waiting for X" / "Also to
+// acknowledge: X"). Re-fetch js/app.bundle.js again.
+//
+// Bumped to v194 — admin Job Order list now names the technicians who have
+// not yet acknowledged, under the progress bar, so admin knows exactly who to
+// chase without opening the ticket. Re-fetch js/app.bundle.js again.
+//
 // Bumped to v125 — tapping a notification while the app was closed opened
 // GitHub's 404 page: the default target was '/', which on GitHub Pages is
 // the bare domain root, not the app's own folder (/Awes-Portal/). Targets
@@ -1039,7 +1047,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v193';
+const CACHE_NAME = 'awes-sr-v195';
 
 // Split into two lists on purpose.
 //
