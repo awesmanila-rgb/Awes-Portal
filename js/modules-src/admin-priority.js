@@ -390,9 +390,109 @@
     }catch(e){ /* unsupported — ignore */ }
   }
 
+  // ---- dispatch board: today's job orders by technician on a time axis ----
+  // Start = the ticket's dispatch time. Tickets store no end time, so every
+  // block is drawn two hours wide — it shows WHEN a job starts and who has
+  // it, not how long it will take. Late uses dtIsLateDispatch(), the same
+  // rule as the priority list. Read-only; a click opens the existing job order.
+  const PRIO_BOARD_COLORS = ['#7A4E2D','#6B3F8A','#0F5A40','#2A63B0','#8A5A00','#B0467A'];
+  let prioBoardSel = null, prioBoardData = null;
+  function prioHM(hhmm){ const p = String(hhmm || '').split(':').map(Number); return (p[0] || 0) + (p[1] || 0) / 60; }
+  function prioFmtHour(x){ const h = Math.floor(x), m = Math.round((x - h) * 60); return ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function prioJobKind(t){
+    if(dtIsLateDispatch(t)) return 'late';
+    const s = dtEffectiveStatus(t);
+    if(s === 'completed' || s === 'closed') return 'done';
+    if(s === 'in_progress') return 'on';
+    if(s === 'acknowledged') return 'en';
+    return '';
+  }
+  function prioJobLabel(t, k){
+    if(k === 'late') return 'Late ' + prioAge(Date.now() - dtDispatchMs(t)) + ', not acknowledged';
+    return { done:'Completed', on:'On site', en:'En route' }[k] || 'Scheduled';
+  }
+  function prioRenderBoard(base){
+    const card = $('prioBoardCard'); if(!card) return;
+    const el = $('prioBoard'); if(!el) return;
+    const today = todayISO();
+    const users = (base.users || []).filter(u=> u.active !== false);
+    const byId = {}; users.forEach(u=>{ byId[u.id] = u; });
+    const jobs = (base.tickets || []).filter(t=> t.date === today && t.dispatchTime && !['cancelled','expired','replaced'].includes(dtEffectiveStatus(t)));
+    const lanes = {}, order = [];
+    const laneFor = (key, name)=>{ if(!lanes[key]){ lanes[key] = { key, name, jobs: [] }; order.push(key); } return lanes[key]; };
+    jobs.forEach(t=>{
+      const ids = t.assignedWorkerIds || [];
+      if(!ids.length){ laneFor('_un', 'Unassigned').jobs.push(t); return; }
+      ids.forEach((id, i)=>{ laneFor(id, (byId[id] && byId[id].name) || (t.assignedWorkerNames || [])[i] || 'Technician').jobs.push(t); });
+    });
+    const rows = order.filter(k=> k !== '_un').map(k=> lanes[k]).sort((a, b)=> a.name.localeCompare(b.name));
+    if(lanes._un) rows.unshift(lanes._un);
+    if(!jobs.length){
+      el.innerHTML = '<div class="empty-state">No job orders with a dispatch time today.</div>';
+      $('prioBoardDetail').innerHTML = ''; $('prioBoardNote').textContent = '';
+      return;
+    }
+    const starts = jobs.map(t=> prioHM(t.dispatchTime));
+    const H0 = Math.max(0, Math.min(7, Math.floor(Math.min.apply(null, starts))));
+    const H1 = Math.min(24, Math.max(18, Math.ceil(Math.max.apply(null, starts) + 2)));
+    const span = H1 - H0;
+    const pct = x=> ((x - H0) / span * 100);
+    let h = '<div class="adm-b-hours"><div></div><div>';
+    for(let i = H0; i < H1; i++) h += '<span>' + ((i % 12) || 12) + ' ' + (i < 12 ? 'AM' : 'PM') + '</span>';
+    h += '</div></div>';
+    rows.forEach((r, ri)=>{
+      const initials = r.key === '_un' ? '?' : r.name.split(/\s+/).map(w=> w[0]).join('').slice(0, 2).toUpperCase();
+      const color = r.key === '_un' ? '#5A6B62' : PRIO_BOARD_COLORS[ri % PRIO_BOARD_COLORS.length];
+      h += '<div class="adm-b-lane"><div class="adm-b-who"><span class="adm-b-av" style="background:' + color + '">' + escapeHtml(initials) + '</span><div><b>' + escapeHtml(r.name) + '</b>' +
+        (r.key === '_un' ? '<small>Needs a technician</small>' : '') + '</div></div><div class="adm-b-track">';
+      r.jobs.forEach(t=>{
+        const a = prioHM(t.dispatchTime), k = prioJobKind(t);
+        h += '<button type="button" class="adm-b-job ' + k + '" aria-pressed="false" data-id="' + escapeHtml(String(t.id)) + '" style="left:' + pct(a) + '%;width:calc(' + (2 / span * 100) + '% - 3px)" title="' +
+          escapeHtml((t.jobOrderNo || '') + ' · ' + (t.custName || '')) + '"><b>' + escapeHtml(t.jobOrderNo || t.id) + '</b><span>' + escapeHtml(t.custName || '') + '</span></button>';
+      });
+      h += '</div></div>';
+    });
+    const off = parseInt(BUSINESS_TZ_OFFSET, 10) || 8;
+    const nd = new Date(dtNowMs() + off * 3600000), nowH = nd.getUTCHours() + nd.getUTCMinutes() / 60;
+    if(nowH >= H0 && nowH <= H1) h += '<div class="adm-b-now" data-t="' + prioFmtHour(nowH).replace(' AM', '').replace(' PM', '') + '" style="left:calc(132px + (100% - 132px) * ' + ((nowH - H0) / span) + ')"></div>';
+    el.style.setProperty('--n', span);
+    el.innerHTML = h;
+    prioBoardData = { jobs, lanes };
+    if(!prioBoardSel || !jobs.some(t=> String(t.id) === prioBoardSel)){
+      const first = jobs.find(t=> dtIsLateDispatch(t)) || null; prioBoardSel = first ? String(first.id) : null;
+    }
+    prioBoardPick(prioBoardSel);
+    el.onclick = e=>{ const b = e.target.closest('.adm-b-job'); if(b) prioBoardPick(b.dataset.id); };
+    const open = $('prioBoardOpen'); if(open) open.onclick = ()=>{ const l = $('sbNavDispatch'); if(l) l.click(); };
+    const free = users.filter(u=> !lanes[u.id]).length;
+    $('prioBoardNote').textContent = (free ? free + ' technician' + (free === 1 ? ' has' : 's have') + ' no job order today. ' : '') + 'Blocks show the dispatch time, not the job length.';
+  }
+  function prioBoardPick(id){
+    const el = $('prioBoard'), det = $('prioBoardDetail'); if(!el || !det) return;
+    prioBoardSel = id ? String(id) : null;
+    el.querySelectorAll('.adm-b-job').forEach(b=> b.setAttribute('aria-pressed', String(b.dataset.id === prioBoardSel)));
+    const t = prioBoardData && prioBoardData.jobs.find(x=> String(x.id) === prioBoardSel);
+    if(!t){ det.innerHTML = ''; return; }
+    const k = prioJobKind(t), crew = (t.assignedWorkerNames || []).join(', ') || 'No technician yet';
+    det.innerHTML = '<div><b>' + escapeHtml((t.jobOrderNo || t.id) + ', ' + (t.custName || 'Customer')) + '</b><small>' + escapeHtml(crew + ', dispatch ' + prioFmtHour(prioHM(t.dispatchTime)) + '. ' + prioJobLabel(t, k)) + '</small></div>' +
+      '<button type="button" class="adm-b-open" id="prioBoardOpenJo">Open job order</button>';
+    const b = $('prioBoardOpenJo'); if(b) b.onclick = ()=> dtOpenTicketOverlay(t.id);
+  }
+  function prioRenderStatusLine(){
+    const el = $('admStatusLine'); if(!el) return;
+    const tk = ((prioLastBase && prioLastBase.tickets) || []).filter(t=> t.date === todayISO());
+    const late = tk.filter(t=> dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').length;
+    const un = tk.filter(t=> !(t.assignedWorkerIds || []).length && !dtIsTerminal(t)).length;
+    const waiting = prioLastItems.filter(i=> i.tier !== 'watch').length;
+    el.textContent = late ? late + ' job order' + (late === 1 ? ' is' : 's are') + ' running late.'
+      : un ? un + ' job order' + (un === 1 ? ' has' : 's have') + ' no technician.'
+      : waiting ? waiting + ' item' + (waiting === 1 ? ' needs' : 's need') + ' you today.'
+      : 'Everything is on track today.';
+  }
+
   async function prioRender(base){
-    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; return; }
-    $('prioCard').style.display = ''; $('prioTechCard').style.display = '';
+    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; if($('prioBoardCard')) $('prioBoardCard').style.display = 'none'; if($('admStatusLine')) $('admStatusLine').textContent = ''; return; }
+    $('prioCard').style.display = ''; $('prioTechCard').style.display = ''; if($('prioBoardCard')) $('prioBoardCard').style.display = '';
     prioStartLive();
     try{
       const extra = await prioLoadExtras();
@@ -400,6 +500,8 @@
       prioLastBase = base;
       prioRenderList();
       prioRenderTechs(prioTechStatus(base));
+      prioRenderBoard(base);
+      prioRenderStatusLine();
       prioSetBadge(prioLastItems.filter(i=> i.tier !== 'watch').length);
     }catch(e){
       console.error('priority render failed', e);

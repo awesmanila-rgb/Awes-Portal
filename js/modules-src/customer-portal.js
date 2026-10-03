@@ -344,7 +344,7 @@
     const first = String(currentUser.name||'').trim().split(/\s+/)[0];
     $('cpGreetingName').textContent = first || 'there';
   }
-  const CP_AVATAR_COLORS = ['#0F5A40','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
+  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
   function cpAvatarColor(name){
     let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
     return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
@@ -522,10 +522,12 @@
       : '<div class="cph-tech"><span class="cph-avatar cph-avatar-muted">'+CP_ICON.person+'</span>'+
           '<div class="cph-text"><p class="cph-tech-name">Technician to be assigned</p><p class="cph-sub">You\u2019ll see who\u2019s coming once the crew confirms</p></div>'+
           '<button type="button" class="cph-icon-btn" data-hero="msg" aria-label="Message">'+CP_ICON.chat+'</button></div>';
+    const stepIdx = cpTrackIdx(subject.status);
+    const stepNote = '<p class="cph-stepnote">Step '+(stepIdx+1)+' of '+CP_TRACK.length+' \u00B7 '+escapeHtml(CP_TRACK[stepIdx])+'</p>';
     cpSetHtml(hero,
-      '<p class="cph-title">'+cpVisitWhen(subject)+'</p>'+
-      '<p class="cph-sub">'+cpEquipLabel(eq)+(subject.description ? ' · '+escapeHtml(String(subject.description).slice(0,90)) : '')+'</p>'+
-      techHtml+cpTrackHtml(subject.status)+doneNote+
+      '<p class="cph-title">'+(subject.description ? escapeHtml(String(subject.description).slice(0,60)) : 'Service visit')+'</p>'+
+      '<p class="cph-sub">'+cpEquipLabel(eq)+' \u00B7 '+cpVisitWhen(subject)+'</p>'+
+      techHtml+cpTrackHtml(subject.status)+stepNote+doneNote+
       '<button type="button" class="cph-link-btn" data-hero="open">View request</button>');
     hero.onclick = (e)=>{
       const a = e.target.closest('[data-hero]'); if(!a) return;
@@ -713,6 +715,10 @@
     $('cpActBookIc').innerHTML = CP_ICON.calendar;
     $('cpActProblemIc').innerHTML = CP_ICON.alert;
     $('cpActMsgIc').innerHTML = CP_ICON.chat;
+    $('cpActUnitsIc').innerHTML = CP_ICON.unit;
+    $('cpActHistoryIc').innerHTML = CP_ICON.history;
+    $('cpActQuotesIc').innerHTML = CP_ICON.receipt;
+    $('cpActUnitsSub').textContent = n ? n+' unit'+(n===1?'':'s') : 'No units yet';
 
     $('customerHomeScreen').classList.remove('cph-loading');
     renderCustomerHero(cpMyRequestsCache);
@@ -2166,6 +2172,10 @@
   // note on top — it lands in admin's urgent tier after 60 min unanswered.
   $('cpReportProblemBtn').addEventListener('click', ()=> cpOpenNewRequest({ urgent:true, focus:true }));
   $('cpMessageUsBtn').addEventListener('click', ()=> cpOpenCentralChat());
+  // Home quick-action shortcuts (v3) — each opens a screen that already exists.
+  $('cpActUnitsBtn').addEventListener('click', ()=> cpShowScreen('Units'));
+  $('cpActHistoryBtn').addEventListener('click', ()=> cpShowScreen('History'));
+  $('cpActQuotesBtn').addEventListener('click', ()=> cpShowScreen('History', 'Quotations'));
   $('cpProfileRowHistory').addEventListener('click', ()=>{ cpShowScreen('History'); cpSetNavActive('Profile'); });
   $('cpUnitsViewAllLink').addEventListener('click', (e)=>{ e.preventDefault(); cpShowScreen('Units'); });
   cpInitNav();
