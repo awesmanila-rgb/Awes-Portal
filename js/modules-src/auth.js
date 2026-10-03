@@ -350,6 +350,10 @@
       if(sec && sbState[sec.dataset.sbKey] === 'closed'){ delete sbState[sec.dataset.sbKey]; sbSaveState(); }
       // forward view: follow the page you're on into its section
       if(sec && group.classList.contains('sb-drill') && !sec.classList.contains('sb-current')) sbDrillInto(sec);
+      // Dispatch / Service Requests / Service Reports / Inbox live in the
+      // pinned group, outside every section: come back to the main list so
+      // the page you are on is visible and highlighted.
+      else if(active && !sec && group.classList.contains('sb-drill') && active.closest('.sb-top-links')) sbDrillBack(true);
     }
     group.querySelectorAll('.sb-section').forEach(sec=>{
       const st = sbState[sec.dataset.sbKey];
@@ -367,6 +371,7 @@
       });
       sec.classList.toggle('has-alert', alert);
     });
+    sbSyncTitles();
   }
   function sbSyncSoon(){
     if(sbSyncQueued) return;
@@ -378,6 +383,38 @@
   // the pointer.
   function sbRefitSoon(){ clearTimeout(sbRefitTimer); sbRefitTimer = setTimeout(fitSidebarNav, 240); }
 
+  // ---------- Collapsed icon rail (admin, desktop) ----------
+  // Remembered per device. Only ever applied for the admin account; the CSS
+  // lives under body.role-admin.sb-collapsed in app.css and ignores phones.
+  const SB_RAIL_KEY = 'awesSidebarRail';
+  function sbRailWanted(){ try{ return localStorage.getItem(SB_RAIL_KEY) === '1'; }catch(e){ return false; } }
+  // Icons alone say nothing, so while collapsed every link and section gets
+  // a native tooltip: its name plus whatever count is showing on it.
+  function sbSyncTitles(){
+    const rail = document.body.classList.contains('sb-collapsed');
+    document.querySelectorAll('#sbNavDashboard, #sidebarAdminGroup .sidebar-link, #sidebarAdminGroup .sb-section-toggle').forEach(el=>{
+      if(!rail){ if(el.dataset.sbTip){ el.removeAttribute('title'); delete el.dataset.sbTip; } return; }
+      const t = el.querySelector('.sb-title');
+      const label = (t ? t.textContent : Array.from(el.childNodes).filter(n=> n.nodeType === 3).map(n=> n.textContent).join(' ')).replace(/\s+/g, ' ').trim();
+      const b = el.querySelector('.sidebar-badge, .sb-count');
+      const cnt = b && b.style.display !== 'none' ? b.textContent.trim() : '';
+      el.title = label + (cnt && cnt !== '0' ? ' \u00B7 ' + cnt : '');
+      el.dataset.sbTip = '1';
+    });
+  }
+  function sbSetRail(on, persist){
+    on = !!on && !!(currentUser && currentUser.role === 'admin');
+    document.body.classList.toggle('sb-collapsed', on);
+    if(persist){ try{ localStorage.setItem(SB_RAIL_KEY, on ? '1' : '0'); }catch(e){} }
+    const group = document.getElementById('sidebarAdminGroup');
+    if(on && group && group.classList.contains('sb-drill')) sbDrillBack(true);
+    const btn = document.getElementById('sbCollapseBtn');
+    if(btn){ btn.title = on ? 'Expand sidebar' : 'Collapse sidebar'; btn.setAttribute('aria-label', btn.title); btn.setAttribute('aria-pressed', String(on)); }
+    sbSyncTitles();
+    fitSidebarNav();
+  }
+  function sbApplyRail(){ sbSetRail(sbRailWanted(), false); }
+
   function sbDrillInto(sec){
     const group = document.getElementById('sidebarAdminGroup');
     group.querySelectorAll('.sb-section.sb-current').forEach(x=> x.classList.remove('sb-current'));
@@ -388,12 +425,12 @@
     const first = sec.querySelector('.sidebar-link'); if(first && document.activeElement === t) first.focus({ preventScroll:true });
     sbRefitSoon();
   }
-  function sbDrillBack(){
+  function sbDrillBack(quiet){
     const group = document.getElementById('sidebarAdminGroup');
     const cur = group.querySelector('.sb-section.sb-current');
     group.classList.remove('sb-drill');
     group.querySelectorAll('.sb-section.sb-current').forEach(x=>{ x.classList.remove('sb-current'); const t = x.querySelector('.sb-section-toggle'); if(t) t.setAttribute('aria-expanded', 'false'); });
-    if(cur){ const t = cur.querySelector('.sb-section-toggle'); if(t) t.focus({ preventScroll:true }); }
+    if(cur && !quiet){ const t = cur.querySelector('.sb-section-toggle'); if(t) t.focus({ preventScroll:true }); }
     sbRefitSoon();
   }
   function initSidebarSections(){
@@ -408,6 +445,9 @@
       const t = e.target.closest('.sb-section-toggle');
       if(!t) return;
       const sec = t.closest('.sb-section');
+      // From the collapsed rail a section icon opens the full sidebar on
+      // that section, so its pages have somewhere to be listed.
+      if(document.body.classList.contains('sb-collapsed')) sbSetRail(false, true);
       if(group.classList.contains('sb-drill') && sec.classList.contains('sb-current')) sbDrillBack();
       else sbDrillInto(sec);
     });
@@ -428,6 +468,8 @@
     sbSyncSections();
   }
   initSidebarSections();
+  const sbCollapseBtn = document.getElementById('sbCollapseBtn');
+  if(sbCollapseBtn) sbCollapseBtn.addEventListener('click', ()=> sbSetRail(!document.body.classList.contains('sb-collapsed'), true));
 
   // Applies per-user access restrictions set by the admin. Admins bypass all restrictions.
   function applyUserRestrictions(){
@@ -481,12 +523,14 @@
     // #sidebarAdminGroup / #sidebarCustomerGroup wrappers in index.html.
     setVis('sidebarTechGroup', isTech);
     setVis('sidebarAdminGroup', isAdmin);
+    setVis('sbCollapseBtn', isAdmin);
+    sbApplyRail();
     if(typeof staffRenderSidebar === 'function') staffRenderSidebar();
     setVis('sidebarCustomerGroup', isCustomer);
     fitSidebarNav();
     if(currentUser){
-      const brandNameEl = $('sidebarBrandName'); if(brandNameEl) brandNameEl.textContent = isAdmin ? 'Field Operations Portal' : isStaff ? 'Office Portal' : isCustomer ? 'Customer Portal' : "Technician's Homepage";
-      const brandSubEl = $('sidebarBrandSub'); if(brandSubEl) brandSubEl.textContent = isAdmin ? 'Management & Administration' : isStaff ? 'Department staff' : isCustomer ? 'Your equipment & service history' : 'Field digital form';
+      const brandNameEl = $('sidebarBrandName'); if(brandNameEl) brandNameEl.textContent = isAdmin ? 'AWES Management Portal' : isStaff ? 'Office Portal' : isCustomer ? 'Customer Portal' : "Technician's Homepage";
+      const brandSubEl = $('sidebarBrandSub'); if(brandSubEl) brandSubEl.textContent = isAdmin ? 'Administration' : isStaff ? 'Department staff' : isCustomer ? 'Your equipment & service history' : 'Field digital form';
       const initial = (currentUser.name||'?').trim().charAt(0).toUpperCase() || '?';
       const avatarEl = $('sidebarAvatar'); if(avatarEl) avatarEl.textContent = initial;
       const acctNameEl = $('sidebarAccountName'); if(acctNameEl) acctNameEl.textContent = currentUser.name || '—';
@@ -693,7 +737,7 @@
   function loginBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
+    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> showRoleChooser());
     return back;
@@ -750,7 +794,7 @@
   function loginStaffBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
+    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> renderStaffRoleChooser());
     return back;

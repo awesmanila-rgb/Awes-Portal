@@ -333,7 +333,21 @@
       else if(d && d.timeIn && !d.timeOut){ key = 'idle'; label = 'Idle'; sub = 'Timed in ' + prioFmtTime(d.timeIn) + ' · no job order'; }
       else if(d && d.timeOut){ key = 'out'; label = 'Timed out'; sub = 'In ' + prioFmtTime(d.timeIn) + ' · out ' + prioFmtTime(d.otTimeOut || d.timeOut); }
       else { key = 'notin'; label = 'Not timed in'; sub = 'No job order today'; }
-      return { id: u.id, name: u.name || u.username || 'Technician', key, label, sub, r: rank[key] };
+      // The job order this row is about: what they are on, else what is late,
+      // else their next one. The table's Acknowledged / En route / On site
+      // cells all read from it. Acknowledgement is per technician (matched by
+      // id); en route means every assigned technician has acknowledged, which
+      // is exactly when the ticket moves to 'acknowledged'. No per-person
+      // timestamp is stored for either, so those cells say Yes, not a time.
+      const nextJ = live.slice().sort((a, b)=> String(a.dispatchTime || '').localeCompare(String(b.dispatchTime || '')))[0];
+      const cur = onsite || enroute || late || nextJ || null;
+      const eff = cur ? dtEffectiveStatus(cur) : '';
+      const ack = !cur ? null : ((cur.acknowledgedBy || []).includes(u.id) ? 'yes' : (eff === 'scheduled' ? 'na' : 'wait'));
+      return { id: u.id, name: u.name || u.username || 'Technician', key, label, sub, r: rank[key],
+        hasJob: !!cur, joId: cur ? cur.id : null, joNo: cur ? (cur.jobOrderNo || cur.id) : '',
+        isLate: !!cur && dtIsLateDispatch(cur), timeIn: (d && d.timeIn) || '',
+        ack, en: !!cur && (eff === 'acknowledged' || eff === 'in_progress'),
+        onSite: !!cur && eff === 'in_progress', onAt: (cur && cur.arrivedAt) || '' };
     }).sort((a, b)=> a.r - b.r || a.name.localeCompare(b.name));
   }
 
@@ -372,14 +386,70 @@
       '<button type="button" class="prio-chip" data-prio="' + idx(it) + ':0">' + escapeHtml(it.title) + '</button>').join('') + '</div>';
     $('prioList').innerHTML = html;
   }
+  function prioClock(iso){
+    const t = iso ? new Date(iso) : null;
+    return t && isFinite(t) ? t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  }
   function prioRenderTechs(rows){
     const n = k=> rows.filter(r=> k.includes(r.key)).length;
     const bits = [n(['onsite','enroute']) + ' on a job', n(['late']) ? n(['late']) + ' late' : '', n(['idle']) ? n(['idle']) + ' free' : '', n(['out']) ? n(['out']) + ' timed out' : '', n(['off']) ? n(['off']) + ' off' : ''].filter(Boolean);
     $('prioTechSub').textContent = bits.join(' · ');
-    $('prioTechList').innerHTML = rows.length ? rows.map(r=>
-      '<div class="prio-tech"><b>' + escapeHtml(r.name) + '</b><span class="prio-tech-sub">' + escapeHtml(r.sub) + '</span>' +
-      '<span class="prio-pill prio-pill-' + r.key + '">' + escapeHtml(r.label) + '</span></div>').join('')
-      : '<div class="empty-state">No active technicians.</div>';
+    const box = $('prioTechList');
+    if(!rows.length){ box.innerHTML = '<div class="empty-state">No active technicians.</div>'; return; }
+    const dash = '<span class="ptt-dim">\u2014</span>';
+    const head = '<div class="ptt-row ptt-head"><span>Name</span><span>Job order</span><span>Time-in</span><span>Acknowledged</span><span>En route</span><span>On site</span></div>';
+    const body = rows.map(r=>{
+      const name = '<button type="button" class="ptt-name" data-tid="' + escapeHtml(r.id) + '" title="Show on the live tracker">' + escapeHtml(r.name) + '</button>';
+      const tin = r.timeIn ? escapeHtml(prioFmtTime(r.timeIn)) : '<span class="ptt-dim">Not in</span>';
+      if(!r.hasJob){
+        return '<div class="ptt-row">' + name + dash + '<span>' + tin + '</span>' +
+          '<span class="ptt-span"><span class="prio-pill prio-pill-' + r.key + '">' + escapeHtml(r.label) + '</span><small>' + escapeHtml(r.sub) + '</small></span></div>';
+      }
+      const jo = '<span><button type="button" class="ptt-jo" data-jo="' + escapeHtml(String(r.joId)) + '">' + escapeHtml(r.joNo) + '</button>' +
+        (r.isLate ? ' <span class="prio-pill prio-pill-late">Late</span>' : '') + '</span>';
+      const ack = r.ack === 'yes' ? '<span class="prio-pill prio-pill-yes">Yes</span>'
+        : r.ack === 'wait' ? '<span class="prio-pill prio-pill-wait">Waiting</span>' : dash;
+      const en = r.en ? '<span class="prio-pill prio-pill-enroute">Yes</span>' : dash;
+      const on = r.onSite ? '<span class="prio-pill prio-pill-onsite">' + escapeHtml(prioClock(r.onAt) || 'Yes') + '</span>' : dash;
+      return '<div class="ptt-row">' + name + jo + '<span>' + tin + '</span><span>' + ack + '</span><span>' + en + '</span><span>' + on + '</span></div>';
+    }).join('');
+    box.innerHTML = head + body;
+    box.onclick = e=>{
+      const jo = e.target.closest('.ptt-jo');
+      if(jo){ dtOpenTicketOverlay(jo.dataset.jo); return; }
+      const nm = e.target.closest('.ptt-name');
+      if(!nm) return;
+      const li = document.querySelector('#trackerList .tracker-list-item[data-tid="' + String(nm.dataset.tid).replace(/"/g, '') + '"]');
+      if(li) li.click(); else toast(nm.textContent + ' is not sharing a location right now');
+    };
+  }
+
+  // ---- job order progress tracking: today's active job orders ----
+  // Same four-stage bar the Job Orders list uses, plus the whole crew with
+  // each technician's acknowledgement (dtAdminProgressHtml, dispatch.js), so
+  // admin can watch every job order without opening any.
+  const PRIO_PROGRESS_MAX = 8;
+  function prioRenderProgress(base){
+    const box = $('prioProgressList'); if(!box) return;
+    const today = todayISO();
+    const hidden = ['closed', 'cancelled', 'expired', 'replaced'];
+    const rows = (base.tickets || [])
+      .filter(t=> (t.date === today || t.status === 'in_progress' || t.status === 'acknowledged') && !hidden.includes(dtEffectiveStatus(t)))
+      .sort((a, b)=> String(a.dispatchTime || '').localeCompare(String(b.dispatchTime || '')) || String(a.jobOrderNo || '').localeCompare(String(b.jobOrderNo || '')));
+    const sub = $('prioProgressSub'); if(sub) sub.textContent = rows.length ? rows.length + ' active' : '';
+    if(!rows.length){ box.innerHTML = '<div class="empty-state">No job orders in progress today.</div>'; return; }
+    const shown = rows.slice(0, PRIO_PROGRESS_MAX);
+    box.innerHTML = shown.map(t=>
+      '<div class="ptp-item"><div class="ptp-head">' +
+        '<button type="button" class="ptp-jo" data-jo="' + escapeHtml(String(t.id)) + '">' + escapeHtml((t.jobOrderNo || t.id) + (t.custName ? ' \u00b7 ' + t.custName : '')) + '</button>' +
+        '<span class="ptp-time">' + (t.dispatchTime ? 'Dispatch ' + escapeHtml(prioFmtTime(t.dispatchTime)) : '') + '</span></div>' +
+      dtAdminProgressHtml(t) + '</div>').join('') +
+      (rows.length > shown.length ? '<button type="button" class="ptp-more" id="prioProgressMore">+ ' + (rows.length - shown.length) + ' more in Dispatch</button>' : '');
+    box.onclick = e=>{
+      const jo = e.target.closest('.ptp-jo');
+      if(jo){ dtOpenTicketOverlay(jo.dataset.jo); return; }
+      if(e.target.closest('#prioProgressMore')) showDispatchView('all');
+    };
   }
   // App-icon badge (installed PWA): urgent + today. Also refreshed by the
   // push handler in sw.js whenever an alert arrives with the app closed.
@@ -478,6 +548,48 @@
       '<button type="button" class="adm-b-open" id="prioBoardOpenJo">Open job order</button>';
     const b = $('prioBoardOpenJo'); if(b) b.onclick = ()=> dtOpenTicketOverlay(t.id);
   }
+  // ---- sidebar counts ----
+  // The numbers on the sidebar come from the same list as "Needs you now"
+  // (urgent + today; watch items are not counted), so the two always agree.
+  // jorev / srsignoff / srsign / settle are ONE item standing for N records,
+  // so their N is read from the title. Inbox is the staff inbox list as is.
+  function prioSbSet(id, n, label, late){
+    const el = $(id); if(!el) return;
+    const on = n > 0;
+    el.textContent = on ? (label || String(n)) : '';
+    el.style.display = on ? '' : 'none';
+    el.classList.toggle('is-late', on && !!late);
+  }
+  function prioSbSection(key, n){
+    const el = document.querySelector('#sidebarAdminGroup .sb-section[data-sb-key="' + key + '"] .sb-count');
+    if(el) el.textContent = n > 0 ? String(n) : '';
+  }
+  function prioSidebarCounts(base, extra, items){
+    const act = (items || []).filter(i=> i.tier !== 'watch');
+    const GROUPED = /^(jorev|srsignoff|srsign|settle)$/;
+    const sum = test=> act.reduce((n, i)=>{
+      const k = String(i.key || '');
+      return test(k) ? n + (GROUPED.test(k) ? (parseInt(String(i.title || ''), 10) || 1) : 1) : n;
+    }, 0);
+    const starts = (...p)=> k=> p.some(x=> k.indexOf(x) === 0);
+    const today = todayISO();
+    const late = ((base && base.tickets) || []).filter(t=> t.date === today && dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').length;
+    const toReview = sum(k=> k === 'jorev');
+    const leave = sum(starts('leave:')), mr = sum(starts('mr:')), po = sum(starts('poappr:'));
+    const fin = sum(k=> /^(ca|rel|liq):/.test(k) || k === 'settle');
+    prioSbSet('sbInboxBadge', ((extra && extra.inbox) || []).length);
+    if(late > 0) prioSbSet('sbDispatchBadge', late, late + ' late', true);
+    else prioSbSet('sbDispatchBadge', toReview, toReview + ' to review', false);
+    prioSbSet('sbReportsBadge', sum(k=> k === 'srsignoff'));
+    prioSbSet('sbLeaveBadge', leave);
+    prioSbSet('sbReqBadge', mr);
+    prioSbSet('sbPoBadge', po);
+    prioSbSection('purchasing', mr + po);
+    prioSbSection('hr', leave);
+    prioSbSection('finance', fin);
+    if(typeof sbSyncTitles === 'function') sbSyncTitles();
+  }
+
   function prioRenderStatusLine(){
     const el = $('admStatusLine'); if(!el) return;
     const tk = ((prioLastBase && prioLastBase.tickets) || []).filter(t=> t.date === todayISO());
@@ -491,16 +603,19 @@
   }
 
   async function prioRender(base){
-    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; if($('prioBoardCard')) $('prioBoardCard').style.display = 'none'; if($('admStatusLine')) $('admStatusLine').textContent = ''; return; }
-    $('prioCard').style.display = ''; $('prioTechCard').style.display = ''; if($('prioBoardCard')) $('prioBoardCard').style.display = '';
+    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; if($('prioBoardCard')) $('prioBoardCard').style.display = 'none'; if($('prioProgressCard')) $('prioProgressCard').style.display = 'none'; if($('admStatusLine')) $('admStatusLine').textContent = ''; return; }
+    $('prioCard').style.display = ''; $('prioTechCard').style.display = ''; if($('prioBoardCard')) $('prioBoardCard').style.display = ''; if($('prioProgressCard')) $('prioProgressCard').style.display = '';
     prioStartLive();
     try{
       const extra = await prioLoadExtras();
       prioLastItems = prioBuild(base, Object.assign({ custNames: {} }, extra));
       prioLastBase = base;
+      try{ prioSidebarCounts(base, extra, prioLastItems); }catch(e){ console.warn('sidebar counts failed', e); }
+      prioLastAt = Date.now();
       prioRenderList();
       prioRenderTechs(prioTechStatus(base));
       prioRenderBoard(base);
+      prioRenderProgress(base);
       prioRenderStatusLine();
       prioSetBadge(prioLastItems.filter(i=> i.tier !== 'watch').length);
     }catch(e){
@@ -519,12 +634,15 @@
   // re-drawing the data from when the page opened. Triggered by: realtime
   // changes on dtr_records / dispatch_tickets (when those tables publish),
   // a 60-second poll as the safety net, and returning to the app.
-  let prioRefreshing = false, prioRefreshTimer = null, prioRt = null;
+  let prioRefreshing = false, prioRefreshTimer = null, prioRt = null, prioLastAt = 0;
   function prioHomeVisible(){
     return !!prioLastBase && currentUser && currentUser.role === 'admin' && !document.hidden && $('homeScreen').style.display !== 'none';
   }
   async function prioRefreshLive(){
-    if(!prioHomeVisible() || prioRefreshing) return;
+    // Off the homepage the sidebar counts still have to move, but a full
+    // re-read every minute would be wasteful there: at most every 3 minutes.
+    const away = !prioHomeVisible() && !!prioLastBase && currentUser && currentUser.role === 'admin' && !document.hidden && (Date.now() - prioLastAt > 180000);
+    if((!prioHomeVisible() && !away) || prioRefreshing) return;
     prioRefreshing = true;
     try{
       const [dtrToday, tickets] = await Promise.all([
