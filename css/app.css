@@ -4895,7 +4895,6 @@ body.role-admin #adminDash.adm-v2 .prio-btn.primary{ background:var(--av2-pine);
 .cph.cph-v3 .cp-header-inner{ display:flex; align-items:center; gap:10px; max-width:1200px; margin:0 auto; padding:0 var(--cph-gut); box-sizing:border-box; }
 .cph-who{ display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
 .cph-who .cp-profile-menu-wrap{ flex:none; }
-.cph.cph-v3 #cpProfileMenuWrap{ display:block !important; }
 .cph.cph-v3 .cp-avatar{ flex:none; width:38px; height:38px; border:0; background:var(--cph-accent); color:#2A1D00; font-size:13px; font-weight:700; letter-spacing:.2px; }
 .cph.cph-v3 .cph-greet{ margin:0; display:flex; flex-direction:column; min-width:0; line-height:1.25; }
 .cph.cph-v3 .cph-greet-sm{ font-size:12px; font-weight:500; color:var(--cph-muted); }
