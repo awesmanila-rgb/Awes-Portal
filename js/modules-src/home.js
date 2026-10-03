@@ -401,16 +401,20 @@
         if(ackd){
           const assigned = (r.assignedWorkerIds||[]).length;
           const acked = (r.acknowledgedBy||[]).filter(id=> (r.assignedWorkerIds||[]).includes(id)).length;
+          const waitingOn = dtPendingAckNames(r, currentUser.id);
           add({ rank:45, key:sortKey(r), tone:'gray', ic:'people', info:true,
             title:'Waiting for your teammates · '+jo,
-            sub: acked+' of '+assigned+' have accepted. You can tap Arrived at Site once everyone accepts.', steps:1 });
+            sub: acked+' of '+assigned+' have accepted.'+
+              (waitingOn.length ? '<br>Still to accept: '+escapeHtml(waitingOn.join(', '))+'.' : '')+
+              '<br>You can tap Arrived at Site once everyone accepts.', steps:1 });
           return;
         }
         const late = dtIsLateDispatch(r);
         add({ rank: late ? 35 : 40, key:sortKey(r), tone: late ? 'red' : 'green', ic:'truck',
           tag: late ? 'Late' : null,
           title:'Accept job order '+jo,
-          sub: (where ? where+'<br>' : '')+thDayWord(r.date)+(r.dispatchTime ? ' · leave by '+thFmtHm(r.dispatchTime) : (r.expectedTime ? ' · at site '+thFmtHm(r.expectedTime) : ''))+mateLine,
+          sub: (where ? where+'<br>' : '')+thDayWord(r.date)+(r.dispatchTime ? ' · leave by '+thFmtHm(r.dispatchTime) : (r.expectedTime ? ' · at site '+thFmtHm(r.expectedTime) : ''))+mateLine+
+            (dtPendingAckNames(r, currentUser.id).length ? '<br>Also to accept: '+escapeHtml(dtPendingAckNames(r, currentUser.id).join(', ')) : ''),
           steps:1, btn:'Acknowledge', act:'ack', id:r.id, jo:r.jobOrderNo });
       }
     });
