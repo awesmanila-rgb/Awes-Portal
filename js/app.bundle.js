@@ -2134,7 +2134,7 @@
   function loginBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
+    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> showRoleChooser());
     return back;
@@ -2191,7 +2191,7 @@
   function loginStaffBackButton(){
     const back = document.createElement('button');
     back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#E6EEE8; color:var(--text);';
+    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
     back.textContent = '← Back';
     back.addEventListener('click', ()=> renderStaffRoleChooser());
     return back;
@@ -2875,7 +2875,7 @@
       pad.clear();
       if(data) pad.fromData(data);
     }
-    const pad = new SignaturePad(canvas, {penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)'});
+    const pad = new SignaturePad(canvas, {penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)'});
     pad.addEventListener('beginStroke', ()=>{ $(phId).style.display='none'; });
     window.addEventListener('resize', resize);
     setTimeout(resize, 50);
@@ -10216,10 +10216,10 @@
     // stage is labelled for what each side is meant to do with it.
     if(status==='completed'){
       const label = (dtIsDispatcher()) ? 'For Review' : 'Completed';
-      return '<span class="status-pill" style="background:#E3EFE6; color:#17714F;">Status: '+label+'</span>';
+      return '<span class="status-pill" style="background:#DCEFE5; color:#1F7A52;">Status: '+label+'</span>';
     }
     if(status==='in_progress') return '<span class="status-pill" style="background:#E4F0F1; color:#1F6F7A;">Status: Work in Progress</span>';
-    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCE8E0; color:var(--green-dark);">Status: En Route</span>';
+    if(status==='acknowledged') return '<span class="status-pill" style="background:#DCEAE0; color:var(--green-dark);">Status: En Route</span>';
     if(status==='preparing') return '<span class="status-pill" style="background:#FBF0DC; color:#B9791F;">Status: Preparing</span>';
     // Future-dated: deliberately no "Status:" prefix — it isn't in the
     // lifecycle yet, it's just booked.
@@ -12089,7 +12089,7 @@
       const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
         '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
-        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#E6EEE8')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
       '</div>';
     }).join('');
     list.scrollTop = list.scrollHeight;
@@ -12276,7 +12276,7 @@
   // change; anything unmatched falls back to grey at the call site.
   const DT_CAL_STATUS_COLORS = {
     scheduled:'#8A9089', preparing:'#B9791F', open:'#B9791F',
-    acknowledged:'#17714F', in_progress:'#1F6F7A', completed:'#0F5A40',
+    acknowledged:'#1F7A50', in_progress:'#1F6F7A', completed:'#154D34',
     closed:'#8A9089', expired:'#B3402D', cancelled:'#B3402D'
   };
   const dtCalStates = {};
@@ -12997,7 +12997,7 @@
       const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
         '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
-        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#E6EEE8')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
       '</div>';
     }).join('');
     list.scrollTop = list.scrollHeight;
@@ -14317,7 +14317,7 @@
     if(!row) return;
     row.scrollIntoView({behavior:'smooth', block:'center'});
     row.style.transition = 'background-color 0.3s';
-    row.style.backgroundColor = '#E3EFE6';
+    row.style.backgroundColor = '#DFF3E3';
     setTimeout(()=>{ row.style.backgroundColor = ''; }, 1400);
   }
 
@@ -22251,7 +22251,7 @@
       window.scrollTo({ top:0 });
       if(!signed){
         await loadAwesScript('signature', awesLibs.signature);
-        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)' });
+        invSigPad = new SignaturePad($('invMineSig'), { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
         invSigFit();
       }
     }catch(e){ purchFail('Couldn\u2019t open the slip: ', e); }
@@ -22876,7 +22876,7 @@
         await loadAwesScript('signature', awesLibs.signature);
         const c = $('tlSignCanvas'), r = Math.max(window.devicePixelRatio || 1, 1);
         c.width = c.offsetWidth * r; c.height = c.offsetHeight * r; c.getContext('2d').scale(r, r);
-        tlPad = new SignaturePad(c, { penColor:'#12221A', backgroundColor:'rgba(255,255,255,0)' });
+        tlPad = new SignaturePad(c, { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
       }catch(e){ toast('Signature tool couldn\u2019t load — check the connection'); tlSignDone(null); }
     });
   }
@@ -27429,9 +27429,109 @@
     }catch(e){ /* unsupported — ignore */ }
   }
 
+  // ---- dispatch board: today's job orders by technician on a time axis ----
+  // Start = the ticket's dispatch time. Tickets store no end time, so every
+  // block is drawn two hours wide — it shows WHEN a job starts and who has
+  // it, not how long it will take. Late uses dtIsLateDispatch(), the same
+  // rule as the priority list. Read-only; a click opens the existing job order.
+  const PRIO_BOARD_COLORS = ['#7A4E2D','#6B3F8A','#0F5A40','#2A63B0','#8A5A00','#B0467A'];
+  let prioBoardSel = null, prioBoardData = null;
+  function prioHM(hhmm){ const p = String(hhmm || '').split(':').map(Number); return (p[0] || 0) + (p[1] || 0) / 60; }
+  function prioFmtHour(x){ const h = Math.floor(x), m = Math.round((x - h) * 60); return ((h % 12) || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function prioJobKind(t){
+    if(dtIsLateDispatch(t)) return 'late';
+    const s = dtEffectiveStatus(t);
+    if(s === 'completed' || s === 'closed') return 'done';
+    if(s === 'in_progress') return 'on';
+    if(s === 'acknowledged') return 'en';
+    return '';
+  }
+  function prioJobLabel(t, k){
+    if(k === 'late') return 'Late ' + prioAge(Date.now() - dtDispatchMs(t)) + ', not acknowledged';
+    return { done:'Completed', on:'On site', en:'En route' }[k] || 'Scheduled';
+  }
+  function prioRenderBoard(base){
+    const card = $('prioBoardCard'); if(!card) return;
+    const el = $('prioBoard'); if(!el) return;
+    const today = todayISO();
+    const users = (base.users || []).filter(u=> u.active !== false);
+    const byId = {}; users.forEach(u=>{ byId[u.id] = u; });
+    const jobs = (base.tickets || []).filter(t=> t.date === today && t.dispatchTime && !['cancelled','expired','replaced'].includes(dtEffectiveStatus(t)));
+    const lanes = {}, order = [];
+    const laneFor = (key, name)=>{ if(!lanes[key]){ lanes[key] = { key, name, jobs: [] }; order.push(key); } return lanes[key]; };
+    jobs.forEach(t=>{
+      const ids = t.assignedWorkerIds || [];
+      if(!ids.length){ laneFor('_un', 'Unassigned').jobs.push(t); return; }
+      ids.forEach((id, i)=>{ laneFor(id, (byId[id] && byId[id].name) || (t.assignedWorkerNames || [])[i] || 'Technician').jobs.push(t); });
+    });
+    const rows = order.filter(k=> k !== '_un').map(k=> lanes[k]).sort((a, b)=> a.name.localeCompare(b.name));
+    if(lanes._un) rows.unshift(lanes._un);
+    if(!jobs.length){
+      el.innerHTML = '<div class="empty-state">No job orders with a dispatch time today.</div>';
+      $('prioBoardDetail').innerHTML = ''; $('prioBoardNote').textContent = '';
+      return;
+    }
+    const starts = jobs.map(t=> prioHM(t.dispatchTime));
+    const H0 = Math.max(0, Math.min(7, Math.floor(Math.min.apply(null, starts))));
+    const H1 = Math.min(24, Math.max(18, Math.ceil(Math.max.apply(null, starts) + 2)));
+    const span = H1 - H0;
+    const pct = x=> ((x - H0) / span * 100);
+    let h = '<div class="adm-b-hours"><div></div><div>';
+    for(let i = H0; i < H1; i++) h += '<span>' + ((i % 12) || 12) + ' ' + (i < 12 ? 'AM' : 'PM') + '</span>';
+    h += '</div></div>';
+    rows.forEach((r, ri)=>{
+      const initials = r.key === '_un' ? '?' : r.name.split(/\s+/).map(w=> w[0]).join('').slice(0, 2).toUpperCase();
+      const color = r.key === '_un' ? '#5A6B62' : PRIO_BOARD_COLORS[ri % PRIO_BOARD_COLORS.length];
+      h += '<div class="adm-b-lane"><div class="adm-b-who"><span class="adm-b-av" style="background:' + color + '">' + escapeHtml(initials) + '</span><div><b>' + escapeHtml(r.name) + '</b>' +
+        (r.key === '_un' ? '<small>Needs a technician</small>' : '') + '</div></div><div class="adm-b-track">';
+      r.jobs.forEach(t=>{
+        const a = prioHM(t.dispatchTime), k = prioJobKind(t);
+        h += '<button type="button" class="adm-b-job ' + k + '" aria-pressed="false" data-id="' + escapeHtml(String(t.id)) + '" style="left:' + pct(a) + '%;width:calc(' + (2 / span * 100) + '% - 3px)" title="' +
+          escapeHtml((t.jobOrderNo || '') + ' · ' + (t.custName || '')) + '"><b>' + escapeHtml(t.jobOrderNo || t.id) + '</b><span>' + escapeHtml(t.custName || '') + '</span></button>';
+      });
+      h += '</div></div>';
+    });
+    const off = parseInt(BUSINESS_TZ_OFFSET, 10) || 8;
+    const nd = new Date(dtNowMs() + off * 3600000), nowH = nd.getUTCHours() + nd.getUTCMinutes() / 60;
+    if(nowH >= H0 && nowH <= H1) h += '<div class="adm-b-now" data-t="' + prioFmtHour(nowH).replace(' AM', '').replace(' PM', '') + '" style="left:calc(132px + (100% - 132px) * ' + ((nowH - H0) / span) + ')"></div>';
+    el.style.setProperty('--n', span);
+    el.innerHTML = h;
+    prioBoardData = { jobs, lanes };
+    if(!prioBoardSel || !jobs.some(t=> String(t.id) === prioBoardSel)){
+      const first = jobs.find(t=> dtIsLateDispatch(t)) || null; prioBoardSel = first ? String(first.id) : null;
+    }
+    prioBoardPick(prioBoardSel);
+    el.onclick = e=>{ const b = e.target.closest('.adm-b-job'); if(b) prioBoardPick(b.dataset.id); };
+    const open = $('prioBoardOpen'); if(open) open.onclick = ()=>{ const l = $('sbNavDispatch'); if(l) l.click(); };
+    const free = users.filter(u=> !lanes[u.id]).length;
+    $('prioBoardNote').textContent = (free ? free + ' technician' + (free === 1 ? ' has' : 's have') + ' no job order today. ' : '') + 'Blocks show the dispatch time, not the job length.';
+  }
+  function prioBoardPick(id){
+    const el = $('prioBoard'), det = $('prioBoardDetail'); if(!el || !det) return;
+    prioBoardSel = id ? String(id) : null;
+    el.querySelectorAll('.adm-b-job').forEach(b=> b.setAttribute('aria-pressed', String(b.dataset.id === prioBoardSel)));
+    const t = prioBoardData && prioBoardData.jobs.find(x=> String(x.id) === prioBoardSel);
+    if(!t){ det.innerHTML = ''; return; }
+    const k = prioJobKind(t), crew = (t.assignedWorkerNames || []).join(', ') || 'No technician yet';
+    det.innerHTML = '<div><b>' + escapeHtml((t.jobOrderNo || t.id) + ', ' + (t.custName || 'Customer')) + '</b><small>' + escapeHtml(crew + ', dispatch ' + prioFmtHour(prioHM(t.dispatchTime)) + '. ' + prioJobLabel(t, k)) + '</small></div>' +
+      '<button type="button" class="adm-b-open" id="prioBoardOpenJo">Open job order</button>';
+    const b = $('prioBoardOpenJo'); if(b) b.onclick = ()=> dtOpenTicketOverlay(t.id);
+  }
+  function prioRenderStatusLine(){
+    const el = $('admStatusLine'); if(!el) return;
+    const tk = ((prioLastBase && prioLastBase.tickets) || []).filter(t=> t.date === todayISO());
+    const late = tk.filter(t=> dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').length;
+    const un = tk.filter(t=> !(t.assignedWorkerIds || []).length && !dtIsTerminal(t)).length;
+    const waiting = prioLastItems.filter(i=> i.tier !== 'watch').length;
+    el.textContent = late ? late + ' job order' + (late === 1 ? ' is' : 's are') + ' running late.'
+      : un ? un + ' job order' + (un === 1 ? ' has' : 's have') + ' no technician.'
+      : waiting ? waiting + ' item' + (waiting === 1 ? ' needs' : 's need') + ' you today.'
+      : 'Everything is on track today.';
+  }
+
   async function prioRender(base){
-    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; return; }
-    $('prioCard').style.display = ''; $('prioTechCard').style.display = '';
+    if(!currentUser || currentUser.role !== 'admin'){ $('prioCard').style.display = 'none'; $('prioTechCard').style.display = 'none'; if($('prioBoardCard')) $('prioBoardCard').style.display = 'none'; if($('admStatusLine')) $('admStatusLine').textContent = ''; return; }
+    $('prioCard').style.display = ''; $('prioTechCard').style.display = ''; if($('prioBoardCard')) $('prioBoardCard').style.display = '';
     prioStartLive();
     try{
       const extra = await prioLoadExtras();
@@ -27439,6 +27539,8 @@
       prioLastBase = base;
       prioRenderList();
       prioRenderTechs(prioTechStatus(base));
+      prioRenderBoard(base);
+      prioRenderStatusLine();
       prioSetBadge(prioLastItems.filter(i=> i.tier !== 'watch').length);
     }catch(e){
       console.error('priority render failed', e);
@@ -32623,7 +32725,7 @@
     });
   }
 
-  const TRACKER_DOT = { live: '#17714F', idle: '#B9791F', stale: '#8A8F8A' };
+  const TRACKER_DOT = { live: '#1F7A50', idle: '#B9791F', stale: '#8A8F8A' };
 
   function trackerFmtAgo(iso){
     if(!iso) return 'never';
@@ -32671,8 +32773,8 @@
   function trackerPopupHtml(name, row){
     return '<div style="font:13px -apple-system,BlinkMacSystemFont,sans-serif;">'+
       '<b>'+escapeHtml(name)+'</b><br>'+
-      '<span style="color:#58695F;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
-      (row.accuracy != null ? '<br><span style="color:#58695F;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
+      '<span style="color:#5C6B62;">Updated '+trackerFmtAgo(row.updated_at)+'</span>'+
+      (row.accuracy != null ? '<br><span style="color:#5C6B62;">±'+Math.round(row.accuracy)+'m accuracy</span>' : '')+
     '</div>';
   }
 
@@ -33315,7 +33417,7 @@
     const first = String(currentUser.name||'').trim().split(/\s+/)[0];
     $('cpGreetingName').textContent = first || 'there';
   }
-  const CP_AVATAR_COLORS = ['#0F5A40','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
+  const CP_AVATAR_COLORS = ['#154D34','#1F6F7A','#B9791F','#6B4FA0','#2A6FDB'];
   function cpAvatarColor(name){
     let h = 0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
     return CP_AVATAR_COLORS[h % CP_AVATAR_COLORS.length];
@@ -33493,10 +33595,12 @@
       : '<div class="cph-tech"><span class="cph-avatar cph-avatar-muted">'+CP_ICON.person+'</span>'+
           '<div class="cph-text"><p class="cph-tech-name">Technician to be assigned</p><p class="cph-sub">You\u2019ll see who\u2019s coming once the crew confirms</p></div>'+
           '<button type="button" class="cph-icon-btn" data-hero="msg" aria-label="Message">'+CP_ICON.chat+'</button></div>';
+    const stepIdx = cpTrackIdx(subject.status);
+    const stepNote = '<p class="cph-stepnote">Step '+(stepIdx+1)+' of '+CP_TRACK.length+' \u00B7 '+escapeHtml(CP_TRACK[stepIdx])+'</p>';
     cpSetHtml(hero,
-      '<p class="cph-title">'+cpVisitWhen(subject)+'</p>'+
-      '<p class="cph-sub">'+cpEquipLabel(eq)+(subject.description ? ' · '+escapeHtml(String(subject.description).slice(0,90)) : '')+'</p>'+
-      techHtml+cpTrackHtml(subject.status)+doneNote+
+      '<p class="cph-title">'+(subject.description ? escapeHtml(String(subject.description).slice(0,60)) : 'Service visit')+'</p>'+
+      '<p class="cph-sub">'+cpEquipLabel(eq)+' \u00B7 '+cpVisitWhen(subject)+'</p>'+
+      techHtml+cpTrackHtml(subject.status)+stepNote+doneNote+
       '<button type="button" class="cph-link-btn" data-hero="open">View request</button>');
     hero.onclick = (e)=>{
       const a = e.target.closest('[data-hero]'); if(!a) return;
@@ -33684,6 +33788,10 @@
     $('cpActBookIc').innerHTML = CP_ICON.calendar;
     $('cpActProblemIc').innerHTML = CP_ICON.alert;
     $('cpActMsgIc').innerHTML = CP_ICON.chat;
+    $('cpActUnitsIc').innerHTML = CP_ICON.unit;
+    $('cpActHistoryIc').innerHTML = CP_ICON.history;
+    $('cpActQuotesIc').innerHTML = CP_ICON.receipt;
+    $('cpActUnitsSub').textContent = n ? n+' unit'+(n===1?'':'s') : 'No units yet';
 
     $('customerHomeScreen').classList.remove('cph-loading');
     renderCustomerHero(cpMyRequestsCache);
@@ -35137,6 +35245,10 @@
   // note on top — it lands in admin's urgent tier after 60 min unanswered.
   $('cpReportProblemBtn').addEventListener('click', ()=> cpOpenNewRequest({ urgent:true, focus:true }));
   $('cpMessageUsBtn').addEventListener('click', ()=> cpOpenCentralChat());
+  // Home quick-action shortcuts (v3) — each opens a screen that already exists.
+  $('cpActUnitsBtn').addEventListener('click', ()=> cpShowScreen('Units'));
+  $('cpActHistoryBtn').addEventListener('click', ()=> cpShowScreen('History'));
+  $('cpActQuotesBtn').addEventListener('click', ()=> cpShowScreen('History', 'Quotations'));
   $('cpProfileRowHistory').addEventListener('click', ()=>{ cpShowScreen('History'); cpSetNavActive('Profile'); });
   $('cpUnitsViewAllLink').addEventListener('click', (e)=>{ e.preventDefault(); cpShowScreen('Units'); });
   cpInitNav();
