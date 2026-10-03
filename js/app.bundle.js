@@ -10152,6 +10152,16 @@
     return day+' at '+time;
   }
   function dtHasAnyAck(r){ return ((r.acknowledgedBy||[]).length > 0); }
+  // Names of the assigned technicians who have NOT acknowledged yet, matched
+  // by id (acknowledgedBy can hold someone since replaced, so its length
+  // proves nothing). excludeId drops the viewer, so a technician sees who
+  // ELSE still has to accept rather than their own name.
+  // assignedWorkerNames runs parallel to assignedWorkerIds.
+  function dtPendingAckNames(r, excludeId){
+    const ackd = new Set(r.acknowledgedBy||[]);
+    const ids = r.assignedWorkerIds||[], names = r.assignedWorkerNames||[];
+    return ids.map((id,i)=> (id===excludeId || ackd.has(id)) ? null : (names[i] || 'Technician')).filter(Boolean);
+  }
   // Late = its Dispatch Time has passed and nobody is en route yet
   // (acknowledged) or on site. Measured against dispatchTime only — the
   // client's Expected Time at Site never decides lateness. Tickets saved
@@ -10534,9 +10544,26 @@
     if(r.arrivedAt && resolved<units) bits.push('on site');
     if(status==='completed') bits.push('waiting on your review');
 
+    // WHO hasn't acknowledged, by name. The count above says how many are
+    // outstanding; this says who to chase. Matched by id, never by position
+    // in acknowledgedBy — that array can hold someone who was replaced, and
+    // counting it by length would hide the person actually still owing an
+    // acknowledgement. assignedWorkerNames runs parallel to assignedWorkerIds.
+    // Hidden once the job order is Completed/Closed, when it no longer matters.
+    const ackedSet = new Set(r.acknowledgedBy||[]);
+    const idList = r.assignedWorkerIds||[], nameList = r.assignedWorkerNames||[];
+    const pendingNames = idList
+      .map((id,i)=> ackedSet.has(id) ? null : (nameList[i] || 'Technician'))
+      .filter(Boolean);
+    const pendingHtml = (pendingNames.length && status!=='completed' && status!=='closed')
+      ? '<div class="u-status jo-pending-ack" style="font-size:10.5px; margin-top:2px; color:var(--amber, #B8860B);">'+
+          '<b>Not yet acknowledged:</b> '+escapeHtml(pendingNames.join(', '))+'</div>'
+      : '';
+
     return '<div class="jo-admin-progress" style="margin-top:6px;">'+
         '<div style="display:flex; gap:3px; margin-bottom:3px;">'+bar+'</div>'+
         (bits.length ? '<div class="u-status" style="font-size:10.5px;">'+escapeHtml(bits.join(' · '))+'</div>' : '')+
+        pendingHtml+
       '</div>';
   }
 
@@ -10614,8 +10641,15 @@
       nextText = resolved+' of '+units.length+' unit(s) resolved. File a Service Report for each one — or flag a unit as not done, with a reason, if it can\'t be serviced. The job order completes on its own once none are left.';
     }
     else if(ack && stage_==='acknowledged') nextText = 'The customer knows you\'re on the way. Tap Arrived at Site when you get there — that starts the work and fills Time In on the Service Report.';
-    else if(ack) nextText = 'Acknowledged — waiting for the other assigned technician(s) before the customer is told the crew is en route.';
-    else nextText = 'Scheduled for today. Tap Acknowledge to accept this job order.';
+    else if(ack){
+      const others = dtPendingAckNames(r, currentUser.id);
+      nextText = 'Acknowledged — waiting for '+(others.length ? '<b>'+escapeHtml(others.join(', '))+'</b>' : 'the other assigned technician(s)')+' before the customer is told the crew is en route.';
+    }
+    else{
+      const others = dtPendingAckNames(r, currentUser.id);
+      nextText = 'Scheduled for today. Tap Acknowledge to accept this job order.'+
+        (others.length ? ' Also still to acknowledge: <b>'+escapeHtml(others.join(', '))+'</b>.' : '');
+    }
 
     return '<div class="jo-stepper">'+
       '<div class="jo-stepper-track">'+stepsHtml+'</div>'+
@@ -10875,7 +10909,11 @@
           // ticket from Preparing straight to Work in Progress, so the
           // customer never saw En Route at all.
           (!locked && stage==='acknowledged' && !arrived ? '<button data-act="arrived" class="primary">Arrived at Site</button>' : '')+
-          (!locked && alreadyAck && stage==='preparing' ? '<span class="u-status">Waiting for the other assigned technician(s) to acknowledge</span>' : '')+
+          (!locked && stage==='preparing' && !notYetDue && dtPendingAckNames(r, currentUser.id).length
+            ? '<span class="u-status jo-pending-ack" style="display:block; flex-basis:100%;">'+
+                (alreadyAck ? 'Waiting for ' : 'Also to acknowledge: ')+
+                '<b>'+escapeHtml(dtPendingAckNames(r, currentUser.id).join(', '))+'</b></span>'
+            : (!locked && alreadyAck && stage==='preparing' ? '<span class="u-status">Waiting for the other assigned technician(s) to acknowledge</span>' : ''))+
           (!locked && arrived && stage==='in_progress' ? '<span class="u-status">File a Service Report for each unit, or flag it as not done</span>' : '')+
         '</div>';
       const ackBtn = card.querySelector('[data-act="ack"]');
@@ -28056,16 +28094,20 @@
         if(ackd){
           const assigned = (r.assignedWorkerIds||[]).length;
           const acked = (r.acknowledgedBy||[]).filter(id=> (r.assignedWorkerIds||[]).includes(id)).length;
+          const waitingOn = dtPendingAckNames(r, currentUser.id);
           add({ rank:45, key:sortKey(r), tone:'gray', ic:'people', info:true,
             title:'Waiting for your teammates · '+jo,
-            sub: acked+' of '+assigned+' have accepted. You can tap Arrived at Site once everyone accepts.', steps:1 });
+            sub: acked+' of '+assigned+' have accepted.'+
+              (waitingOn.length ? '<br>Still to accept: '+escapeHtml(waitingOn.join(', '))+'.' : '')+
+              '<br>You can tap Arrived at Site once everyone accepts.', steps:1 });
           return;
         }
         const late = dtIsLateDispatch(r);
         add({ rank: late ? 35 : 40, key:sortKey(r), tone: late ? 'red' : 'green', ic:'truck',
           tag: late ? 'Late' : null,
           title:'Accept job order '+jo,
-          sub: (where ? where+'<br>' : '')+thDayWord(r.date)+(r.dispatchTime ? ' · leave by '+thFmtHm(r.dispatchTime) : (r.expectedTime ? ' · at site '+thFmtHm(r.expectedTime) : ''))+mateLine,
+          sub: (where ? where+'<br>' : '')+thDayWord(r.date)+(r.dispatchTime ? ' · leave by '+thFmtHm(r.dispatchTime) : (r.expectedTime ? ' · at site '+thFmtHm(r.expectedTime) : ''))+mateLine+
+            (dtPendingAckNames(r, currentUser.id).length ? '<br>Also to accept: '+escapeHtml(dtPendingAckNames(r, currentUser.id).join(', ')) : ''),
           steps:1, btn:'Acknowledge', act:'ack', id:r.id, jo:r.jobOrderNo });
       }
     });
