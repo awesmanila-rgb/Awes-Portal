@@ -27391,8 +27391,7 @@
 
     // WATCH — chips
     // Inbox items that no rule above already covers, grouped by kind.
-    const COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide',
-      'jo_review','report_signoff','sr_new','jo_late','jo_overdue','po_draft']);
+    const COVERED = PRIO_COVERED;
     const groups = {};
     (extra.inbox || []).forEach(x=>{
       if(!x || COVERED.has(x.kind) || /_endorse$/.test(x.kind || '')) return;
@@ -27674,44 +27673,108 @@
     const b = $('prioBoardOpenJo'); if(b) b.onclick = ()=> dtOpenTicketOverlay(t.id);
   }
   // ---- sidebar counts ----
-  // The numbers on the sidebar come from the same list as "Needs you now"
-  // (urgent + today; watch items are not counted), so the two always agree.
-  // jorev / srsignoff / srsign / settle are ONE item standing for N records,
-  // so their N is read from the title. Inbox is the staff inbox list as is.
-  function prioSbSet(id, n, label, late){
-    const el = $(id); if(!el) return;
-    const on = n > 0;
-    el.textContent = on ? (label || String(n)) : '';
-    el.style.display = on ? '' : 'none';
-    el.classList.toggle('is-late', on && !!late);
-  }
-  function prioSbSection(key, n){
-    const el = document.querySelector('#sidebarAdminGroup .sb-section[data-sb-key="' + key + '"] .sb-count');
-    if(el) el.textContent = n > 0 ? String(n) : '';
+  // Every sidebar page and category carries a number for what is waiting on the
+  // admin there, drawn from the same two sources as "Needs you now" so the two
+  // always agree:
+  //   * the ranked list (late job orders, requisitions, leave, cash advances ...)
+  //   * the raw Inbox rows the list does not have its own rule for (receive a
+  //     PO, tool defects, pay runs, errands ...), each carrying the module it
+  //     belongs to — SB_MODULE_LINK says which sidebar page that is.
+  // Red = something late / escalated, amber = needs action, grey = only a
+  // heads-up (below reorder level). A category shows the total of its pages.
+  // Inbox items the list already has a rule for; prioBuild and the counts below
+  // must agree on this, so there is one copy.
+  const PRIO_COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide',
+    'jo_review','report_signoff','sr_new','jo_late','jo_overdue','po_draft']);
+  const SB_MODULE_LINK = {
+    'pur.requisitions':'sbNavRequisitions', 'pur.purchase_orders':'sbNavPurchaseOrders', 'pur.suppliers':'sbNavSuppliers', 'pur.materials':'sbNavMaterials',
+    'inv.stock':'sbNavStock', 'inv.receive':'sbNavReceive', 'inv.issue':'sbNavIssue', 'inv.returns':'sbNavReturns',
+    'inv.transfers':'sbNavTransfers', 'inv.slips':'sbNavSlips', 'inv.reports':'sbNavInvReports', 'inv.warehouses':'sbNavWarehouses',
+    'fin.cash_advance':'sbNavCashAdvance', 'fin.liquidation':'sbNavLiquidation', 'fin.reimbursement':'sbNavReimbursement',
+    'fin.payroll_approve':'sbNavPayApprove', 'fin.payroll_rules':'sbNavPayRules',
+    'hr.leaves':'sbNavLeave', 'hr.timesheets':'sbNavPayTimesheets', 'hr.payroll_runs':'sbNavPayRuns', 'hr.payroll_setup':'sbNavPaySetup', 'hr.attendance':'sbNavTechnicians',
+    'hr.staff_attendance':'sbNavTechnicians', 'hr.tech_profiles':'sbNavTechnicians', 'ops.technicians':'sbNavTechnicians',
+    'tools.register':'sbNavTlRegister', 'tools.issue':'sbNavTlIssue', 'tools.return':'sbNavTlReturn', 'tools.handover':'sbNavTlHandover',
+    'tools.defects':'sbNavTlDefects', 'tools.maintenance':'sbNavTlMaint',
+    'adm.errands':'sbNavErrands', 'adm.permits':'sbNavAdmPermits', 'adm.vehicles':'sbNavAdmVehicles', 'adm.contracts':'sbNavAdmContracts',
+    'adm.bills':'sbNavAdmBills', 'adm.assets':'sbNavAdmAssets', 'adm.announcements':'menuManageAnnouncements',
+    'adm.customers':'menuManageCustomers', 'adm.equipment':'menuManageEquipment',
+    'ops.dispatch':'sbNavDispatch', 'ops.service_reports':'menuManageReports'
+    // ops.service_requests is deliberately absent: that page keeps its own live badge (srRefreshAdminCounts)
+  };
+  let prioSbManaged = new Set();
+  function prioSbPaint(id, o){
+    const link = $(id); if(!link) return;
+    let b = link.querySelector('.sidebar-badge');
+    const show = !!o && (o.act > 0 || o.watch > 0);
+    if(!b){ if(!show) return; b = document.createElement('span'); b.className = 'sidebar-badge'; link.appendChild(b); }
+    if(!show){ b.textContent = ''; b.style.display = 'none'; b.removeAttribute('title'); b.classList.remove('is-late', 'is-watch'); return; }
+    const act = o.act > 0;
+    b.textContent = String(act ? o.act : o.watch);
+    b.style.display = '';
+    b.classList.toggle('is-late', act && o.red);
+    b.classList.toggle('is-watch', !act);
+    b.title = Object.keys(o.why).map(w=> o.why[w] + ' ' + w).join(' \u00B7 ');
   }
   function prioSidebarCounts(base, extra, items){
-    const act = (items || []).filter(i=> i.tier !== 'watch');
-    const GROUPED = /^(jorev|srsignoff|srsign|settle)$/;
-    const sum = test=> act.reduce((n, i)=>{
-      const k = String(i.key || '');
-      return test(k) ? n + (GROUPED.test(k) ? (parseInt(String(i.title || ''), 10) || 1) : 1) : n;
-    }, 0);
-    const starts = (...p)=> k=> p.some(x=> k.indexOf(x) === 0);
-    const today = todayISO();
-    const late = ((base && base.tickets) || []).filter(t=> t.date === today && dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').length;
-    const toReview = sum(k=> k === 'jorev');
-    const leave = sum(starts('leave:')), mr = sum(starts('mr:')), po = sum(starts('poappr:'));
-    const fin = sum(k=> /^(ca|rel|liq):/.test(k) || k === 'settle');
-    prioSbSet('sbInboxBadge', ((extra && extra.inbox) || []).length);
-    if(late > 0) prioSbSet('sbDispatchBadge', late, late + ' late', true);
-    else prioSbSet('sbDispatchBadge', toReview, toReview + ' to review', false);
-    prioSbSet('sbReportsBadge', sum(k=> k === 'srsignoff'));
-    prioSbSet('sbLeaveBadge', leave);
-    prioSbSet('sbReqBadge', mr);
-    prioSbSet('sbPoBadge', po);
-    prioSbSection('purchasing', mr + po);
-    prioSbSection('hr', leave);
-    prioSbSection('finance', fin);
+    extra = extra || {};
+    const nav = {};
+    const bump = (id, n, sev, why)=>{
+      if(!id || !(n > 0)) return;
+      const o = nav[id] || (nav[id] = { act:0, watch:0, red:false, why:{} });
+      if(sev === 'watch') o.watch += n; else { o.act += n; if(sev === 'red') o.red = true; }
+      if(why) o.why[why] = (o.why[why] || 0) + n;
+    };
+    // a grouped item ("3 job orders to review") stands for N records: N is in its title
+    const num = it=> parseInt(String(it.title || ''), 10) || 1;
+    (items || []).forEach(it=>{
+      const k = String(it.key || '');
+      const sev = it.tier === 'urgent' ? 'red' : (it.tier === 'watch' ? 'watch' : 'act');
+      if(/^(late|exp|overdue|long):/.test(k)) bump('sbNavDispatch', 1, sev, k.indexOf('late') === 0 ? 'late' : k.indexOf('exp') === 0 ? 'expired' : k.indexOf('overdue') === 0 ? 'overdue' : 'running long');
+      else if(k === 'jorev')   bump('sbNavDispatch', num(it), sev, 'to review');
+      else if(k === 'nodisp')  bump('sbNavDispatch', num(it), 'watch', 'without a dispatch time');
+      else if(k === 'srsignoff' || k === 'srsign') bump('menuManageReports', num(it), sev, 'to sign off');
+      else if(k.indexOf('mr:') === 0)     bump('sbNavRequisitions', 1, sev, 'to review');
+      else if(k.indexOf('poappr:') === 0) bump('sbNavPurchaseOrders', 1, sev, 'to approve');
+      else if(k.indexOf('leave:') === 0)  bump('sbNavLeave', 1, sev, 'to decide');
+      else if(k.indexOf('ca:') === 0)     bump('sbNavCashAdvance', 1, sev, 'to act on');
+      else if(k.indexOf('liq:') === 0)    bump('sbNavLiquidation', 1, sev, 'to review');
+      else if(k.indexOf('rel:') === 0)    bump('sbNavReimbursement', 1, sev, 'to act on');
+      else if(k === 'settle')  bump('sbNavReimbursement', num(it), sev, 'to settle');
+      else if(k === 'reorder') bump('sbNavStock', (extra.reorder || []).length, 'watch', 'below reorder level');
+    });
+    // Inbox rows without a rule of their own, one count per record
+    (extra.inbox || []).forEach(x=>{
+      if(!x || PRIO_COVERED.has(x.kind) || /_endorse$/.test(x.kind || '')) return;
+      const id = SB_MODULE_LINK[x.module]; if(!id) return;
+      const sev = x.state === 'escalated' ? 'red' : (x.state === 'overdue' || x.level === 'approve') ? 'act' : 'watch';
+      const lbl = String(x.label || 'waiting'); bump(id, 1, sev, lbl.charAt(0).toLowerCase() + lbl.slice(1));
+    });
+
+    // paint pages; clear any that had a number last time and have none now
+    const ids = new Set(Object.keys(nav));
+    prioSbManaged.forEach(id=>{ if(!ids.has(id)) prioSbPaint(id, null); });
+    ids.forEach(id=> prioSbPaint(id, nav[id]));
+    prioSbManaged = ids;
+
+    // categories: the total of their pages
+    const cats = {};
+    ids.forEach(id=>{
+      const link = $(id), sec = link && link.closest('.sb-section'); if(!sec) return;
+      const c = cats[sec.dataset.sbKey] || (cats[sec.dataset.sbKey] = { act:0, watch:0, red:false });
+      c.act += nav[id].act; c.watch += nav[id].watch; if(nav[id].red) c.red = true;
+    });
+    document.querySelectorAll('#sidebarAdminGroup .sb-section[data-sb-key] .sb-count').forEach(el=>{
+      const c = cats[el.closest('.sb-section').dataset.sbKey];
+      const act = !!c && c.act > 0, n = !c ? 0 : (act ? c.act : c.watch);
+      el.textContent = n > 0 ? String(n) : '';
+      el.classList.toggle('is-late', act && c.red);
+      el.classList.toggle('is-watch', !!c && !act && n > 0);
+    });
+
+    // Inbox itself: everything waiting across departments
+    const ib = $('sbInboxBadge');
+    if(ib){ const n = (extra.inbox || []).length; ib.textContent = n > 0 ? String(n) : ''; ib.style.display = n > 0 ? '' : 'none'; }
     if(typeof sbSyncTitles === 'function') sbSyncTitles();
   }
 
