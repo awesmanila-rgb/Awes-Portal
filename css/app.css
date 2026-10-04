@@ -5020,7 +5020,8 @@ body.role-admin #adminDash.adm-v2{
     "jo    jo    jo    jo    act   act"
     "ov    ov    ov    ov    ov    ov"
     "jobs  jobs  jobs  jobs  chart chart"
-    "week  week  week  week  cal   cal"
+    "cal   cal   cal   cal   cal   cal"
+    "week  week  week  week  week  week"
     "avail avail qa    qa    qa    qa"
     "ann   ann   ann   ann   ann   ann";
 }
@@ -5208,7 +5209,8 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
       "jo    jo    jo    jo    act   act"
       "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
-      "week  week  week  week  cal   cal"
+      "cal   cal   cal   cal   cal   cal"
+    "week  week  week  week  week  week"
       "avail avail qa    qa    qa    qa"
       "ann   ann   ann   ann   ann   ann";
   }
@@ -5220,7 +5222,8 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
       "jo    jo    jo    jo    jo    jo"
       "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
-      "week  week  week  week  cal   cal"
+      "cal   cal   cal   cal   cal   cal"
+    "week  week  week  week  week  week"
       "avail avail qa    qa    qa    qa"
       "ann   ann   ann   ann   ann   ann";
   }
@@ -5232,7 +5235,8 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
       "jo    jo    jo    jo    jo    jo"
       "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
-      "week  week  week  week  cal   cal"
+      "cal   cal   cal   cal   cal   cal"
+    "week  week  week  week  week  week"
       "avail avail qa    qa    qa    qa"
       "ann   ann   ann   ann   ann   ann";
   }
@@ -5264,3 +5268,25 @@ body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .overview-grid{ grid-templa
   body.role-admin #adminDash.adm-v2{ grid-template-rows:auto 1fr; }
   body.role-admin #adminDash.adm-v2 #prioProgressCard{ align-self:start; }
 }
+
+/* Schedule Calendar: month grid on the left, the chosen day's job orders on
+   the right. The old dashboard stacked it because it lived in a narrow side
+   column; it now has a full-width row, so it goes side-by-side whenever the
+   CARD itself is wide enough (a container query, so it reacts to the space it
+   really has, not the screen). Narrower than that — phones — it stacks again. */
+body.role-admin #homeScheduleCalendarCard{ container-type:inline-size; container-name:homecal; }
+@container homecal (min-width:520px){
+  body.role-admin #homeScheduleCalendarCard .cal-body-wrap{ flex-direction:row; align-items:flex-start; gap:22px; }
+  body.role-admin #homeScheduleCalendarCard .cal-grid-col{ flex:0 0 clamp(250px, 46%, 470px); width:auto; max-width:none; min-width:0; }
+  body.role-admin #homeScheduleCalendarCard .cal-day-detail{
+    flex:1 1 0; min-width:0; margin-top:0; padding-top:0;
+    border-top:0; border-left:1px solid var(--border); padding-left:22px;
+    max-height:440px; overflow-y:auto;
+  }
+  body.role-admin #homeScheduleCalendarCard .cal-compact .cal-cell{ min-height:46px; }
+}
+/* Whatever the width, a job order in this list is a narrow column: give the
+   title the whole line and put Open Job Order + status underneath, instead of
+   squeezing three things into one row. */
+body.role-admin #homeCalDayList .jo-card-toggle{ flex-direction:column; align-items:stretch; gap:8px; }
+body.role-admin #homeCalDayList .jo-card-toggle .jo-card-head-actions{ width:100%; flex-wrap:wrap; }

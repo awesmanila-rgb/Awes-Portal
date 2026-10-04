@@ -1,3 +1,8 @@
+// Bumped to v202 — admin dashboard: Schedule Calendar now has its own full-width
+// row with the month grid on the left and the selected day's job orders on the
+// right (stacks again on phones); the job order cards in that list stack their
+// title above the buttons. Re-fetch css/app.css.
+//
 // Bumped to v201 — admin dashboard: Job order progress tracking now sits directly
 // under Today's dispatch board (left column, beside Needs you now); the Job Orders
 // status tiles moved down beside Recent activity. Re-fetch css/app.css.
@@ -1076,7 +1081,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v201';
+const CACHE_NAME = 'awes-sr-v202';
 
 // Split into two lists on purpose.
 //
