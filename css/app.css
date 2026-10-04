@@ -5296,3 +5296,15 @@ body.role-admin #homeCalDayList .jo-card-toggle .jo-card-head-actions{ width:100
    technician, so the old list is dropped from the dashboard; its markup stays
    so the code that fills it keeps working. */
 body.role-admin #adminDash.adm-v2 #homeTechListCard{ display:none !important; }
+
+/* Sidebar counts: grey = heads-up only (e.g. below reorder level); red and amber
+   were already defined. Category totals use the same three colours. */
+body.role-admin #adminSidebar .sidebar-badge.is-watch,
+body.role-admin #adminSidebar .sb-count.is-watch{ background:rgba(255,255,255,.2); color:#fff; }
+body.role-admin #adminSidebar .sb-count.is-late{ background:#E5533D; color:#fff; }
+
+/* collapsed rail: a grey heads-up dot needs a lighter fill to show on the dark green */
+@media (min-width:1000px){
+  body.role-admin.sb-collapsed #adminSidebar .sidebar-badge.is-watch,
+  body.role-admin.sb-collapsed #adminSidebar .sb-count.is-watch{ background:#9FC3B0; }
+}

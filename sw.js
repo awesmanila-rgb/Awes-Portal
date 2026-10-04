@@ -1,3 +1,8 @@
+// Bumped to v204 — admin sidebar: every page and every category now carries a
+// number for what is waiting on the admin there (red = late/escalated, amber =
+// needs action, grey = heads-up), from the same data as "Needs you now"
+// (admin-priority.js prioSidebarCounts). Re-fetch css/app.css/js/app.bundle.js.
+//
 // Bumped to v203 — admin dashboard: Recent Activity replaces the Technicians list
 // card (bottom left, beside "What would you like to do?"); the Technicians list
 // is no longer shown there. Re-fetch css/app.css.
@@ -1085,7 +1090,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v203';
+const CACHE_NAME = 'awes-sr-v204';
 
 // Split into two lists on purpose.
 //
