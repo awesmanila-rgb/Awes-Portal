@@ -5017,12 +5017,12 @@ body.role-admin #adminDash.adm-v2{
     "board board board board prio  prio"
     "prog  prog  prog  prog  prio  prio"
     "track track ptech ptech ptech ptech"
-    "jo    jo    jo    jo    act   act"
+    "jo    jo    jo    jo    jo    jo"
     "ov    ov    ov    ov    ov    ov"
     "jobs  jobs  jobs  jobs  chart chart"
     "cal   cal   cal   cal   cal   cal"
     "week  week  week  week  week  week"
-    "avail avail qa    qa    qa    qa"
+    "act   act   qa    qa    qa    qa"
     "ann   ann   ann   ann   ann   ann";
 }
 body.role-admin #prioProgressCard{ grid-area:prog; }
@@ -5035,14 +5035,14 @@ body.role-admin #adminDash.adm-v2 #homeTrackerCard .tracker-map{ min-height:300p
       "board board"
       "ptech ptech"
       "prog  prog"
-      "track act"
+      "track track"
       "jo    jo"
       "ov    ov"
       "jobs  jobs"
       "chart chart"
       "week  week"
       "cal   cal"
-      "avail avail"
+      "act   act"
       "qa    qa"
       "ann   ann";
   }
@@ -5050,7 +5050,7 @@ body.role-admin #adminDash.adm-v2 #homeTrackerCard .tracker-map{ min-height:300p
 @media (max-width:640px){
   body.role-admin #adminDash.adm-v2{
     grid-template-columns:minmax(0,1fr);
-    grid-template-areas:"prio" "board" "ptech" "prog" "track" "act" "jo" "ov" "jobs" "chart" "week" "cal" "avail" "qa" "ann";
+    grid-template-areas:"prio" "board" "ptech" "prog" "track" "jo" "ov" "jobs" "chart" "week" "cal" "act" "qa" "ann";
   }
 }
 
@@ -5206,12 +5206,12 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
       "board board board board prio  prio"
       "prog  prog  prog  prog  prio  prio"
       "ptech ptech ptech ptech ptech ptech"
-      "jo    jo    jo    jo    act   act"
+      "jo    jo    jo    jo    jo    jo"
       "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
       "cal   cal   cal   cal   cal   cal"
-    "week  week  week  week  week  week"
-      "avail avail qa    qa    qa    qa"
+      "week  week  week  week  week  week"
+      "act   act   qa    qa    qa    qa"
       "ann   ann   ann   ann   ann   ann";
   }
   body.role-admin #adminDash.adm-v2:has(#homeActivityCard:is([style*="display:none"],[style*="display: none"])){
@@ -5223,8 +5223,8 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
       "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
       "cal   cal   cal   cal   cal   cal"
-    "week  week  week  week  week  week"
-      "avail avail qa    qa    qa    qa"
+      "week  week  week  week  week  week"
+      "qa    qa    qa    qa    qa    qa"
       "ann   ann   ann   ann   ann   ann";
   }
   body.role-admin #adminDash.adm-v2:has(#homeTrackerCard:is([style*="display:none"],[style*="display: none"])):has(#homeActivityCard:is([style*="display:none"],[style*="display: none"])){
@@ -5236,8 +5236,8 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
       "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
       "cal   cal   cal   cal   cal   cal"
-    "week  week  week  week  week  week"
-      "avail avail qa    qa    qa    qa"
+      "week  week  week  week  week  week"
+      "qa    qa    qa    qa    qa    qa"
       "ann   ann   ann   ann   ann   ann";
   }
 }
@@ -5290,3 +5290,9 @@ body.role-admin #homeScheduleCalendarCard{ container-type:inline-size; container
    squeezing three things into one row. */
 body.role-admin #homeCalDayList .jo-card-toggle{ flex-direction:column; align-items:stretch; gap:8px; }
 body.role-admin #homeCalDayList .jo-card-toggle .jo-card-head-actions{ width:100%; flex-wrap:wrap; }
+
+/* Recent Activity takes the place of the Technicians list (who is signed in and
+   when they were last seen). The Technicians status table already shows every
+   technician, so the old list is dropped from the dashboard; its markup stays
+   so the code that fills it keeps working. */
+body.role-admin #adminDash.adm-v2 #homeTechListCard{ display:none !important; }

@@ -1,3 +1,7 @@
+// Bumped to v203 — admin dashboard: Recent Activity replaces the Technicians list
+// card (bottom left, beside "What would you like to do?"); the Technicians list
+// is no longer shown there. Re-fetch css/app.css.
+//
 // Bumped to v202 — admin dashboard: Schedule Calendar now has its own full-width
 // row with the month grid on the left and the selected day's job orders on the
 // right (stacks again on phones); the job order cards in that list stack their
@@ -1081,7 +1085,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v202';
+const CACHE_NAME = 'awes-sr-v203';
 
 // Split into two lists on purpose.
 //
