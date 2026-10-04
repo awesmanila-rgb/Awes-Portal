@@ -5015,9 +5015,9 @@ body.role-admin #adminDash.adm-v2{
   grid-template-columns:repeat(6, minmax(0,1fr));
   grid-template-areas:
     "board board board board prio  prio"
-    "jo    jo    jo    jo    prio  prio"
+    "prog  prog  prog  prog  prio  prio"
     "track track ptech ptech ptech ptech"
-    "prog  prog  prog  prog  act   act"
+    "jo    jo    jo    jo    act   act"
     "ov    ov    ov    ov    ov    ov"
     "jobs  jobs  jobs  jobs  chart chart"
     "week  week  week  week  cal   cal"
@@ -5203,10 +5203,10 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
   body.role-admin #adminDash.adm-v2:has(#homeTrackerCard:is([style*="display:none"],[style*="display: none"])){
     grid-template-areas:
       "board board board board prio  prio"
-    "jo    jo    jo    jo    prio  prio"
+      "prog  prog  prog  prog  prio  prio"
       "ptech ptech ptech ptech ptech ptech"
-      "prog  prog  prog  prog  act   act"
-        "ov    ov    ov    ov    ov    ov"
+      "jo    jo    jo    jo    act   act"
+      "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
       "week  week  week  week  cal   cal"
       "avail avail qa    qa    qa    qa"
@@ -5215,10 +5215,10 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
   body.role-admin #adminDash.adm-v2:has(#homeActivityCard:is([style*="display:none"],[style*="display: none"])){
     grid-template-areas:
       "board board board board prio  prio"
-    "jo    jo    jo    jo    prio  prio"
+      "prog  prog  prog  prog  prio  prio"
       "track track ptech ptech ptech ptech"
-      "prog  prog  prog  prog  prog  prog"
-        "ov    ov    ov    ov    ov    ov"
+      "jo    jo    jo    jo    jo    jo"
+      "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
       "week  week  week  week  cal   cal"
       "avail avail qa    qa    qa    qa"
@@ -5227,10 +5227,10 @@ body.role-admin #adminSidebar .sidebar-cloud-btn.cloud-connected::before{ backgr
   body.role-admin #adminDash.adm-v2:has(#homeTrackerCard:is([style*="display:none"],[style*="display: none"])):has(#homeActivityCard:is([style*="display:none"],[style*="display: none"])){
     grid-template-areas:
       "board board board board prio  prio"
-    "jo    jo    jo    jo    prio  prio"
+      "prog  prog  prog  prog  prio  prio"
       "ptech ptech ptech ptech ptech ptech"
-      "prog  prog  prog  prog  prog  prog"
-        "ov    ov    ov    ov    ov    ov"
+      "jo    jo    jo    jo    jo    jo"
+      "ov    ov    ov    ov    ov    ov"
       "jobs  jobs  jobs  jobs  chart chart"
       "week  week  week  week  cal   cal"
       "avail avail qa    qa    qa    qa"
@@ -5255,3 +5255,12 @@ body.role-admin #adminDash.adm-v2 #homeJobOrdersCard{
 body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .card-head{ display:flex; }
 body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .card-body{ padding:var(--adm-pad, 18px); }
 body.role-admin #adminDash.adm-v2 #homeJobOrdersCard .overview-grid{ grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); }
+
+/* Job order progress tracking sits directly under the dispatch board. The
+   second grid row takes whatever height "Needs you now" needs beyond the
+   board, and the progress card keeps its own height instead of stretching
+   into an empty white box when only a job order or two is active. */
+@media (min-width:1101px){
+  body.role-admin #adminDash.adm-v2{ grid-template-rows:auto 1fr; }
+  body.role-admin #adminDash.adm-v2 #prioProgressCard{ align-self:start; }
+}
