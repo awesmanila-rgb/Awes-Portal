@@ -1384,12 +1384,13 @@
   // "Active service" hero to show who's on the job.
   async function dtFetchTicketTechNames(ticketId){
     if(!ticketId || !(await ensureCloud())) return [];
-    // Returns the technician(s) who can create this ticket's service report
-    // (falling back to the assigned crew if none were designated) — NOT the
-    // whole crew. Customers can't read dispatch_tickets, so they (and everyone) go
-    // through customer_ticket_tech_names(), which returns only the names —
-    // see 20261007_01_customer_ticket_tech_names.sql. The direct read below
-    // stays as the fallback until that migration is run.
+    // Returns the WHOLE assigned crew, with the technician(s) who can create the
+    // service report listed first (they stay the face of the job — the card shows
+    // the first name plus "+N", so 5 assigned = "Name + 4"). Customers can't read
+    // dispatch_tickets, so they (and everyone) go through customer_ticket_tech_names(),
+    // which returns only the names — see 20261019_01_customer_ticket_crew_names.sql
+    // (before it, only the report writers came back: 2 of 5 showed as "+ 1").
+    // The direct read below is the fallback and orders the names the same way.
     try{
       const { data, error } = await db.rpc('customer_ticket_tech_names', { p_ticket_id: ticketId });
       if(!error) return Array.isArray(data) ? data : [];
@@ -1399,10 +1400,20 @@
         .select('data').eq('id', ticketId).maybeSingle();
       if(error) throw error;
       const t = data && data.data;
-      // Same rule as the RPC: the technician(s) who will file the service
-      // report are the face of the job; fall back to the crew list only
-      // when the ticket has no designated reporter.
-      return (t && ((t.reportAllowedWorkerNames && t.reportAllowedWorkerNames.length) ? t.reportAllowedWorkerNames : t.assignedWorkerNames)) || [];
+      if(!t) return [];
+      // Same rule as the RPC: report writers first, then everyone else assigned,
+      // nobody twice (matched by id; by name only on older tickets without ids).
+      const arr = (v)=> Array.isArray(v) ? v : [];
+      const names = arr(t.assignedWorkerNames), ids = arr(t.assignedWorkerIds);
+      const repNames = arr(t.reportAllowedWorkerNames), repIds = arr(t.reportAllowedWorkerIds);
+      const out = repNames.slice();
+      names.forEach((n, i)=>{
+        const id = ids[i];
+        const dup = (id != null && Array.isArray(t.reportAllowedWorkerIds)) ? repIds.includes(id)
+                  : Array.isArray(t.reportAllowedWorkerNames) ? repNames.includes(n) : false;
+        if(!dup) out.push(n);
+      });
+      return out;
     }catch(e){ console.error('fetch ticket technicians failed', describeCloudError(e)); return []; }
   }
 
