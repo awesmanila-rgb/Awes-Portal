@@ -93,19 +93,23 @@
 
     // ---------- the four-step wizard over the existing forms ----------
     const CFG = {
-      receive:  { panel:'purchPanel_receive',   role:'Receiver',   verb:'Receive',  post:'invRcvPost', le:'rcv',
+      receive:  { panel:'purchPanel_receive',   role:'Receiver',   verb:'Receive',  post:'invRcvPost', le:'rcv', color:'#2E7D5B', page:'receive', scene:['truck', 'wh'], label:'Receive',
+        def:'Items coming in from a supplier.', use:'Use it when a delivery arrives at a warehouse, or is delivered straight to a site.',
         steps:[ { n:'From',  q:'Where is it coming from?',            h:'Choose the kind of delivery.' },
                 { n:'To',    q:'Where is it going?',                  h:'Pick the warehouse that receives it. Any warehouse will do.' },
                 { n:'Items', q:'Which items arrived?',                h:'Enter what actually arrived.' } ] },
-      issue:    { panel:'purchPanel_issue',     role:'Issuer',     verb:'Issue',    post:'invIssPost', le:'iss',
+      issue:    { panel:'purchPanel_issue',     role:'Issuer',     verb:'Issue',    post:'invIssPost', le:'iss', color:'#2F6DB5', page:'issue', scene:['wh', 'custody'], label:'Issue',
+        def:'Items given to a worker to use.', use:'Use it when a worker takes items from a warehouse. They confirm what they received on their phone.',
         steps:[ { n:'From',  q:'Which warehouse is it leaving from?', h:'You can only take stock out of your own warehouses.' },
                 { n:'To',    q:'Who gets it?',                        h:'The worker signs for it on their phone.' },
                 { n:'Items', q:'Which items, and how many?',          h:'Only what is in stock can be issued.' } ] },
-      returns:  { panel:'purchPanel_returns',   role:'Returner',   verb:'Return',   post:'invRetPost',
+      returns:  { panel:'purchPanel_returns',   role:'Returner',   verb:'Return',   post:'invRetPost', color:'#B5413F', page:'returns', scene:['custody', 'wh'], label:'Return',
+        def:'Items brought back to a warehouse.', use:'Use it when items are unused, wrong or damaged and the worker brings them back.',
         steps:[ { n:'From',  q:'Whose custody is it in?',             h:'Pick the worker who is returning the materials.' },
                 { n:'To',    q:'Which warehouse takes it back?',      h:'Good items go back into stock.' },
                 { n:'Items', q:'What is being returned?',             h:'Only what the worker holds is listed.' } ] },
-      transfer: { panel:'purchPanel_transfers', role:'Transferer', verb:'Transfer', post:'invTrfPost', le:'trf',
+      transfer: { panel:'purchPanel_transfers', role:'Transferer', verb:'Transfer', post:'invTrfPost', le:'trf', color:'#D9731A', page:'transfers', scene:['wh', 'wh'], label:'Transfer',
+        def:'Items moved from one warehouse to another.', use:'Use it when stock moves between stores without going through a worker.',
         steps:[ { n:'From',  q:'Which warehouse is it leaving?',      h:'You can only take stock out of your own warehouses.' },
                 { n:'To',    q:'Which warehouse is it going to?',     h:'It goes into that warehouse\u2019s stock.' },
                 { n:'Items', q:'Which items, and how many?',          h:'You can only move what is in stock.' } ] }
@@ -134,8 +138,12 @@
       const body = panel.querySelector('.card-body'), top = body && body.querySelector('.po-ed-top'); if(!top) return;
       const sections = Array.from(body.querySelectorAll(':scope > section.po-sec'));
       const itemsSec = sections[1], actions = body.querySelector(':scope > .po-actions');
-      const el = document.createElement('div'); el.className = 'wz'; el.id = 'wz-' + key;
+      const el = document.createElement('div'); el.className = 'wz'; el.id = 'wz-' + key; el.style.setProperty('--mv', cfg.color);
+      const mini = (k)=> k === 'wh' ? art.wh('', 44) : art[k](44);
+      const allowed = (k)=> typeof staffPurchPageAllowed !== 'function' || staffPurchPageAllowed(CFG[k].page);
       el.innerHTML =
+        '<div class="wz-mvbar" role="tablist" aria-label="What are you moving?">' + Object.keys(CFG).filter(allowed).map(k=> '<button type="button" role="tab" class="wz-mvb" style="--mc:' + CFG[k].color + '" aria-selected="' + (k === key) + '" data-page="' + CFG[k].page + '"><span class="wz-sc">' + mini(CFG[k].scene[0]) + '<i aria-hidden="true">\u2192</i>' + mini(CFG[k].scene[1]) + '</span><b>' + CFG[k].label + '</b></button>').join('') + '</div>' +
+        '<div class="wz-def"><h3>' + cfg.label + ': ' + cfg.def + '</h3><p>' + cfg.use + '</p></div>' +
         '<div class="wz-head"><div class="wz-acct" title="The person doing this is always the signed-in account"><span class="wz-av"></span><span class="wz-who"><b></b><i></i></span></div></div>' +
         '<ol class="wz-steps">' + cfg.steps.concat([{ n:'Review' }]).map((s, i)=> '<li><button type="button" class="wz-stp" data-go="' + i + '"><span class="wz-dot">' + (i + 1) + '</span><span class="wz-sl">' + s.n + '</span></button></li>').join('') + '</ol>' +
         '<div class="wz-bar" aria-live="polite"></div>' +
@@ -157,6 +165,14 @@
           }else grid.appendChild(f);
         });
       });
+      // Receive: a third way in — the supplier delivers straight to a site and a worker receives it
+      if(key === 'receive'){
+        const card = document.createElement('div'); card.className = 'wz-site';
+        card.innerHTML = '<div class="wz-or"><span>or</span></div><button type="button" class="wz-site-btn" id="wzSiteBtn"><span class="wz-site-art">' + art.truck(88) + '</span><span class="wz-site-txt"><b>Supplier delivering to a site</b><span>Assign a worker to receive it on site. They upload photos as proof.</span></span><span class="wz-site-go" aria-hidden="true">\u2192</span></button>' +
+          '<button type="button" class="wz-site-link" id="wzSiteList">See site deliveries and their photos</button>';
+        bodies[0].appendChild(card);
+        card.addEventListener('click', (ev)=>{ if(ev.target.closest('#wzSiteBtn')){ showPurchasingView('siteDelivery'); } else if(ev.target.closest('#wzSiteList')){ sd.tab = 'list'; showPurchasingView('siteDelivery'); } });
+      }
       // the items section moves whole into step 3; its title is replaced by the step heading
       if(itemsSec){ itemsSec.classList.add('wz-items'); bodies[2].appendChild(itemsSec); }
       // the original first section and Post button stay in the page, hidden
@@ -164,6 +180,7 @@
       if(actions) actions.classList.add('wz-legacy');
       wz[key] = { el, step:0 };
       el.addEventListener('click', (ev)=>{
+        const sw = ev.target.closest('.wz-mvb'); if(sw){ if(sw.getAttribute('aria-selected') !== 'true') showPurchasingView(sw.dataset.page); return; }
         const go = ev.target.closest('.wz-stp'); if(go){ const g = Number(go.dataset.go); if(g < wz[key].step) show(key, g); return; }
         if(ev.target.closest('.wz-back')){ show(key, Math.max(0, wz[key].step - 1)); return; }
         if(ev.target.closest('.wz-next')) next(key);
@@ -240,13 +257,21 @@
       if(key === 'returns') return invRetHold.filter(h=> String(h.ret).trim()).length;
       return invLE[CFG[key].le] ? invLE[CFG[key].le].lines.filter(l=> l.material_id && String(l.qty).trim()).length : 0;
     }
+    // what to draw at each end of the route
+    function endArt(key){
+      const wh = (id)=> { const t = selText(id); return art.wh(t ? t.split(' \u00B7 ')[0].trim() : '', 64); };
+      if(key === 'issue') return [wh('invIssWh'), art.custody(64)];
+      if(key === 'returns') return [art.custody(64), wh('invRetWh')];
+      if(key === 'transfer') return [wh('invTrfFrom'), wh('invTrfTo')];
+      const po = mode('invRcvMode') === 'po';
+      return [po ? art.po(64) : art.truck(64), $('invRcvDirect') && $('invRcvDirect').checked ? art.project(64) : wh('invRcvWh')];
+    }
     function renderBar(key){
       const w = wz[key]; if(!w) return;
-      const [f, t] = ends(key), n = countItems(key);
-      w.el.querySelector('.wz-bar').innerHTML =
-        '<span class="wz-chip' + (f ? ' set' : '') + '">' + esc(f || 'From') + '</span><span class="wz-arr" aria-hidden="true">\u2192</span>' +
-        '<span class="wz-chip' + (t ? ' set' : '') + '">' + esc(t || 'To') + '</span>' +
-        (n ? '<span class="wz-chip">' + n + ' item' + (n === 1 ? '' : 's') + '</span>' : '');
+      const [f, t] = ends(key), n = countItems(key), [fa, ta] = endArt(key);
+      const end = (lab, txt, svg)=> '<div class="wz-rend' + (txt ? ' set' : '') + '"><span class="wz-rart">' + svg + '</span><span class="wz-rtxt"><small>' + lab + '</small>' + esc(txt || '\u2014') + '</span></div>';
+      w.el.querySelector('.wz-bar').innerHTML = '<div class="wz-route">' + end('From', f, fa) + '<span class="wz-rarr" aria-hidden="true">\u279C</span>' + end('To', t, ta) + '</div>' +
+        (n ? '<span class="wz-chip wz-nchip">' + n + ' item' + (n === 1 ? '' : 's') + '</span>' : '');
     }
     // ---------- the review ----------
     function effects(key){

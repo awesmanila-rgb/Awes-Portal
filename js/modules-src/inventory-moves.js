@@ -584,7 +584,7 @@
     $('invSlipList').innerHTML = rows.length ? rows.slice(0, 300).map(s=>
       '<button type="button" class="mt-row" data-kind="' + s.kind + '" data-id="' + escapeHtml(s.id) + '"><div class="mt-row-main">' +
       '<div class="mt-row-title"><span class="mt-code">' + escapeHtml(invSlipNo(s)) + '</span>' + escapeHtml(INV_SLIP_KIND[s.kind].label) +
-      (s.kind === 'iss' ? ' <span class="po-status ' + (s.status === 'acknowledged' ? 'fulfilled' : 'returned') + '">' + (s.status === 'acknowledged' ? 'signed' : 'awaiting signature') + '</span>' : '') + '</div>' +
+      (s.kind === 'iss' ? ' <span class="po-status ' + (s.status === 'acknowledged' ? (s.ack_diff ? 'returned' : 'fulfilled') : 'returned') + '">' + (s.status === 'acknowledged' ? (s.ack_diff ? 'received with differences' : 'signed') : 'awaiting signature') + '</span>' : '') + '</div>' +
       '<div class="sp-row-sub">' + escapeHtml([mrWhen(s.created_at), invSlipParty(s), s.job_order_id || s.direct_job_order_id, (s.project_id || s.direct_project_id) ? invPrjLabel(s.project_id || s.direct_project_id, '') : ''].filter(Boolean).join(' · ')) + '</div></div>' +
       '<div class="mt-row-price none">' + escapeHtml(invSlipWhs(s).map(id=> (invX.whs.find(w=> w.id === id) || {}).code || '').join(' → ')) + '</div></button>').join('')
       : '<div class="empty-state">' + (invSlips.length ? 'Nothing matches.' : 'No stock movements yet.') + '</div>';
@@ -618,20 +618,20 @@
     const K = INV_SLIP_KIND[d.kind], h = d.h;
     const wh = (id)=>{ const w = invX.whs.find(x=> x.id === id); return w ? w.code + ' · ' + w.name : ''; };
     $(pre + 'Title').innerHTML = '<span class="mt-code">' + escapeHtml(h[K.no]) + '</span> ' + escapeHtml(K.label) +
-      (d.kind === 'iss' ? ' <span class="po-status ' + (h.status === 'acknowledged' ? 'fulfilled' : 'returned') + '">' + (h.status === 'acknowledged' ? 'signed' : 'awaiting signature') + '</span>' : '');
+      (d.kind === 'iss' ? ' <span class="po-status ' + (h.status === 'acknowledged' ? (h.ack_diff ? 'returned' : 'fulfilled') : 'returned') + '">' + (h.status === 'acknowledged' ? (h.ack_diff ? 'received with differences' : 'signed') : 'awaiting signature') + '</span>' : '');
     const kv = (k, v)=> v ? '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>' : '';
     $(pre + 'Info').innerHTML = kv('Date', escapeHtml(mrWhen(h.created_at))) +
       (d.kind === 'trf' ? kv('From', escapeHtml(wh(h.from_warehouse_id))) + kv('To', escapeHtml(wh(h.to_warehouse_id))) : kv('Warehouse', escapeHtml(wh(h.warehouse_id)))) +
-      (d.kind === 'iss' ? kv('Issued to', escapeHtml(h.worker_name)) + kv('Issued by', escapeHtml(h.issued_by_name)) + (h.ack_at ? kv('Signed', escapeHtml(mrWhen(h.ack_at))) : '') : '') +
+      (d.kind === 'iss' ? kv('Issued to', escapeHtml(h.worker_name)) + kv('Issued by', escapeHtml(h.issued_by_name)) + (h.ack_at ? kv('Signed', escapeHtml(mrWhen(h.ack_at))) : '') + (h.ack_diff ? kv('Difference', escapeHtml(h.ack_note || 'See the items')) : '') : '') +
       (d.kind === 'ret' ? kv('Returned by', escapeHtml(h.worker_name)) + kv('Received by', escapeHtml(h.received_by_name)) : '') +
       (d.kind === 'rcv' ? kv('Received by', escapeHtml(h.received_by_name)) + kv('DR / invoice', escapeHtml(h.supplier_ref)) + ((h.direct_project_id || h.direct_job_order_id) ? kv('Delivered to site', escapeHtml(invPrjLabel(h.direct_project_id, h.direct_job_order_id))) : '') : '') +
       (d.kind === 'trf' ? kv('By', escapeHtml(h.created_by_name)) : '') +
       ((h.project_id || h.job_order_id) ? kv('Project / job', escapeHtml(invPrjLabel(h.project_id, h.job_order_id))) : '') + kv('Note', escapeHtml(h.note));
     const name = (id)=> invX.catById.get(id) || { code:'', name:'(inactive item)', unit:'' };
-    $(pre + 'Items').innerHTML = '<thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>Unit</th>' + (d.kind === 'ret' ? '<th>Condition</th>' : d.kind === 'rcv' ? '<th>As on PO</th>' : '') + '</tr></thead><tbody>' +
+    $(pre + 'Items').innerHTML = '<thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>Unit</th>' + (d.kind === 'ret' ? '<th>Condition</th>' : d.kind === 'rcv' ? '<th>As on PO</th>' : (d.kind === 'iss' && d.h.status === 'acknowledged' && d.items.some(x=> x.qty_received != null) ? '<th>Received</th>' : '')) + '</tr></thead><tbody>' +
       d.items.map((it, i)=>{ const m = name(it.material_id);
         return '<tr><td>' + (i + 1) + '</td><td><b>' + escapeHtml(m.name) + '</b><div class="sp-row-sub">' + escapeHtml(m.code) + '</div></td><td class="num">' + invQty(it.qty) + '</td><td>' + escapeHtml(m.unit) + '</td>' +
-          (d.kind === 'ret' ? '<td>' + (it.condition === 'damaged' ? '<span class="sp-tag danger">Damaged</span>' : 'Good') + '</td>' : d.kind === 'rcv' ? '<td>' + (it.qty_po_units ? invQty(it.qty_po_units) + ' ' + escapeHtml(it.po_unit) : '—') + '</td>' : '') + '</tr>';
+          (d.kind === 'ret' ? '<td>' + (it.condition === 'damaged' ? '<span class="sp-tag danger">Damaged</span>' : 'Good') + '</td>' : d.kind === 'rcv' ? '<td>' + (it.qty_po_units ? invQty(it.qty_po_units) + ' ' + escapeHtml(it.po_unit) : '—') + '</td>' : (d.kind === 'iss' && d.h.status === 'acknowledged' && d.items.some(x=> x.qty_received != null) ? '<td>' + (it.qty_received == null ? '' : invQty(it.qty_received) + (Number(it.qty_received) < Number(it.qty) ? ' <span class="sp-tag danger">short ' + invQty(Number(it.qty) - Number(it.qty_received)) + '</span>' : '') + (it.damaged ? ' <span class="sp-tag danger">damaged</span>' : '') + (it.item_note ? '<div class="sp-row-sub">' + escapeHtml(it.item_note) + '</div>' : '')) + '</td>' : '')) + '</tr>';
       }).join('') + '</tbody>';
   }
   $('invSlipPdf').addEventListener('click', ()=>{ if(invSlipOpen) invSlipPdf(invSlipOpen); });
@@ -737,6 +737,12 @@
       invMine = s.data || [];
       invX.catById = new Map((cat.data || []).map(m=> [m.id, m]));
       invX.projects = pr.data || [];
+      // site deliveries assigned to this worker (site-deliveries.js) are things to receive too
+      let dels = [];
+      try{ const dr = await db.from('site_deliveries').select('id, delivery_no, supplier_name, site_label, expected_on').eq('assigned_to', currentUser.id).eq('status', 'assigned').order('assigned_at', { ascending:false }); if(!dr.error) dels = dr.data || []; }catch(e){}
+      $('invMineDelWrap').style.display = dels.length ? '' : 'none';
+      $('invMineDeliveries').innerHTML = dels.map(d=> '<button type="button" class="mt-row mv-del" data-del="' + escapeHtml(d.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(d.delivery_no) + '</span>' + escapeHtml(d.supplier_name || 'Supplier') + ' <span class="po-status returned">to receive</span></div>' +
+        '<div class="sp-row-sub">' + escapeHtml([d.site_label, d.expected_on ? 'expected ' + d.expected_on : ''].filter(Boolean).join(' \u00B7 ')) + '</div></div></button>').join('');
       const pend = invMine.filter(x=> x.status === 'issued');
       const row = (x)=> '<button type="button" class="mt-row" data-id="' + escapeHtml(x.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(x.slip_no) + '</span>' +
         (x.status === 'issued' ? '<span class="po-status returned">sign now</span>' : '<span class="po-status fulfilled">signed</span>') + '</div>' +
@@ -753,23 +759,26 @@
           '<div class="mt-row-price"><span class="inv-qty">' + invQty(hh.holding) + ' ' + escapeHtml(m.unit) + '</span></div></div></div>';
       });
       $('invMineHold').innerHTML = html || '<div class="empty-state" style="padding:12px;">You\u2019re not holding any issued materials.</div>';
-      invSetMineBadge(pend.length);
+      invSetMineBadge(pend.length + dels.length);
     }catch(e){
       $('invMinePending').innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? 'Inventory isn\u2019t set up yet.' : 'Couldn\u2019t load: ' + escapeHtml(describeCloudError(e))) + '</div>';
     }
   }
   function invSetMineBadge(n){
     const b = document.getElementById('techQaMyMatBadge'); if(!b) return;
-    b.textContent = n ? n + ' to sign' : ''; b.style.display = n ? '' : 'none';
+    b.textContent = n ? n + ' to receive' : ''; b.style.display = n ? '' : 'none';
   }
   // cheap check on the home screen so the tile shows how many slips need signing
   async function invRefreshMineBadge(){
     if(!currentUser || currentUser.role === 'admin' || currentUser.role === 'customer') return;
     try{
       const { data, error } = await db.from('issue_slips').select('id').eq('worker_id', currentUser.id).eq('status', 'issued');
-      if(!error) invSetMineBadge((data || []).length);
+      let n = error ? null : (data || []).length;
+      try{ const dr = await db.from('site_deliveries').select('id').eq('assigned_to', currentUser.id).eq('status', 'assigned'); if(!dr.error && n != null) n += (dr.data || []).length; }catch(e){}
+      if(n != null) invSetMineBadge(n);
     }catch(e){}
   }
+  $('invMineDeliveries').addEventListener('click', (e)=>{ const r = e.target.closest('[data-del]'); if(r){ sd.openAfter = r.dataset.del; showPurchasingView('myDeliveries'); } });
   ['invMinePending', 'invMineRecent'].forEach(id=> $(id).addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowMyMaterials(); }); return; }
     const r = e.target.closest('.mt-row'); if(r) invOpenMineSlip(r.dataset.id);
@@ -784,6 +793,10 @@
       const signed = invMineOpen.h.status === 'acknowledged';
       $('invMineSignSec').style.display = signed ? 'none' : '';
       $('invMineActions').style.display = signed ? 'none' : '';
+      // an unsigned slip is confirmed ITEM BY ITEM first (tick, how many, damaged, remarks), then signed
+      $('invMineConfirmSec').style.display = signed ? 'none' : '';
+      $('invMineItems').closest('section').style.display = signed ? '' : 'none';
+      if(!signed) invCfInit();
       $('invMineListView').style.display = 'none'; $('invMineSlipView').style.display = '';
       window.scrollTo({ top:0 });
       if(!signed){
@@ -806,8 +819,50 @@
   }
   window.addEventListener('resize', ()=>{ if($('invMineSlipView').style.display !== 'none') invSigFit(); });
   $('invMineSigClear').addEventListener('click', ()=>{ if(invSigPad) invSigPad.clear(); });
+  // ---------- the worker confirms an issue slip item by item ----------
+  let invCf = null;
+  function invCfInit(){
+    const items = invMineOpen.items || [];
+    invCf = { ck:items.map(()=> true), q:items.map(it=> Number(it.qty)), dm:items.map(()=> false), remark:'' };
+    invCfRender();
+  }
+  function invCfDiff(){
+    const items = invMineOpen.items || []; let short = 0, dam = 0, miss = 0, n = 0;
+    items.forEach((it, k)=>{ const got = invCf.ck[k] ? invCf.q[k] : 0; short += Number(it.qty) - got; if(invCf.ck[k]){ n++; if(invCf.dm[k]) dam++; } else miss++; });
+    return { short, dam, miss, n, diff: short > 0 || dam > 0 };
+  }
+  function invCfRender(){
+    if(!invCf) return;
+    const items = invMineOpen.items || [], d = invCfDiff(), all = d.n === items.length;
+    $live('invCf').innerHTML =
+      '<div class="cf-hd"><span>' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' issued to you</span><button type="button" class="cf-all" data-cf="all">' + (all ? 'Clear all' : 'Select all') + '</button></div>' +
+      items.map((it, k)=>{
+        const m = invX.catById.get(it.material_id) || { code:'', name:'(item)', unit:'' }, on = invCf.ck[k], short = Number(it.qty) - invCf.q[k];
+        return '<div class="cf-it ' + (on ? 'on' : 'off') + '"><button type="button" class="cf-l1" role="checkbox" aria-checked="' + on + '" data-cf="ck" data-k="' + k + '"><span class="cf-box">' + (on ? '\u2713' : '') + '</span>' +
+          '<span class="cf-nm"><b>' + escapeHtml(m.name) + '</b><small>' + escapeHtml(m.code) + ' \u00B7 issued ' + invQty(it.qty) + ' ' + escapeHtml(m.unit) + (on ? '' : ' \u00B7 not received') + '</small></span></button>' +
+          (on ? '<div class="cf-row2"><div class="cf-qty"><button type="button" data-cf="q" data-k="' + k + '" data-d="-1" aria-label="Less">\u2212</button><output>' + invQty(invCf.q[k]) + '</output><button type="button" data-cf="q" data-k="' + k + '" data-d="1" aria-label="More">+</button></div>' +
+            (short > 0 ? '<span class="cf-short">Short by ' + invQty(short) + '</span>' : '<span class="cf-okk">\u2713 Complete</span>') +
+            '<button type="button" class="cf-dm" aria-pressed="' + !!invCf.dm[k] + '" data-cf="dm" data-k="' + k + '">Damaged</button></div>' : '') + '</div>';
+      }).join('') +
+      '<div class="cf-sum' + (d.diff ? ' w' : '') + '">' + d.n + ' of ' + items.length + ' items received. ' + (d.diff ? (d.miss ? d.miss + ' not received. ' : '') + (d.short && !d.miss ? invQty(d.short) + ' units short. ' : '') + (d.dam ? d.dam + ' damaged. ' : '') + 'It will be saved as received with differences and the issuer is told.' : 'Everything matches what was issued.') + '</div>' +
+      '<label class="cf-lbl" for="invCfRemark">Remarks' + (d.diff ? ' (explain the difference) *' : ' (optional)') + '</label><input type="text" id="invCfRemark" value="' + escapeHtml(invCf.remark) + '" placeholder="Note for the storekeeper">';
+    const b = $('invMineAck'); b.textContent = d.diff ? 'Confirm with differences' : 'Confirm receipt'; b.classList.toggle('cf-warn', d.diff);
+  }
+  document.addEventListener('click', (ev)=>{
+    const t = ev.target.closest && ev.target.closest('#invCf [data-cf]'); if(!t || !invCf) return;
+    const k = Number(t.dataset.k), items = invMineOpen.items || [];
+    if(t.dataset.cf === 'ck'){ invCf.ck[k] = !invCf.ck[k]; if(invCf.ck[k] && !invCf.q[k]) invCf.q[k] = Number(items[k].qty); if(!invCf.ck[k]) invCf.dm[k] = false; }
+    else if(t.dataset.cf === 'all'){ const every = invCf.ck.every(Boolean); invCf.ck = invCf.ck.map(()=> !every); if(!every) invCf.q = items.map((it, i)=> invCf.q[i] || Number(it.qty)); else invCf.dm = invCf.dm.map(()=> false); }
+    else if(t.dataset.cf === 'q'){ invCf.q[k] = Math.min(Number(items[k].qty), Math.max(0, invCf.q[k] + Number(t.dataset.d))); if(invCf.q[k] === 0){ invCf.ck[k] = false; invCf.dm[k] = false; } }
+    else if(t.dataset.cf === 'dm'){ invCf.dm[k] = !invCf.dm[k]; }
+    invCfRender();
+  });
+  document.addEventListener('input', (ev)=>{ if(ev.target && ev.target.id === 'invCfRemark' && invCf) invCf.remark = ev.target.value; });
   $('invMineAck').addEventListener('click', async ()=>{
-    if(!invMineOpen) return;
+    if(!invMineOpen || !invCf) return;
+    const d = invCfDiff();
+    if(!d.n){ toast('You received nothing? Tell the storekeeper instead of signing.'); return; }
+    if(d.diff && !invCf.remark.trim()){ toast('Explain the difference in the remarks'); const r = $live('invCfRemark'); if(r) r.focus(); return; }
     if(!invSigPad || invSigPad.isEmpty()){ toast('Please sign in the box first'); return; }
     if(!(await purchEnsureSession())) return;
     const btn = $('invMineAck'); btn.disabled = true;
@@ -819,11 +874,24 @@
       const path = currentUser.id + '/' + invMineOpen.h.id + '-' + Date.now() + '.png';
       const up = await db.storage.from('inventory-signatures').upload(path, blob, { contentType:'image/png', upsert:false });
       if(up.error) throw up.error;
-      const { error } = await db.rpc('inv_ack_issue', { p_slip: invMineOpen.h.id, p_signature_path: path });
-      if(error) throw error;
-      toast(invMineOpen.h.slip_no + ' acknowledged — thank you');
+      const lines = (invMineOpen.items || []).map((it, k)=> ({ item_id: it.id, qty_received: invCf.ck[k] ? invCf.q[k] : 0, damaged: !!(invCf.ck[k] && invCf.dm[k]) }));
+      let res = await db.rpc('inv_ack_issue_items', { p: { slip_id: invMineOpen.h.id, signature_path: path, remark: invCf.remark.trim(), lines } });
+      let out = res.data;
+      if(res.error){
+        // migration 20261028_01 not run yet: a slip with no differences can still be signed the old way
+        if(/inv_ack_issue_items|PGRST202|42883/.test(describeCloudError(res.error)) && !d.diff){
+          const old = await db.rpc('inv_ack_issue', { p_slip: invMineOpen.h.id, p_signature_path: path });
+          if(old.error) throw old.error; out = { slip_no: invMineOpen.h.slip_no, diff:false, issued_by: invMineOpen.h.issued_by };
+        }else throw res.error;
+      }
+      toast(invMineOpen.h.slip_no + (out && out.diff ? ' saved with differences' : ' confirmed') + ' — thank you');
+      if(out && out.issued_by){
+        const me = currentUser.name || 'The worker';
+        notifyUser(out.issued_by, out.diff ? 'Received with differences' : 'Materials confirmed', out.slip_no + ' \u2014 ' + me + (out.diff ? ': ' + [out.short_units > 0 ? invQty(out.short_units) + ' units short' : '', out.damaged_lines > 0 ? out.damaged_lines + ' damaged' : ''].filter(Boolean).join(', ') + (invCf.remark.trim() ? ' (' + invCf.remark.trim() + ')' : '') : ' received everything.'), 'ack-' + invMineOpen.h.id);
+      }
+      if(out && out.diff && typeof notifyAdmins === 'function') notifyAdmins('Issue received with differences', out.slip_no + ' \u2014 ' + (currentUser.name || 'a worker'), 'ack-' + invMineOpen.h.id);
       $('invMineSlipView').style.display = 'none'; $('invMineListView').style.display = '';
       invShowMyMaterials();
-    }catch(e){ purchFail('Couldn\u2019t acknowledge: ', e); }
+    }catch(e){ purchFail('Couldn\u2019t confirm: ', e); }
     finally{ btn.disabled = false; }
   });
