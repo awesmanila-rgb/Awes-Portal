@@ -26000,6 +26000,8 @@
   }
   function erRenderDetail(box){
     const e = er.cur, mine = e.assigned_to === currentUser.id, mgr = er.mode === 'manager';
+    // Messenger accounts: one instruction per screen (messenger.js) for errands still to do
+    if(er.mode === 'messenger' && mine && typeof msgrRenderGuided === 'function' && msgrRenderGuided(box, e)){ erFillThumbs(box); window.scrollTo({ top:0 }); return; }
     const late = erOverdue(e);
     const ck = e.checklist || [];
     const stepFiles = (sid)=> er.files.filter(f=> f.step_id === sid);
@@ -26221,9 +26223,9 @@
     finally{ btn.disabled = false; }
   }
 
-  async function erDeliver(){
+  async function erDeliver(preHow){
     const x = er.cur;
-    const how = await uiConfirm('Hand over the items\n\nWill the receiver sign on your phone? Government offices and banks usually stamp a receiving copy instead \u2014 then take a photo of it.',
+    const how = (preHow === true || preHow === false) ? preHow : await uiConfirm('Hand over the items\n\nWill the receiver sign on your phone? Government offices and banks usually stamp a receiving copy instead \u2014 then take a photo of it.',
       { ok:'Receiver signs', cancel:'Photo of stamped copy' });
     const p = { items: x.items || [] };
     if(how){
@@ -26318,6 +26320,7 @@
   // My Errands (messenger)
   // =====================================================================
   async function erShowMine(){
+    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // list uses the normal header
     const box = $('erMyBody');
     box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     try{
@@ -31825,6 +31828,7 @@
 
   // ---------- navigation (bar + Menu rows) ----------
   async function msgrGo(where){
+    document.body.classList.remove('msgr-own-head');   // Home / Menu / Account turn it back on via their title
     switch(where){
       case 'home': return msgrShowHome();
       case 'errands': msgrSetTab('errands'); return showPurchasingView('myErrands');
@@ -31860,6 +31864,202 @@
         const bell = ev.target.closest('[data-msgr="alerts"]');
         if(bell) staffOpenInbox();
       });
+    });
+  })();
+
+  // =====================================================================
+  // Guided errand — ONE instruction per screen (renders into #erMyBody)
+  //
+  // Hooked from errands.js erRenderDetail(): for the messenger's own errand
+  // that is assigned / in progress it draws these screens instead of the long
+  // detail page. State is derived from the errand itself (status, checklist
+  // done flags, uploaded files, transmittal), so every action just reloads the
+  // errand and the right next screen appears. Photos, signatures, steps,
+  // hand-over, finish and "couldn't complete" all call the same server
+  // functions as the old page (erStepAction / erDeliver / errand_complete /
+  // errand_fail). Done and failed errands fall back to the old read-only page.
+  // =====================================================================
+  Object.assign(MSGR_ICONS, {
+    nobody:'<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/><path d="M4 4l16 16"/>',
+    wrongpin:'<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><path d="M10 8l4 4M14 8l-4 4"/>',
+    nodoc:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 14l4 4M14 14l-4 4"/>',
+    info:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+    camera:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+    pen:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>',
+    stamp:'<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M10 14l2 2 4-4"/>',
+    phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>'
+  });
+  const MSGR_REASONS = [['Nobody was there', 'nobody'], ['Office is closed', 'lock'], ['Wrong address', 'wrongpin'], ['Papers are missing', 'nodoc'], ['Something else', 'info']];
+
+  function msgrGInfo(e){
+    const place = [e.destination, e.address].filter(Boolean).join(', ');
+    const rows = [];
+    if(place) rows.push('<div class="msgr-g-line">' + msgrIc('pin', 20) + '<span>' + msgrEsc(place) + '</span></div>' +
+      '<a class="msgr-linkbtn" href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(place) + '" target="_blank" rel="noopener">' + msgrIc('arrow', 18, 2.6) + 'Directions</a>');
+    if(e.contact_name || e.contact_phone) rows.push('<div class="msgr-g-line">' + msgrIc('people', 20) + '<span>' + msgrEsc(e.contact_name || '') + '</span></div>' +
+      (e.contact_phone ? '<a class="msgr-linkbtn" href="tel:' + msgrEsc(e.contact_phone) + '">' + msgrIc('phone', 18, 2.4) + 'Call ' + msgrEsc(e.contact_phone) + '</a>' : ''));
+    if(e.instructions) rows.push('<div class="msgr-g-line">' + msgrIc('info', 20) + '<span>' + msgrEsc(e.instructions).replace(/\n/g, '<br>') + '</span></div>');
+    if(e.cash_amount) rows.push('<div class="msgr-g-line">' + msgrIc('cash', 20) + '<span>Cash needed: \u20B1' + Number(e.cash_amount).toLocaleString('en-PH', { minimumFractionDigits:2 }) + (e.cash_note ? ' \u2014 ' + msgrEsc(e.cash_note) : '') + '</span></div>');
+    return rows.length ? '<details class="msgr-info"><summary>Errand details</summary>' + rows.join('') + '</details>' : '';
+  }
+  function msgrGPlan(e){
+    const ck = Array.isArray(e.checklist) ? e.checklist : [];
+    const needTx = !!(e.transmittal_required || (e.items || []).length);
+    const total = ck.length + (needTx ? 1 : 0);
+    const doneN = ck.filter(s=> s.done).length + (needTx && er.tx ? 1 : 0);
+    return { ck, needTx, total, doneN };
+  }
+  function msgrGTop(e, plan, showBar){
+    const bar = (showBar && plan.total) ? '<div class="msgr-segs">' + Array.from({ length: plan.total }, (_, i)=> '<span class="msgr-seg ' + (i < plan.doneN ? 'g' : i === plan.doneN ? 'b' : '') + '"></span>').join('') + '</div>' : '';
+    const pill = (showBar && plan.total && plan.doneN < plan.total) ? '<span class="msgr-pill">Step ' + (plan.doneN + 1) + ' of ' + plan.total + '</span>' : '';
+    return '<div class="msgr-g-top"><button type="button" class="msgr-backbtn" data-er-back="1">' + msgrIc('back', 22, 2.8) + 'My errands</button>' + pill + '</div>' + bar;
+  }
+  const msgrLink = (act, text, extra)=> '<button type="button" class="msgr-textbtn' + (extra || '') + '" data-msgr-g="' + act + '">' + text + '</button>';
+
+  function msgrGReady(e){
+    const plan = msgrGPlan(e);
+    const steps = plan.ck.slice(0, 6).map((s, i)=> '<div class="msgr-g-step"><span class="msgr-mic">' + msgrIc(s.needs_photo ? 'camera' : s.needs_signature ? 'pen' : 'check', 22) + '</span><span>' + msgrEsc(s.text) + '</span></div>').join('') +
+      (plan.needTx ? '<div class="msgr-g-step"><span class="msgr-mic">' + msgrIc('pen', 22) + '</span><span>Hand over and get a signature</span></div>' : '');
+    return msgrGTop(e, plan, false) +
+      '<div><div class="msgr-g-h">Ready to go?</div><div class="msgr-g-sub">Here is your errand' + (steps ? '. It has ' + (plan.ck.length + (plan.needTx ? 1 : 0)) + ' simple part' + ((plan.ck.length + (plan.needTx ? 1 : 0)) === 1 ? '' : 's') : '') + '.</div></div>' +
+      '<div class="msgr-card"><div class="msgr-card-t">' + msgrEsc(e.title) + '</div>' +
+      (e.due_at ? '<div class="msgr-due">' + msgrIc('clock', 20) + 'Due ' + msgrEsc(msgrDue(e.due_at)) + '</div>' : '') + (steps ? '<div class="msgr-g-steps">' + steps + '</div>' : '') + '</div>' +
+      msgrGInfo(e) +
+      '<button type="button" class="msgr-big" data-er-act="start">' + msgrIc('play', 30) + '<span>START ERRAND</span></button>' +
+      msgrTap('your time and location are saved. Then you see your first step.') + msgrLink('problem', 'I can\u2019t do this errand', ' danger');
+  }
+
+  function msgrGStepScreen(e, plan, s){
+    const files = er.files.filter(f=> f.step_id === s.id);
+    const hasPhoto = files.some(f=> f.kind === 'proof'), hasSig = files.some(f=> f.kind === 'signature');
+    const needPhoto = !!s.needs_photo && !hasPhoto, needSig = !!s.needs_signature && !hasSig;
+    let btn, tap, sub;
+    if(needPhoto){ btn = '<button type="button" class="msgr-big" data-step-act="photo">' + msgrIc('camera', 30) + '<span>TAKE PHOTO</span></button>'; tap = 'your camera opens. After the photo, a green button appears.'; sub = 'This step needs a photo for the office.'; }
+    else if(needSig){ btn = '<button type="button" class="msgr-big" data-step-act="sign">' + msgrIc('pen', 30) + '<span>SIGN HERE</span></button>'; tap = 'a box opens to sign with your finger.'; sub = 'This step needs a signature.'; }
+    else { btn = '<button type="button" class="msgr-big" data-step-act="done">' + msgrIc('check', 30, 3) + '<span>DONE</span></button>'; tap = 'this step is saved with your time and location. Then you see the next step.'; sub = (s.needs_photo || s.needs_signature) ? 'Everything for this step is added.' : 'Tap the green button when you finish this.'; }
+    const proof = (hasPhoto || hasSig) ? '<div class="msgr-g-proof">' + (hasPhoto ? '<div class="msgr-ok-line">' + msgrIc('check', 20, 3) + 'Photo added</div>' : '') + (hasSig ? '<div class="msgr-ok-line">' + msgrIc('check', 20, 3) + 'Signature saved</div>' : '') + (typeof erThumbs === 'function' ? erThumbs(files) : '') + '</div>' : '';
+    const prev = plan.ck.slice().reverse().find(x=> x.done);
+    return msgrGTop(e, plan, true) +
+      '<div data-step="' + msgrEsc(s.id) + '"><div class="msgr-g-h">' + msgrEsc(s.text) + '</div><div class="msgr-g-sub">' + sub + '</div>' + proof +
+      '<div class="msgr-g-act">' + btn + '</div></div>' + msgrTap(tap) + msgrGInfo(e) +
+      '<div class="msgr-g-links"><button type="button" class="msgr-textbtn" data-er-act="photo">Add a receipt or photo</button>' +
+      (prev ? '<span data-step="' + msgrEsc(prev.id) + '"><button type="button" class="msgr-textbtn" data-step-act="undo">Go back one step</button></span>' : '') +
+      msgrLink('problem', 'Can\u2019t finish this errand?', ' danger') + '</div>';
+  }
+  function msgrGHandOver(e, plan){
+    const items = (e.items || []).map(i=> '<div class="msgr-g-line"><span>' + msgrEsc(i.qty) + ' \u00D7 ' + msgrEsc(i.description) + '</span></div>').join('');
+    const card = (how, icon, t, s)=> '<button type="button" class="msgr-choice" data-msgr-g="hand" data-how="' + how + '"><span class="msgr-mic big">' + msgrIc(icon, 34, 2.2) + '</span>' +
+      '<span class="msgr-mrow-main"><span class="msgr-choice-t">' + t + '</span><span class="msgr-mrow-s">' + s + '</span></span><span class="msgr-chev">' + msgrIc('chev', 26, 3) + '</span></button>';
+    return msgrGTop(e, plan, true) + '<div><div class="msgr-g-h">How did they receive it?</div><div class="msgr-g-sub">Tap one. You can\u2019t get this wrong.</div></div>' +
+      (items ? '<div class="msgr-card"><div class="msgr-label">ITEMS TO HAND OVER</div>' + items + '</div>' : '') +
+      card('sign', 'pen', 'They sign on my phone', 'Best for offices and companies.') +
+      card('stamp', 'stamp', 'They stamp a copy', 'Banks and government offices usually do this. You take a photo of it.') +
+      msgrTap('you add the receiver\u2019s name and signature, or a photo of the stamped copy.') + msgrLink('problem', 'Can\u2019t finish this errand?', ' danger');
+  }
+  function msgrGFinish(e, plan){
+    const note = (msgr.gNoteFor === e.id && msgr.gNote) ? '<div class="msgr-g-line">' + msgrIc('info', 20) + '<span>' + msgrEsc(msgr.gNote) + '</span></div>' : '';
+    return msgrGTop(e, plan, true) + '<div class="msgr-g-center">' + msgrCircle('done').replace('msgr-circ done', 'msgr-circ done huge') +
+      '<div class="msgr-g-h">All steps done</div><div class="msgr-g-sub">' + (er.tx ? 'Handed over' + (er.tx.receiver_name ? ' to ' + msgrEsc(er.tx.receiver_name) : '') + '. ' : '') + 'Tap the green button to tell the office.</div></div>' + note +
+      '<button type="button" class="msgr-big" data-msgr-g="finish">' + msgrIc('check', 30, 3) + '<span>FINISH ERRAND</span></button>' +
+      msgrTap('the office is told it is done, with your time and location.') +
+      '<div class="msgr-g-links"><button type="button" class="msgr-textbtn" data-msgr-g="note">' + (note ? 'Change my note' : 'Add a note for the office') + '</button><button type="button" class="msgr-textbtn" data-er-act="photo">Add a receipt or photo</button></div>';
+  }
+  function msgrGProblem(e){
+    const btn = ([t, ic])=> '<button type="button" class="msgr-reason" data-msgr-g="reason" data-reason="' + msgrEsc(t) + '"' + (t === 'Something else' ? ' data-other="1"' : '') + '><span class="msgr-mic warn">' + msgrIc(ic, 26) + '</span><span class="msgr-reason-t">' + t + '</span><span class="msgr-chev">' + msgrIc('chev', 24, 3) + '</span></button>';
+    return '<div class="msgr-g-top"><button type="button" class="msgr-backbtn" data-msgr-g="unproblem">' + msgrIc('back', 22, 2.8) + 'Back</button></div>' +
+      '<div><div class="msgr-g-h">What went wrong?</div><div class="msgr-g-sub">Tap the closest one.</div></div>' + MSGR_REASONS.map(btn).join('') +
+      msgrTap('the office is told right away, with your time and place. They will plan a new try. Nothing is lost.') +
+      '<button type="button" class="msgr-secondary" data-msgr-g="unproblem">Go back to my errand</button>';
+  }
+  function msgrGFailed(e){
+    return '<div class="msgr-g-center"><span class="msgr-circ prog huge"></span><div class="msgr-g-h">The office has been told</div><div class="msgr-g-sub">' + msgrEsc(e.failed_reason || '') + '</div></div>' +
+      msgrTap('the office will plan a new try. You don\u2019t need to do anything else.').replace('When you tap:', 'What happens now:') +
+      '<button type="button" class="msgr-big" data-msgr-g="home">' + msgrIc('home', 30) + '<span>BACK TO HOME</span></button>';
+  }
+  async function msgrGComplete(box, e){
+    const plan = msgrGPlan(e);
+    const when = e.completed_at ? new Date(e.completed_at).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }) : '';
+    const line = (t)=> '<div class="msgr-ok-line big">' + msgrIc('check', 22, 3) + t + '</div>';
+    document.body.classList.add('msgr-own-head');
+    box.innerHTML = '<div class="msgr-page msgr-guided"><div class="msgr-g-center">' + msgrCircle('done').replace('msgr-circ done', 'msgr-circ done huge') +
+      '<div class="msgr-g-h">Errand complete</div><div class="msgr-g-sub">' + msgrEsc(e.title) + (when ? ' \u2014 finished at ' + msgrEsc(when) : '') + '. Well done, ' + msgrEsc(msgrFirstName()) + '.</div></div>' +
+      '<div class="msgr-card">' + (plan.ck.length ? line(plan.doneN >= plan.ck.length ? 'All ' + plan.ck.length + ' steps done' : plan.doneN + ' of ' + plan.ck.length + ' steps done') : '') +
+      (er.tx ? line('Handed over and signed') : '') + line('Time and place saved') + '</div>' +
+      msgrTap('the office checks it. You don\u2019t need to do anything else.').replace('When you tap:', 'What happens now:') +
+      '<div id="msgrNextSlot"><button type="button" class="msgr-big" data-msgr-g="home">' + msgrIc('home', 30) + '<span>BACK TO HOME</span></button></div></div>';
+    try{
+      const { data } = await db.from('errands').select('id, title, due_at').eq('assigned_to', currentUser.id).in('status', ['assigned', 'in_progress']).order('due_at', { ascending:true, nullsFirst:false }).limit(1);
+      const nx = data && data[0], slot = box.querySelector('#msgrNextSlot');
+      if(nx && slot) slot.innerHTML = '<button type="button" class="msgr-big" data-msgr-g="open-next" data-id="' + msgrEsc(nx.id) + '">' + msgrIc('arrow', 30, 2.8) + '<span>NEXT ERRAND</span></button>' +
+        '<div class="msgr-g-next">Next: ' + msgrEsc(nx.title) + (nx.due_at ? ', due ' + msgrEsc(msgrDue(nx.due_at)) : '') + '</div>' +
+        '<button type="button" class="msgr-secondary" data-msgr-g="home">Back to Home</button>';
+    }catch(err){}
+    window.scrollTo({ top:0 });
+  }
+
+  // Called from errands.js erRenderDetail(); true = this file drew the screen.
+  function msgrRenderGuided(box, e){
+    if(!isMessengerUser() || e.assigned_to !== currentUser.id) return false;
+    const st = e.status;
+    let html = null;
+    if(msgr.gProblem === e.id && (st === 'assigned' || st === 'in_progress')) html = msgrGProblem(e);
+    else if(st === 'assigned') html = msgrGReady(e);
+    else if(st === 'in_progress'){
+      const plan = msgrGPlan(e);
+      const cur = plan.ck.find(s=> !s.done);
+      if(cur) html = msgrGStepScreen(e, plan, cur);
+      else if(plan.needTx && !er.tx) html = msgrGHandOver(e, plan);
+      else html = msgrGFinish(e, plan);
+    }
+    else if(st === 'done' && er.justDone === e.id){ msgrGComplete(box, e); return true; }
+    else if(st === 'failed' && er.justFailed === e.id) html = msgrGFailed(e);
+    else return false;
+    document.body.classList.add('msgr-own-head');
+    box.innerHTML = '<div class="msgr-page msgr-guided">' + html + '</div>';
+    return true;
+  }
+
+  (function msgrGuidedWire(){
+    const body = $('erMyBody'); if(!body) return;
+    body.addEventListener('click', async (ev)=>{
+      const b = ev.target.closest('[data-msgr-g]'); if(!b || !er.cur || !isMessengerUser()) return;
+      const act = b.dataset.msgrG, x = er.cur;
+      const redraw = ()=> { msgrRenderGuided(body, x); window.scrollTo({ top:0 }); };
+      try{
+        if(act === 'home'){ er.justDone = null; er.justFailed = null; msgr.gProblem = null; return msgrGo('home'); }
+        if(act === 'open-next'){ er.justDone = null; return erOpenDetail(b.dataset.id); }
+        if(act === 'problem'){ msgr.gProblem = x.id; return redraw(); }
+        if(act === 'unproblem'){ msgr.gProblem = null; return redraw(); }
+        if(act === 'note'){
+          const t = await uiPrompt('Anything the office should know? (optional)', msgr.gNoteFor === x.id ? (msgr.gNote || '') : '', { ok:'Save note', multiline:true });
+          if(t == null) return;
+          msgr.gNote = t.trim(); msgr.gNoteFor = x.id; return redraw();
+        }
+        b.disabled = true;
+        if(act === 'hand'){ await erDeliver(b.dataset.how === 'sign'); return; }
+        if(act === 'finish'){
+          const loc = await erLoc(); if(!loc) return;
+          const { error } = await db.rpc('errand_complete', { p_id:x.id, p_note:(msgr.gNoteFor === x.id ? msgr.gNote : '') || '', p_loc:loc });
+          if(error) throw error;
+          er.justDone = x.id; msgr.gNote = ''; msgr.gNoteFor = null;
+          return erOpenDetail(x.id);
+        }
+        if(act === 'reason'){
+          let why = b.dataset.reason;
+          if(b.dataset.other){
+            const t = await uiPrompt('What happened?', '', { ok:'Send', multiline:true });
+            if(t == null) return;
+            if(!t.trim()){ toast('Say what happened'); return; }
+            why = t.trim();
+          }else if(!(await uiConfirm('Tell the office you couldn\u2019t finish?\n\n' + why, { ok:'Tell the office', cancel:'Go back' }))) return;
+          const loc = await erLoc(); if(!loc) return;
+          const { error } = await db.rpc('errand_fail', { p_id:x.id, p_reason:why, p_loc:loc });
+          if(error) throw error;
+          msgr.gProblem = null; er.justFailed = x.id;
+          return erOpenDetail(x.id);
+        }
+      }catch(err){ toast('Couldn\u2019t do that: ' + ((err && err.message) || describeCloudError(err))); }
+      finally{ b.disabled = false; }
     });
   })();
 
