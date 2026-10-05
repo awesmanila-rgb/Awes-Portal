@@ -16398,6 +16398,8 @@
   function purchOnShow(key){
     purchLoadCategories();   // cached after the first load; realtime keeps it fresh
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
+    if(key === 'myDeliveries'){ if(currentUser) sdMineShow(); return; }   // every worker: deliveries assigned to them
+    if(key === 'siteDelivery'){ if(currentUser){ if(isStaffUser() && !purchStaffAllowed(key)) return; purchApplyStaffMode(); sdOfficeShow(); } return; }   // office: assign + see proof
     // Payroll (payroll.js): Super Admin, or staff with that page
     if(key === 'paySetup' || key === 'payRules'){ if(currentUser && purchStaffAllowed(key)) payOnShow(key); return; }
     if(key === 'myPayslips'){ if(currentUser) prMyPayslipsShow(); return; }
@@ -22963,7 +22965,7 @@
     $('invSlipList').innerHTML = rows.length ? rows.slice(0, 300).map(s=>
       '<button type="button" class="mt-row" data-kind="' + s.kind + '" data-id="' + escapeHtml(s.id) + '"><div class="mt-row-main">' +
       '<div class="mt-row-title"><span class="mt-code">' + escapeHtml(invSlipNo(s)) + '</span>' + escapeHtml(INV_SLIP_KIND[s.kind].label) +
-      (s.kind === 'iss' ? ' <span class="po-status ' + (s.status === 'acknowledged' ? 'fulfilled' : 'returned') + '">' + (s.status === 'acknowledged' ? 'signed' : 'awaiting signature') + '</span>' : '') + '</div>' +
+      (s.kind === 'iss' ? ' <span class="po-status ' + (s.status === 'acknowledged' ? (s.ack_diff ? 'returned' : 'fulfilled') : 'returned') + '">' + (s.status === 'acknowledged' ? (s.ack_diff ? 'received with differences' : 'signed') : 'awaiting signature') + '</span>' : '') + '</div>' +
       '<div class="sp-row-sub">' + escapeHtml([mrWhen(s.created_at), invSlipParty(s), s.job_order_id || s.direct_job_order_id, (s.project_id || s.direct_project_id) ? invPrjLabel(s.project_id || s.direct_project_id, '') : ''].filter(Boolean).join(' · ')) + '</div></div>' +
       '<div class="mt-row-price none">' + escapeHtml(invSlipWhs(s).map(id=> (invX.whs.find(w=> w.id === id) || {}).code || '').join(' → ')) + '</div></button>').join('')
       : '<div class="empty-state">' + (invSlips.length ? 'Nothing matches.' : 'No stock movements yet.') + '</div>';
@@ -22997,20 +22999,20 @@
     const K = INV_SLIP_KIND[d.kind], h = d.h;
     const wh = (id)=>{ const w = invX.whs.find(x=> x.id === id); return w ? w.code + ' · ' + w.name : ''; };
     $(pre + 'Title').innerHTML = '<span class="mt-code">' + escapeHtml(h[K.no]) + '</span> ' + escapeHtml(K.label) +
-      (d.kind === 'iss' ? ' <span class="po-status ' + (h.status === 'acknowledged' ? 'fulfilled' : 'returned') + '">' + (h.status === 'acknowledged' ? 'signed' : 'awaiting signature') + '</span>' : '');
+      (d.kind === 'iss' ? ' <span class="po-status ' + (h.status === 'acknowledged' ? (h.ack_diff ? 'returned' : 'fulfilled') : 'returned') + '">' + (h.status === 'acknowledged' ? (h.ack_diff ? 'received with differences' : 'signed') : 'awaiting signature') + '</span>' : '');
     const kv = (k, v)=> v ? '<div><div class="k">' + k + '</div><div class="v">' + v + '</div></div>' : '';
     $(pre + 'Info').innerHTML = kv('Date', escapeHtml(mrWhen(h.created_at))) +
       (d.kind === 'trf' ? kv('From', escapeHtml(wh(h.from_warehouse_id))) + kv('To', escapeHtml(wh(h.to_warehouse_id))) : kv('Warehouse', escapeHtml(wh(h.warehouse_id)))) +
-      (d.kind === 'iss' ? kv('Issued to', escapeHtml(h.worker_name)) + kv('Issued by', escapeHtml(h.issued_by_name)) + (h.ack_at ? kv('Signed', escapeHtml(mrWhen(h.ack_at))) : '') : '') +
+      (d.kind === 'iss' ? kv('Issued to', escapeHtml(h.worker_name)) + kv('Issued by', escapeHtml(h.issued_by_name)) + (h.ack_at ? kv('Signed', escapeHtml(mrWhen(h.ack_at))) : '') + (h.ack_diff ? kv('Difference', escapeHtml(h.ack_note || 'See the items')) : '') : '') +
       (d.kind === 'ret' ? kv('Returned by', escapeHtml(h.worker_name)) + kv('Received by', escapeHtml(h.received_by_name)) : '') +
       (d.kind === 'rcv' ? kv('Received by', escapeHtml(h.received_by_name)) + kv('DR / invoice', escapeHtml(h.supplier_ref)) + ((h.direct_project_id || h.direct_job_order_id) ? kv('Delivered to site', escapeHtml(invPrjLabel(h.direct_project_id, h.direct_job_order_id))) : '') : '') +
       (d.kind === 'trf' ? kv('By', escapeHtml(h.created_by_name)) : '') +
       ((h.project_id || h.job_order_id) ? kv('Project / job', escapeHtml(invPrjLabel(h.project_id, h.job_order_id))) : '') + kv('Note', escapeHtml(h.note));
     const name = (id)=> invX.catById.get(id) || { code:'', name:'(inactive item)', unit:'' };
-    $(pre + 'Items').innerHTML = '<thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>Unit</th>' + (d.kind === 'ret' ? '<th>Condition</th>' : d.kind === 'rcv' ? '<th>As on PO</th>' : '') + '</tr></thead><tbody>' +
+    $(pre + 'Items').innerHTML = '<thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th>Unit</th>' + (d.kind === 'ret' ? '<th>Condition</th>' : d.kind === 'rcv' ? '<th>As on PO</th>' : (d.kind === 'iss' && d.h.status === 'acknowledged' && d.items.some(x=> x.qty_received != null) ? '<th>Received</th>' : '')) + '</tr></thead><tbody>' +
       d.items.map((it, i)=>{ const m = name(it.material_id);
         return '<tr><td>' + (i + 1) + '</td><td><b>' + escapeHtml(m.name) + '</b><div class="sp-row-sub">' + escapeHtml(m.code) + '</div></td><td class="num">' + invQty(it.qty) + '</td><td>' + escapeHtml(m.unit) + '</td>' +
-          (d.kind === 'ret' ? '<td>' + (it.condition === 'damaged' ? '<span class="sp-tag danger">Damaged</span>' : 'Good') + '</td>' : d.kind === 'rcv' ? '<td>' + (it.qty_po_units ? invQty(it.qty_po_units) + ' ' + escapeHtml(it.po_unit) : '—') + '</td>' : '') + '</tr>';
+          (d.kind === 'ret' ? '<td>' + (it.condition === 'damaged' ? '<span class="sp-tag danger">Damaged</span>' : 'Good') + '</td>' : d.kind === 'rcv' ? '<td>' + (it.qty_po_units ? invQty(it.qty_po_units) + ' ' + escapeHtml(it.po_unit) : '—') + '</td>' : (d.kind === 'iss' && d.h.status === 'acknowledged' && d.items.some(x=> x.qty_received != null) ? '<td>' + (it.qty_received == null ? '' : invQty(it.qty_received) + (Number(it.qty_received) < Number(it.qty) ? ' <span class="sp-tag danger">short ' + invQty(Number(it.qty) - Number(it.qty_received)) + '</span>' : '') + (it.damaged ? ' <span class="sp-tag danger">damaged</span>' : '') + (it.item_note ? '<div class="sp-row-sub">' + escapeHtml(it.item_note) + '</div>' : '')) + '</td>' : '')) + '</tr>';
       }).join('') + '</tbody>';
   }
   $('invSlipPdf').addEventListener('click', ()=>{ if(invSlipOpen) invSlipPdf(invSlipOpen); });
@@ -23116,6 +23118,12 @@
       invMine = s.data || [];
       invX.catById = new Map((cat.data || []).map(m=> [m.id, m]));
       invX.projects = pr.data || [];
+      // site deliveries assigned to this worker (site-deliveries.js) are things to receive too
+      let dels = [];
+      try{ const dr = await db.from('site_deliveries').select('id, delivery_no, supplier_name, site_label, expected_on').eq('assigned_to', currentUser.id).eq('status', 'assigned').order('assigned_at', { ascending:false }); if(!dr.error) dels = dr.data || []; }catch(e){}
+      $('invMineDelWrap').style.display = dels.length ? '' : 'none';
+      $('invMineDeliveries').innerHTML = dels.map(d=> '<button type="button" class="mt-row mv-del" data-del="' + escapeHtml(d.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(d.delivery_no) + '</span>' + escapeHtml(d.supplier_name || 'Supplier') + ' <span class="po-status returned">to receive</span></div>' +
+        '<div class="sp-row-sub">' + escapeHtml([d.site_label, d.expected_on ? 'expected ' + d.expected_on : ''].filter(Boolean).join(' \u00B7 ')) + '</div></div></button>').join('');
       const pend = invMine.filter(x=> x.status === 'issued');
       const row = (x)=> '<button type="button" class="mt-row" data-id="' + escapeHtml(x.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(x.slip_no) + '</span>' +
         (x.status === 'issued' ? '<span class="po-status returned">sign now</span>' : '<span class="po-status fulfilled">signed</span>') + '</div>' +
@@ -23132,23 +23140,26 @@
           '<div class="mt-row-price"><span class="inv-qty">' + invQty(hh.holding) + ' ' + escapeHtml(m.unit) + '</span></div></div></div>';
       });
       $('invMineHold').innerHTML = html || '<div class="empty-state" style="padding:12px;">You\u2019re not holding any issued materials.</div>';
-      invSetMineBadge(pend.length);
+      invSetMineBadge(pend.length + dels.length);
     }catch(e){
       $('invMinePending').innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? 'Inventory isn\u2019t set up yet.' : 'Couldn\u2019t load: ' + escapeHtml(describeCloudError(e))) + '</div>';
     }
   }
   function invSetMineBadge(n){
     const b = document.getElementById('techQaMyMatBadge'); if(!b) return;
-    b.textContent = n ? n + ' to sign' : ''; b.style.display = n ? '' : 'none';
+    b.textContent = n ? n + ' to receive' : ''; b.style.display = n ? '' : 'none';
   }
   // cheap check on the home screen so the tile shows how many slips need signing
   async function invRefreshMineBadge(){
     if(!currentUser || currentUser.role === 'admin' || currentUser.role === 'customer') return;
     try{
       const { data, error } = await db.from('issue_slips').select('id').eq('worker_id', currentUser.id).eq('status', 'issued');
-      if(!error) invSetMineBadge((data || []).length);
+      let n = error ? null : (data || []).length;
+      try{ const dr = await db.from('site_deliveries').select('id').eq('assigned_to', currentUser.id).eq('status', 'assigned'); if(!dr.error && n != null) n += (dr.data || []).length; }catch(e){}
+      if(n != null) invSetMineBadge(n);
     }catch(e){}
   }
+  $('invMineDeliveries').addEventListener('click', (e)=>{ const r = e.target.closest('[data-del]'); if(r){ sd.openAfter = r.dataset.del; showPurchasingView('myDeliveries'); } });
   ['invMinePending', 'invMineRecent'].forEach(id=> $(id).addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowMyMaterials(); }); return; }
     const r = e.target.closest('.mt-row'); if(r) invOpenMineSlip(r.dataset.id);
@@ -23163,6 +23174,10 @@
       const signed = invMineOpen.h.status === 'acknowledged';
       $('invMineSignSec').style.display = signed ? 'none' : '';
       $('invMineActions').style.display = signed ? 'none' : '';
+      // an unsigned slip is confirmed ITEM BY ITEM first (tick, how many, damaged, remarks), then signed
+      $('invMineConfirmSec').style.display = signed ? 'none' : '';
+      $('invMineItems').closest('section').style.display = signed ? '' : 'none';
+      if(!signed) invCfInit();
       $('invMineListView').style.display = 'none'; $('invMineSlipView').style.display = '';
       window.scrollTo({ top:0 });
       if(!signed){
@@ -23185,8 +23200,50 @@
   }
   window.addEventListener('resize', ()=>{ if($('invMineSlipView').style.display !== 'none') invSigFit(); });
   $('invMineSigClear').addEventListener('click', ()=>{ if(invSigPad) invSigPad.clear(); });
+  // ---------- the worker confirms an issue slip item by item ----------
+  let invCf = null;
+  function invCfInit(){
+    const items = invMineOpen.items || [];
+    invCf = { ck:items.map(()=> true), q:items.map(it=> Number(it.qty)), dm:items.map(()=> false), remark:'' };
+    invCfRender();
+  }
+  function invCfDiff(){
+    const items = invMineOpen.items || []; let short = 0, dam = 0, miss = 0, n = 0;
+    items.forEach((it, k)=>{ const got = invCf.ck[k] ? invCf.q[k] : 0; short += Number(it.qty) - got; if(invCf.ck[k]){ n++; if(invCf.dm[k]) dam++; } else miss++; });
+    return { short, dam, miss, n, diff: short > 0 || dam > 0 };
+  }
+  function invCfRender(){
+    if(!invCf) return;
+    const items = invMineOpen.items || [], d = invCfDiff(), all = d.n === items.length;
+    $live('invCf').innerHTML =
+      '<div class="cf-hd"><span>' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' issued to you</span><button type="button" class="cf-all" data-cf="all">' + (all ? 'Clear all' : 'Select all') + '</button></div>' +
+      items.map((it, k)=>{
+        const m = invX.catById.get(it.material_id) || { code:'', name:'(item)', unit:'' }, on = invCf.ck[k], short = Number(it.qty) - invCf.q[k];
+        return '<div class="cf-it ' + (on ? 'on' : 'off') + '"><button type="button" class="cf-l1" role="checkbox" aria-checked="' + on + '" data-cf="ck" data-k="' + k + '"><span class="cf-box">' + (on ? '\u2713' : '') + '</span>' +
+          '<span class="cf-nm"><b>' + escapeHtml(m.name) + '</b><small>' + escapeHtml(m.code) + ' \u00B7 issued ' + invQty(it.qty) + ' ' + escapeHtml(m.unit) + (on ? '' : ' \u00B7 not received') + '</small></span></button>' +
+          (on ? '<div class="cf-row2"><div class="cf-qty"><button type="button" data-cf="q" data-k="' + k + '" data-d="-1" aria-label="Less">\u2212</button><output>' + invQty(invCf.q[k]) + '</output><button type="button" data-cf="q" data-k="' + k + '" data-d="1" aria-label="More">+</button></div>' +
+            (short > 0 ? '<span class="cf-short">Short by ' + invQty(short) + '</span>' : '<span class="cf-okk">\u2713 Complete</span>') +
+            '<button type="button" class="cf-dm" aria-pressed="' + !!invCf.dm[k] + '" data-cf="dm" data-k="' + k + '">Damaged</button></div>' : '') + '</div>';
+      }).join('') +
+      '<div class="cf-sum' + (d.diff ? ' w' : '') + '">' + d.n + ' of ' + items.length + ' items received. ' + (d.diff ? (d.miss ? d.miss + ' not received. ' : '') + (d.short && !d.miss ? invQty(d.short) + ' units short. ' : '') + (d.dam ? d.dam + ' damaged. ' : '') + 'It will be saved as received with differences and the issuer is told.' : 'Everything matches what was issued.') + '</div>' +
+      '<label class="cf-lbl" for="invCfRemark">Remarks' + (d.diff ? ' (explain the difference) *' : ' (optional)') + '</label><input type="text" id="invCfRemark" value="' + escapeHtml(invCf.remark) + '" placeholder="Note for the storekeeper">';
+    const b = $('invMineAck'); b.textContent = d.diff ? 'Confirm with differences' : 'Confirm receipt'; b.classList.toggle('cf-warn', d.diff);
+  }
+  document.addEventListener('click', (ev)=>{
+    const t = ev.target.closest && ev.target.closest('#invCf [data-cf]'); if(!t || !invCf) return;
+    const k = Number(t.dataset.k), items = invMineOpen.items || [];
+    if(t.dataset.cf === 'ck'){ invCf.ck[k] = !invCf.ck[k]; if(invCf.ck[k] && !invCf.q[k]) invCf.q[k] = Number(items[k].qty); if(!invCf.ck[k]) invCf.dm[k] = false; }
+    else if(t.dataset.cf === 'all'){ const every = invCf.ck.every(Boolean); invCf.ck = invCf.ck.map(()=> !every); if(!every) invCf.q = items.map((it, i)=> invCf.q[i] || Number(it.qty)); else invCf.dm = invCf.dm.map(()=> false); }
+    else if(t.dataset.cf === 'q'){ invCf.q[k] = Math.min(Number(items[k].qty), Math.max(0, invCf.q[k] + Number(t.dataset.d))); if(invCf.q[k] === 0){ invCf.ck[k] = false; invCf.dm[k] = false; } }
+    else if(t.dataset.cf === 'dm'){ invCf.dm[k] = !invCf.dm[k]; }
+    invCfRender();
+  });
+  document.addEventListener('input', (ev)=>{ if(ev.target && ev.target.id === 'invCfRemark' && invCf) invCf.remark = ev.target.value; });
   $('invMineAck').addEventListener('click', async ()=>{
-    if(!invMineOpen) return;
+    if(!invMineOpen || !invCf) return;
+    const d = invCfDiff();
+    if(!d.n){ toast('You received nothing? Tell the storekeeper instead of signing.'); return; }
+    if(d.diff && !invCf.remark.trim()){ toast('Explain the difference in the remarks'); const r = $live('invCfRemark'); if(r) r.focus(); return; }
     if(!invSigPad || invSigPad.isEmpty()){ toast('Please sign in the box first'); return; }
     if(!(await purchEnsureSession())) return;
     const btn = $('invMineAck'); btn.disabled = true;
@@ -23198,12 +23255,25 @@
       const path = currentUser.id + '/' + invMineOpen.h.id + '-' + Date.now() + '.png';
       const up = await db.storage.from('inventory-signatures').upload(path, blob, { contentType:'image/png', upsert:false });
       if(up.error) throw up.error;
-      const { error } = await db.rpc('inv_ack_issue', { p_slip: invMineOpen.h.id, p_signature_path: path });
-      if(error) throw error;
-      toast(invMineOpen.h.slip_no + ' acknowledged — thank you');
+      const lines = (invMineOpen.items || []).map((it, k)=> ({ item_id: it.id, qty_received: invCf.ck[k] ? invCf.q[k] : 0, damaged: !!(invCf.ck[k] && invCf.dm[k]) }));
+      let res = await db.rpc('inv_ack_issue_items', { p: { slip_id: invMineOpen.h.id, signature_path: path, remark: invCf.remark.trim(), lines } });
+      let out = res.data;
+      if(res.error){
+        // migration 20261028_01 not run yet: a slip with no differences can still be signed the old way
+        if(/inv_ack_issue_items|PGRST202|42883/.test(describeCloudError(res.error)) && !d.diff){
+          const old = await db.rpc('inv_ack_issue', { p_slip: invMineOpen.h.id, p_signature_path: path });
+          if(old.error) throw old.error; out = { slip_no: invMineOpen.h.slip_no, diff:false, issued_by: invMineOpen.h.issued_by };
+        }else throw res.error;
+      }
+      toast(invMineOpen.h.slip_no + (out && out.diff ? ' saved with differences' : ' confirmed') + ' — thank you');
+      if(out && out.issued_by){
+        const me = currentUser.name || 'The worker';
+        notifyUser(out.issued_by, out.diff ? 'Received with differences' : 'Materials confirmed', out.slip_no + ' \u2014 ' + me + (out.diff ? ': ' + [out.short_units > 0 ? invQty(out.short_units) + ' units short' : '', out.damaged_lines > 0 ? out.damaged_lines + ' damaged' : ''].filter(Boolean).join(', ') + (invCf.remark.trim() ? ' (' + invCf.remark.trim() + ')' : '') : ' received everything.'), 'ack-' + invMineOpen.h.id);
+      }
+      if(out && out.diff && typeof notifyAdmins === 'function') notifyAdmins('Issue received with differences', out.slip_no + ' \u2014 ' + (currentUser.name || 'a worker'), 'ack-' + invMineOpen.h.id);
       $('invMineSlipView').style.display = 'none'; $('invMineListView').style.display = '';
       invShowMyMaterials();
-    }catch(e){ purchFail('Couldn\u2019t acknowledge: ', e); }
+    }catch(e){ purchFail('Couldn\u2019t confirm: ', e); }
     finally{ btn.disabled = false; }
   });
 
@@ -23303,19 +23373,23 @@
 
     // ---------- the four-step wizard over the existing forms ----------
     const CFG = {
-      receive:  { panel:'purchPanel_receive',   role:'Receiver',   verb:'Receive',  post:'invRcvPost', le:'rcv',
+      receive:  { panel:'purchPanel_receive',   role:'Receiver',   verb:'Receive',  post:'invRcvPost', le:'rcv', color:'#2E7D5B', page:'receive', scene:['truck', 'wh'], label:'Receive',
+        def:'Items coming in from a supplier.', use:'Use it when a delivery arrives at a warehouse, or is delivered straight to a site.',
         steps:[ { n:'From',  q:'Where is it coming from?',            h:'Choose the kind of delivery.' },
                 { n:'To',    q:'Where is it going?',                  h:'Pick the warehouse that receives it. Any warehouse will do.' },
                 { n:'Items', q:'Which items arrived?',                h:'Enter what actually arrived.' } ] },
-      issue:    { panel:'purchPanel_issue',     role:'Issuer',     verb:'Issue',    post:'invIssPost', le:'iss',
+      issue:    { panel:'purchPanel_issue',     role:'Issuer',     verb:'Issue',    post:'invIssPost', le:'iss', color:'#2F6DB5', page:'issue', scene:['wh', 'custody'], label:'Issue',
+        def:'Items given to a worker to use.', use:'Use it when a worker takes items from a warehouse. They confirm what they received on their phone.',
         steps:[ { n:'From',  q:'Which warehouse is it leaving from?', h:'You can only take stock out of your own warehouses.' },
                 { n:'To',    q:'Who gets it?',                        h:'The worker signs for it on their phone.' },
                 { n:'Items', q:'Which items, and how many?',          h:'Only what is in stock can be issued.' } ] },
-      returns:  { panel:'purchPanel_returns',   role:'Returner',   verb:'Return',   post:'invRetPost',
+      returns:  { panel:'purchPanel_returns',   role:'Returner',   verb:'Return',   post:'invRetPost', color:'#B5413F', page:'returns', scene:['custody', 'wh'], label:'Return',
+        def:'Items brought back to a warehouse.', use:'Use it when items are unused, wrong or damaged and the worker brings them back.',
         steps:[ { n:'From',  q:'Whose custody is it in?',             h:'Pick the worker who is returning the materials.' },
                 { n:'To',    q:'Which warehouse takes it back?',      h:'Good items go back into stock.' },
                 { n:'Items', q:'What is being returned?',             h:'Only what the worker holds is listed.' } ] },
-      transfer: { panel:'purchPanel_transfers', role:'Transferer', verb:'Transfer', post:'invTrfPost', le:'trf',
+      transfer: { panel:'purchPanel_transfers', role:'Transferer', verb:'Transfer', post:'invTrfPost', le:'trf', color:'#D9731A', page:'transfers', scene:['wh', 'wh'], label:'Transfer',
+        def:'Items moved from one warehouse to another.', use:'Use it when stock moves between stores without going through a worker.',
         steps:[ { n:'From',  q:'Which warehouse is it leaving?',      h:'You can only take stock out of your own warehouses.' },
                 { n:'To',    q:'Which warehouse is it going to?',     h:'It goes into that warehouse\u2019s stock.' },
                 { n:'Items', q:'Which items, and how many?',          h:'You can only move what is in stock.' } ] }
@@ -23344,8 +23418,12 @@
       const body = panel.querySelector('.card-body'), top = body && body.querySelector('.po-ed-top'); if(!top) return;
       const sections = Array.from(body.querySelectorAll(':scope > section.po-sec'));
       const itemsSec = sections[1], actions = body.querySelector(':scope > .po-actions');
-      const el = document.createElement('div'); el.className = 'wz'; el.id = 'wz-' + key;
+      const el = document.createElement('div'); el.className = 'wz'; el.id = 'wz-' + key; el.style.setProperty('--mv', cfg.color);
+      const mini = (k)=> k === 'wh' ? art.wh('', 44) : art[k](44);
+      const allowed = (k)=> typeof staffPurchPageAllowed !== 'function' || staffPurchPageAllowed(CFG[k].page);
       el.innerHTML =
+        '<div class="wz-mvbar" role="tablist" aria-label="What are you moving?">' + Object.keys(CFG).filter(allowed).map(k=> '<button type="button" role="tab" class="wz-mvb" style="--mc:' + CFG[k].color + '" aria-selected="' + (k === key) + '" data-page="' + CFG[k].page + '"><span class="wz-sc">' + mini(CFG[k].scene[0]) + '<i aria-hidden="true">\u2192</i>' + mini(CFG[k].scene[1]) + '</span><b>' + CFG[k].label + '</b></button>').join('') + '</div>' +
+        '<div class="wz-def"><h3>' + cfg.label + ': ' + cfg.def + '</h3><p>' + cfg.use + '</p></div>' +
         '<div class="wz-head"><div class="wz-acct" title="The person doing this is always the signed-in account"><span class="wz-av"></span><span class="wz-who"><b></b><i></i></span></div></div>' +
         '<ol class="wz-steps">' + cfg.steps.concat([{ n:'Review' }]).map((s, i)=> '<li><button type="button" class="wz-stp" data-go="' + i + '"><span class="wz-dot">' + (i + 1) + '</span><span class="wz-sl">' + s.n + '</span></button></li>').join('') + '</ol>' +
         '<div class="wz-bar" aria-live="polite"></div>' +
@@ -23367,6 +23445,14 @@
           }else grid.appendChild(f);
         });
       });
+      // Receive: a third way in — the supplier delivers straight to a site and a worker receives it
+      if(key === 'receive'){
+        const card = document.createElement('div'); card.className = 'wz-site';
+        card.innerHTML = '<div class="wz-or"><span>or</span></div><button type="button" class="wz-site-btn" id="wzSiteBtn"><span class="wz-site-art">' + art.truck(88) + '</span><span class="wz-site-txt"><b>Supplier delivering to a site</b><span>Assign a worker to receive it on site. They upload photos as proof.</span></span><span class="wz-site-go" aria-hidden="true">\u2192</span></button>' +
+          '<button type="button" class="wz-site-link" id="wzSiteList">See site deliveries and their photos</button>';
+        bodies[0].appendChild(card);
+        card.addEventListener('click', (ev)=>{ if(ev.target.closest('#wzSiteBtn')){ showPurchasingView('siteDelivery'); } else if(ev.target.closest('#wzSiteList')){ sd.tab = 'list'; showPurchasingView('siteDelivery'); } });
+      }
       // the items section moves whole into step 3; its title is replaced by the step heading
       if(itemsSec){ itemsSec.classList.add('wz-items'); bodies[2].appendChild(itemsSec); }
       // the original first section and Post button stay in the page, hidden
@@ -23374,6 +23460,7 @@
       if(actions) actions.classList.add('wz-legacy');
       wz[key] = { el, step:0 };
       el.addEventListener('click', (ev)=>{
+        const sw = ev.target.closest('.wz-mvb'); if(sw){ if(sw.getAttribute('aria-selected') !== 'true') showPurchasingView(sw.dataset.page); return; }
         const go = ev.target.closest('.wz-stp'); if(go){ const g = Number(go.dataset.go); if(g < wz[key].step) show(key, g); return; }
         if(ev.target.closest('.wz-back')){ show(key, Math.max(0, wz[key].step - 1)); return; }
         if(ev.target.closest('.wz-next')) next(key);
@@ -23450,13 +23537,21 @@
       if(key === 'returns') return invRetHold.filter(h=> String(h.ret).trim()).length;
       return invLE[CFG[key].le] ? invLE[CFG[key].le].lines.filter(l=> l.material_id && String(l.qty).trim()).length : 0;
     }
+    // what to draw at each end of the route
+    function endArt(key){
+      const wh = (id)=> { const t = selText(id); return art.wh(t ? t.split(' \u00B7 ')[0].trim() : '', 64); };
+      if(key === 'issue') return [wh('invIssWh'), art.custody(64)];
+      if(key === 'returns') return [art.custody(64), wh('invRetWh')];
+      if(key === 'transfer') return [wh('invTrfFrom'), wh('invTrfTo')];
+      const po = mode('invRcvMode') === 'po';
+      return [po ? art.po(64) : art.truck(64), $('invRcvDirect') && $('invRcvDirect').checked ? art.project(64) : wh('invRcvWh')];
+    }
     function renderBar(key){
       const w = wz[key]; if(!w) return;
-      const [f, t] = ends(key), n = countItems(key);
-      w.el.querySelector('.wz-bar').innerHTML =
-        '<span class="wz-chip' + (f ? ' set' : '') + '">' + esc(f || 'From') + '</span><span class="wz-arr" aria-hidden="true">\u2192</span>' +
-        '<span class="wz-chip' + (t ? ' set' : '') + '">' + esc(t || 'To') + '</span>' +
-        (n ? '<span class="wz-chip">' + n + ' item' + (n === 1 ? '' : 's') + '</span>' : '');
+      const [f, t] = ends(key), n = countItems(key), [fa, ta] = endArt(key);
+      const end = (lab, txt, svg)=> '<div class="wz-rend' + (txt ? ' set' : '') + '"><span class="wz-rart">' + svg + '</span><span class="wz-rtxt"><small>' + lab + '</small>' + esc(txt || '\u2014') + '</span></div>';
+      w.el.querySelector('.wz-bar').innerHTML = '<div class="wz-route">' + end('From', f, fa) + '<span class="wz-rarr" aria-hidden="true">\u279C</span>' + end('To', t, ta) + '</div>' +
+        (n ? '<span class="wz-chip wz-nchip">' + n + ' item' + (n === 1 ? '' : 's') + '</span>' : '');
     }
     // ---------- the review ----------
     function effects(key){
@@ -23551,6 +23646,405 @@
     ['invRcvLines', 'invIssLines', 'invRetLines', 'invTrfLines'].forEach(id=>{ const s = document.getElementById(id); if(s) mo.observe(s, { childList:true }); });
     IT.onEnter();
   })();
+
+
+  // =====================================================================
+  // Site deliveries — a supplier delivers STRAIGHT TO A SITE
+  //
+  //   OFFICE  (Receive Stock > "Supplier delivering to a site")
+  //     assigns the delivery: supplier / PO > the site and the worker who will receive it >
+  //     the expected items > review. The worker is told.
+  //   WORKER  (My Deliveries, on their phone)
+  //     confirms how many of each item arrived and adds photos as proof (at least one).
+  //   Nothing goes into a warehouse. For lines on a PO, what arrived is added to the PO line
+  //   and shows in Purchased Items as "Received by <worker>".
+  //
+  // NOTE: this screen redraws itself, so it reads elements with $live() (the app's $() remembers
+  // the first node it found and would keep returning the old, detached one).
+  //
+  // Database: site_deliveries / site_delivery_items / site_delivery_photos and the functions
+  // site_delivery_create / _receive / _cancel (migration 20261027_01); photos go to the private
+  // bucket delivery-proofs, each worker only into their own folder.
+  // =====================================================================
+
+  const SD_BUCKET = 'delivery-proofs';
+  const sd = { form:null, tab:'assign', filter:'assigned', list:[], mine:[], rcv:null, ctxOk:false, pos:[], suppliers:[] };
+  const sdDay = (ts)=> { try{ return new Date(ts).toLocaleDateString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric' }); }catch(e){ return ''; } };
+  const sdDate = (d)=> d ? sdDay(String(d).length === 10 ? d + 'T12:00:00+08:00' : d) : '';
+  const sdNum = (n)=> Number(n || 0).toLocaleString('en-PH', { maximumFractionDigits:3 });
+  const SD_STATUS = { assigned:{ label:'To receive', cls:'approval' }, received:{ label:'Received', cls:'ready' }, cancelled:{ label:'Cancelled', cls:'' } };
+  const sdChip = (st)=> '<span class="mm-chip ' + ((SD_STATUS[st] || {}).cls || '') + '">' + escapeHtml((SD_STATUS[st] || { label:st }).label) + '</span>';
+
+  // ---------- photos ----------
+  async function sdUpload(files, deliveryId){
+    const out = [];
+    for(const f of files){
+      let blob = null;
+      try{ blob = await compressImageForUpload(f, { targetBytes: 350 * 1024, maxDim: 1800 }); }catch(e){ blob = null; }
+      const path = currentUser.id + '/' + deliveryId + '/' + Date.now() + '-' + (out.length + 1) + '.jpg';
+      const up = await db.storage.from(SD_BUCKET).upload(path, blob || f, { contentType:'image/jpeg', upsert:false });
+      if(up.error) throw up.error;
+      out.push(path);
+    }
+    return out;
+  }
+  async function sdSigned(paths){
+    if(!paths.length) return {};
+    const { data } = await db.storage.from(SD_BUCKET).createSignedUrls(paths, 3600);
+    const m = {}; (data || []).forEach(x=>{ if(x && x.path && x.signedUrl) m[x.path] = x.signedUrl; });
+    return m;
+  }
+  function sdLightbox(url){
+    let ov = $live('sdLightbox');
+    if(!ov){
+      ov = document.createElement('div'); ov.id = 'sdLightbox'; ov.className = 'sd-lightbox';
+      ov.innerHTML = '<button type="button" class="sd-lb-x" aria-label="Close">\u00D7</button><img alt="Delivery proof">';
+      ov.addEventListener('click', ()=> ov.classList.remove('open'));
+      document.body.appendChild(ov);
+    }
+    ov.querySelector('img').src = url; ov.classList.add('open');
+  }
+
+  // =====================================================================
+  // WORKER — My Deliveries
+  // =====================================================================
+  async function sdMineShow(){
+    sd.rcv = null;
+    $live('sdMineForm').style.display = 'none'; $live('sdMineList').style.display = '';
+    $live('sdMineList').innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    if(!(await ensureCloud())){ $live('sdMineList').innerHTML = '<div class="empty-state">Not connected \u2014 this page needs a connection.</div>'; return; }
+    try{
+      const { data, error } = await db.from('site_deliveries').select('*, site_delivery_items(*), site_delivery_photos(id)')
+        .eq('assigned_to', currentUser.id).order('assigned_at', { ascending:false }).limit(40);
+      if(error) throw error;
+      sd.mine = data || [];
+      sdRenderMine();
+      if(sd.openAfter){ const id = sd.openAfter; sd.openAfter = null; if(sd.mine.some(d=> d.id === id && d.status === 'assigned')) sdOpenReceive(id); }
+    }catch(e){
+      const m = describeCloudError(e);
+      $live('sdMineList').innerHTML = '<div class="empty-state">' + (/site_deliveries|PGRST205|42P01/.test(m) ? 'This page needs migration 20261027_01_site_deliveries.sql to be run in Supabase.' : 'Couldn\u2019t load your deliveries: ' + escapeHtml(m)) + '</div>';
+    }
+  }
+  function sdItemsLine(d){
+    const it = (d.site_delivery_items || []).slice().sort((a, b)=> a.line_no - b.line_no);
+    return it.slice(0, 3).map(i=> escapeHtml(i.description) + ' \u00D7 ' + sdNum(i.qty_expected) + (i.unit ? ' ' + escapeHtml(i.unit) : '')).join(', ') + (it.length > 3 ? ' + ' + (it.length - 3) + ' more' : '');
+  }
+  function sdRenderMine(){
+    const todo = sd.mine.filter(d=> d.status === 'assigned'), rest = sd.mine.filter(d=> d.status !== 'assigned');
+    const card = (d)=> '<div class="sd-card"><div class="sd-card-top"><b>' + escapeHtml(d.supplier_name || 'Supplier') + '</b>' + sdChip(d.status) + '</div>' +
+      '<div class="sd-line"><span>Deliver to</span>' + escapeHtml(d.site_label) + '</div>' +
+      (d.expected_on ? '<div class="sd-line"><span>Expected</span>' + escapeHtml(sdDate(d.expected_on)) + '</div>' : '') +
+      '<div class="sd-line"><span>Items</span>' + sdItemsLine(d) + '</div>' +
+      (d.note ? '<div class="sd-line"><span>Office note</span>' + escapeHtml(d.note) + '</div>' : '') +
+      (d.status === 'assigned' ? '<button type="button" class="btn btn-primary sd-go" data-rcv="' + escapeHtml(d.id) + '">I received it</button>' :
+        d.status === 'received' ? '<div class="sd-line"><span>Received</span>' + escapeHtml(sdDay(d.received_at)) + ' \u00B7 ' + (d.site_delivery_photos || []).length + ' photo' + ((d.site_delivery_photos || []).length === 1 ? '' : 's') + '</div>' :
+        '<div class="sd-line"><span>Why</span>' + escapeHtml(d.cancel_reason || '') + '</div>') + '</div>';
+    $live('sdMineList').innerHTML =
+      '<p class="sd-intro">When a supplier delivers to a site, the office assigns you to receive it. Count what arrived and take photos as proof.</p>' +
+      (todo.length ? '<h3 class="sd-h">To receive (' + todo.length + ')</h3>' + todo.map(card).join('') : '<div class="empty-state">Nothing to receive right now.</div>') +
+      (rest.length ? '<h3 class="sd-h">Earlier</h3>' + rest.map(card).join('') : '');
+  }
+
+  // ---- the receive form ----
+  function sdOpenReceive(id){
+    const d = sd.mine.find(x=> x.id === id); if(!d) return;
+    sd.rcv = { d, files:[], uploaded:[], busy:false };
+    $live('sdMineList').style.display = 'none'; $live('sdMineForm').style.display = '';
+    sdRenderReceive();
+  }
+  function sdRenderReceive(){
+    const r = sd.rcv, d = r.d, items = (d.site_delivery_items || []).slice().sort((a, b)=> a.line_no - b.line_no);
+    $live('sdMineForm').innerHTML =
+      '<div class="po-ed-top"><button type="button" class="po-back" id="sdRcvBack">&larr; My deliveries</button></div>' +
+      '<div class="sd-head"><b>' + escapeHtml(d.supplier_name || 'Supplier') + '</b><span>' + escapeHtml(d.site_label) + '</span>' + (d.expected_on ? '<span>Expected ' + escapeHtml(sdDate(d.expected_on)) + '</span>' : '') + '</div>' +
+      '<h3 class="sd-h">1. How many arrived?</h3>' +
+      items.map(i=> '<div class="sd-item" data-item="' + escapeHtml(i.id) + '"><div class="sd-item-name"><b>' + escapeHtml(i.description) + '</b><span>Expected ' + sdNum(i.qty_expected) + ' ' + escapeHtml(i.unit || '') + '</span></div>' +
+        '<input type="text" inputmode="decimal" class="sd-q" value="' + escapeHtml(String(Number(i.qty_expected))) + '" aria-label="Quantity received of ' + escapeHtml(i.description) + '">' +
+        '<input type="text" class="sd-n" placeholder="Note (e.g. 2 damaged)" aria-label="Note"></div>').join('') +
+      '<h3 class="sd-h">2. Photos as proof <span class="sd-req">required</span></h3>' +
+      '<p class="sd-help">Show the delivery and the items. Take as many as you need.</p>' +
+      '<div class="sd-thumbs" id="sdThumbs">' + r.files.map((f, n)=> '<div class="sd-thumb"><img src="' + escapeHtml(f.url) + '" alt="Photo ' + (n + 1) + '"><button type="button" data-rm="' + n + '" aria-label="Remove photo ' + (n + 1) + '">\u00D7</button></div>').join('') + '</div>' +
+      '<input type="file" id="sdFile" accept="image/*" multiple hidden>' +
+      '<button type="button" class="btn btn-secondary sd-add" id="sdAddPhoto">+ Add photos</button>' +
+      '<h3 class="sd-h">3. Anything to tell the office?</h3>' +
+      '<input type="text" id="sdRcvNote" placeholder="Optional note">' +
+      '<div class="sd-err" id="sdRcvErr" role="alert"></div>' +
+      '<button type="button" class="btn btn-primary sd-submit" id="sdRcvSubmit">Confirm delivery received</button>';
+  }
+  async function sdSubmitReceive(){
+    const r = sd.rcv; if(!r || r.busy) return;
+    const err = (m)=> { $live('sdRcvErr').textContent = m; };
+    const items = (r.d.site_delivery_items || []).slice().sort((a, b)=> a.line_no - b.line_no), lines = [];
+    let any = false;
+    for(const i of items){
+      const row = $live('sdMineForm').querySelector('.sd-item[data-item="' + i.id + '"]');
+      const q = spParseMoney(row.querySelector('.sd-q').value);
+      if(q == null || Number.isNaN(q)){ err(i.description + ': say how many arrived (0 if none).'); return; }
+      if(q > Number(i.qty_expected)){ err(i.description + ': only ' + sdNum(i.qty_expected) + ' were expected.'); return; }
+      if(q > 0) any = true;
+      lines.push({ item_id:i.id, qty_received:q, note:row.querySelector('.sd-n').value.trim() });
+    }
+    if(!any){ err('Nothing arrived? Tell the office instead of recording this.'); return; }
+    if(!r.files.length && !r.uploaded.length){ err('Add at least one photo as proof.'); return; }
+    err('');
+    r.busy = true; const btn = $live('sdRcvSubmit'); btn.disabled = true; btn.textContent = 'Saving\u2026';
+    try{
+      if(!(await purchEnsureSession())){ return; }
+      // upload once; if the save fails the paths are kept so a retry does not upload again
+      if(r.files.length){ const paths = await sdUpload(r.files.map(f=> f.file), r.d.id); r.uploaded = r.uploaded.concat(paths); r.files = []; }
+      const { data, error } = await db.rpc('site_delivery_receive', { p: { id:r.d.id, lines, photos:r.uploaded, note:$live('sdRcvNote').value.trim() } });
+      if(error) throw error;
+      toast('Saved \u2014 thank you');
+      const who = currentUser.name || 'A worker';
+      if(r.d.assigned_by) notifyUser(r.d.assigned_by, 'Delivery received', (data && data.delivery_no || 'A delivery') + ' \u2014 ' + who + ' received it at ' + r.d.site_label + '.', 'sd-rcv-' + r.d.id);
+      if(typeof notifyAdmins === 'function') notifyAdmins('Delivery received on site', (data && data.delivery_no || '') + ' \u2014 ' + who + ' \u00B7 ' + r.d.site_label, 'sd-rcv-' + r.d.id);
+      sd.rcv = null; sdMineShow();
+    }catch(e){
+      err('Couldn\u2019t save: ' + describeCloudError(e).replace(/^.*?:\s*(?=[A-Z])/, ''));
+      btn.disabled = false; btn.textContent = 'Confirm delivery received';
+    }finally{ if(sd.rcv) sd.rcv.busy = false; }
+  }
+  document.addEventListener('click', (ev)=>{
+    const t = ev.target;
+    if(!t.closest || !t.closest('#purchPanel_myDeliveries')) return;
+    const go = t.closest('[data-rcv]'); if(go){ sdOpenReceive(go.getAttribute('data-rcv')); return; }
+    if(t.closest('#sdRcvBack')){ sd.rcv = null; $live('sdMineForm').style.display = 'none'; $live('sdMineList').style.display = ''; sdRenderMine(); return; }
+    if(t.closest('#sdAddPhoto')){ $live('sdFile').click(); return; }
+    const rm = t.closest('#sdThumbs [data-rm]'); if(rm){ const f = sd.rcv.files.splice(Number(rm.getAttribute('data-rm')), 1)[0]; if(f) URL.revokeObjectURL(f.url); sdKeepFields(); return; }
+    if(t.closest('#sdRcvSubmit')) sdSubmitReceive();
+  });
+  document.addEventListener('change', (ev)=>{
+    if(!ev.target || ev.target.id !== 'sdFile' || !sd.rcv) return;
+    Array.from(ev.target.files || []).forEach(f=>{ if(sd.rcv.files.length < 12 - sd.rcv.uploaded.length && /^image\//.test(f.type || 'image/')) sd.rcv.files.push({ file:f, url:URL.createObjectURL(f) }); });
+    ev.target.value = ''; sdKeepFields();
+  });
+  // re-draw the form (for the photo grid) without losing what has been typed
+  function sdKeepFields(){
+    const keep = { q:[], n:[], note:$live('sdRcvNote') ? $live('sdRcvNote').value : '' };
+    $live('sdMineForm').querySelectorAll('.sd-item').forEach(row=>{ keep.q.push(row.querySelector('.sd-q').value); keep.n.push(row.querySelector('.sd-n').value); });
+    sdRenderReceive();
+    $live('sdMineForm').querySelectorAll('.sd-item').forEach((row, i)=>{ row.querySelector('.sd-q').value = keep.q[i]; row.querySelector('.sd-n').value = keep.n[i]; });
+    $live('sdRcvNote').value = keep.note;
+  }
+
+  // =====================================================================
+  // OFFICE — assign a delivery, and see the deliveries with their proof
+  // =====================================================================
+  function sdBlankForm(){ return { step:0, po_id:'', supplier_id:'', supplier_name:'', ref:'', project_id:'', job_order_id:'', site_label:'', expected_on:'', worker_id:'', note:'', items:[], err:'' }; }
+  async function sdOfficeShow(){
+    if(!sd.form) sd.form = sdBlankForm();
+    sdSetTab(sd.tab);
+    if(!(await ensureCloud())){ $live('sdAssign').innerHTML = '<div class="empty-state">Not connected \u2014 this page needs a connection.</div>'; return; }
+    try{
+      await invLoadCtx();
+      const [sup, pos] = await Promise.all([ db.from('suppliers_directory').select('id, display_name').order('display_name'), db.rpc('inv_pos_to_receive') ]);
+      sd.suppliers = sup.data || []; sd.pos = pos.data || []; sd.ctxOk = true;
+    }catch(e){ sd.ctxOk = false; }
+    sdRenderAssign();
+    if(sd.tab === 'list') sdLoadList();
+  }
+  function sdSetTab(tab){
+    sd.tab = tab;
+    $$('#sdTabs .seg-tab').forEach(b=> b.classList.toggle('active', b.dataset.tab === tab));
+    if(tab === 'assign' && sd.form && sd.ctxOk) sdRenderAssign();   // always the current form, never a stale screen
+    $live('sdAssign').style.display = tab === 'assign' ? '' : 'none';
+    $live('sdList').style.display = tab === 'list' ? '' : 'none';
+    $live('sdDetail').style.display = 'none';
+  }
+
+  // ---- the assign wizard (same look as the movement screens) ----
+  const SD_STEPS = [
+    { n:'Supplier', q:'Which supplier is delivering?', h:'Pick the purchase order, or type the supplier\u2019s name.' },
+    { n:'Site',     q:'Where does it go, and who receives it?', h:'The worker you pick receives it on site and uploads photos as proof.' },
+    { n:'Items',    q:'What is expected?', h:'What the supplier should bring. The worker confirms how much arrived.' },
+    { n:'Review',   q:'Check and assign', h:'The worker is told as soon as you assign it.' }
+  ];
+  const sdPoOf = (id)=> sd.pos.find(p=> p.id === id);
+  const sdWorker = (id)=> (invX.workers || []).find(w=> w.id === id);
+  function sdOpts(list, val, label, blank, sel){ return '<option value="">' + escapeHtml(blank) + '</option>' + list.map(x=> '<option value="' + escapeHtml(val(x)) + '"' + (val(x) === sel ? ' selected' : '') + '>' + escapeHtml(label(x)) + '</option>').join(''); }
+  function sdChipsHtml(f){
+    const po = sdPoOf(f.po_id), sup = po ? po.supplier : (f.supplier_name || (sd.suppliers.find(s=> s.id === f.supplier_id) || {}).display_name || '');
+    const w = sdWorker(f.worker_id), site = f.site_label || (invX.projects || []).filter(p=> p.id === f.project_id).map(p=> p.name)[0] || f.job_order_id || '';
+    const n = f.items.filter(i=> i.on !== false && Number(i.qty) > 0).length;
+    return '<span class="wz-chip' + (sup ? ' set' : '') + '">' + escapeHtml(sup || 'Supplier') + '</span><span class="wz-arr" aria-hidden="true">\u2192</span><span class="wz-chip' + (site ? ' set' : '') + '">' + escapeHtml(site || 'Site') + '</span><span class="wz-arr" aria-hidden="true">\u2192</span><span class="wz-chip' + (w ? ' set' : '') + '">' + escapeHtml(w ? w.name : 'Receiver') + '</span>' + (n ? '<span class="wz-chip">' + n + ' item' + (n === 1 ? '' : 's') + '</span>' : '');
+  }
+  function sdStepBody(f){
+    if(f.step === 0){
+      return '<div class="po-grid wz-grid"><div class="field po-c12"><label>Purchase order <span class="sd-opt">optional</span></label><select id="sdPo">' +
+        sdOpts(sd.pos, p=> p.id, p=> p.po_no + ' \u00B7 ' + (p.supplier || 'no supplier'), 'No purchase order', f.po_id) + '</select></div>' +
+        (f.po_id ? '' : '<div class="field po-c12"><label>Supplier</label><select id="sdSup">' + sdOpts(sd.suppliers, s=> s.id, s=> s.display_name, 'Not in the list', f.supplier_id) + '</select></div>' +
+          '<div class="field po-c12"' + (f.supplier_id ? ' style="display:none"' : '') + '><label>Supplier name</label><input type="text" id="sdSupName" value="' + escapeHtml(f.supplier_name) + '" placeholder="If the supplier is not in the list"></div>') +
+        '<div class="field po-c12"><label>Delivery receipt / reference no. <span class="sd-opt">optional</span></label><input type="text" id="sdRef" value="' + escapeHtml(f.ref) + '" placeholder="e.g. DR-5521"></div></div>';
+    }
+    if(f.step === 1){
+      return '<div class="wz-recipient po-c12"><span class="wz-recipient-art">' + IT.art.custody(96) + '</span><div class="field wz-recipient-f"><label>Worker who receives it <span class="req">*</span></label><select id="sdWorker">' +
+          sdOpts(invX.workers || [], w=> w.id, w=> w.name, 'Choose a worker\u2026', f.worker_id) + '</select></div></div>' +
+        '<div class="po-grid wz-grid"><div class="field po-c6"><label>Project</label><select id="sdProj">' + sdOpts(invX.projects || [], p=> p.id, p=> (p.project_no ? p.project_no + ' \u2014 ' : '') + p.name, '\u2014 none \u2014', f.project_id) + '</select></div>' +
+        '<div class="field po-c6"><label>Job order</label><select id="sdJob">' + sdOpts(invX.jobs || [], j=> j.id, j=> j.id + (j.cust_name ? ' \u00B7 ' + j.cust_name : ''), '\u2014 none \u2014', f.job_order_id) + '</select></div>' +
+        '<div class="field po-c12"><label>Site address <span class="sd-opt">if not a project or job order</span></label><input type="text" id="sdSite" value="' + escapeHtml(f.site_label) + '" placeholder="Where exactly?"></div>' +
+        '<div class="field po-c6"><label>Expected on</label><input type="date" id="sdDate" value="' + escapeHtml(f.expected_on) + '"></div>' +
+        '<div class="field po-c6"><label>Note to the worker <span class="sd-opt">optional</span></label><input type="text" id="sdNote" value="' + escapeHtml(f.note) + '" placeholder="e.g. ask for the guard"></div></div>';
+    }
+    if(f.step === 2){
+      const rows = f.items.map((i, n)=> '<div class="sd-row" data-n="' + n + '">' + (i.po_item_id ? '<label class="sd-on"><input type="checkbox" data-on="1"' + (i.on !== false ? ' checked' : '') + '></label>' : '') +
+        '<div class="sd-row-name">' + (i.po_item_id ? '<b>' + escapeHtml(i.description) + '</b><span>Left on the PO: ' + sdNum(i.max) + ' ' + escapeHtml(i.unit || '') + '</span>' :
+          '<input type="text" data-d="1" list="sdCat" placeholder="Item" value="' + escapeHtml(i.description) + '"><input type="text" data-u="1" class="sd-unit" placeholder="unit" value="' + escapeHtml(i.unit) + '">') + '</div>' +
+        '<input type="text" inputmode="decimal" class="sd-q" data-q="1" placeholder="Qty" value="' + escapeHtml(String(i.qty)) + '" aria-label="Expected quantity">' +
+        (i.po_item_id ? '' : '<button type="button" class="po-rm" data-rm="' + n + '" title="Remove">\u2212</button>') + '</div>').join('');
+      return '<datalist id="sdCat">' + (invX.cat || []).map(m=> '<option value="' + escapeHtml(m.name) + '"></option>').join('') + '</datalist>' + rows +
+        (f.po_id ? '<p class="sd-help">Untick a line the supplier is not bringing to this site.</p>' : '<button type="button" class="btn btn-secondary" id="sdAddItem">+ Add item</button>');
+    }
+    const w = sdWorker(f.worker_id), po = sdPoOf(f.po_id), items = f.items.filter(i=> i.on !== false && Number(i.qty) > 0);
+    const site = [ (invX.projects || []).filter(p=> p.id === f.project_id).map(p=> p.name)[0], f.job_order_id, f.site_label ].filter(Boolean).join(' \u00B7 ');
+    return '<dl class="wz-sum"><dt>Supplier</dt><dd>' + escapeHtml(po ? po.supplier : (f.supplier_name || (sd.suppliers.find(s=> s.id === f.supplier_id) || {}).display_name || '\u2014')) + '</dd>' +
+      (po ? '<dt>Purchase order</dt><dd>' + escapeHtml(po.po_no) + '</dd>' : '') + (f.ref ? '<dt>Reference</dt><dd>' + escapeHtml(f.ref) + '</dd>' : '') +
+      '<dt>Site</dt><dd>' + escapeHtml(site) + '</dd>' + (f.expected_on ? '<dt>Expected</dt><dd>' + escapeHtml(sdDate(f.expected_on)) + '</dd>' : '') +
+      '<dt>Receiver</dt><dd>' + escapeHtml(w ? w.name : '') + '</dd><dt>Assigned by</dt><dd>You \u2014 ' + escapeHtml(currentUser.name || '') + '</dd></dl>' +
+      '<div class="wz-lines">' + items.map(i=> '<div class="wz-li"><span>' + escapeHtml(i.description) + '</span><b>' + escapeHtml(sdNum(i.qty)) + ' ' + escapeHtml(i.unit || '') + '</b></div>').join('') + '</div>' +
+      '<div class="wz-what">What happens</div><div class="wz-eff">' +
+      '<div><span class="wz-ico" aria-hidden="true">\u2713</span><span>' + escapeHtml(w ? w.name : 'The worker') + ' is told to receive it</span></div>' +
+      '<div><span class="wz-ico" aria-hidden="true">\u2713</span><span>They confirm what arrived and upload photos as proof</span></div>' +
+      '<div><span class="wz-ico warn" aria-hidden="true">!</span><span>Nothing goes into a warehouse' + (po ? '; the PO line shows what arrived' : '') + '</span></div></div>';
+  }
+  function sdRenderAssign(){
+    const f = sd.form, host = $live('sdAssign');
+    if(!sd.ctxOk){ host.innerHTML = '<div class="empty-state">Couldn\u2019t load the suppliers and workers. Check your connection.</div>'; return; }
+    host.innerHTML = '<div class="wz"><ol class="wz-steps">' + SD_STEPS.map((s, i)=> '<li class="' + (i < f.step ? 'done' : i === f.step ? 'cur' : '') + '"><button type="button" class="wz-stp" data-sdgo="' + i + '"' + (i > f.step ? ' disabled' : '') + '><span class="wz-dot">' + (i < f.step ? '\u2713' : i + 1) + '</span><span class="wz-sl">' + s.n + '</span></button></li>').join('') + '</ol>' +
+      '<div class="wz-bar">' + sdChipsHtml(f) + '</div>' +
+      '<section class="wz-step on"><h3 class="wz-q">' + SD_STEPS[f.step].q + '</h3><p class="wz-help">' + SD_STEPS[f.step].h + '</p><div class="wz-body">' + sdStepBody(f) + '</div></section>' +
+      '<div class="wz-err" role="alert">' + escapeHtml(f.err) + '</div>' +
+      '<div class="wz-foot"><button type="button" class="btn btn-secondary" id="sdBack"' + (f.step === 0 ? ' style="visibility:hidden"' : '') + '>Back</button><button type="button" class="btn btn-primary" id="sdNext">' + (f.step === 3 ? 'Assign the delivery' : 'Next: ' + SD_STEPS[f.step + 1].n.toLowerCase()) + '</button></div></div>';
+  }
+  function sdReadStep(){
+    const f = sd.form, g = (id)=> $live(id) ? $live(id).value : null;
+    if(f.step === 0){
+      if(g('sdPo') !== null){ const prev = f.po_id; f.po_id = g('sdPo'); if(f.po_id !== prev){ f.items = sdItemsFromPo(f.po_id); } }
+      if(g('sdSup') !== null) f.supplier_id = g('sdSup'); if(g('sdSupName') !== null) f.supplier_name = g('sdSupName').trim(); if(g('sdRef') !== null) f.ref = g('sdRef').trim();
+    }
+    if(f.step === 1){ ['Worker:worker_id', 'Proj:project_id', 'Job:job_order_id'].forEach(p=>{ const [id, k] = p.split(':'); if(g('sd' + id) !== null) f[k] = g('sd' + id); }); if(g('sdSite') !== null) f.site_label = g('sdSite').trim(); if(g('sdDate') !== null) f.expected_on = g('sdDate'); if(g('sdNote') !== null) f.note = g('sdNote').trim(); }
+    if(f.step === 2){
+      $live('sdAssign').querySelectorAll('.sd-row').forEach(row=>{
+        const i = f.items[Number(row.dataset.n)]; if(!i) return;
+        const q = row.querySelector('[data-q]'); if(q) i.qty = q.value.trim();
+        const on = row.querySelector('[data-on]'); if(on) i.on = on.checked;
+        const d = row.querySelector('[data-d]'); if(d){ i.description = d.value.trim(); const m = (invX.cat || []).find(c=> c.name.toLowerCase() === i.description.toLowerCase()); i.material_id = m ? m.id : null; if(m && !i.unit) i.unit = m.unit; }
+        const u = row.querySelector('[data-u]'); if(u) i.unit = u.value.trim();
+      });
+    }
+  }
+  function sdItemsFromPo(poId){
+    const po = sdPoOf(poId); if(!po) return [];
+    return (po.items || []).map(i=>{ const left = Number(i.qty) - Number(i.qty_received); return { po_item_id:i.id, material_id:i.material_id || null, description:i.description, unit:i.unit || '', qty:String(left), max:left, on:left > 0 }; }).filter(i=> i.max > 0);
+  }
+  function sdCheck(step){
+    const f = sd.form;
+    if(step === 0 && !f.po_id && !f.supplier_id && !f.supplier_name) return 'Pick the purchase order or the supplier.';
+    if(step === 1){
+      if(!f.worker_id) return 'Choose the worker who receives it.';
+      if(!f.project_id && !f.job_order_id && !f.site_label) return 'Say where it goes: a project, a job order or the site address.';
+    }
+    if(step === 2){
+      const rows = f.items.filter(i=> i.on !== false && (i.po_item_id || i.description || String(i.qty).trim()));
+      if(!rows.length) return 'Add at least one item.';
+      for(const i of rows){
+        if(!i.description) return 'Name every item.';
+        const q = spParseMoney(i.qty);
+        if(q == null || Number.isNaN(q) || q <= 0) return i.description + ': enter a quantity above 0.';
+        if(i.po_item_id && q > i.max) return i.description + ': only ' + sdNum(i.max) + ' left on the PO.';
+      }
+    }
+    return '';
+  }
+  async function sdAssignNow(){
+    const f = sd.form, btn = $live('sdNext'); btn.disabled = true; btn.textContent = 'Assigning\u2026';
+    try{
+      if(!(await purchEnsureSession())) return;
+      const items = f.items.filter(i=> i.on !== false && Number(spParseMoney(i.qty)) > 0).map(i=> ({ po_item_id:i.po_item_id || null, material_id:i.material_id || null, description:i.description, unit:i.unit || '', qty_expected:spParseMoney(i.qty) }));
+      const { data, error } = await db.rpc('site_delivery_create', { p: { po_id:f.po_id || null, supplier_id:f.supplier_id || null, supplier_name:f.supplier_name, supplier_ref:f.ref, project_id:f.project_id || null, job_order_id:f.job_order_id || null, site_label:f.site_label, expected_on:f.expected_on || null, note:f.note, assigned_to:f.worker_id, items } });
+      if(error) throw error;
+      const w = sdWorker(f.worker_id), po = sdPoOf(f.po_id);
+      notifyUser(f.worker_id, 'Delivery to receive', (data.delivery_no || 'A delivery') + ' \u2014 ' + (po ? po.supplier : f.supplier_name || 'a supplier') + ' delivers to ' + (f.site_label || 'the site') + '. Open My Deliveries to record it with photos.', 'sd-new-' + data.id);
+      toast(data.delivery_no + ' assigned to ' + (w ? w.name : 'the worker'));
+      sd.form = sdBlankForm(); sd.tab = 'list'; sd.filter = 'assigned'; sdSetTab('list'); sdLoadList();
+    }catch(e){
+      f.err = describeCloudError(e).replace(/^.*?:\s*(?=[A-Z])/, ''); sdRenderAssign();
+    }
+  }
+  document.addEventListener('click', (ev)=>{
+    const t = ev.target; if(!t.closest || !t.closest('#purchPanel_siteDelivery')) return;
+    const tab = t.closest('#sdTabs [data-tab]'); if(tab){ sdSetTab(tab.dataset.tab); if(tab.dataset.tab === 'list') sdLoadList(); return; }
+    if(t.closest('#sdBackReceive')){ showPurchasingView('receive'); return; }
+    const f = sd.form;
+    const go = t.closest('[data-sdgo]'); if(go){ sdReadStep(); const g = Number(go.dataset.sdgo); if(g < f.step){ f.step = g; f.err = ''; sdRenderAssign(); } return; }
+    if(t.closest('#sdBack')){ sdReadStep(); f.step = Math.max(0, f.step - 1); f.err = ''; sdRenderAssign(); return; }
+    if(t.closest('#sdAddItem')){ sdReadStep(); f.items.push({ po_item_id:null, material_id:null, description:'', unit:'', qty:'', on:true }); sdRenderAssign(); return; }
+    const rm = t.closest('#sdAssign [data-rm]'); if(rm){ sdReadStep(); f.items.splice(Number(rm.dataset.rm), 1); sdRenderAssign(); return; }
+    if(t.closest('#sdNext')){
+      sdReadStep(); const e = sdCheck(f.step);
+      if(e){ f.err = e; sdRenderAssign(); return; }
+      f.err = '';
+      if(f.step === 0 && !f.po_id && !f.items.length) f.items = [{ po_item_id:null, material_id:null, description:'', unit:'', qty:'', on:true }];
+      if(f.step === 3){ for(let i = 0; i < 3; i++){ const x = sdCheck(i); if(x){ f.step = i; f.err = x; sdRenderAssign(); return; } } sdAssignNow(); return; }
+      f.step++; sdRenderAssign();
+    }
+    // list + detail
+    const card = t.closest('[data-sdopen]'); if(card){ sdOpenDetail(card.dataset.sdopen); return; }
+    const flt = t.closest('#sdFilters [data-f]'); if(flt){ sd.filter = flt.dataset.f; sdRenderList(); return; }
+    if(t.closest('#sdDetailBack')){ $live('sdDetail').style.display = 'none'; $live('sdList').style.display = ''; return; }
+    const ph = t.closest('[data-photo]'); if(ph){ sdLightbox(ph.dataset.photo); return; }
+    if(t.closest('#sdCancelBtn')) sdCancelDialog(t.closest('#sdCancelBtn').dataset.id);
+  });
+  document.addEventListener('change', (ev)=>{
+    if(!ev.target.closest || !ev.target.closest('#sdAssign')) return;
+    // choosing a PO / supplier changes what the step shows
+    if(ev.target.id === 'sdPo' || ev.target.id === 'sdSup'){ sdReadStep(); sdRenderAssign(); }
+  });
+
+  // ---- the deliveries list + a delivery's detail with its photos ----
+  async function sdLoadList(){
+    $live('sdList').innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    try{
+      const { data, error } = await db.from('site_deliveries').select('*, site_delivery_items(*), site_delivery_photos(id)').order('assigned_at', { ascending:false }).limit(120);
+      if(error) throw error;
+      sd.list = data || []; sdRenderList();
+    }catch(e){
+      const m = describeCloudError(e);
+      $live('sdList').innerHTML = '<div class="empty-state">' + (/site_deliveries|PGRST205|42P01/.test(m) ? 'This page needs migration 20261027_01_site_deliveries.sql to be run in Supabase.' : 'Couldn\u2019t load deliveries: ' + escapeHtml(m)) + '</div>';
+    }
+  }
+  function sdRenderList(){
+    const n = (s)=> sd.list.filter(d=> d.status === s).length;
+    const rows = sd.filter ? sd.list.filter(d=> d.status === sd.filter) : sd.list;
+    $live('sdList').innerHTML = '<div class="sd-filters" id="sdFilters">' + [['assigned', 'To receive'], ['received', 'Received'], ['cancelled', 'Cancelled'], ['', 'All']].map(x=> '<button type="button" class="sd-fl' + (sd.filter === x[0] ? ' on' : '') + '" data-f="' + x[0] + '">' + x[1] + (x[0] ? ' <b>' + n(x[0]) + '</b>' : '') + '</button>').join('') + '</div>' +
+      (rows.length ? rows.map(d=> '<button type="button" class="sd-card sd-open" data-sdopen="' + escapeHtml(d.id) + '"><span class="sd-card-top"><b>' + escapeHtml(d.delivery_no) + ' \u00B7 ' + escapeHtml(d.supplier_name || 'Supplier') + '</b>' + sdChip(d.status) + '</span>' +
+        '<span class="sd-line"><span>Site</span>' + escapeHtml(d.site_label) + '</span><span class="sd-line"><span>Receiver</span>' + escapeHtml(d.assigned_to_name) + (d.expected_on ? ' \u00B7 expected ' + escapeHtml(sdDate(d.expected_on)) : '') + '</span>' +
+        '<span class="sd-line"><span>Items</span>' + sdItemsLine(d) + '</span>' + (d.status === 'received' ? '<span class="sd-line"><span>Proof</span>' + (d.site_delivery_photos || []).length + ' photo' + ((d.site_delivery_photos || []).length === 1 ? '' : 's') + ' \u00B7 ' + escapeHtml(sdDay(d.received_at)) + '</span>' : '') + '</button>').join('') : '<div class="empty-state">Nothing here.</div>');
+  }
+  async function sdOpenDetail(id){
+    const d = sd.list.find(x=> x.id === id); if(!d) return;
+    $live('sdList').style.display = 'none'; $live('sdDetail').style.display = '';
+    $live('sdDetail').innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    let photos = [];
+    if(d.status === 'received'){ try{ const r = await db.from('site_delivery_photos').select('path, uploaded_at').eq('delivery_id', id).order('uploaded_at'); photos = r.data || []; }catch(e){} }
+    const urls = await sdSigned(photos.map(p=> p.path)).catch(()=> ({}));
+    const items = (d.site_delivery_items || []).slice().sort((a, b)=> a.line_no - b.line_no);
+    $live('sdDetail').innerHTML = '<div class="po-ed-top"><button type="button" class="po-back" id="sdDetailBack">&larr; Deliveries</button></div>' +
+      '<div class="sd-head"><b>' + escapeHtml(d.delivery_no) + ' \u00B7 ' + escapeHtml(d.supplier_name || 'Supplier') + '</b>' + sdChip(d.status) + '</div>' +
+      '<dl class="wz-sum"><dt>Site</dt><dd>' + escapeHtml(d.site_label) + '</dd><dt>Receiver</dt><dd>' + escapeHtml(d.assigned_to_name) + '</dd><dt>Assigned</dt><dd>' + escapeHtml(sdDay(d.assigned_at)) + ' by ' + escapeHtml(d.assigned_by_name || '') + '</dd>' +
+      (d.expected_on ? '<dt>Expected</dt><dd>' + escapeHtml(sdDate(d.expected_on)) + '</dd>' : '') + (d.supplier_ref ? '<dt>Reference</dt><dd>' + escapeHtml(d.supplier_ref) + '</dd>' : '') + (d.note ? '<dt>Note</dt><dd>' + escapeHtml(d.note) + '</dd>' : '') +
+      (d.status === 'received' ? '<dt>Received</dt><dd>' + escapeHtml(sdDay(d.received_at)) + (d.receive_note ? ' \u2014 ' + escapeHtml(d.receive_note) : '') + '</dd>' : '') + (d.status === 'cancelled' ? '<dt>Cancelled</dt><dd>' + escapeHtml(d.cancel_reason) + '</dd>' : '') + '</dl>' +
+      '<div class="wz-lines">' + items.map(i=> '<div class="wz-li"><span>' + escapeHtml(i.description) + (i.item_note ? ' <em>' + escapeHtml(i.item_note) + '</em>' : '') + '</span><b>' + (i.qty_received == null ? sdNum(i.qty_expected) + ' expected' : sdNum(i.qty_received) + ' of ' + sdNum(i.qty_expected)) + ' ' + escapeHtml(i.unit || '') + '</b></div>').join('') + '</div>' +
+      (d.status === 'received' ? '<h3 class="sd-h">Proof photos</h3><div class="sd-thumbs">' + (photos.length ? photos.map((p, n)=> urls[p.path] ? '<button type="button" class="sd-thumb" data-photo="' + escapeHtml(urls[p.path]) + '" aria-label="Open photo ' + (n + 1) + '"><img src="' + escapeHtml(urls[p.path]) + '" alt="Proof photo ' + (n + 1) + '"></button>' : '').join('') : '<div class="empty-state">No photos could be loaded.</div>') + '</div>' : '') +
+      (d.status === 'assigned' ? '<button type="button" class="btn btn-secondary" id="sdCancelBtn" data-id="' + escapeHtml(d.id) + '" style="margin-top:12px;">Cancel this delivery</button>' : '');
+  }
+  function sdCancelDialog(id){
+    mtDialog('Cancel this delivery?', '<div class="field"><label>Why?</label><input type="text" data-f="why" placeholder="e.g. supplier rescheduled"></div>', 'Cancel the delivery', async (body)=>{
+      const why = body.querySelector('[data-f="why"]').value.trim();
+      if(!why){ toast('Say why'); return false; }
+      try{ const { error } = await db.rpc('site_delivery_cancel', { p_id:id, p_reason:why }); if(error) throw error; toast('Cancelled'); sdLoadList(); $live('sdDetail').style.display = 'none'; $live('sdList').style.display = ''; }
+      catch(e){ toast('Couldn\u2019t cancel: ' + describeCloudError(e).replace(/^.*?:\s*(?=[A-Z])/, '')); return false; }
+    });
+  }
 
 
   // =====================================================================
@@ -30050,6 +30544,8 @@
     suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
     requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review & fulfil technician requests' },
     myRequests:     { nav:'',                    title:'Material Requests',    sub:'Request materials for your jobs' },
+    siteDelivery:   { nav:'',                    title:'Site Deliveries',      sub:'Supplier to site, received by a worker' },
+    myDeliveries:   { nav:'',                    title:'My Deliveries',        sub:'Receive what a supplier brings to a site' },
     stock:          { nav:'sbNavStock',          title:'Stock on Hand',        sub:'Quantities & value per warehouse' },
     warehouses:     { nav:'sbNavWarehouses',     title:'Warehouses',           sub:'Stock locations & storekeepers' },
     projects:       { nav:'sbNavProjects',       title:'Projects',             sub:'Job orders & material cost' },
@@ -30561,6 +31057,7 @@
   $('techQaServiceReport').addEventListener('click', showServiceReport);
   $('techQaJobOrder').addEventListener('click', ()=> showDispatchView());
   $('techQaMaterials').addEventListener('click', ()=> showPurchasingView('myRequests'));
+  $('techQaDeliveries').addEventListener('click', ()=> showPurchasingView('myDeliveries'));
   $('techQaAttendance').addEventListener('click', ()=> showDtrView());
   $('techQaMessages').addEventListener('click', ()=> showMessagesView());
   $('techQaLeave').addEventListener('click', ()=> showLeaveView());
@@ -32422,7 +32919,8 @@
     bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
     bind('staffNavMyPayslips', ()=>{ showPurchasingView('myPayslips'); setSidebarActive('staffNavMyPayslips'); });
     bind('staffNavErrandReq', ()=>{ showPurchasingView('errandRequests'); setSidebarActive('staffNavErrandReq'); });
-    bind('staffNavMatReq', ()=>{ showPurchasingView('myRequests'); setSidebarActive('staffNavMatReq'); });   // every worker can request materials
+    bind('staffNavMatReq', ()=>{ showPurchasingView('myRequests'); setSidebarActive('staffNavMatReq'); });
+    bind('staffNavMyDeliveries', ()=>{ showPurchasingView('myDeliveries'); setSidebarActive('staffNavMyDeliveries'); });   // every worker can request materials
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -32524,7 +33022,7 @@
   // screens (My Requests / Materials / Tools) are never for staff.
   function staffPurchPageAllowed(key){
     if(!isStaffUser()) return true;
-    if(key === 'myPayslips' || key === 'errandRequests' || key === 'myRequests') return true;   // everyone's own payslips / errand requests / material requests
+    if(key === 'myPayslips' || key === 'errandRequests' || key === 'myRequests' || key === 'myDeliveries') return true;   // everyone's own payslips / errand requests / material requests
     if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
     return purchStaffAllowed(key);
   }
@@ -32627,7 +33125,7 @@
   // ---------------------------------------------------------------------
   // Purchasing screens (purchasing.js / purchase-orders.js / requisitions.js)
   // ---------------------------------------------------------------------
-  const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders', purchasedItems:'pur.purchased_items',
+  const STAFF_PURCH_KEYS = { siteDelivery:'inv.receive', suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders', purchasedItems:'pur.purchased_items',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
     paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands',
@@ -33096,7 +33594,8 @@
       msgrMenuRow('liq', 'My liquidation', 'Send in your receipts', 'data-msgr-go="liq"', msgr.cash.toLiq || '') +
       msgrMenuRow('refund', 'My reimbursement', 'Money you paid first', 'data-msgr-go="reimb"') +
       '<div class="msgr-label">ASK THE OFFICE</div>' + msgrMenuRow('plus', 'Errand requests', 'Ask for a messenger', 'data-msgr-go="errandReq"') +
-      msgrMenuRow('box', 'Request materials', 'Ask for what you need', 'data-msgr-go="requestMaterials"') + '</div>';
+      msgrMenuRow('box', 'Request materials', 'Ask for what you need', 'data-msgr-go="requestMaterials"') +
+      msgrMenuRow('truck', 'My deliveries', 'Receive at a site, with photos', 'data-msgr-go="myDeliveries"') + '</div>';
   }
 
   // ---------- My account ----------
@@ -33134,6 +33633,7 @@
       case 'reimb': msgrSetTab('cash'); return showCashAdvanceView(true, 'reimburse');
       case 'errandReq': return showPurchasingView('errandRequests');
       case 'requestMaterials': return showPurchasingView('myRequests');
+      case 'myDeliveries': return showPurchasingView('myDeliveries');
       case 'password': return showChangePasswordScreen(false);
       case 'activity': return staffOpenActivity();
       case 'signout':
