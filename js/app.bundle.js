@@ -32318,10 +32318,11 @@
   //   Operations today ..... one tile per page they hold (job orders, late,
   //                          awaiting review, new requests, reports to sign off,
   //                          technicians timed in)
-  //   Dispatch board, Technicians status,
-  //   Job order progress,
+  //   Dispatch board, Job order progress,
+  //   Technicians status,
   //   Schedule calendar .... Dispatch (View)
-  //   Live tracker (+ list)  Live Tracker (View) — with both, Technicians status sits beside the map
+  //   Live tracker (+ list)  Live Tracker (View) — with both, Job order progress sits beside the map
+  //                          and the Technicians status table runs full-width below
   //   Time-in / time-out ... only with Technician Attendance (View)
   //   Everything else on the admin dashboard (finance, leave, purchasing,
   //   activity log, charts) is hidden — those stay in Inbox / their own pages.
@@ -32465,7 +32466,7 @@
       if(!opsDockDash(host)){ return; }
       const p = opsPerms();
       const dash = document.getElementById('adminDash');
-      if(dash){ dash.classList.toggle('ops-map', !!p.trk); dash.classList.toggle('ops-disp', !!p.d); }   // layout: Technicians status beside the map
+      if(dash){ dash.classList.toggle('ops-map', !!p.trk); dash.classList.toggle('ops-disp', !!p.d); }   // layout: Job order progress beside the map
       // show only the cards this person may use; hide the rest of the admin dashboard
       OPS_HIDE.forEach(id=> opsSetVis(id, false));
       opsSetVis('prioCard', p.d || p.sr || p.rep);
