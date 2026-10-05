@@ -3174,6 +3174,7 @@
       try{
         const { error } = await db.from('customers').delete().eq('id', id);
         if(error) throw error;
+        equipCountsInvalidate();
         await loadCustomers();
         return true;
       }catch(e){ console.error('delete customer failed', describeCloudError(e)); return false; }
@@ -3270,6 +3271,7 @@
       try{
         const { data, error } = await db.from('customer_equipment').insert(rec).select('id').single();
         if(error) throw error;
+        equipCountsInvalidate();
         await loadCustomerEquipment(customerId);
         return data ? data.id : null;
       }catch(e){ console.error('add customer equipment failed', describeCloudError(e)); return null; }
@@ -3312,6 +3314,7 @@
         : m || 'Could not remove';
       return false;
     }
+    equipCountsInvalidate();
     currentEquipmentCache = currentEquipmentCache.filter(e=>e.id!==id);
     return true;
   }
@@ -3363,12 +3366,56 @@
       EQUIP_FIELD_KEYS.forEach(k=> rec[EQUIP_FIELD_TO_COLUMN[k]] = (fields[k]||'').trim());
       const { error: insErr } = await db.from('customer_equipment').insert(rec);
       if(insErr) throw insErr;
+      equipCountsInvalidate();
       return true;
     }catch(e){
       console.error('admin add customer equipment failed', describeCloudError(e));
       return false;
     }
   }
+  // ---------- Equipment totals (admin Equipment + Customers pages) ----------
+  // How many units are on file, in total and per customer. Reads only customer_id
+  // (a few bytes a row) in pages of 1000 — the server caps one response at 1000 rows,
+  // so a single query would silently stop counting there. Cached for a minute and
+  // cleared whenever equipment or a customer is added, deleted or removed here;
+  // the pages also ask for a fresh count each time they open.
+  let equipCountsCache = null;
+  function equipCountsInvalidate(){ equipCountsCache = null; }
+  async function loadEquipmentCounts(force){
+    if(!force && equipCountsCache && Date.now() - equipCountsCache.at < 60000) return equipCountsCache.data;
+    const out = { total:0, byCustomer:{}, customersWith:0, ok:false, local:false };
+    const add = (cid)=>{ out.total++; const k = String(cid == null ? '' : cid); out.byCustomer[k] = (out.byCustomer[k] || 0) + 1; };
+    const online = await ensureCloud();
+    if(online){
+      try{
+        const PAGE = 1000;
+        for(let from = 0; ; from += PAGE){
+          const { data, error } = await db.from('customer_equipment').select('customer_id').order('id', { ascending:true }).range(from, from + PAGE - 1);
+          if(error) throw error;
+          (data || []).forEach(r=> add(r.customer_id));
+          if(!data || data.length < PAGE) break;
+        }
+        out.ok = true;
+      }catch(e){ console.error('equipment count failed', describeCloudError(e)); out.total = 0; out.byCustomer = {}; }
+    }
+    if(!online){
+      // Offline only (a failed cloud read is reported as a failure, never as 0): count each customer's
+      // locally cached list, same fallback as loadAllCustomerEquipment
+      out.local = true;
+      try{
+        if(customersCache.length === 0) await loadCustomers();
+        for(const cu of customersCache){
+          try{ const res = await window.storage.get('cequip:' + cu.id, false); (res ? JSON.parse(res.value) : []).forEach(()=> add(cu.id)); }catch(e){}
+        }
+        out.ok = true;
+      }catch(e){}
+    }
+    out.customersWith = Object.keys(out.byCustomer).filter(k=> k && out.byCustomer[k] > 0).length;
+    if(out.ok) equipCountsCache = { at: Date.now(), data: out };
+    return out;
+  }
+  const equipUnits = (n)=> n + ' unit' + (n === 1 ? '' : 's');
+
   // Loads every equipment record across every customer, with the owning
   // customer's name attached — powers the admin "Customer Equipment List"
   // master view. (loadCustomerEquipment above is scoped to one customer,
@@ -4288,6 +4335,8 @@
     body.innerHTML = '<div class="empty-state">Loading…</div>';
     const cloudOn = await ensureCloud();
     await loadCustomers();
+    const counts = await loadEquipmentCounts();   // cached for a minute; cleared on any add / delete
+    renderEquipTotalBar('custEquipTotalBar', counts, customersCache.length);
     body.innerHTML = '';
     if(!cloudOn){
       const note = document.createElement('div');
@@ -4311,7 +4360,7 @@
         '<div class="user-card-head" data-act="toggle" style="cursor:pointer;"><div>'+
           '<div class="u-name">'+escapeHtml(c.name)+'</div>'+
           '<div class="u-status">'+escapeHtml(c.address||'No address on file')+'</div>'+
-        '</div><span class="card-caret">▾</span></div>'+
+        '</div>'+(counts.ok ? '<span class="cust-eq-count' + ((counts.byCustomer[String(c.id)] || 0) ? '' : ' zero') + '" title="Equipment on file">'+equipUnits(counts.byCustomer[String(c.id)] || 0)+'</span>' : '')+'<span class="card-caret">▾</span></div>'+
         '<div class="user-edit-panel" data-panel="1">'+
           '<div class="cust-detail-row"><b>Address:</b> '+escapeHtml(c.address||'—')+'</div>'+
           '<div class="cust-detail-row"><b>Contact No.:</b> '+escapeHtml(c.contactNo||'—')+'</div>'+
@@ -4523,14 +4572,26 @@
   // customer, in one master view across every customer, not scoped to
   // whichever one is open in Manage Customers) ----------
   let equipListTab = 'edit'; // 'edit' | 'add' | 'delete'
+  let equipPageCounts = null;
 
   // (Re)builds the customer filter (Edit/Delete tabs) and the customer
   // picker on the Add tab from the shared customers list, keeping whatever
   // was already selected if it's still there.
+  // The total at the top of the Equipment and Customers pages (same wording on both)
+  function renderEquipTotalBar(id, counts, customerTotal){
+    const el = $(id); if(!el) return;
+    if(!counts || !counts.ok){ el.innerHTML = '<span class="eq-total-num">\u2014</span><span class="eq-total-text">Couldn\u2019t count the equipment right now.</span>'; return; }
+    el.innerHTML = '<span class="eq-total-num">' + counts.total.toLocaleString('en-PH') + '</span>' +
+      '<span class="eq-total-text"><b>Total equipment on file</b><span>' + counts.customersWith.toLocaleString('en-PH') + ' of ' + customerTotal.toLocaleString('en-PH') + ' customer' + (customerTotal === 1 ? '' : 's') + ' have equipment' + (counts.local ? ' \u00B7 saved on this device only' : '') + '</span></span>';
+  }
   async function populateEquipmentCustomerSelects(){
     if(customersCache.length===0) await loadCustomers();
+    const counts = await loadEquipmentCounts(true);
+    equipPageCounts = counts;
+    renderEquipTotalBar('equipTotalBar', counts, customersCache.length);
     const sorted = customersCache.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-    const opts = sorted.map(c=> '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>').join('');
+    // each customer shows how many units they have, so the right one is easy to pick
+    const opts = sorted.map(c=> '<option value="'+c.id+'">'+escapeHtml(c.name)+(counts.ok ? ' ('+(counts.byCustomer[String(c.id)] || 0)+')' : '')+'</option>').join('');
     const filterSel = $('equipmentListCustomerFilter');
     const keepFilter = filterSel.value;
     filterSel.innerHTML = '<option value="">Search and select a customer…</option>' + opts;
@@ -4577,6 +4638,10 @@
       });
     }
     items.sort((a,b)=> (a.customerName||'').localeCompare(b.customerName||''));
+    // "5 units" for the customer, or "2 of 5 match" while searching
+    const ofAll = all.filter(e=> String(e.customerId)===String(custId)).length;
+    const cl = $('equipListCountLine');
+    if(cl) cl.textContent = q ? items.length + ' of ' + equipUnits(ofAll) + ' match' : equipUnits(ofAll) + ' for this customer';
     // One query for the whole (already customer-scoped) list rather than
     // one per card — see cloudGetEquipmentPhotoCounts in
     // equipment-photos.js.
@@ -4625,7 +4690,7 @@
         card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
           if(!await uiConfirm('Delete '+(e.equipLocation || 'this unit')+' for '+e.customerName+'?\n\nPast service reports are kept (each keeps the unit details it was filed with); they just won\u2019t be linked to this unit any more. Its photos are removed.')) return;
           const ok = await cloudDeleteCustomerEquipment(e.id);
-          if(ok){ toast('Removed'); renderEquipmentMasterList(); }
+          if(ok){ toast('Removed'); populateEquipmentCustomerSelects(); renderEquipmentMasterList(); }
           else toast(cloudDeleteCustomerEquipment.lastError || 'Could not remove');
         });
       }
@@ -5016,6 +5081,7 @@
     $('eqAddSaveBtn').disabled = false;
     if(!result){ toast('Could not add — check your connection'); return; }
     toast('Equipment added');
+    populateEquipmentCustomerSelects();   // refresh the total and the per-customer counts
     EQUIP_FIELD_KEYS.forEach(k=>{
       const el = $('eqAdd'+k.charAt(0).toUpperCase()+k.slice(1));
       if(el) el.value = '';
