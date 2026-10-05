@@ -264,7 +264,9 @@
     preview:  { nav:'',                 title:'Preview',          sub:'What this user sees' },
     tracker:  { nav:'',                 title:'Live Tracker',     sub:'Where technicians are right now' },
     templates:{ nav:'',                 title:'Role Templates',   sub:'Saved sets of departments & page levels' },
-    inbox:    { nav:'',                 title:'Inbox',            sub:'Work waiting on you, oldest first' }
+    inbox:    { nav:'',                 title:'Inbox',            sub:'Work waiting on you, oldest first' },
+    msgrMenu:    { nav:'', title:'Menu',       sub:'' },
+    msgrAccount: { nav:'', title:'My account', sub:'' }
   };
   let staffViewHiding = false;
 
@@ -447,11 +449,15 @@
     target.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     await staffRefreshAccess();
     if(!isStaffUser()) return;
+    // Messenger / liaison accounts get the simple mission home (messenger.js)
+    try{ msgrApply(); }catch(e){}
+    if(typeof isMessengerUser === 'function' && isMessengerUser()){ msgrSetTab('home'); await msgrRenderHome(target); return; }
     await staffRenderHome(target, currentUser.access || {});
   }
 
   // Sidebar for staff: granted + opened pages (Phase 3), My Team for Heads.
   function staffRenderSidebar(){
+    try{ msgrApply(); }catch(e){}   // messenger.js: bottom bar instead of the sidebar
     const grp = $('sidebarStaffGroup');
     if(!grp) return;
     const staff = isStaffUser();

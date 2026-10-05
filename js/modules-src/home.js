@@ -2,6 +2,7 @@
   function setHeaderTitle(title, sub){
     $('brandName').textContent = title;
     $('brandSub').textContent = sub || '';
+    if(typeof msgrOnHeader === 'function') msgrOnHeader(title);
   }
 
   // forceMine: office staff opening their OWN attendance from My HR, even

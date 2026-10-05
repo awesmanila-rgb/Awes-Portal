@@ -670,6 +670,8 @@
           : '<div class="pay-banner">' + (open.length ? open.length + ' open \u00B7 ' + dueToday + ' due today' : 'No errands right now.') + '</div>') +
         (open.length ? open.map(e=> erRow(e, { mine:true })).join('') : '') +
         (recent.length ? '<div class="po-sec-title" style="margin-top:14px;">Recent</div>' + recent.map(e=> erRow(e, { mine:true })).join('') : '');
+      // opened from the messenger Home: go straight to that errand (messenger.js)
+      if(er.pendingOpen){ const pid = er.pendingOpen; er.pendingOpen = null; erOpenDetail(pid); }
     }catch(e){ box.innerHTML = '<div class="empty-state">' + erErr('Couldn\u2019t load your errands: ', e) + '</div>'; }
   }
   $('erMyBody').addEventListener('click', (e)=>{
