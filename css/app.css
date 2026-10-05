@@ -5534,7 +5534,7 @@ body.role-messenger.msgr-own-head #staffView{ padding-top:20px; }
    The Super Admin's #adminDash grid is docked inside #staffPanel_home > #opsDash.
    Its named grid areas are the admin layout; for Operations staff the visible cards are
    re-flowed: summary tiles, Needs you now, dispatch board, then the rest. */
-body.has-ops-dash #staffView{ max-width:1200px; }
+body.has-ops-dash #staffView{ max-width:1360px; }
 body.has-ops-dash #staffPanel_home{ display:flex; flex-direction:column; gap:16px; }
 body.has-ops-dash #staffPanel_home > *{ order:0; }
 body.has-ops-dash #staffPanel_home > :first-child{ order:-3; }              /* "Getting started" guide card, when shown */
@@ -5542,15 +5542,26 @@ body.has-ops-dash #staffPanel_home > .card:has(.stf-hello){ order:-2; }       /*
 body.has-ops-dash #staffPanel_home > #opsDash{ order:-1; }                    /* the dashboard, right under the greeting */
 body.has-ops-dash #staffPanel_home > .card{ margin:0; }
 #opsDash #adminDash{ margin:0; }
-/* !important: the admin grid has many :has() variants that would otherwise outrank this */
+/* !important: the admin grid has many :has() variants that would otherwise outrank this.
+   Layout depends on what the person may see (classes set by ops-dashboard.js):
+     ops-map  = Live Tracker (the map + its technician list)
+     ops-disp = Dispatch (board, Technicians status, progress, calendar)
+   With both, Technicians status sits BESIDE the map. */
 body.role-admin #opsDash #adminDash.adm-v2{
   grid-template-columns:minmax(0,1fr) !important;
-  grid-template-areas:"ops" "prio" "board" "ptech" "prog" "cal" "track" "avail" !important;
+  grid-template-areas:"ops" "prio" "board" "track" "ptech" "prog" "cal" !important;
 }
 @media (min-width:1100px){
   body.role-admin #opsDash #adminDash.adm-v2{
     grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
-    grid-template-areas:"ops ops" "prio prio" "board board" "ptech prog" "cal cal" "track avail" !important;
+    grid-template-areas:"ops ops" "prio prio" "board board" "ptech prog" "cal cal" !important;       /* Dispatch only */
+  }
+  body.role-admin #opsDash #adminDash.adm-v2.ops-map{
+    grid-template-areas:"ops ops" "prio prio" "track track" !important;                                /* Live Tracker only */
+  }
+  body.role-admin #opsDash #adminDash.adm-v2.ops-map.ops-disp{
+    grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) !important;      /* the status table needs more width than the map */
+    grid-template-areas:"ops ops" "prio prio" "board board" "track ptech" "prog prog" "cal cal" !important;   /* map | Technicians status */
   }
 }
 body.role-admin #opsDash #opsStatsCard{ grid-area:ops !important; }
@@ -5559,8 +5570,14 @@ body.role-admin #opsDash #prioBoardCard{ grid-area:board !important; }
 body.role-admin #opsDash #prioTechCard{ grid-area:ptech !important; }
 body.role-admin #opsDash #prioProgressCard{ grid-area:prog !important; }
 body.role-admin #opsDash #homeScheduleCalendarCard{ grid-area:cal !important; }
+body.role-admin #opsDash #dashTwoCol{ display:contents; }                      /* its two cards join the grid directly */
 body.role-admin #opsDash #homeTrackerCard{ grid-area:track !important; }
-body.role-admin #opsDash #homeTechListCard{ grid-area:avail !important; }
+/* (#homeTechListCard stays hidden, as on the Super Admin dashboard: the Technicians status table replaces it) */
+@media (min-width:1100px){
+  /* beside the map the two cards read as a pair: same top, same minimum height */
+  body.role-admin #opsDash #adminDash.ops-map.ops-disp #homeTrackerCard,
+  body.role-admin #opsDash #adminDash.ops-map.ops-disp #prioTechCard{ align-self:stretch; }
+}
 #opsStats{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
 #opsStatsCard .card-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 #opsStatsCard .ops-asof{ font-size:12px; font-weight:600; color:var(--text-muted); }
