@@ -26223,15 +26223,16 @@
     finally{ btn.disabled = false; }
   }
 
-  async function erDeliver(preHow){
+  async function erDeliver(preHow, preName){
     const x = er.cur;
     const how = (preHow === true || preHow === false) ? preHow : await uiConfirm('Hand over the items\n\nWill the receiver sign on your phone? Government offices and banks usually stamp a receiving copy instead \u2014 then take a photo of it.',
       { ok:'Receiver signs', cancel:'Photo of stamped copy' });
     const p = { items: x.items || [] };
     if(how){
-      const name = await uiPrompt('Receiver\u2019s name', x.contact_name || '', { ok:'Next', multiline:false });
+      // preName: the guided screen already asked for the name (and skips the position question)
+      const name = preName != null ? preName : await uiPrompt('Receiver\u2019s name', x.contact_name || '', { ok:'Next', multiline:false });
       if(name == null) return; if(!name.trim()){ toast('Enter the receiver\u2019s name'); return; }
-      const pos = await uiPrompt('Receiver\u2019s position / office (optional)', '', { ok:'Next', multiline:false });
+      const pos = preName != null ? '' : await uiPrompt('Receiver\u2019s position / office (optional)', '', { ok:'Next', multiline:false });
       if(pos == null) return;
       const rs = await erSignature('Receiver: ' + name.trim(), 'Received the items listed on ' + x.errand_no);
       if(!rs) return;
@@ -26320,13 +26321,19 @@
   // My Errands (messenger)
   // =====================================================================
   async function erShowMine(){
-    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // list uses the normal header
+    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // messenger list draws its own heading
     const box = $('erMyBody');
     box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     try{
       const { data, error } = await db.from('errands').select('*').eq('assigned_to', currentUser.id).order('due_at', { ascending:true, nullsFirst:false }).limit(200);
       if(error) throw error;
       const all = data || [];
+      // Messenger accounts: the simple Errands tab (messenger.js); open a chosen errand straight away
+      if(typeof msgrRenderMine === 'function' && isMessengerUser()){
+        const pid = er.pendingOpen; er.pendingOpen = null;
+        if(pid){ erOpenDetail(pid); return; }
+        msgrRenderMine(box, all); return;
+      }
       const open = all.filter(e=> ['assigned', 'in_progress'].includes(e.status));
       const recent = all.filter(e=> ['done', 'failed', 'closed'].includes(e.status)).reverse().slice(0, 15);
       const late = open.filter(erOverdue).length;
@@ -29792,7 +29799,9 @@
     templates:{ nav:'',                 title:'Role Templates',   sub:'Saved sets of departments & page levels' },
     inbox:    { nav:'',                 title:'Inbox',            sub:'Work waiting on you, oldest first' },
     msgrMenu:    { nav:'', title:'Menu',       sub:'' },
-    msgrAccount: { nav:'', title:'My account', sub:'' }
+    msgrAccount: { nav:'', title:'My account', sub:'' },
+    msgrAlerts:  { nav:'', title:'Alerts',     sub:'' },
+    msgrCash:    { nav:'', title:'Cash',       sub:'' }
   };
   let staffViewHiding = false;
 
@@ -30915,6 +30924,7 @@
   }
 
   async function staffOpenInbox(){
+    if(typeof isMessengerUser === 'function' && isMessengerUser()) return msgrShowAlerts();   // messenger.js: simple Alerts screen
     showStaffView('inbox');
     const target = $('staffPanel_inbox');
     target.innerHTML = '<div class="empty-state">Loading\u2026</div>';
@@ -31478,7 +31488,7 @@
   // =====================================================================
 
   const msgr = { tab:'home', cash:{ toLiq:0, pending:0 }, openErrands:0 };
-  const MSGR_OWN_HEADER = ['Home', 'Menu', 'My account'];   // screens that draw their own heading
+  const MSGR_OWN_HEADER = ['Home', 'Menu', 'My account', 'Alerts', 'Cash', 'My Errands'];   // screens that draw their own heading
 
   function isMessengerUser(){ return !!(typeof isStaffUser === 'function' && isStaffUser() && can('adm.my_errands', 'view')); }
 
@@ -31558,10 +31568,18 @@
     }catch(e){ return ''; }
   }
   function msgrPlace(e){ return String(e.destination || e.address || '').trim(); }
-  function msgrNeedsYou(){
+  // Everything in the staff Inbox is work waiting on him ('waiting' / 'overdue' / 'escalated' only say
+  // how urgent), plus his own cash advances still to be liquidated.
+  const MSGR_RANK = { escalated:0, overdue:1, waiting:2 };
+  function msgrAlertList(){
     const items = (typeof stfInbox !== 'undefined' && stfInbox && stfInbox.items) ? stfInbox.items : [];
-    return items.filter(x=> x.state !== 'waiting');
+    const out = items.map(x=> ({ src:'inbox', x, state:x.state || 'waiting', title:x.label || 'Waiting for you',
+      sub:[x.ref_label, x.title].filter(Boolean).join(' \u00B7 '), age:x.age_hours, module:x.module }));
+    if(msgr.cash.toLiq > 0) out.push({ src:'liq', state:'waiting', title:'Send in your receipts',
+      sub:'My liquidation \u00B7 ' + msgr.cash.toLiq + ' cash advance' + (msgr.cash.toLiq === 1 ? '' : 's') + ' to close', module:'fin.liquidation' });
+    return out.sort((a, b)=> (MSGR_RANK[a.state] != null ? MSGR_RANK[a.state] : 2) - (MSGR_RANK[b.state] != null ? MSGR_RANK[b.state] : 2));
   }
+  const msgrNeedsYou = msgrAlertList;
 
   // ---------- data ----------
   async function msgrLoad(){
@@ -31729,7 +31747,7 @@
     const b = ev.target.closest('[data-msgr]');
     if(!b || !home || !home.contains(b) || !isMessengerUser()) return;
     const act = b.getAttribute('data-msgr'), id = b.getAttribute('data-id');
-    if(act === 'alerts'){ msgrSetTab('home'); staffOpenInbox(); }
+    if(act === 'alerts'){ msgrShowAlerts(); }
     else if(act === 'retry') msgrRenderHome(home);
     else if(act === 'timein'){ b.disabled = true; try{ await dtrDoTimeIn(); }finally{ b.disabled = false; } msgrRenderHome(home); }
     else if(act === 'timeout'){
@@ -31762,7 +31780,7 @@
       if(!keys.includes(kk)) keys.push(kk);
     });
     const counts = {};
-    msgrNeedsYou().forEach(x=>{ const m = STAFF_TECH_HUB.includes(x.module) ? 'tech.hub' : x.module; counts[m] = (counts[m] || 0) + 1; });
+    ((typeof stfInbox !== 'undefined' && stfInbox.items) || []).forEach(x=>{ const m = STAFF_TECH_HUB.includes(x.module) ? 'tech.hub' : x.module; counts[m] = (counts[m] || 0) + 1; });
     return keys.map(k=>{
       const m = typeof stfModule === 'function' ? stfModule(k) : null;
       return { key:k, label: k === 'tech.hub' ? 'Technicians' : (STAFF_NAV_LABELS[k] || (m ? m.label : k)), group: staffNavGroup(k), n: counts[k] || 0 };
@@ -31803,7 +31821,7 @@
       '<div class="msgr-label">MY TIME AND PAY</div>' +
       msgrMenuRow('clock', 'My attendance', 'Time in and out', 'data-msgr-go="dtr"') + msgrMenuRow('leave', 'My leave', 'Days off', 'data-msgr-go="leave"') + msgrMenuRow('slip', 'My payslips', 'Your pay', 'data-msgr-go="payslips"') +
       '<div class="msgr-label">MY MONEY</div>' +
-      msgrMenuRow('cash', 'My cash advance', 'Money for errands', 'data-msgr-go="cash"', msgr.cash.pending || '') +
+      msgrMenuRow('cash', 'My cash advance', 'Money for errands', 'data-msgr-go="cashNew"', msgr.cash.pending || '') +
       msgrMenuRow('liq', 'My liquidation', 'Send in your receipts', 'data-msgr-go="liq"', msgr.cash.toLiq || '') +
       msgrMenuRow('refund', 'My reimbursement', 'Money you paid first', 'data-msgr-go="reimb"') +
       '<div class="msgr-label">ASK THE OFFICE</div>' + msgrMenuRow('plus', 'Errand requests', 'Ask for a messenger', 'data-msgr-go="errandReq"') + '</div>';
@@ -31832,14 +31850,16 @@
     switch(where){
       case 'home': return msgrShowHome();
       case 'errands': msgrSetTab('errands'); return showPurchasingView('myErrands');
-      case 'cash': msgrSetTab('cash'); return showCashAdvanceView(true, 'new');
+      case 'cash': return msgrShowCash();
+      case 'cashNew': msgrSetTab('cash'); return showCashAdvanceView(true, 'new');
+      case 'alerts': return msgrShowAlerts();
       case 'menu': return msgrShowMenu();
       case 'account': return msgrShowAccount();
       case 'dtr': return showDtrView(true);
       case 'leave': return showLeaveView(true);
       case 'payslips': return showPurchasingView('myPayslips');
-      case 'liq': return showCashAdvanceView(true, 'liquidate');
-      case 'reimb': return showCashAdvanceView(true, 'reimburse');
+      case 'liq': msgrSetTab('cash'); return showCashAdvanceView(true, 'liquidate');
+      case 'reimb': msgrSetTab('cash'); return showCashAdvanceView(true, 'reimburse');
       case 'errandReq': return showPurchasingView('errandRequests');
       case 'password': return showChangePasswordScreen(false);
       case 'activity': return staffOpenActivity();
@@ -31854,7 +31874,7 @@
       const b = ev.target.closest('[data-msgr-tab]'); if(!b) return;
       msgrGo(b.getAttribute('data-msgr-tab'));
     });
-    ['staffPanel_msgrMenu', 'staffPanel_msgrAccount'].forEach(id=>{
+    ['staffPanel_msgrMenu', 'staffPanel_msgrAccount', 'staffPanel_msgrAlerts', 'staffPanel_msgrCash'].forEach(id=>{
       const el = $(id); if(!el) return;
       el.addEventListener('click', (ev)=>{
         const go = ev.target.closest('[data-msgr-go]');
@@ -31862,7 +31882,7 @@
         const mod = ev.target.closest('[data-msgr-module]');
         if(mod){ staffOpenModule(mod.getAttribute('data-msgr-module')); return; }
         const bell = ev.target.closest('[data-msgr="alerts"]');
-        if(bell) staffOpenInbox();
+        if(bell) msgrShowAlerts();
       });
     });
   })();
@@ -31956,6 +31976,15 @@
       card('stamp', 'stamp', 'They stamp a copy', 'Banks and government offices usually do this. You take a photo of it.') +
       msgrTap('you add the receiver\u2019s name and signature, or a photo of the stamped copy.') + msgrLink('problem', 'Can\u2019t finish this errand?', ' danger');
   }
+  function msgrGSignName(e, plan){
+    const bar = plan.total ? '<div class="msgr-segs">' + Array.from({ length: plan.total }, (_, i)=> '<span class="msgr-seg ' + (i < plan.doneN ? 'g' : i === plan.doneN ? 'b' : '') + '"></span>').join('') + '</div>' : '';
+    return '<div class="msgr-g-top"><button type="button" class="msgr-backbtn" data-msgr-g="handback">' + msgrIc('back', 22, 2.8) + 'Back</button>' +
+      (plan.total ? '<span class="msgr-pill">Step ' + plan.total + ' of ' + plan.total + '</span>' : '') + '</div>' + bar +
+      '<div><div class="msgr-g-h">Ask them to sign</div><div class="msgr-g-sub">Hand your phone to the receiver.</div></div>' +
+      '<label class="msgr-field"><span class="msgr-label">RECEIVER\u2019S NAME</span><input id="msgrRecvName" class="msgr-input" type="text" autocomplete="off" value="' + msgrEsc(e.contact_name || '') + '" placeholder="Type their name"></label>' +
+      '<button type="button" class="msgr-big" data-msgr-g="signgo">' + msgrIc('pen', 30) + '<span>ASK THEM TO SIGN</span></button>' +
+      msgrTap('a box opens for the receiver to sign with a finger. Then you sign once, and the hand-over is saved.');
+  }
   function msgrGFinish(e, plan){
     const note = (msgr.gNoteFor === e.id && msgr.gNote) ? '<div class="msgr-g-line">' + msgrIc('info', 20) + '<span>' + msgrEsc(msgr.gNote) + '</span></div>' : '';
     return msgrGTop(e, plan, true) + '<div class="msgr-g-center">' + msgrCircle('done').replace('msgr-circ done', 'msgr-circ done huge') +
@@ -32008,7 +32037,7 @@
       const plan = msgrGPlan(e);
       const cur = plan.ck.find(s=> !s.done);
       if(cur) html = msgrGStepScreen(e, plan, cur);
-      else if(plan.needTx && !er.tx) html = msgrGHandOver(e, plan);
+      else if(plan.needTx && !er.tx) html = (msgr.gHandSign === e.id) ? msgrGSignName(e, plan) : msgrGHandOver(e, plan);
       else html = msgrGFinish(e, plan);
     }
     else if(st === 'done' && er.justDone === e.id){ msgrGComplete(box, e); return true; }
@@ -32035,8 +32064,15 @@
           if(t == null) return;
           msgr.gNote = t.trim(); msgr.gNoteFor = x.id; return redraw();
         }
+        if(act === 'handback'){ msgr.gHandSign = null; return redraw(); }
+        if(act === 'hand' && b.dataset.how === 'sign'){ msgr.gHandSign = x.id; return redraw(); }
         b.disabled = true;
-        if(act === 'hand'){ await erDeliver(b.dataset.how === 'sign'); return; }
+        if(act === 'hand'){ await erDeliver(false); return; }
+        if(act === 'signgo'){
+          const inp = $('msgrRecvName'), name = inp ? inp.value.trim() : '';
+          if(!name){ toast('Type the receiver\u2019s name first'); if(inp) inp.focus(); return; }
+          await erDeliver(true, name); return;
+        }
         if(act === 'finish'){
           const loc = await erLoc(); if(!loc) return;
           const { error } = await db.rpc('errand_complete', { p_id:x.id, p_note:(msgr.gNoteFor === x.id ? msgr.gNote : '') || '', p_loc:loc });
@@ -32062,6 +32098,96 @@
       finally{ b.disabled = false; }
     });
   })();
+
+  // =====================================================================
+  // Alerts (the bell) — everything waiting on him, most urgent first
+  // =====================================================================
+  const MSGR_ALERT_ICON = { adm:'list', fin:'cash', hr:'clock', inv:'box', pur:'cart', tools:'tool', ops:'truck' };
+  async function msgrShowAlerts(){
+    msgrSetTab('home');
+    showStaffView('msgrAlerts');
+    const target = $('staffPanel_msgrAlerts');
+    target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    await Promise.all([msgrLoad(), (typeof staffLoadInbox === 'function' ? staffLoadInbox() : null)]);
+    const list = msgr.alerts = msgrAlertList();
+    const card = (a, i)=>{
+      const sev = a.state === 'escalated' ? 'red' : a.state === 'overdue' ? 'red' : '';
+      const tag = a.state === 'escalated' ? '<span class="msgr-tag red">ESCALATED</span>' : a.state === 'overdue' ? '<span class="msgr-tag red">OVERDUE</span>' : '';
+      const wait = a.src === 'inbox' && a.age != null && typeof staffFmtWait === 'function' ? 'Waiting ' + staffFmtWait(a.age) : '';
+      return '<div class="msgr-alert ' + sev + '"><div class="msgr-alert-top"><span class="msgr-mic warn">' + msgrIc(MSGR_ALERT_ICON[String(a.module || '').split('.')[0]] || 'bell', 24) + '</span>' +
+        '<div class="msgr-alert-main">' + tag + '<div class="msgr-alert-t">' + msgrEsc(a.title) + '</div>' + (a.sub ? '<div class="msgr-alert-s">' + msgrEsc(a.sub) + '</div>' : '') +
+        (wait ? '<div class="msgr-alert-w">' + msgrEsc(wait) + '</div>' : '') + '</div></div>' +
+        '<button type="button" class="msgr-open" data-msgr-alert="' + i + '"><span>Open</span>' + msgrIc('arrow', 22, 2.8) + '</button></div>';
+    };
+    target.innerHTML = '<div class="msgr-page"><button type="button" class="msgr-backbtn" data-msgr-go="home">' + msgrIc('back', 22, 2.8) + 'Back</button>' +
+      '<div><div class="msgr-title">Alerts</div><div class="msgr-g-sub">' + (list.length ? list.length + ' thing' + (list.length === 1 ? '' : 's') + ' need' + (list.length === 1 ? 's' : '') + ' you' : 'You\u2019re all caught up') + '</div></div>' +
+      (list.length ? '<div class="msgr-label amber">NEEDS YOU</div>' + list.map(card).join('') + msgrTap('you go straight to the page that needs you. Done items leave this list.')
+        : '<div class="msgr-g-center">' + msgrCircle('done').replace('msgr-circ done', 'msgr-circ done huge') + '<div class="msgr-g-sub">Nothing is waiting for you right now.</div></div>' +
+          '<button type="button" class="msgr-big" data-msgr-go="home">' + msgrIc('home', 30) + '<span>BACK TO HOME</span></button>') + '</div>';
+  }
+  function msgrOpenAlert(a){
+    if(!a) return;
+    if(a.src === 'liq') return msgrGo('liq');
+    const x = a.x;
+    if(x.kind === 'errand_todo' && x.ref_id) return msgrOpenErrand(x.ref_id);
+    if(/_endorse$/.test(x.kind || '')) return staffOpenTeam();
+    if(x.kind === 'report_signoff') return srOpenReviewQueue();
+    if(x.kind === 'jo_review') return showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); });
+    return staffOpenModule(x.module);
+  }
+  document.addEventListener('click', (ev)=>{
+    const b = ev.target.closest('[data-msgr-alert]');
+    if(b && isMessengerUser()) msgrOpenAlert((msgr.alerts || [])[Number(b.getAttribute('data-msgr-alert'))]);
+  });
+
+  // =====================================================================
+  // Errands tab — to do (in order), done today, earlier
+  // =====================================================================
+  function msgrRenderMine(box, all){
+    const { open, done, failed } = msgrSplit(all);
+    const late = open.filter(e=> typeof erOverdue === 'function' && erOverdue(e)).length;
+    const doneIds = new Set(done.concat(failed).map(e=> e.id));
+    const earlier = all.filter(e=> ['done', 'failed', 'closed'].includes(e.status) && !doneIds.has(e.id))
+      .sort((a, b)=> String(b.completed_at || b.failed_at || b.closed_at || '').localeCompare(String(a.completed_at || a.failed_at || a.closed_at || ''))).slice(0, 10);
+    const sub = open.length ? open.length + ' to do' + (late ? ' \u00B7 ' + late + ' late' : '') : 'Nothing to do right now';
+    const rowFor = (e, n, kind)=> msgrRow(e, n, kind);
+    document.body.classList.add('msgr-own-head');
+    box.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-title">My errands</div><div class="msgr-g-sub" style="margin-top:4px;">' + sub + '</div></div>' + msgrBellHtml() + '</div>' +
+      (late ? '<div class="msgr-banner">' + msgrIc('clock', 22) + '<span><b>' + late + ' late.</b> Finish ' + (late === 1 ? 'it' : 'them') + ', or open it and tap \u201CCan\u2019t finish\u201D so the office can reschedule.</span></div>' : '') +
+      (open.length ? '<div class="msgr-label">TO DO, IN THIS ORDER</div><div class="msgr-list">' + open.map((e, i)=> rowFor(e, i + 1, e.status === 'in_progress' ? 'prog' : 'todo')).join('') + '</div>'
+        : '<div class="msgr-card"><div class="msgr-done-line">' + msgrCircle('done') + '<div><div class="msgr-card-t">All caught up</div><p class="msgr-p">The office will tell you when a new errand is ready.</p></div></div></div>') +
+      (done.length || failed.length ? '<div class="msgr-label">DONE TODAY</div><div class="msgr-list">' + done.map(e=> rowFor(e, 0, 'done')).join('') + failed.map(e=> rowFor(e, 0, 'failed')).join('') + '</div>' : '') +
+      (earlier.length ? '<div class="msgr-label">EARLIER</div><div class="msgr-list">' + earlier.map(e=> rowFor(e, 0, e.status === 'failed' ? 'failed' : 'done')).join('') + '</div>' : '') + '</div>';
+  }
+  (function msgrMineWire(){
+    const body = $('erMyBody'); if(!body) return;
+    body.addEventListener('click', (ev)=>{
+      if(!isMessengerUser()) return;
+      const row = ev.target.closest('[data-msgr-errand]');
+      if(row){ erOpenDetail(row.getAttribute('data-msgr-errand')); return; }
+      const bell = ev.target.closest('[data-msgr="alerts"]');
+      if(bell) msgrShowAlerts();
+    });
+  })();
+
+  // =====================================================================
+  // Cash tab — three plain choices, each opening the page that already exists
+  // =====================================================================
+  async function msgrShowCash(){
+    msgrSetTab('cash');
+    showStaffView('msgrCash');
+    const target = $('staffPanel_msgrCash');
+    target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    await Promise.all([msgrLoad(), (typeof staffLoadInbox === 'function' ? staffLoadInbox() : null)]);
+    const card = (go, icon, t, s, hint, n)=> '<button type="button" class="msgr-choice small" data-msgr-go="' + go + '"><span class="msgr-mic big">' + msgrIc(icon, 30, 2.2) + '</span>' +
+      '<span class="msgr-mrow-main"><span class="msgr-choice-t">' + t + '</span><span class="msgr-mrow-s">' + s + '</span>' + (hint ? '<span class="msgr-choice-h">' + hint + '</span>' : '') + '</span>' +
+      (n ? '<span class="msgr-count">' + n + '</span>' : '') + '<span class="msgr-chev">' + msgrIc('chev', 24, 3) + '</span></button>';
+    target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-title">Cash</div><div class="msgr-g-sub" style="margin-top:4px;">Money for your errands</div></div>' + msgrBellHtml() + '</div>' +
+      (msgr.cash.toLiq ? '<div class="msgr-banner">' + msgrIc('liq', 22) + '<span><b>' + msgr.cash.toLiq + ' to close.</b> Send in your receipts for the cash you received.</span></div>' : '') +
+      card('cashNew', 'cash', 'Ask for cash', 'Cash advance', 'Need money for an errand? Ask here first.', msgr.cash.pending) +
+      card('liq', 'liq', 'Send in your receipts', 'Liquidation', 'Show how you used the cash.', msgr.cash.toLiq) +
+      card('reimb', 'refund', 'Money I paid first', 'Reimbursement', 'Paid with your own money? Ask to get it back.', 0) + '</div>';
+  }
 
 
   // =====================================================================
