@@ -1,3 +1,18 @@
+// Bumped to v218 — warehouse movements as a four-step screen (From > To > Items > Review) on Receive / Issue / Return / Transfer.
+// Re-fetch css/app.css/js/app.bundle.js.
+//
+// Bumped to v217 — warehouse movements: drawn warehouse tiles and the From > To strip on Receive / Issue / Return / Transfer.
+// Re-fetch css/app.css/js/app.bundle.js.
+//
+// Bumped to v216 — Materials Monitor (five stages, one list) replaces the many-step views as the default.
+// Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
+// Bumped to v215 — materials: purchased items by date received, warehouse rules, workers buy/receive, per-item trail,
+// PO receipt status, notifications. Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
+// Bumped to v214 — Purchased Items page + PDF; every worker can request materials; Issue/Return list all workers.
+// Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
 // Bumped to v213 — customer portal status card counts the whole assigned crew (dispatch.js, app.bundle.js).
 // Re-fetch js/app.bundle.js.
 //
@@ -1118,7 +1133,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v213';
+const CACHE_NAME = 'awes-sr-v218';
 
 // Split into two lists on purpose.
 //
