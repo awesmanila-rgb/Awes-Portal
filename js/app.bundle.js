@@ -1,6 +1,22 @@
 (function(){
   "use strict";
 
+  (function(){
+    var NEED = 221;
+    function show(msg){
+      try{
+        var d = document.createElement('div');
+        d.setAttribute('role', 'alert');
+        d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483647;background:#B3402D;color:#fff;padding:14px 18px;font:600 15px/1.4 system-ui,sans-serif;text-align:center;';
+        d.textContent = msg;
+        (document.body || document.documentElement).appendChild(d);
+      }catch(e){}
+    }
+    var m = document.querySelector('meta[name="awes-index-version"]');
+    var have = m ? parseInt(m.getAttribute('content'), 10) : 0;
+    if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
+  })();
+
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
   // dashboard, DTR, dispatch, cash advance, etc. — same reasoning and same
@@ -20382,6 +20398,8 @@
   }
 
   // ---------- events ----------
+  // Bound only if this page's markup is in index.html — a missing element must never stop the app starting.
+  function piBind(){
   $('piModeMonth').addEventListener('click', ()=>{ piSetMode('month'); piLoad(); });
   $('piModeRange').addEventListener('click', ()=>{
     if(!$('piFrom').value){ piApplyRangeFields(pi.from, pi.to); }
@@ -20397,6 +20415,8 @@
   $('piSearch').addEventListener('input', ()=>{ pi.q = $('piSearch').value; piRender(); });
   $('piViewItem').addEventListener('click', ()=>{ pi.view = 'item'; piRender(); });
   $('piViewLine').addEventListener('click', ()=>{ pi.view = 'line'; piRender(); });
+  }
+  if(document.getElementById('piModeMonth')) piBind();
 
   // ---------- PDF ----------
   $('piPdf').addEventListener('click', ()=> piExportPdf());
@@ -23159,7 +23179,7 @@
       if(n != null) invSetMineBadge(n);
     }catch(e){}
   }
-  $('invMineDeliveries').addEventListener('click', (e)=>{ const r = e.target.closest('[data-del]'); if(r){ sd.openAfter = r.dataset.del; showPurchasingView('myDeliveries'); } });
+  if($('invMineDeliveries')) $('invMineDeliveries').addEventListener('click', (e)=>{ const r = e.target.closest('[data-del]'); if(r){ sd.openAfter = r.dataset.del; showPurchasingView('myDeliveries'); } });
   ['invMinePending', 'invMineRecent'].forEach(id=> $(id).addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowMyMaterials(); }); return; }
     const r = e.target.closest('.mt-row'); if(r) invOpenMineSlip(r.dataset.id);
@@ -31057,7 +31077,7 @@
   $('techQaServiceReport').addEventListener('click', showServiceReport);
   $('techQaJobOrder').addEventListener('click', ()=> showDispatchView());
   $('techQaMaterials').addEventListener('click', ()=> showPurchasingView('myRequests'));
-  $('techQaDeliveries').addEventListener('click', ()=> showPurchasingView('myDeliveries'));
+  if($('techQaDeliveries')) $('techQaDeliveries').addEventListener('click', ()=> showPurchasingView('myDeliveries'));
   $('techQaAttendance').addEventListener('click', ()=> showDtrView());
   $('techQaMessages').addEventListener('click', ()=> showMessagesView());
   $('techQaLeave').addEventListener('click', ()=> showLeaveView());
