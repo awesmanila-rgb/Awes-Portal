@@ -10,10 +10,10 @@
   //   Operations today ..... one tile per page they hold (job orders, late,
   //                          awaiting review, new requests, reports to sign off,
   //                          technicians timed in)
-  //   Dispatch board, Technicians today,
+  //   Dispatch board, Technicians status,
   //   Job order progress,
   //   Schedule calendar .... Dispatch (View)
-  //   Live tracker (+ list)  Live Tracker (View)
+  //   Live tracker (+ list)  Live Tracker (View) — with both, Technicians status sits beside the map
   //   Time-in / time-out ... only with Technician Attendance (View)
   //   Everything else on the admin dashboard (finance, leave, purchasing,
   //   activity log, charts) is hidden — those stay in Inbox / their own pages.
@@ -30,7 +30,7 @@
   // =====================================================================
 
   const OPS_HIDE = ['homeAnnouncementsCard', 'homeOverviewCard', 'homeJobOrdersCard', 'homeIntroCard', 'homeActivityCard', 'admJobsCard', 'admChartCard', 'admWeekCard', 'prioCard',
-    'prioBoardCard', 'prioTechCard', 'prioProgressCard', 'homeScheduleCalendarCard', 'dashTwoCol', 'homeTrackerCard', 'homeTechListCard'];
+    'prioBoardCard', 'prioTechCard', 'prioProgressCard', 'homeScheduleCalendarCard', 'dashTwoCol', 'homeTrackerCard', 'homeTechListCard'];  // all hidden first, then the allowed ones shown
   const opsDock = { marker:null, orig:{}, busy:false, wired:false, rt:null, rtUid:null, rtTries:0, deb:null };
 
   function opsPerms(){
@@ -76,6 +76,7 @@
     Object.keys(opsDock.orig).forEach(id=>{ const el = document.getElementById(id); if(el) el.style.display = opsDock.orig[id]; });
     opsDock.orig = {};
     const stats = document.getElementById('opsStatsCard'); if(stats && stats.parentNode) stats.parentNode.removeChild(stats);
+    if(dash){ dash.classList.remove('ops-map', 'ops-disp'); }
     if(dash && m && m.parentNode) m.parentNode.insertBefore(dash, m);
     if(m && m.parentNode) m.parentNode.removeChild(m);
     opsDock.marker = null;
@@ -155,11 +156,13 @@
       }
       if(!opsDockDash(host)){ return; }
       const p = opsPerms();
+      const dash = document.getElementById('adminDash');
+      if(dash){ dash.classList.toggle('ops-map', !!p.trk); dash.classList.toggle('ops-disp', !!p.d); }   // layout: Technicians status beside the map
       // show only the cards this person may use; hide the rest of the admin dashboard
       OPS_HIDE.forEach(id=> opsSetVis(id, false));
       opsSetVis('prioCard', p.d || p.sr || p.rep);
       ['prioBoardCard', 'prioTechCard', 'prioProgressCard', 'homeScheduleCalendarCard'].forEach(id=> opsSetVis(id, p.d));
-      opsSetVis('dashTwoCol', p.trk); opsSetVis('homeTrackerCard', p.trk); opsSetVis('homeTechListCard', p.trk);
+      opsSetVis('dashTwoCol', p.trk); opsSetVis('homeTrackerCard', p.trk);   // the separate technician list stays hidden: Technicians status replaces it
 
       const [tickets, users, dtrToday, reports, extra] = await Promise.all([
         p.d ? dtListAll().catch(()=> null) : Promise.resolve([]),
