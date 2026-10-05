@@ -778,7 +778,7 @@
       if(n != null) invSetMineBadge(n);
     }catch(e){}
   }
-  $('invMineDeliveries').addEventListener('click', (e)=>{ const r = e.target.closest('[data-del]'); if(r){ sd.openAfter = r.dataset.del; showPurchasingView('myDeliveries'); } });
+  if($('invMineDeliveries')) $('invMineDeliveries').addEventListener('click', (e)=>{ const r = e.target.closest('[data-del]'); if(r){ sd.openAfter = r.dataset.del; showPurchasingView('myDeliveries'); } });
   ['invMinePending', 'invMineRecent'].forEach(id=> $(id).addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) invShowMyMaterials(); }); return; }
     const r = e.target.closest('.mt-row'); if(r) invOpenMineSlip(r.dataset.id);

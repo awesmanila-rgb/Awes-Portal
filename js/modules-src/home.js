@@ -940,6 +940,8 @@
     suppliers:      { nav:'sbNavSuppliers',      title:'Supplier Database',    sub:'Suppliers, contacts & price lists' },
     requisitions:   { nav:'sbNavRequisitions',   title:'Material Requisition', sub:'Review & fulfil technician requests' },
     myRequests:     { nav:'',                    title:'Material Requests',    sub:'Request materials for your jobs' },
+    siteDelivery:   { nav:'',                    title:'Site Deliveries',      sub:'Supplier to site, received by a worker' },
+    myDeliveries:   { nav:'',                    title:'My Deliveries',        sub:'Receive what a supplier brings to a site' },
     stock:          { nav:'sbNavStock',          title:'Stock on Hand',        sub:'Quantities & value per warehouse' },
     warehouses:     { nav:'sbNavWarehouses',     title:'Warehouses',           sub:'Stock locations & storekeepers' },
     projects:       { nav:'sbNavProjects',       title:'Projects',             sub:'Job orders & material cost' },
@@ -962,6 +964,7 @@
     tlReports:      { nav:'sbNavTlReports',      title:'Tool Reports',         sub:'Movements, custody, defects, register' },
     myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' },
+    purchasedItems: { nav:'sbNavPurchasedItems', title:'Purchased Items',      sub:'Every item bought, by the date received' },
     paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
     admPermits:     { nav:'sbNavAdmPermits',     title:'Permits & Licenses',   sub:'Registrations, licenses & expiry alerts' },
     admVehicles:    { nav:'sbNavAdmVehicles',    title:'Vehicles',             sub:'Trip tickets, fuel, PMS, OR/CR & insurance' },
@@ -1450,6 +1453,7 @@
   $('techQaServiceReport').addEventListener('click', showServiceReport);
   $('techQaJobOrder').addEventListener('click', ()=> showDispatchView());
   $('techQaMaterials').addEventListener('click', ()=> showPurchasingView('myRequests'));
+  if($('techQaDeliveries')) $('techQaDeliveries').addEventListener('click', ()=> showPurchasingView('myDeliveries'));
   $('techQaAttendance').addEventListener('click', ()=> showDtrView());
   $('techQaMessages').addEventListener('click', ()=> showMessagesView());
   $('techQaLeave').addEventListener('click', ()=> showLeaveView());
