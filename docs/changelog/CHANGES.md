@@ -1,3 +1,18 @@
+# AWES App — no more blank white screen when files are out of step (sw v221)
+
+**Symptom fixed:** the Super Admin dashboard stayed empty under the stale header "Technician's Homepage". Cause: the new scripts were
+deployed without the matching `index.html`. The scripts bind buttons and panels that only exist in the newer `index.html`; when one
+was missing, the browser threw an error while the app was starting and nothing after that point ran.
+
+- **index.html and app.bundle.js must always be deployed together.** Every release zip that changes the screens contains both.
+- The bundle now checks `index.html` first (`<meta name="awes-index-version" content="221">`). If it is older, a red bar
+  appears at the top: "The app files are out of date: upload the latest index.html together with the rest, then reload."
+- Three start-up bindings that depended on the newest `index.html` (Purchased Items page, My Materials deliveries list, the
+  technician "My deliveries" tile) are now skipped when their element is missing instead of stopping the app.
+- Rule for later releases: bump `INDEX_MIN` in `scripts/build.py` and the meta tag together, only in a release that changes `index.html`.
+
+---
+
 # AWES App — Stock Movements design adopted (sw v220)
 
 **Run first:** `supabase/migrations/20261028_01_issue_item_confirmation.sql` (safe to re-run). Without it the screens still work:
