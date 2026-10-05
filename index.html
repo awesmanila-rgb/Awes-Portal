@@ -1547,6 +1547,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
   <div class="card" id="equipmentManagerCard">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="20" height="11" rx="2"/><path d="M8 9V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/><path d="M2 14h20"/></svg> Manage Equipment List</span></div>
     <div class="card-body">
+      <div class="eq-total-bar" id="equipTotalBar" aria-live="polite"><span class="eq-total-num">&hellip;</span><span class="eq-total-text">Counting equipment&hellip;</span></div>
       <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
         Every unit on file, across all customers — showing each equipment's description and the
         customer it's under. Use the tabs below to edit, add, or delete a record.
@@ -1566,6 +1567,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         </div>
         <div id="equipListResultsWrap" style="display:none;">
           <div class="field"><input type="text" id="equipmentListSearch" placeholder="Search equipment…"></div>
+          <div class="eq-count-line" id="equipListCountLine" aria-live="polite"></div>
           <div id="equipmentListBody"></div>
         </div>
         <div id="equipListNoCustomerHint" class="empty-state">Select a customer above to see their equipment.</div>
@@ -4544,6 +4546,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         auto-fills address and contact info. Only Admin can add or edit customer records here;
         technicians can view and select, but can't add new ones.
       </p>
+      <div class="eq-total-bar" id="custEquipTotalBar" aria-live="polite"><span class="eq-total-num">&hellip;</span><span class="eq-total-text">Counting equipment&hellip;</span></div>
       <div class="field"><input type="text" id="customerSearch" placeholder="Search customers…"></div>
       <div id="customersList"></div>
       <div style="border-top:1px solid var(--border); padding-top:12px; margin-top:6px;">

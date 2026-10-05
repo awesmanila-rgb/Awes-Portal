@@ -5585,3 +5585,12 @@ body.role-admin #opsDash #homeTrackerCard{ grid-area:track !important; }
 #opsStatsCard .ops-asof{ font-size:12px; font-weight:600; color:var(--text-muted); }
 #opsStats .overview-stat:focus-visible{ outline:3px solid #1F5FAE; outline-offset:2px; }
 #opsStats .overview-stat.ops-warn{ border-color:#E5A93B; }
+
+/* ---------- Admin Equipment / Customers pages: equipment totals ---------- */
+.eq-total-bar{ display:flex; align-items:center; gap:14px; background:var(--green-light, #E3EFE6); border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:0 0 14px; }
+.eq-total-num{ font-size:30px; font-weight:800; line-height:1; color:var(--green-dark, #0F5A40); min-width:34px; }
+.eq-total-text{ display:flex; flex-direction:column; gap:2px; font-size:15px; color:var(--text, #12221A); }
+.eq-total-text > span{ font-size:13px; font-weight:500; color:var(--text-muted); }
+.eq-count-line{ font-size:13px; font-weight:700; color:var(--text-muted); margin:-4px 0 10px; }
+.cust-eq-count{ margin-left:auto; margin-right:8px; flex-shrink:0; background:var(--green-light, #E3EFE6); color:var(--green-dark, #0F5A40); border-radius:999px; padding:3px 10px; font-size:12px; font-weight:800; white-space:nowrap; }
+.cust-eq-count.zero{ background:#ECEDEF; color:var(--text-muted); }

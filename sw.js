@@ -1,3 +1,6 @@
+// Bumped to v212 — admin Equipment and Customers pages show the total equipment (and per-customer counts).
+// Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
 // Bumped to v211 — Operations dashboard: Job order progress beside the map, Technicians status full-width below (css/app.css).
 // Re-fetch css/app.css/js/app.bundle.js.
 //
@@ -1112,7 +1115,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v211';
+const CACHE_NAME = 'awes-sr-v212';
 
 // Split into two lists on purpose.
 //
