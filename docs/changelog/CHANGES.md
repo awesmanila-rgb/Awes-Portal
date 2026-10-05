@@ -1,3 +1,63 @@
+# AWES App — Stock Movements design adopted (sw v220)
+
+**Run first:** `supabase/migrations/20261028_01_issue_item_confirmation.sql` (safe to re-run). Without it the screens still work:
+a worker can sign a slip with no differences the old way, and is told to run the migration to record differences.
+
+Adopted from the "Stock movements" design, adjusted to fit the current system:
+
+- **One colour per movement** — Receive green, Issue blue, Return red, Transfer orange — on the stepper, the route, the
+  selected tiles and the main button, so a person always knows which movement they are in.
+- **Switcher + plain definition** at the top of Receive, Issue, Return and Transfer: four drawn buttons (truck > warehouse,
+  warehouse > worker, ...) to jump between movements, and a line saying what the movement is and when to use it
+  ("Issue: items given to a worker to use. Use it when a worker takes items from a warehouse...").
+- **Drawn From > To route** replaces the chips: each end shows its drawing (warehouse with its own code, purchase order, delivery
+  truck, construction site, worker) with "From" / "To" and the chosen name.
+- **Sticky action bar on phones:** Back / Next stay at the bottom of the screen while the page scrolls.
+- **The receiver confirms item by item** (My Materials): for every item the worker ticks it, sets how many they actually
+  received, and can mark it Damaged; a summary shows "3 units short, 1 damaged"; a remark is REQUIRED when anything differs;
+  then they sign (the signature pad is unchanged). It saves as **received with differences**; the issuer and the admins are told.
+  Nothing is received at all? They are told to speak to the storekeeper instead of signing. A difference does NOT change stock:
+  the issue is already booked out, so the storekeeper follows up (a return or a recount).
+- **My Materials is one inbox:** site deliveries assigned to the worker appear as "Deliveries to receive" beside the slips waiting
+  for their signature; tapping a delivery opens its receive form. The home-screen badge counts both ("2 to receive").
+- **Slips & History:** each movement row has its colour; an issue slip reads awaiting signature / signed / received with
+  differences; its detail shows how many of each item were received, short and damaged marks, and the remark.
+
+Not adopted (it needs a decision first): the design posts every movement as PENDING until the receiving side confirms and only
+then moves stock ("in transit"); warehouse receipts, returns and transfers here are posted by the person who physically
+receives them and move stock immediately. Also not adopted: its separate account per site, the demo account switcher, and its
+fonts / hazard-stripe branding (the AWES look is kept).
+
+---
+
+# AWES App — Supplier as a source: site deliveries with photo proof (sw v219)
+
+**Run first:** `supabase/migrations/20261027_01_site_deliveries.sql` (safe to re-run). It creates the delivery tables, a PRIVATE
+photo bucket (`delivery-proofs`) and three functions. Without it the new screens say which migration to run.
+
+A supplier can now deliver STRAIGHT TO A SITE. The office assigns a worker to receive it; the worker confirms what arrived and
+uploads photos as proof.
+
+- **Office:** Receive Stock > step 1 > **Supplier delivering to a site** (a third way in, beside Purchase order and
+  Delivery without a PO). A four-step screen: Supplier (a PO, or a supplier + reference) > Site and receiver (project, job order
+  or address, expected date, the worker, a note) > Items (a PO's remaining lines, or typed items) > Review > **Assign the delivery**.
+  The worker is notified. A **Deliveries** tab lists them (To receive / Received / Cancelled), shows each one's items, the
+  quantities that arrived, and the **proof photos** (tap to enlarge), and can cancel one that has not been received (reason required).
+- **Worker:** **My Deliveries** (technician home tile, staff sidebar, messenger Menu). Shows what is assigned to them. "I received
+  it" opens: how many of each item arrived (starts at what was expected), **at least one photo (required, up to 12)**, an optional
+  note. Photos are compressed before upload; if saving fails, the photos are kept and not uploaded again on retry. The office person
+  who assigned it, and the admins, are told.
+- **Rules (in the database):** only the assigned worker can record a delivery; only Super Admin / staff with Edit on Receive Stock
+  can assign or cancel; a worker can't receive more than expected, nor record "0 of everything" (tell the office instead); a PO line
+  can't be over-assigned (counting what is already assigned to others) nor over-received; photos must be the worker's own uploads;
+  a delivery can't be recorded twice or after it is cancelled.
+- **Effect on stock:** none. Nothing goes into a warehouse. For lines on a PO, what arrived is added to that PO line (so the PO can
+  complete) and recorded as a worker receipt, so it shows in Purchased Items by the day received, "Received by <worker>".
+- Photos: a private bucket; a worker can only write into their own folder, nobody can edit or delete a photo, and the office reads
+  them through short-lived signed links.
+
+---
+
 # AWES App — warehouse movements: one clean four-step screen (sw v218)
 
 No database changes. Receive Stock, Issue to Worker, Return to Stock and Transfer now share one layout
