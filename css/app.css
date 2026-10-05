@@ -5529,3 +5529,40 @@ body.role-messenger.msgr-own-head #staffView{ padding-top:20px; }
 .msgr-push-top{ display:flex; align-items:flex-start; gap:12px; }
 .msgr-push-t{ font-size:20px; font-weight:800; line-height:1.2; }
 .msgr-push-s{ font-size:15.5px; font-weight:600; color:#33443B; margin-top:4px; line-height:1.35; }
+
+/* ---------- Operations dashboard on the staff home (ops-dashboard.js) ----------
+   The Super Admin's #adminDash grid is docked inside #staffPanel_home > #opsDash.
+   Its named grid areas are the admin layout; for Operations staff the visible cards are
+   re-flowed: summary tiles, Needs you now, dispatch board, then the rest. */
+body.has-ops-dash #staffView{ max-width:1200px; }
+body.has-ops-dash #staffPanel_home{ display:flex; flex-direction:column; gap:16px; }
+body.has-ops-dash #staffPanel_home > *{ order:0; }
+body.has-ops-dash #staffPanel_home > :first-child{ order:-3; }              /* "Getting started" guide card, when shown */
+body.has-ops-dash #staffPanel_home > .card:has(.stf-hello){ order:-2; }       /* greeting */
+body.has-ops-dash #staffPanel_home > #opsDash{ order:-1; }                    /* the dashboard, right under the greeting */
+body.has-ops-dash #staffPanel_home > .card{ margin:0; }
+#opsDash #adminDash{ margin:0; }
+/* !important: the admin grid has many :has() variants that would otherwise outrank this */
+body.role-admin #opsDash #adminDash.adm-v2{
+  grid-template-columns:minmax(0,1fr) !important;
+  grid-template-areas:"ops" "prio" "board" "ptech" "prog" "cal" "track" "avail" !important;
+}
+@media (min-width:1100px){
+  body.role-admin #opsDash #adminDash.adm-v2{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+    grid-template-areas:"ops ops" "prio prio" "board board" "ptech prog" "cal cal" "track avail" !important;
+  }
+}
+body.role-admin #opsDash #opsStatsCard{ grid-area:ops !important; }
+body.role-admin #opsDash #prioCard{ grid-area:prio !important; }
+body.role-admin #opsDash #prioBoardCard{ grid-area:board !important; }
+body.role-admin #opsDash #prioTechCard{ grid-area:ptech !important; }
+body.role-admin #opsDash #prioProgressCard{ grid-area:prog !important; }
+body.role-admin #opsDash #homeScheduleCalendarCard{ grid-area:cal !important; }
+body.role-admin #opsDash #homeTrackerCard{ grid-area:track !important; }
+body.role-admin #opsDash #homeTechListCard{ grid-area:avail !important; }
+#opsStats{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
+#opsStatsCard .card-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+#opsStatsCard .ops-asof{ font-size:12px; font-weight:600; color:var(--text-muted); }
+#opsStats .overview-stat:focus-visible{ outline:3px solid #1F5FAE; outline-offset:2px; }
+#opsStats .overview-stat.ops-warn{ border-color:#E5A93B; }
