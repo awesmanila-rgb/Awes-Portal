@@ -45,6 +45,7 @@
       try{
         const { error } = await db.from('customers').delete().eq('id', id);
         if(error) throw error;
+        equipCountsInvalidate();
         await loadCustomers();
         return true;
       }catch(e){ console.error('delete customer failed', describeCloudError(e)); return false; }
@@ -141,6 +142,7 @@
       try{
         const { data, error } = await db.from('customer_equipment').insert(rec).select('id').single();
         if(error) throw error;
+        equipCountsInvalidate();
         await loadCustomerEquipment(customerId);
         return data ? data.id : null;
       }catch(e){ console.error('add customer equipment failed', describeCloudError(e)); return null; }
@@ -183,6 +185,7 @@
         : m || 'Could not remove';
       return false;
     }
+    equipCountsInvalidate();
     currentEquipmentCache = currentEquipmentCache.filter(e=>e.id!==id);
     return true;
   }
@@ -234,12 +237,56 @@
       EQUIP_FIELD_KEYS.forEach(k=> rec[EQUIP_FIELD_TO_COLUMN[k]] = (fields[k]||'').trim());
       const { error: insErr } = await db.from('customer_equipment').insert(rec);
       if(insErr) throw insErr;
+      equipCountsInvalidate();
       return true;
     }catch(e){
       console.error('admin add customer equipment failed', describeCloudError(e));
       return false;
     }
   }
+  // ---------- Equipment totals (admin Equipment + Customers pages) ----------
+  // How many units are on file, in total and per customer. Reads only customer_id
+  // (a few bytes a row) in pages of 1000 — the server caps one response at 1000 rows,
+  // so a single query would silently stop counting there. Cached for a minute and
+  // cleared whenever equipment or a customer is added, deleted or removed here;
+  // the pages also ask for a fresh count each time they open.
+  let equipCountsCache = null;
+  function equipCountsInvalidate(){ equipCountsCache = null; }
+  async function loadEquipmentCounts(force){
+    if(!force && equipCountsCache && Date.now() - equipCountsCache.at < 60000) return equipCountsCache.data;
+    const out = { total:0, byCustomer:{}, customersWith:0, ok:false, local:false };
+    const add = (cid)=>{ out.total++; const k = String(cid == null ? '' : cid); out.byCustomer[k] = (out.byCustomer[k] || 0) + 1; };
+    const online = await ensureCloud();
+    if(online){
+      try{
+        const PAGE = 1000;
+        for(let from = 0; ; from += PAGE){
+          const { data, error } = await db.from('customer_equipment').select('customer_id').order('id', { ascending:true }).range(from, from + PAGE - 1);
+          if(error) throw error;
+          (data || []).forEach(r=> add(r.customer_id));
+          if(!data || data.length < PAGE) break;
+        }
+        out.ok = true;
+      }catch(e){ console.error('equipment count failed', describeCloudError(e)); out.total = 0; out.byCustomer = {}; }
+    }
+    if(!online){
+      // Offline only (a failed cloud read is reported as a failure, never as 0): count each customer's
+      // locally cached list, same fallback as loadAllCustomerEquipment
+      out.local = true;
+      try{
+        if(customersCache.length === 0) await loadCustomers();
+        for(const cu of customersCache){
+          try{ const res = await window.storage.get('cequip:' + cu.id, false); (res ? JSON.parse(res.value) : []).forEach(()=> add(cu.id)); }catch(e){}
+        }
+        out.ok = true;
+      }catch(e){}
+    }
+    out.customersWith = Object.keys(out.byCustomer).filter(k=> k && out.byCustomer[k] > 0).length;
+    if(out.ok) equipCountsCache = { at: Date.now(), data: out };
+    return out;
+  }
+  const equipUnits = (n)=> n + ' unit' + (n === 1 ? '' : 's');
+
   // Loads every equipment record across every customer, with the owning
   // customer's name attached — powers the admin "Customer Equipment List"
   // master view. (loadCustomerEquipment above is scoped to one customer,

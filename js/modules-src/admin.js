@@ -287,6 +287,8 @@
     body.innerHTML = '<div class="empty-state">Loading…</div>';
     const cloudOn = await ensureCloud();
     await loadCustomers();
+    const counts = await loadEquipmentCounts();   // cached for a minute; cleared on any add / delete
+    renderEquipTotalBar('custEquipTotalBar', counts, customersCache.length);
     body.innerHTML = '';
     if(!cloudOn){
       const note = document.createElement('div');
@@ -310,7 +312,7 @@
         '<div class="user-card-head" data-act="toggle" style="cursor:pointer;"><div>'+
           '<div class="u-name">'+escapeHtml(c.name)+'</div>'+
           '<div class="u-status">'+escapeHtml(c.address||'No address on file')+'</div>'+
-        '</div><span class="card-caret">▾</span></div>'+
+        '</div>'+(counts.ok ? '<span class="cust-eq-count' + ((counts.byCustomer[String(c.id)] || 0) ? '' : ' zero') + '" title="Equipment on file">'+equipUnits(counts.byCustomer[String(c.id)] || 0)+'</span>' : '')+'<span class="card-caret">▾</span></div>'+
         '<div class="user-edit-panel" data-panel="1">'+
           '<div class="cust-detail-row"><b>Address:</b> '+escapeHtml(c.address||'—')+'</div>'+
           '<div class="cust-detail-row"><b>Contact No.:</b> '+escapeHtml(c.contactNo||'—')+'</div>'+
@@ -522,14 +524,26 @@
   // customer, in one master view across every customer, not scoped to
   // whichever one is open in Manage Customers) ----------
   let equipListTab = 'edit'; // 'edit' | 'add' | 'delete'
+  let equipPageCounts = null;
 
   // (Re)builds the customer filter (Edit/Delete tabs) and the customer
   // picker on the Add tab from the shared customers list, keeping whatever
   // was already selected if it's still there.
+  // The total at the top of the Equipment and Customers pages (same wording on both)
+  function renderEquipTotalBar(id, counts, customerTotal){
+    const el = $(id); if(!el) return;
+    if(!counts || !counts.ok){ el.innerHTML = '<span class="eq-total-num">\u2014</span><span class="eq-total-text">Couldn\u2019t count the equipment right now.</span>'; return; }
+    el.innerHTML = '<span class="eq-total-num">' + counts.total.toLocaleString('en-PH') + '</span>' +
+      '<span class="eq-total-text"><b>Total equipment on file</b><span>' + counts.customersWith.toLocaleString('en-PH') + ' of ' + customerTotal.toLocaleString('en-PH') + ' customer' + (customerTotal === 1 ? '' : 's') + ' have equipment' + (counts.local ? ' \u00B7 saved on this device only' : '') + '</span></span>';
+  }
   async function populateEquipmentCustomerSelects(){
     if(customersCache.length===0) await loadCustomers();
+    const counts = await loadEquipmentCounts(true);
+    equipPageCounts = counts;
+    renderEquipTotalBar('equipTotalBar', counts, customersCache.length);
     const sorted = customersCache.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-    const opts = sorted.map(c=> '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>').join('');
+    // each customer shows how many units they have, so the right one is easy to pick
+    const opts = sorted.map(c=> '<option value="'+c.id+'">'+escapeHtml(c.name)+(counts.ok ? ' ('+(counts.byCustomer[String(c.id)] || 0)+')' : '')+'</option>').join('');
     const filterSel = $('equipmentListCustomerFilter');
     const keepFilter = filterSel.value;
     filterSel.innerHTML = '<option value="">Search and select a customer…</option>' + opts;
@@ -576,6 +590,10 @@
       });
     }
     items.sort((a,b)=> (a.customerName||'').localeCompare(b.customerName||''));
+    // "5 units" for the customer, or "2 of 5 match" while searching
+    const ofAll = all.filter(e=> String(e.customerId)===String(custId)).length;
+    const cl = $('equipListCountLine');
+    if(cl) cl.textContent = q ? items.length + ' of ' + equipUnits(ofAll) + ' match' : equipUnits(ofAll) + ' for this customer';
     // One query for the whole (already customer-scoped) list rather than
     // one per card — see cloudGetEquipmentPhotoCounts in
     // equipment-photos.js.
@@ -624,7 +642,7 @@
         card.querySelector('[data-act="remove"]').addEventListener('click', async ()=>{
           if(!await uiConfirm('Delete '+(e.equipLocation || 'this unit')+' for '+e.customerName+'?\n\nPast service reports are kept (each keeps the unit details it was filed with); they just won\u2019t be linked to this unit any more. Its photos are removed.')) return;
           const ok = await cloudDeleteCustomerEquipment(e.id);
-          if(ok){ toast('Removed'); renderEquipmentMasterList(); }
+          if(ok){ toast('Removed'); populateEquipmentCustomerSelects(); renderEquipmentMasterList(); }
           else toast(cloudDeleteCustomerEquipment.lastError || 'Could not remove');
         });
       }
@@ -1015,6 +1033,7 @@
     $('eqAddSaveBtn').disabled = false;
     if(!result){ toast('Could not add — check your connection'); return; }
     toast('Equipment added');
+    populateEquipmentCustomerSelects();   // refresh the total and the per-customer counts
     EQUIP_FIELD_KEYS.forEach(k=>{
       const el = $('eqAdd'+k.charAt(0).toUpperCase()+k.slice(1));
       if(el) el.value = '';
