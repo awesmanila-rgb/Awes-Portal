@@ -5391,6 +5391,7 @@ body.role-messenger.msgr-own-head #staffView{ padding-top:20px; }
 .msgr-big{
   min-height:72px; border:0; border-radius:20px; background:#0F5A40; color:#fff; font:inherit; font-size:23px; font-weight:800; letter-spacing:.02em;
   display:flex; align-items:center; justify-content:center; gap:12px; box-shadow:0 6px 0 #0B4531; margin:4px 0 6px; cursor:pointer;
+  width:100%; box-sizing:border-box;
 }
 .msgr-big:active{ transform:translateY(3px); box-shadow:0 3px 0 #0B4531; }
 .msgr-big:disabled{ opacity:.6; }
@@ -5458,3 +5459,46 @@ body.role-messenger.msgr-own-head #staffView{ padding-top:20px; }
 @media (min-width:1000px){
   body.role-messenger{ padding-bottom:calc(92px + env(safe-area-inset-bottom)); }
 }
+
+/* ---------- Messenger guided errand: one instruction per screen (messenger.js) ---------- */
+.msgr-guided{ gap:16px; }
+.msgr-g-top{ display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:48px; }
+.msgr-g-h{ font-size:31px; font-weight:800; line-height:1.12; }
+.msgr-g-sub{ font-size:18px; font-weight:600; line-height:1.3; color:#33443B; margin-top:8px; }
+.msgr-g-act{ margin-top:14px; }
+.msgr-g-center{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; padding:14px 0 4px; }
+.msgr-g-center .msgr-g-sub{ margin-top:0; }
+.msgr-circ.huge{ width:104px; height:104px; border-width:0; }
+.msgr-circ.done.huge svg{ width:56px; height:56px; }
+.msgr-circ.prog.huge{ border:6px solid #B9770A; }
+.msgr-g-steps{ display:flex; flex-direction:column; gap:6px; border-top:2px solid #E3EFE6; padding-top:10px; }
+.msgr-g-step{ display:flex; align-items:center; gap:14px; min-height:52px; font-size:19px; font-weight:700; line-height:1.25; }
+.msgr-g-line{ display:flex; align-items:flex-start; gap:10px; font-size:16px; font-weight:600; line-height:1.35; color:#33443B; padding:4px 0; }
+.msgr-g-line svg{ flex-shrink:0; margin-top:2px; color:#0F5A40; }
+.msgr-info{ background:#fff; border:1px solid #DCE8E0; border-radius:20px; padding:0 16px; }
+.msgr-info[open]{ padding-bottom:12px; }
+.msgr-info summary{ cursor:pointer; list-style:none; min-height:48px; display:flex; align-items:center; font-size:17px; font-weight:800; color:#17488A; }
+.msgr-info summary::-webkit-details-marker{ display:none; }
+.msgr-linkbtn{ display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 14px; margin:2px 0 8px; border:2px solid #0F5A40; border-radius:16px; color:#0F5A40; font-size:16px; font-weight:800; text-decoration:none; }
+.msgr-textbtn{ min-height:48px; padding:0 8px; border:0; background:transparent; font:inherit; font-size:17px; font-weight:800; color:#17488A; text-decoration:underline; cursor:pointer; }
+.msgr-textbtn.danger{ color:#8A3322; }
+.msgr-g-links{ display:flex; flex-direction:column; align-items:center; gap:2px; }
+.msgr-g-proof{ margin-top:12px; display:flex; flex-direction:column; gap:6px; }
+.msgr-ok-line{ display:flex; align-items:center; gap:8px; font-size:17px; font-weight:800; color:#17714F; }
+.msgr-ok-line.big{ font-size:18px; color:#12221A; min-height:40px; }
+.msgr-ok-line svg{ flex-shrink:0; width:26px; height:26px; padding:4px; box-sizing:border-box; border-radius:50%; background:#17714F; color:#fff; }
+.msgr-choice{
+  display:flex; align-items:center; gap:16px; width:100%; min-height:112px; padding:20px 18px; box-sizing:border-box; text-align:left;
+  background:#fff; border:2.5px solid #0F5A40; border-radius:24px; box-shadow:0 5px 0 #CFE0D5; font:inherit; color:inherit; cursor:pointer;
+}
+.msgr-choice-t{ display:block; font-size:23px; font-weight:800; line-height:1.15; }
+.msgr-mic.big{ width:64px; height:64px; border-radius:50%; }
+.msgr-mic.warn{ background:#FDF1DC; color:#7A4B00; }
+.msgr-reason{
+  display:flex; align-items:center; gap:14px; width:100%; min-height:76px; padding:0 18px; box-sizing:border-box; text-align:left;
+  background:#fff; border:2px solid #DCE8E0; border-radius:20px; font:inherit; color:inherit; cursor:pointer;
+}
+.msgr-reason-t{ flex:1; font-size:21px; font-weight:800; line-height:1.2; }
+.msgr-secondary{ width:100%; box-sizing:border-box; min-height:60px; border:2px solid #0F5A40; border-radius:20px; background:#fff; color:#0F5A40; font:inherit; font-size:19px; font-weight:800; cursor:pointer; }
+.msgr-g-next{ text-align:center; font-size:16px; font-weight:700; color:#58695F; margin:2px 0 10px; }
+.msgr-guided .er-thumbs{ margin-top:6px; }

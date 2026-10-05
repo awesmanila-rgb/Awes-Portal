@@ -1,3 +1,6 @@
+// Bumped to v206 — messenger guided errand: one instruction per screen (messenger.js, errands.js,
+// css/app.css). Re-fetch css/app.css/js/app.bundle.js.
+//
 // Bumped to v205 — messenger / liaison accounts: simple mission Home, persistent bottom bar
 // (Home · Errands · Cash · Menu), Menu and My account (messenger.js, css/app.css, index.html,
 // staff.js, home.js, errands.js). Re-fetch index.html/css/app.css/js/app.bundle.js.
@@ -1094,7 +1097,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v205';
+const CACHE_NAME = 'awes-sr-v206';
 
 // Split into two lists on purpose.
 //
