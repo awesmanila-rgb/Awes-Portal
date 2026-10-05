@@ -1,3 +1,43 @@
+# AWES App — messenger Alerts, Errands tab, Cash tab, hand-over name (sw v207)
+
+Phase 3 — completes the simplified messenger experience (v205 Home/bar/Menu/Account, v206 guided errand).
+Same accounts (staff with My Errands). No database changes.
+
+- **Alerts (the bell)**: one card per thing waiting on him, most urgent first (Escalated / Overdue, then
+  waiting), each with an Open button that goes to the page (an assigned errand opens that errand).
+  Includes his own cash advances still to be liquidated. The bell / Menu counts now count EVERY Inbox
+  item — in the Inbox 'waiting' is only the freshest urgency level, and a newly assigned errand
+  (`errand_todo`) is always 'waiting', so the old attention-only count would never have shown it.
+  A push-notification tap (?inbox=1) opens Alerts for messengers.
+- **Errands tab**: To do (in order, late banner), Done today, Earlier; tapping opens the guided errand.
+- **Cash tab**: three plain choices — Ask for cash, Send in your receipts, Money I paid first — each opens
+  the existing cash advance / liquidation / reimbursement screen, with counts.
+- **Hand-over**: "They sign on my phone" now goes to an Ask-them-to-sign screen (receiver name pre-filled
+  from the errand, typed on the screen) instead of two pop-up questions. `erDeliver(preHow, preName)`.
+- Not built: an info-only alerts section (leave approved, memos) — the app has no feed for those yet.
+
+---
+
+# AWES App — messenger guided errand (sw v206)
+
+Phase 2 of the simplified messenger experience (builds on v205: Home, bottom bar, Menu, My account).
+Same accounts as v205 (staff with My Errands). No database changes.
+
+- **One instruction per screen** for the messenger's own errand while it is assigned or in progress
+  (`messenger.js` guided section, hooked from `errands.js erRenderDetail`):
+  Ready → one screen per checklist step (Take photo / Sign here / Done, whichever the step needs next) →
+  How did they receive it? (They sign on my phone / They stamp a copy) → Finish errand → Errand complete
+  (with Next errand). Step progress bar + "Step N of M", "When you tap:" line on every screen,
+  Errand details (directions, call, instructions, cash), Add a receipt or photo, Go back one step.
+- **Couldn't complete**: tap a reason (nobody there, office closed, wrong address, papers missing) or
+  "Something else" to type one; confirms first; then an "office has been told" screen.
+- Uses the existing server actions unchanged (errand_start / errand_step / errand_add_file /
+  errand_deliver / errand_complete / errand_fail). `erDeliver(preHow)` now accepts the answer from the
+  new choice screen. Done / failed errands still open the old read-only page.
+- Receiver name and the two signatures still use the existing prompt and signature boxes.
+
+---
+
 # AWES App — messenger / liaison home, bottom bar, Menu, My account (sw v205)
 
 Phase 1 of the simplified messenger experience. Applies to staff accounts that have the
