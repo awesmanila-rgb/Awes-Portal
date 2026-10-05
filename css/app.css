@@ -5544,24 +5544,25 @@ body.has-ops-dash #staffPanel_home > .card{ margin:0; }
 #opsDash #adminDash{ margin:0; }
 /* !important: the admin grid has many :has() variants that would otherwise outrank this.
    Layout depends on what the person may see (classes set by ops-dashboard.js):
-     ops-map  = Live Tracker (the map + its technician list)
-     ops-disp = Dispatch (board, Technicians status, progress, calendar)
-   With both, Technicians status sits BESIDE the map. */
+     ops-map  = Live Tracker (the map)
+     ops-disp = Dispatch (board, Job order progress, Technicians status, calendar)
+   With both, Job order progress sits BESIDE the map and Technicians status (the wide table)
+   runs full-width below them. */
 body.role-admin #opsDash #adminDash.adm-v2{
   grid-template-columns:minmax(0,1fr) !important;
-  grid-template-areas:"ops" "prio" "board" "track" "ptech" "prog" "cal" !important;
+  grid-template-areas:"ops" "prio" "board" "track" "prog" "ptech" "cal" !important;
 }
 @media (min-width:1100px){
   body.role-admin #opsDash #adminDash.adm-v2{
-    grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
-    grid-template-areas:"ops ops" "prio prio" "board board" "ptech prog" "cal cal" !important;       /* Dispatch only */
+    grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) !important;
+    grid-template-areas:"ops ops" "prio prio" "board board" "prog ptech" "cal cal" !important;       /* Dispatch only: the table gets the wider column */
   }
   body.role-admin #opsDash #adminDash.adm-v2.ops-map{
     grid-template-areas:"ops ops" "prio prio" "track track" !important;                                /* Live Tracker only */
   }
   body.role-admin #opsDash #adminDash.adm-v2.ops-map.ops-disp{
-    grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) !important;      /* the status table needs more width than the map */
-    grid-template-areas:"ops ops" "prio prio" "board board" "track ptech" "prog prog" "cal cal" !important;   /* map | Technicians status */
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+    grid-template-areas:"ops ops" "prio prio" "board board" "track prog" "ptech ptech" "cal cal" !important;   /* map | Job order progress, then the full-width table */
   }
 }
 body.role-admin #opsDash #opsStatsCard{ grid-area:ops !important; }
@@ -5574,9 +5575,10 @@ body.role-admin #opsDash #dashTwoCol{ display:contents; }                      /
 body.role-admin #opsDash #homeTrackerCard{ grid-area:track !important; }
 /* (#homeTechListCard stays hidden, as on the Super Admin dashboard: the Technicians status table replaces it) */
 @media (min-width:1100px){
-  /* beside the map the two cards read as a pair: same top, same minimum height */
+  /* beside the map, Job order progress reads as its pair: same top, same height */
   body.role-admin #opsDash #adminDash.ops-map.ops-disp #homeTrackerCard,
-  body.role-admin #opsDash #adminDash.ops-map.ops-disp #prioTechCard{ align-self:stretch; }
+  body.role-admin #opsDash #adminDash.ops-map.ops-disp #prioProgressCard{ align-self:stretch; }
+}
 }
 #opsStats{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
 #opsStatsCard .card-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
