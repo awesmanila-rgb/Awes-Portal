@@ -448,6 +448,9 @@
     if(staffMaybeOpenInboxFromUrl()) return;
     showStaffView('home');
     const target = $('staffPanel_home');
+    // ops-dashboard.js: the Super Admin dashboard is docked inside this panel for Operations staff —
+    // put it back before the panel is rewritten, then dock it again below
+    if(typeof opsUndockDash === 'function') opsUndockDash();
     target.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     await staffRefreshAccess();
     if(!isStaffUser()) return;
@@ -455,6 +458,7 @@
     try{ msgrApply(); }catch(e){}
     if(typeof isMessengerUser === 'function' && isMessengerUser()){ msgrSetTab('home'); await msgrRenderHome(target); return; }
     await staffRenderHome(target, currentUser.access || {});
+    if(typeof opsRenderDashboard === 'function') opsRenderDashboard(target);   // Operations staff: permission-gated dashboard
   }
 
   // Sidebar for staff: granted + opened pages (Phase 3), My Team for Heads.

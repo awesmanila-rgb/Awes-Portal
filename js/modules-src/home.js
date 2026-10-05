@@ -1146,6 +1146,9 @@
     // Department staff get their own home (staff.js) — the admin dashboard
     // below reads admin-only data.
     if(currentUser && currentUser.role==='staff'){ showStaffHome(); return; }
+    // Anyone else's home: the admin dashboard must be back in #homeScreen (ops-dashboard.js docks it into the staff home)
+    if(typeof opsUndockDash === 'function') opsUndockDash();
+    if(typeof opsRealtimeTeardown === 'function') opsRealtimeTeardown();
     // Round 3: a notification tap (…?inbox=1) opens the Inbox; otherwise
     // just refresh the Inbox count in the sidebar
     if(currentUser && currentUser.role==='admin' && typeof staffMaybeOpenInboxFromUrl === 'function'){

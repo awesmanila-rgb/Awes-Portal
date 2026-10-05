@@ -1208,6 +1208,8 @@
     if(typeof purchRealtimeTeardown === 'function') purchRealtimeTeardown();
     if(typeof mrtRealtimeTeardown === 'function') mrtRealtimeTeardown();
     if(typeof msgrRealtimeTeardown === 'function') msgrRealtimeTeardown();
+    if(typeof opsUndockDash === 'function') opsUndockDash();
+    if(typeof opsRealtimeTeardown === 'function') opsRealtimeTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
     // Job order ticket stream. Channel names are keyed by user id, so
     // without this an account switch on a shared device would leave the
