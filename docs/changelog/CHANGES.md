@@ -1,3 +1,193 @@
+# AWES App — warehouse movements: one clean four-step screen (sw v218)
+
+No database changes. Receive Stock, Issue to Worker, Return to Stock and Transfer now share one layout
+(`inventory-wizard.js`, replacing the tile layer of v217). How stock is posted is unchanged: the real fields are MOVED
+into the steps and keep their ids, and the last step presses the original Post button.
+
+- **Four steps:** From > To > Items > Review. A stepper shows where you are (tap a finished step to go back), and a line
+  under it fills in as you choose ("Warehouse MAIN > Pedro Tech > 2 items"). It opens on step 1 every time.
+- **The person doing it is the signed-in account** and is shown as a badge (name + Receiver / Issuer / Returner / Transferer);
+  there is no "issued by / returned by" field. In Return the worker is where the materials are ("Whose custody is it in?").
+- **Warehouses are drawn** with their own code on the sign; Source choices (Against a PO / Without a PO, From an approved
+  request / Direct) are two equal cards. Receive and Return offer any warehouse; Issue and Transfer-from only your own.
+- **Each step checks before moving on**, with the same rules as before (request chosen, worker chosen, direct-to-project
+  needs a project or job, quantity above 0, no more than is in stock or held, a different destination for a transfer).
+- **Review** lists From, To, who is doing it, every item with its quantity, and what will change (stock up / down, who is asked
+  to sign, damaged items not restocked). It replaces the second "are you sure?" dialog; nothing is posted until you press
+  the final button, which says what it does ("Issue 2 items").
+- Phones: one column, three warehouse tiles per row, Back and Next side by side.
+
+Not built (waiting on your answers): Other workers (hand over between workers), Issue straight to a project with no worker,
+Return from a project, Own purchase without a request.
+
+---
+
+
+# AWES App — Materials Monitor: the simple view (sw v216)
+
+**Run first:** `supabase/migrations/20261026_01_materials_monitor.sql` (after 20261025_01). Safe to re-run.
+
+The materials flow was too detailed for everyday use, so there is now ONE simple view built on five plain stages:
+**To approve > Being bought > Ready to hand over > Waiting for signature > Done**, and one answer per request:
+**who has to act next, and for how many days.**
+
+- **Office (Material Requisitions page):** it now opens on **Monitor** — five tiles with a count each (tap one to filter,
+  tap again to clear) and one list of everything not done, late requests first. Each row: request no., requester,
+  the stage, "Waiting on <who> · <N days>", job order and, for several items, "2 of 3 items done". Urgent and Late are flagged.
+  The old detailed list is the **All requests** tab.
+- **Workers (My Requests):** three tiles — Waiting, Ready for you, Done — and a plain line on each request
+  ("Ready to collect — waiting on the warehouse"). Their own words: Waiting for approval / Being bought / Ready to collect /
+  Sign for it / Done.
+- A request with several items shows the EARLIEST stage any item is in (what is holding it up).
+- Inside a request, the step-by-step view of each item is folded away behind "Show each item's steps"; it opens by
+  itself only when the person has something to do there (I received this / I bought this). The little 5-dot paths on the
+  lists were removed.
+- Access is the same as before (requester, collector, office, Super Admin, storekeepers for approved requests). Names and
+  counts only — no prices. Finished requests older than 60 days drop off; open ones never do.
+
+---
+
+# AWES App — materials flow, finished (sw v215)
+
+**Run in order (Supabase SQL editor / `supabase db push`), after 20261020_01 and 20261021_01:**
+`20261022_01_purchased_items_received_date.sql`, `20261023_01_warehouse_rules.sql`,
+`20261024_01_worker_purchase_receive.sql`, `20261025_01_materials_trail_and_issue.sql`. All safe to re-run.
+The app keeps working if a migration is missing (screens say which one to run; Issue/Return and warehouse lists fall back).
+
+**1. Purchased Items counts by the DATE GOODS WERE RECEIVED** (Philippine day). One row per received line, so a PO delivered in
+three parts appears three times. Includes warehouse receipts, goods a worker received on site, and items a worker bought
+(by purchase date). Goods received with no PO are not included. New columns: Date received, Receipt, Received at.
+
+**2. Warehouse rules.** Stock IN (Receive, Returns, the "to" of a Transfer): any warehouse — Super Admin, any warehouseman,
+staff with Edit on the page. Stock OUT (Issue, the "from" of a Transfer): only your own warehouses; office staff are assigned like
+storekeepers or get "all warehouses". Everyone who holds an Inventory page today is switched to "all warehouses" so nobody
+loses access. Super Admin: Employees > person > **Warehouses** card. Tools & Equipment keep their old rule.
+
+**3. Workers buy and receive.** Request form: **Who will collect the materials?** (any worker; default the requester; the office
+can change it). Office, when marking lines "tech buys": **Who buys?** (any worker). The buyer records store, price, date and a
+receipt photo (**I bought this**). The requester or collector records **I received this** on a PO line: it counts toward the PO
+being complete but adds NO warehouse stock. The office is told.
+
+**4. Per-item trail** (Request > Approve > Buy > Arrive > Hand over > Return) on the request detail for the requester,
+collector and office, plus one small path per item on the request lists. Names and quantities only; peso amounts only for people
+who may see prices. Returns are matched to an item by worker + item + job (the Returns screen does not record the issue slip).
+
+**5. Issue to Worker**: lines covered by a PO can now be issued against the request once the goods are in the warehouse;
+a PO line keeps its route (it used to turn into "stock"). The recipient is pre-filled with the collector, else the requester.
+
+**6. PO receipt status**: Not received / Partly received / Fully received badge on every issued PO, with a filter. The PO's own
+status (draft / issued / cancelled) is unchanged.
+
+**7. Notifications**: goods arrive on a PO -> the requester and the collector; materials issued -> the requester (the recipient
+is asked to sign, as before); materials returned -> the requester and the office. Nobody is told twice.
+
+Not built: short-closing a PO line the supplier will never deliver; showing on-hand stock beside each line when approving.
+
+---
+
+# AWES App — Purchased Items page; materials rules for every worker (sw v214)
+
+**Run first, in order (Supabase SQL editor / `supabase db push`):**
+`20261020_01_purchased_items.sql`, then `20261021_01_requests_for_all_workers.sql`. Both are safe to re-run.
+Without them the new page says to run its migration, and the app keeps working as before (the Issue and Return
+lists fall back to technicians only).
+
+**1. Purchased Items** (Purchasing, new page `pur.purchased_items` — the department Head gives it like any page)
+- Every item bought over a **month** (with previous / next arrows) or any **date range** (presets: this month,
+  last month, this year). Source: the lines of ISSUED purchase orders, by PO date; drafts and cancelled POs are left out.
+- **Totals per item** (quantity, number of POs, amount) or **Every line** (date, PO no., supplier, item, qty, unit,
+  unit price, received, amount); filter by supplier and search by item, code or PO no.
+- **Download PDF** (landscape A4, company header, coverage, filters used, totals, page numbers) of exactly the view on screen.
+- Peso values only for the Super Admin and staff who can already see prices (Purchase Orders, or "See peso values");
+  everyone else gets quantities only, on screen and in the PDF.
+- Not included yet: items a worker bought on their own ("tech buys") — those purchases are not recorded anywhere yet.
+  The database function returns a `source` column so they can be added.
+
+**2. Every worker can request materials**
+- Staff sidebar: **Request Materials** (Requests section) for all office staff; messenger Menu: **Request materials**.
+- Anyone holding Dispatch (View) — the Operations head, Operations staff — can link a request to ANY open job
+  order; everyone else still only the job orders they are on (`mr_check_job_order`).
+
+**3. Nobody reviews their own request**
+- The screen already stopped staff approving their own request (`own_record`). Now the database enforces it too,
+  for approve, reject, return AND approved quantities. The Super Admin and server-side jobs are exempt. The review
+  buttons are hidden on your own request, with a note.
+
+**4. Issue to Worker / Returns list every worker** (`inv_workers()`): active technicians and office staff
+(messengers, the Operations head, …), not only technicians.
+
+Still to come (agreed, not built): warehouse choice and limits (stock IN: any warehouse; issue/transfer-out:
+the person's own warehouses, with an "all warehouses" option), workers recording a purchase and a receipt on site,
+notifications when PO goods arrive and when materials are returned, issuing PO goods against the request line,
+a received status on POs, and the per-item trail.
+
+---
+
+# AWES App — customer status card counts the whole crew (sw v213)
+
+**Run first:** `supabase/migrations/20261019_01_customer_ticket_crew_names.sql` (replaces
+`customer_ticket_tech_names()` from 20261017_01; safe to re-run). Without it the card keeps its old count.
+
+- **Bug:** a job order with 5 technicians assigned showed "Jason Pascua + 1" under "Assigned technicians".
+  20261017_01 returned only the "Can Create Service Report" technicians whenever a ticket had any (2 of the 5).
+- **Now:** the report writers first (the card still shows the first name), then every other assigned
+  technician, nobody twice (by id; by name only on older tickets with no ids) -> "Jason Pascua + 4".
+  Tickets with no designated report writer behave as before. Same access rules, names only.
+- `dispatch.js dtFetchTicketTechNames`: the direct-read fallback orders the names the same way.
+
+---
+
+# AWES App — equipment totals on the admin Equipment and Customers pages (sw v212)
+
+No database changes.
+
+- **Equipment page** (Manage Equipment List): a "Total equipment on file" bar at the top (units, and how many
+  customers have equipment); every customer in the picker shows their count, e.g. "Alpha Corp (5)"; picking a
+  customer shows "5 units for this customer", or "3 of 5 units match" while searching.
+- **Customers page** (Manage Customers): the same total bar, and a "5 units" badge on every customer card.
+- The count (`loadEquipmentCounts`, customers.js) reads only `customer_id` in pages of 1000, because the
+  server returns at most 1000 rows per request and one query would silently stop there. It is cached for a minute,
+  cleared when equipment or a customer is added or deleted, and always re-read when either page opens.
+  A failed read shows "Couldn't count the equipment right now" instead of a number; offline it counts this
+  device's saved lists and says so.
+
+---
+
+# AWES App — Operations dashboard on the staff home (sw v209, layout v211)
+
+Office staff who hold an Operations page now see the Super Admin's dashboard on their own homepage,
+limited to what their access allows. No database changes. The Super Admin dashboard is not changed.
+
+**Who gets it:** staff (not messengers) with View on at least one of Dispatch, Service Requests,
+Service Reports or Live Tracker. Everyone else's home is unchanged.
+
+**What each page unlocks** (the database enforces the same rules through has_perm / RLS):
+
+| Card | Needs (View) |
+|---|---|
+| Operations today (tiles) | one tile per page held: Live job orders / Late today / Missed / Awaiting review = Dispatch; New service requests = Service Requests; Service reports = Service Reports; Technicians timed in = Technician Attendance |
+| Needs you now | Dispatch, Service Requests or Service Reports - and only the items from those pages |
+| Today's dispatch board, Technicians today, Job order progress, Schedule calendar | Dispatch |
+| Live tracker + technician list | Live Tracker |
+| Time-in / time-out on Technicians today | Technician Attendance (without it the card shows job orders only) |
+
+Hidden for everyone on this screen: finance, leave, purchasing, announcements, activity log, charts.
+Those items stay in the staff Inbox and on their own pages (e.g. leave decisions are not shown here).
+
+- **How:** `ops-dashboard.js` MOVES `#adminDash` into the staff home (so styles, ids and handlers keep
+  working) and puts it back before the staff home is redrawn, when any other home opens, and on sign out.
+  Cards not allowed are hidden; no request is made for data a person may not read.
+- **Live:** refreshes within ~1.5 s of a dispatch / time-in change (real-time, when those tables are
+  published), every 60 s, and when the app returns to the front. A failed background refresh keeps the screen.
+- Tiles open their page through the staff page opener (also by keyboard: Enter / Space).
+- `css/app.css`: re-flows the admin grid for this screen: tiles, Needs you now, dispatch board, then the live map
+  with **Job order progress beside it** and the **Technicians status table full-width below** (v211 — the table has
+  6 columns and was cut off at half width), then the calendar. Without Live Tracker, Job order progress and the table
+  sit side by side (table in the wider column); with only Live Tracker the map is full width. One column on phones
+  (map, Job order progress, Technicians status).
+
+---
+
 # AWES App — messenger live updates + notifications prompt (sw v208)
 
 Messenger accounts (staff with My Errands) only. Includes ONE new migration.
