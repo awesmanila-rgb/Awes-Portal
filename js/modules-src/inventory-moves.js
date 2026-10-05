@@ -27,41 +27,65 @@
   // stock_on_hand_qty works the same for admins and storekeepers.
   async function invLoadCtx(){
     invX.isAdmin = invIsAdmin();
-    invX.allWh = invX.isAdmin || isStaffUser();
+    invX.allWh = invX.isAdmin || isStaffUser();   // reports / stock views: unchanged
     invX.money = staffSeesCosts();
     invX.direct = invX.isAdmin || (isStaffUser() && can('inv.receive', 'edit'));
-    const [cat, whs, keep, av, wk, pr, jobs] = await Promise.all([
+    const [cat, whs, keep, av, wk, pr, jobs, scope] = await Promise.all([
       db.from('materials').select('id, code, name, unit, pack_unit, pack_qty, category, family, specs, brand').eq('is_active', true).order('name'),
       db.from('warehouses').select('*').order('code'),
-      invX.allWh ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
+      // the warehouses this person keeps (storekeepers AND office staff assigned to a warehouse; 20261023_01)
+      invX.isAdmin ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
       db.from('stock_on_hand_qty').select('*'),
-      db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'),
+      // technicians AND office staff (messengers, the Operations head, ...) — inv_workers(), 20261021_01; falls back to technicians only
+      (async ()=>{ const w = await db.rpc('inv_workers'); if(!w.error) return w; return db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'); })(),
       db.from('projects').select('id, project_no, name, status').in('status', ['planning', 'active', 'on_hold']).order('project_no', { ascending:false }),
-      db.rpc('inv_open_job_orders')
+      db.rpc('inv_open_job_orders'),
+      // office staff: is "all warehouses" switched on for them?
+      isStaffUser() ? db.from('inventory_staff_scope').select('all_warehouses').eq('user_id', currentUser.id).maybeSingle() : Promise.resolve({ data:null })
     ]);
     for(const r of [cat, whs, av, wk, pr]) if(r.error) throw r.error;
     invX.cat = (cat.data || []).map(m=> Object.assign({}, m, { specs: m.specs || {} }));
     invX.catById = new Map(invX.cat.map(m=> [m.id, m]));
     invX.whs = whs.data || [];
-    const keepIds = keep.data ? new Set(keep.data.map(k=> k.warehouse_id)) : null;
-    invX.mine = invX.whs.filter(w=> w.is_active && (!keepIds || keepIds.has(w.id)));
+    const keepIds = (keep.data && !keep.error) ? new Set(keep.data.map(k=> k.warehouse_id)) : new Set();
+    // Stock going OUT (Issue, the "from" side of a Transfer): only your own warehouses —
+    // everything for the Super Admin and for office staff with "all warehouses" switched on.
+    // (Before 20261023_01 staff worked across all warehouses, so with no setting row they still do.)
+    const scopeTableMissing = !!scope.error;   // migration not run yet: staff keep working across all warehouses
+    invX.outAll = invX.isAdmin || (isStaffUser() && (scopeTableMissing || !!(scope.data && scope.data.all_warehouses)));
+    invX.mine = invX.whs.filter(w=> w.is_active && (invX.outAll || keepIds.has(w.id)));
+    // Stock coming IN (Receive, Returns): choose ANY active warehouse — the database decides who may post.
+    invX.inWh = (invX.isAdmin || isStaffUser() || keepIds.size) ? invX.whs.filter(w=> w.is_active) : [];
     invX.avail = new Map((av.data || []).map(b=> [invAvailKey(b.warehouse_id, b.material_id), Number(b.qty_on_hand)]));
     invX.workers = wk.data || [];
     invX.projects = pr.data || [];
     invX.jobs = jobs.error ? [] : (jobs.data || []);
   }
+  // Tell the requester AND the collector of the requests a movement concerns (not the person who just posted it,
+  // and not anyone already told). The database function returns the people; push is best-effort.
+  async function invNotifyTargets(fn, arg, title, message, tag, skip){
+    try{
+      const { data, error } = await db.rpc(fn, arg);
+      if(error || !data) return;
+      const told = new Set([currentUser.id].concat(skip || []));
+      data.forEach(t=>{
+        if(!t.user_id || told.has(t.user_id)) return;
+        told.add(t.user_id);
+        notifyUser(t.user_id, title, message(t), tag + '-' + t.user_id);
+      });
+    }catch(e){}
+  }
   function invOpts(list, val, label, empty){
     return (empty != null ? '<option value="">' + escapeHtml(empty) + '</option>' : '') + list.map(x=> '<option value="' + escapeHtml(val(x)) + '">' + escapeHtml(label(x)) + '</option>').join('');
   }
-  function invFillCommon(prefix){
-    const whOpts = invOpts(invX.mine, w=> w.id, w=> w.code + ' · ' + w.name);
-    return whOpts;
+  function invFillCommon(list){
+    return invOpts(list || invX.mine, w=> w.id, w=> w.code + ' · ' + w.name);
   }
   function invFillProjJob(projSel, jobSel){
     $(projSel).innerHTML = invOpts(invX.projects, p=> p.id, p=> p.project_no + ' — ' + p.name, '— none —');
     $(jobSel).innerHTML = invOpts(invX.jobs, j=> j.id, j=> j.id + (j.cust_name ? ' — ' + j.cust_name : ''), '— none —');
   }
-  async function invEnter(render){
+  async function invEnter(render, which){
     const host = $('purchasingView');
     if(!(await ensureCloud())){ toast('Not connected'); return false; }
     try{ await invLoadCtx(); }
@@ -69,9 +93,16 @@
       purchFail(invMissingTables(e) ? 'Run migration 20260923_08_inventory_movements.sql first: ' : 'Couldn\u2019t load inventory: ', e);
       return false;
     }
-    if(!invX.mine.length){ toast(invX.allWh ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
+    const list = which === 'in' ? invX.inWh : invX.mine;
+    if(!list.length){
+      toast(!invX.whs.some(w=> w.is_active) ? 'Add an active warehouse first'
+        : which === 'in' ? 'You can\u2019t receive stock into a warehouse'
+        : 'You aren\u2019t assigned to a warehouse \u2014 ask the Super Admin to assign one');
+      return false;
+    }
     host.classList.add('po-wide');
     render();
+    if(typeof IT !== 'undefined') IT.onEnter();   // inventory-wizard.js: back to step 1, redraw the pictures
     return true;
   }
   // storekeeper hub navigation
@@ -184,7 +215,7 @@
   let invRcvMode = 'po', invRcvPos = [], invRcvPoLines = [];
   async function invShowReceive(){
     await invEnter(async ()=>{
-      $('invRcvWh').innerHTML = invFillCommon();
+      $('invRcvWh').innerHTML = invFillCommon(invX.inWh);
       let sup = await db.from('suppliers_directory').select('id, display_name').order('display_name');
       $('invRcvSupplier').innerHTML = invOpts(sup.data || [], s=> s.id, s=> s.display_name, '— not specified —');
       invFillProjJob('invRcvProject', 'invRcvJob');
@@ -192,7 +223,7 @@
       invLEBind('rcv', 'invRcvLines', { cost: invX.money, avail:false, wh:'invRcvWh' });
       await invRcvLoadPos();
       invRcvSetMode('po');
-    });
+    }, 'in');
   }
   async function invRcvLoadPos(){
     const { data, error } = await db.rpc('inv_pos_to_receive');
@@ -264,7 +295,7 @@
     });
   });
   $('invRcvPost').addEventListener('click', async ()=>{
-    const wh = invX.mine.find(w=> w.id === $('invRcvWh').value);
+    const wh = invX.inWh.find(w=> w.id === $('invRcvWh').value);
     const payload = { warehouse_id: wh.id, supplier_ref: $('invRcvRef').value.trim(), note: $('invRcvNote').value.trim() };
     let summary;
     if(invRcvMode === 'po'){
@@ -293,11 +324,13 @@
       payload.direct_project_id = $('invRcvProject').value || null; payload.direct_job_order_id = $('invRcvJob').value || null;
       if(!payload.direct_project_id && !payload.direct_job_order_id){ toast('Choose the project or job order it was delivered to'); return; }
     }
-    if(!await uiConfirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
+    if(!await invAsk('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
     const btn = $('invRcvPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_receipt', payload); if(!r) return;
       toast(r.receipt_no + ' posted');
+      if(payload.po_id) invNotifyTargets('po_notify_targets', { p_po: payload.po_id }, 'Materials arrived',
+        (t)=> (t.mrf_no || 'Your request') + ': goods on your order arrived at ' + wh.code + ' (' + r.receipt_no + ')' + (t.kind === 'collector' ? ' \u2014 you are to collect them.' : '.'), 'rcv-' + r.id);
       invAfterPost('rcv', r.id);
     }catch(e){ purchFail('Couldn\u2019t post the receipt: ', e); }
     finally{ btn.disabled = false; }
@@ -309,17 +342,20 @@
   let invIssMode = 'mrf', invIssMrs = [];
   async function invShowIssue(){
     await invEnter(async ()=>{
-      $('invIssWh').innerHTML = invFillCommon();
+      $('invIssWh').innerHTML = invFillCommon(invX.mine);
       $('invIssWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
       invFillProjJob('invIssProject', 'invIssJob');
       $('invIssNote').value = '';
       invLEBind('iss', 'invIssLines', { cost:false, avail:true, wh:'invIssWh' });
       const r = await db.from('material_requisitions').select('id, mrf_no, requested_by, requester_name, job_order_id, job_order, urgency, material_requisition_items(*)')
         .eq('status', 'approved').order('created_at', { ascending:false });
-      invIssMrs = (r.data || []).map(m=> Object.assign(m, { open: (m.material_requisition_items || []).filter(i=>
-        i.material_id && !i.po_id && i.fulfilled_by !== 'tech_buy' && Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0) > 0) })).filter(m=> m.open.length);
+      const leftOf = (i)=> Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
+      // lines from stock, plus lines covered by a PO (issuable once the goods are in the warehouse — checked when the request is chosen)
+      invIssMrs = (r.data || []).map(m=> Object.assign(m, {
+        open: (m.material_requisition_items || []).filter(i=> i.material_id && !i.po_id && i.fulfilled_by !== 'tech_buy' && leftOf(i) > 0),
+        poLines: (m.material_requisition_items || []).filter(i=> i.material_id && i.po_id && leftOf(i) > 0) })).filter(m=> m.open.length || m.poLines.length);
       $('invIssMr').innerHTML = '<option value="">' + (invIssMrs.length ? 'Choose an approved request…' : 'No approved requests with items to issue') + '</option>' +
-        invIssMrs.map(m=> '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.mrf_no + ' — ' + (m.requester_name || '') + (m.job_order ? ' · ' + m.job_order.id : '') + ' · ' + m.open.length + ' item' + (m.open.length === 1 ? '' : 's')) + '</option>').join('');
+        invIssMrs.map(m=> '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.mrf_no + ' — ' + (m.requester_name || '') + (m.job_order ? ' · ' + m.job_order.id : '') + ' · ' + (m.open.length + m.poLines.length) + ' item' + (m.open.length + m.poLines.length === 1 ? '' : 's') + (m.poLines.length ? ' (' + m.poLines.length + ' on a PO)' : '')) + '</option>').join('');
       invIssSetMode(invIssMrs.length ? 'mrf' : 'free');
     });
   }
@@ -335,15 +371,33 @@
   $('invIssAdd').addEventListener('click', ()=>{ invLE.iss.lines.push(invLEBlank()); invLERender('iss'); });
   $('invIssMr').addEventListener('change', invIssFromMr);
   $('invIssWh').addEventListener('change', ()=> invLERender('iss'));
-  function invIssFromMr(){
+  let invIssFromSeq = 0;
+  async function invIssFromMr(){
     const m = invIssMrs.find(x=> x.id === $('invIssMr').value);
     if(!m){ invLE.iss.lines = [invLEBlank()]; invLERender('iss'); return; }
-    $('invIssWorker').value = m.requested_by || '';
+    const seq = ++invIssFromSeq;
     $('invIssJob').value = m.job_order_id && invX.jobs.some(j=> j.id === m.job_order_id) ? m.job_order_id : '';
-    invLE.iss.lines = m.open.map(i=>{
-      const left = Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
-      return { key: ++invLEKey, material_id: i.material_id, qty: String(left), unit_cost:'', mr_item_id: i.id, max: left, locked:true, text:'' };
-    });
+    // who the materials go to: the collector named on the request, else the requester (always changeable)
+    let to = m.requested_by || '';
+    try{ const c = await db.from('material_requisition_collectors').select('collector_id').eq('mr_id', m.id).maybeSingle(); if(c.data && c.data.collector_id) to = c.data.collector_id; }catch(e){}
+    if(seq !== invIssFromSeq) return;
+    $('invIssWorker').value = invX.workers.some(w=> w.id === to) ? to : (invX.workers.some(w=> w.id === m.requested_by) ? m.requested_by : '');
+    const left = (i)=> Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
+    const lines = m.open.map(i=> ({ key: ++invLEKey, material_id: i.material_id, qty: String(left(i)), unit_cost:'', mr_item_id: i.id, max: left(i), locked:true, text:'' }));
+    // lines covered by a PO: issuable up to what has reached the warehouse on that PO and not yet been issued
+    if(m.poLines.length){
+      try{
+        const { data } = await db.rpc('mr_trail', { p_mr: m.id });
+        if(seq !== invIssFromSeq) return;
+        (data && data.items || []).forEach(t=>{
+          const src = m.poLines.find(i=> i.id === t.id); if(!src) return;
+          const can = Math.min(left(src), Math.max(0, Number(t.po_received_in_warehouse) - Number(t.issued_qty)));
+          if(can > 0) lines.push({ key: ++invLEKey, material_id: src.material_id, qty: String(can), unit_cost:'', mr_item_id: src.id, max: can, locked:true, text:'' });
+        });
+      }catch(e){}
+    }
+    invLE.iss.lines = lines.length ? lines : [invLEBlank()];
+    if(!lines.length) toast('Nothing on this request is ready to issue yet \u2014 goods on a PO have to be received into the warehouse first');
     invLERender('iss');
   }
   $('invIssPost').addEventListener('click', async ()=>{
@@ -355,13 +409,14 @@
     if(short.length){ toast('Not enough stock in ' + wh.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
     const mr = invIssMode === 'mrf' ? invIssMrs.find(x=> x.id === $('invIssMr').value) : null;
     if(invIssMode === 'mrf' && !mr){ toast('Choose the request'); return; }
-    if(!await uiConfirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
+    if(!await invAsk('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
     const btn = $('invIssPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_issue', { warehouse_id: wh.id, worker_id: worker.id, mr_id: mr ? mr.id : null,
         project_id: $('invIssProject').value || null, job_order_id: $('invIssJob').value || null, note: $('invIssNote').value.trim(), lines });
       if(!r) return;
       notifyUser(worker.id, 'Materials issued to you', r.slip_no + ' — ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + '. Please open My Materials and sign to acknowledge.', 'iss-' + r.id);
+      if(mr) invNotifyTargets('slip_notify_targets', { p_slip: r.id }, 'Materials issued', (t)=> (t.mrf_no || 'Your request') + ': ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' issued to ' + worker.name + ' (' + r.slip_no + ').', 'iss-' + r.id, [worker.id]);
       toast(r.slip_no + ' posted — ' + worker.name + ' has been asked to acknowledge');
       invAfterPost('iss', r.id);
     }catch(e){ purchFail('Couldn\u2019t post the issue: ', e); }
@@ -374,11 +429,11 @@
   let invRetHold = [];
   async function invShowReturns(){
     await invEnter(()=>{
-      $('invRetWh').innerHTML = invFillCommon();
+      $('invRetWh').innerHTML = invFillCommon(invX.inWh);
       $('invRetWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
       $('invRetNote').value = ''; invRetHold = [];
       $('invRetLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose who is returning materials.</div>';
-    });
+    }, 'in');
   }
   function invPrjLabel(pid, job){
     const p = invX.projects.find(x=> x.id === pid);
@@ -409,7 +464,7 @@
   $('invRetLines').addEventListener('input', (e)=>{ if(e.target.dataset.rq) invRetHold[Number(e.target.closest('[data-h]').dataset.h)].ret = e.target.value.trim(); });
   $('invRetLines').addEventListener('change', (e)=>{ if(e.target.dataset.rc) invRetHold[Number(e.target.closest('[data-h]').dataset.h)].cond = e.target.value; });
   $('invRetPost').addEventListener('click', async ()=>{
-    const wh = invX.mine.find(w=> w.id === $('invRetWh').value), wid = $('invRetWorker').value;
+    const wh = invX.inWh.find(w=> w.id === $('invRetWh').value), wid = $('invRetWorker').value;
     if(!wid){ toast('Choose who is returning'); return; }
     const picked = [];
     for(const h of invRetHold){
@@ -424,7 +479,7 @@
     const groups = new Map();
     picked.forEach(h=>{ const k = (h.project_id || '') + '|' + (h.job_order_id || ''); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(h); });
     const dmg = picked.filter(h=> h.cond === 'damaged').length;
-    if(!await uiConfirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
+    if(!await invAsk('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
     const btn = $('invRetPost'); btn.disabled = true;
     const done = [];
     try{
@@ -435,6 +490,9 @@
         done.push(r);
       }
       toast(done.map(r=> r.return_no).join(', ') + ' posted');
+      const rname = (invX.workers.find(w=> w.id === wid) || {}).name || 'A worker';
+      done.forEach(r=> invNotifyTargets('return_notify_targets', { p_return: r.id }, 'Materials returned', (t)=> (t.mrf_no || 'A request') + ': ' + rname + ' returned materials (' + r.return_no + ').', 'ret-' + r.id, [wid]));
+      notifyAdmins('Materials returned', rname + ' returned materials to ' + wh.code + ' (' + done.map(r=> r.return_no).join(', ') + ').', 'ret-' + done[0].id);
       invAfterPost('ret', done[0].id);
     }catch(e){ purchFail('Couldn\u2019t post the return' + (done.length ? ' (posted ' + done.map(r=> r.return_no).join(', ') + ' before the error)' : '') + ': ', e); }
     finally{ btn.disabled = false; }
@@ -445,7 +503,7 @@
   // =====================================================================
   async function invShowTransfers(){
     await invEnter(()=>{
-      $('invTrfFrom').innerHTML = invFillCommon();
+      $('invTrfFrom').innerHTML = invFillCommon(invX.mine);
       invTrfFillTo();
       $('invTrfNote').value = '';
       invLEBind('trf', 'invTrfLines', { cost:false, avail:true, wh:'invTrfFrom' });
@@ -465,7 +523,7 @@
     if(typeof lines === 'string'){ toast(lines); return; }
     const short = lines.filter(l=> l.qty > invAvail(from.id, l.material_id));
     if(short.length){ toast('Not enough stock in ' + from.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
-    if(!await uiConfirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
+    if(!await invAsk('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
     const btn = $('invTrfPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_transfer', { from_warehouse_id: from.id, to_warehouse_id: to.id, note: $('invTrfNote').value.trim(), lines });
