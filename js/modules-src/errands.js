@@ -337,6 +337,8 @@
   }
   function erRenderDetail(box){
     const e = er.cur, mine = e.assigned_to === currentUser.id, mgr = er.mode === 'manager';
+    // Messenger accounts: one instruction per screen (messenger.js) for errands still to do
+    if(er.mode === 'messenger' && mine && typeof msgrRenderGuided === 'function' && msgrRenderGuided(box, e)){ erFillThumbs(box); window.scrollTo({ top:0 }); return; }
     const late = erOverdue(e);
     const ck = e.checklist || [];
     const stepFiles = (sid)=> er.files.filter(f=> f.step_id === sid);
@@ -558,9 +560,9 @@
     finally{ btn.disabled = false; }
   }
 
-  async function erDeliver(){
+  async function erDeliver(preHow){
     const x = er.cur;
-    const how = await uiConfirm('Hand over the items\n\nWill the receiver sign on your phone? Government offices and banks usually stamp a receiving copy instead \u2014 then take a photo of it.',
+    const how = (preHow === true || preHow === false) ? preHow : await uiConfirm('Hand over the items\n\nWill the receiver sign on your phone? Government offices and banks usually stamp a receiving copy instead \u2014 then take a photo of it.',
       { ok:'Receiver signs', cancel:'Photo of stamped copy' });
     const p = { items: x.items || [] };
     if(how){
@@ -655,6 +657,7 @@
   // My Errands (messenger)
   // =====================================================================
   async function erShowMine(){
+    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // list uses the normal header
     const box = $('erMyBody');
     box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     try{
