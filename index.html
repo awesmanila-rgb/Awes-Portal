@@ -1305,6 +1305,16 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
   <div class="cp-nav-spacer"></div>
 </nav>
 
+<!-- Messenger / liaison bottom bar — persistent on every screen for accounts with My Errands.
+     Shown/hidden by msgrApply() (messenger.js); replaces the sidebar and hamburger for that
+     role only (body.role-messenger). Tabs: Home · Errands · Cash · Menu. -->
+<nav id="msgrNav" class="msgr-nav" style="display:none;" aria-label="Main">
+  <button type="button" class="msgr-tab active" data-msgr-tab="home" aria-current="page"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-6h4v6"/></svg></span><span>Home</span></button>
+  <button type="button" class="msgr-tab" data-msgr-tab="errands"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg></span><span>Errands</span></button>
+  <button type="button" class="msgr-tab" data-msgr-tab="cash"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M3 10h18M16 15h2"/></svg></span><span>Cash</span></button>
+  <button type="button" class="msgr-tab" data-msgr-tab="menu"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span><span>Menu</span></button>
+</nav>
+
 <!-- Customer Portal — Request Service (new + history), reached via
      custNavRequests or cpRequestServiceBtn above. See customer-portal.js
      cpShowRequestsScreen()/cpSubmitRequest()/cpRenderMyRequests(). -->
@@ -4751,6 +4761,8 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
   <section class="stf-panel" id="staffPanel_tracker" style="display:none;"></section>
   <section class="stf-panel" id="staffPanel_templates" style="display:none;"></section>
   <section class="stf-panel" id="staffPanel_inbox" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_msgrMenu" style="display:none;"></section>
+  <section class="stf-panel" id="staffPanel_msgrAccount" style="display:none;"></section>
 </main>
 
 <main id="serviceReportsManagerView" style="display:none; max-width:900px; margin:0 auto; padding:16px;">

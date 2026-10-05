@@ -1,3 +1,7 @@
+// Bumped to v205 — messenger / liaison accounts: simple mission Home, persistent bottom bar
+// (Home · Errands · Cash · Menu), Menu and My account (messenger.js, css/app.css, index.html,
+// staff.js, home.js, errands.js). Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
 // Bumped to v204 — admin sidebar: every page and every category now carries a
 // number for what is waiting on the admin there (red = late/escalated, amber =
 // needs action, grey = heads-up), from the same data as "Needs you now"
@@ -1090,7 +1094,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v204';
+const CACHE_NAME = 'awes-sr-v205';
 
 // Split into two lists on purpose.
 //

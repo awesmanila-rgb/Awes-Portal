@@ -1,3 +1,24 @@
+# AWES App — messenger / liaison home, bottom bar, Menu, My account (sw v205)
+
+Phase 1 of the simplified messenger experience. Applies to staff accounts that have the
+My Errands page (adm.my_errands) — the same rule the time in / out location check already uses.
+Admin, technician, customer and other staff accounts are unchanged. No database changes.
+
+- **Persistent bottom bar** (`#msgrNav`: Home · Errands · Cash · Menu) on every screen for these
+  accounts; the sidebar, hamburger and header Logout/Home buttons are hidden for them (`body.role-messenger`).
+- **Home** (`messenger.js`): today's errands in recommended order with ONE big next action —
+  Time in → Start errand → Continue errand → Time out. Status chips, progress bar, "When you tap" line,
+  bell with the count of items waiting on the messenger (opens the existing Inbox for now).
+- **Menu**: every page the old staff sidebar had, in plain-word groups; office-granted pages become
+  department folders (listed directly when 3 or fewer); counts per row; the name card opens **My account**
+  (Change password, My activity, Sign out with a confirm).
+- Hooks: `staff.js` (panels, home branch, `msgrApply`), `home.js` (`msgrOnHeader`), `errands.js`
+  (`er.pendingOpen` opens a chosen errand), `index.html` (`#msgrNav`, two panels), `css/app.css`
+  (messenger block at the end), `scripts/build.py` (messenger.js), `sw.js` (v205).
+- Not yet built: guided one-step-per-screen errand flow, redesigned Alerts screen, Cash / Errands tab pages.
+
+---
+
 # AWES App — admin sidebar counts (sw v204)
 
 Admin sidebar: every page and every category now shows a number for what is
