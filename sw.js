@@ -1,3 +1,9 @@
+// Bumped to v220 — Stock Movements design adopted: movement colours + switcher, drawn route, sticky action bar, item-by-item receiving.
+// Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
+// Bumped to v219 — site deliveries: a supplier delivers to a site, an assigned worker receives it with photos as proof.
+// Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
 // Bumped to v218 — warehouse movements as a four-step screen (From > To > Items > Review) on Receive / Issue / Return / Transfer.
 // Re-fetch css/app.css/js/app.bundle.js.
 //
@@ -1133,7 +1139,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v218';
+const CACHE_NAME = 'awes-sr-v220';
 
 // Split into two lists on purpose.
 //

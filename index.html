@@ -258,6 +258,8 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
       <button type="button" class="sidebar-link" id="staffNavMyReimb"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></span>My Reimbursement</button>
       <div class="sidebar-section-label">Requests</div>
       <button type="button" class="sidebar-link" id="staffNavErrandReq"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg></span>Errand Requests</button>
+      <button type="button" class="sidebar-link" id="staffNavMatReq"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h13l5 5v5h-3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M3 7v10h2M9 17h6"/></svg></span>Request Materials</button>
+      <button type="button" class="sidebar-link" id="staffNavMyDeliveries"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg></span>My Deliveries</button>
       <div class="sidebar-section-label">Account</div>
       <button type="button" class="sidebar-link" id="staffNavActivity"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><path d="M3.05 11a9 9 0 1 1 .5 4"/><path d="M3 4v5h5"/></svg></span>Activity</button>
       <button type="button" class="sidebar-link" id="staffNavPassword"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2"/><path d="m17 6 3 3"/><path d="m14 9 2 2"/></svg></span>Change Password</button>
@@ -300,6 +302,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         <div class="sb-section-body" id="sbSec_purchasing"><div class="sb-section-inner">
           <button type="button" class="sidebar-link" id="sbNavRequisitions"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg></span>Material Requisitions<span class="sidebar-badge" id="sbReqBadge" style="display:none;">0</span></button>
           <button type="button" class="sidebar-link" id="sbNavPurchaseOrders"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg></span>Purchase Orders<span class="sidebar-badge" id="sbPoBadge" style="display:none;">0</span></button>
+          <button type="button" class="sidebar-link" id="sbNavPurchasedItems"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/></svg></span>Purchased Items</button>
           <button type="button" class="sidebar-link" id="sbNavSuppliers"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg></span>Suppliers</button>
           <button type="button" class="sidebar-link" id="sbNavMaterials"><span class="menu-ico"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></span>Materials</button>
         </div></div>
@@ -522,6 +525,11 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
           <span class="th-tile-label">Request materials</span>
           <span class="th-tile-desc">For a job order</span>
+        </button>
+        <button type="button" class="th-tile th-brown" id="techQaDeliveries">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg></span>
+          <span class="th-tile-label">My deliveries</span>
+          <span class="th-tile-desc">Receive at a site</span>
         </button>
         <button type="button" class="th-tile th-green" id="techQaCashAdvance">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>
@@ -2588,6 +2596,16 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg> Material Requisitions</span><span class="purch-head-right"><span class="sp-count" id="mrCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
       <div id="mrListView">
+        <div class="seg-tabs" id="mrTabs" role="tablist">
+          <button type="button" class="seg-tab active" role="tab" data-tab="monitor">Monitor</button>
+          <button type="button" class="seg-tab" role="tab" data-tab="all">All requests</button>
+        </div>
+        <div id="mrMonitorView">
+          <div class="mm-tiles" id="mmTiles"></div>
+          <div class="mm-title" id="mmTitle"></div>
+          <div id="mmList"><div class="empty-state">Loading…</div></div>
+        </div>
+        <div id="mrAllView" style="display:none;">
         <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
           Requests from technicians. Review and approve (you can lower quantities), then fulfil approved items
           with a <b>Purchase Order</b> or mark them as <b>bought by the technician</b>.
@@ -2601,6 +2619,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
           </select>
         </div>
         <div id="mrList"><div class="empty-state">Loading…</div></div>
+        </div>
       </div>
       <div id="mrDetailView" style="display:none;">
         <div class="po-ed-top">
@@ -2615,6 +2634,8 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         <section class="po-sec">
           <div class="po-sec-title">Items</div>
           <div class="sp-table-wrap"><table class="sp-table mr-table" id="mrItemsTable"></table></div>
+          <div class="po-sec-title" style="margin-top:14px;" id="mrTrailTitle">Trail per item</div>
+          <div id="mrTrail"></div>
           <div class="po-hint" id="mrItemsHint"></div>
         </section>
         <div class="po-actions" id="mrActions"></div>
@@ -2628,6 +2649,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
     <div class="card-body">
       <div id="mrtListView">
         <button type="button" class="btn btn-primary" id="mrtNewBtn" style="width:100%; margin-bottom:12px;">+ New Material Request</button>
+        <div class="mm-tiles mm-tiles-3" id="mmMyTiles"></div>
         <div id="mrtList"><div class="empty-state">Loading…</div></div>
       </div>
       <div id="mrtFormView" style="display:none;">
@@ -2645,6 +2667,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
               <div class="sp-pick mr-urgency-pick" id="mrtUrgency">
                 <button type="button" data-u="normal" class="on">Normal</button><button type="button" data-u="urgent">Urgent</button><button type="button" data-u="emergency">Emergency</button>
               </div></div>
+            <div class="field po-c12" id="mrtCollectorField"><label>Who will collect the materials? <span class="mt-hint">optional — the requester if left blank</span></label><select id="mrtCollector"></select></div>
             <div class="field po-c12"><label>Deliver To</label>
               <select id="mrtDeliver"><option value="Job site">Job site</option><option value="Office">Office</option><option value="I'll pick up">I'll pick up</option></select></div>
             <div class="field po-c12"><label>Purpose / Notes</label><textarea id="mrtPurpose" rows="2" placeholder="What is it for? e.g. replace leaking flare joint, outdoor unit #2"></textarea></div>
@@ -2655,6 +2678,10 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
           <div id="mrtItems"></div>
           <button type="button" class="btn btn-secondary mt-small-btn" id="mrtAddItem">+ Add item</button>
           <div class="po-hint">Type to search the materials list. Not listed? Just type what you need.</div>
+        </section>
+        <section class="po-sec" id="mrtTrailSec" style="display:none;">
+          <div class="po-sec-title">Where your items are</div>
+          <div id="mrtTrail"></div>
         </section>
         <section class="po-sec">
           <div class="po-sec-title">Photo <span class="mt-hint">optional — e.g. the part or the nameplate</span></div>
@@ -2685,6 +2712,7 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         </div>
         <div class="sp-toolbar po-toolbar">
           <input type="text" id="poSearch" placeholder="Search PO no., supplier, reference…">
+          <select id="poReceiptFilter" aria-label="Receipt status"><option value="">Any receipt status</option><option value="none">Not received</option><option value="partial">Partly received</option><option value="full">Fully received</option></select>
         </div>
         <div class="sp-actions-row">
           <button type="button" class="btn btn-primary" id="poAddBtn">+ New Purchase Order</button>
@@ -2764,6 +2792,68 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
   </div>
 
   <!-- ================= INVENTORY ================= -->
+  <div class="card purch-panel" id="purchPanel_purchasedItems" style="display:none;">
+    <div class="card-head"><span>Purchased Items</span><span class="purch-head-right"><span class="sp-count" id="piCoverage"></span></span></div>
+    <div class="card-body">
+      <p style="font-size:13px; color:var(--text-muted); margin-top:0;">
+        Every item bought, counted on the day the goods were received, over a month or any dates you choose. Total it per item or line by line, then download the PDF.
+      </p>
+      <div class="seg-tabs" id="piModeTabs">
+        <button type="button" class="seg-tab active" id="piModeMonth">By month</button>
+        <button type="button" class="seg-tab" id="piModeRange">Date range</button>
+      </div>
+      <div class="pi-cover">
+        <div id="piMonthWrap" class="pi-month">
+          <button type="button" class="btn btn-secondary pi-arrow" id="piPrev" aria-label="Previous month">&lsaquo;</button>
+          <input type="month" id="piMonth" aria-label="Month">
+          <button type="button" class="btn btn-secondary pi-arrow" id="piNext" aria-label="Next month">&rsaquo;</button>
+        </div>
+        <div id="piRangeWrap" class="pi-range" style="display:none;">
+          <label>From <input type="date" id="piFrom"></label>
+          <label>To <input type="date" id="piTo"></label>
+        </div>
+        <div class="pi-presets" id="piPresets">
+          <button type="button" class="btn btn-secondary" data-preset="this">This month</button>
+          <button type="button" class="btn btn-secondary" data-preset="last">Last month</button>
+          <button type="button" class="btn btn-secondary" data-preset="year">This year</button>
+        </div>
+      </div>
+      <div class="pi-filters">
+        <select id="piSupplier" aria-label="Supplier"><option value="">All suppliers</option></select>
+        <input type="text" id="piSearch" placeholder="Search item, code, PO no.…">
+        <div class="seg-tabs pi-view">
+          <button type="button" class="seg-tab active" id="piViewItem">Totals per item</button>
+          <button type="button" class="seg-tab" id="piViewLine">Every line</button>
+        </div>
+        <button type="button" class="btn btn-primary" id="piPdf">Download PDF</button>
+      </div>
+      <div class="pi-summary" id="piSummary"></div>
+      <div id="piBody"><div class="empty-state">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_siteDelivery" style="display:none;">
+    <div class="card-head"><span>Site deliveries</span></div>
+    <div class="card-body">
+      <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" id="sdBackReceive">&larr; Receive Stock</button></div>
+      <div class="seg-tabs" id="sdTabs" role="tablist">
+        <button type="button" class="seg-tab active" role="tab" data-tab="assign">Assign a delivery</button>
+        <button type="button" class="seg-tab" role="tab" data-tab="list">Deliveries</button>
+      </div>
+      <div id="sdAssign"></div>
+      <div id="sdList" style="display:none;"></div>
+      <div id="sdDetail" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="card purch-panel" id="purchPanel_myDeliveries" style="display:none;">
+    <div class="card-head"><span>My deliveries</span></div>
+    <div class="card-body">
+      <div id="sdMineList"><div class="empty-state">Loading…</div></div>
+      <div id="sdMineForm" style="display:none;"></div>
+    </div>
+  </div>
+
   <div class="card purch-panel" id="purchPanel_stock" style="display:none;">
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg> Stock on Hand</span><span class="purch-head-right"><span class="sp-count" id="invStockCount"></span><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
@@ -3189,7 +3279,11 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg> My Materials</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
       <div id="invMineListView">
-        <div class="po-sec-title">Waiting for your signature</div>
+        <div id="invMineDelWrap" style="display:none;">
+          <div class="po-sec-title">Deliveries to receive</div>
+          <div id="invMineDeliveries"></div>
+        </div>
+        <div class="po-sec-title" style="margin-top:0;">Waiting for your signature</div>
         <div id="invMinePending"><div class="empty-state">Loading…</div></div>
         <div class="po-sec-title" style="margin-top:16px;">Materials with you</div>
         <div id="invMineHold"></div>
@@ -3200,6 +3294,10 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         <div class="po-ed-top"><button type="button" class="po-back" id="invMineBack">&larr; My Materials</button><div class="po-ed-title" id="invMineTitle"></div></div>
         <section class="po-sec"><div class="mr-info" id="invMineInfo"></div></section>
         <section class="po-sec"><div class="po-sec-title">Items</div><div class="sp-table-wrap"><table class="sp-table" id="invMineItems"></table></div></section>
+        <section class="po-sec" id="invMineConfirmSec" style="display:none;">
+          <div class="po-sec-title">Tick what you received</div>
+          <div id="invCf"></div>
+        </section>
         <section class="po-sec" id="invMineSignSec">
           <div class="po-sec-title">Sign to confirm you received these</div>
           <div class="inv-sigpad"><canvas id="invMineSig"></canvas></div>
