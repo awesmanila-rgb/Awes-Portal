@@ -16440,6 +16440,7 @@
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
     if(key === 'purchaseOrders') poShow();
+    if(key === 'purchasedItems') piShow();
     if(key === 'requisitions') mrShow();
     if(key === 'stock') invShowStock();
     if(key === 'warehouses') invShowWarehouses();
@@ -18451,7 +18452,7 @@
 
   const PO_BUCKET = 'purchasing-assets';
   const PO_VAT_RATE = 0.12;
-  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, approval_requested_at, returned_at, suppliers(name, trade_name), purchase_order_items(count)';
+  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, approval_requested_at, returned_at, suppliers(name, trade_name), purchase_order_items(qty, qty_received)';
 
   let poCache = [];
   let poStatusFilter = '';   // '' = all, else draft / issued / cancelled (status tabs)
@@ -18674,8 +18675,20 @@
   function poListSupplier(r){
     return poSupplierName(r.suppliers) || poSupplierName(r.supplier_snapshot) || '— no supplier yet —';
   }
+  // How much has arrived on an ISSUED PO — derived from its lines (the PO's own status stays draft / issued / cancelled):
+  // 'none' (nothing yet) | 'partial' | 'full' (every line complete). Drafts and cancelled POs have no receipt state.
+  const poItemsOf = (r)=> Array.isArray(r.purchase_order_items) ? r.purchase_order_items : [];
+  function poReceiptState(r){
+    if(r.status !== 'issued') return '';
+    const items = poItemsOf(r); if(!items.length) return '';
+    const got = items.reduce((a, i)=> a + Number(i.qty_received || 0), 0);
+    if(got <= 0) return 'none';
+    return items.every(i=> Number(i.qty_received || 0) >= Number(i.qty || 0)) ? 'full' : 'partial';
+  }
+  const PO_RECEIPT_LABEL = { none:'Not received', partial:'Partly received', full:'Fully received' };
   function poRenderList(){
     const q = ($('poSearch').value || '').trim().toLowerCase();
+    const rf = $('poReceiptFilter') ? $('poReceiptFilter').value : '';
     const st = poStatusFilter;
     const counts = poCache.reduce((a, r)=>{ a[r.status] = (a[r.status] || 0) + 1; if(poPending(r)) a.approval = (a.approval || 0) + 1; return a; }, {});
     document.querySelectorAll('#poStatusTabs .po-tab-count').forEach(el=>{
@@ -18689,6 +18702,7 @@
     const rows = poCache.filter(r=>{
       if(st === 'approval'){ if(!poPending(r)) return false; }
       else if(st && r.status !== st) return false;
+      if(rf && poReceiptState(r) !== rf) return false;
       if(!q) return true;
       return [r.po_no, poListSupplier(r), r.reference].join(' ').toLowerCase().includes(q);
     });
@@ -18701,17 +18715,19 @@
       return;
     }
     list.innerHTML = rows.map(r=>{
-      const n = Array.isArray(r.purchase_order_items) && r.purchase_order_items[0] ? r.purchase_order_items[0].count : 0;
+      const n = poItemsOf(r).length, rs = poReceiptState(r);
       return '<button type="button" class="mt-row' + (r.status === 'cancelled' ? ' inactive' : '') + '" data-id="' + escapeHtml(r.id) + '">' +
         '<div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(r.po_no || '—') + '</span>' +
           escapeHtml(poListSupplier(r)) + ' <span class="po-status ' + escapeHtml(poPending(r) ? 'approval' : r.status) + '">' +
-            escapeHtml(poPending(r) ? 'for approval' : (r.status === 'draft' && r.returned_at ? 'returned' : r.status)) + '</span></div>' +
+            escapeHtml(poPending(r) ? 'for approval' : (r.status === 'draft' && r.returned_at ? 'returned' : r.status)) + '</span>' +
+            (rs ? ' <span class="po-rcv ' + rs + '">' + PO_RECEIPT_LABEL[rs] + '</span>' : '') + '</div>' +
           '<div class="sp-row-sub">' + escapeHtml([poDateLong(r.po_date), n + ' item' + (n === 1 ? '' : 's'), r.reference].filter(Boolean).join(' · ')) + '</div></div>' +
         '<div class="mt-row-price">₱' + poFmt(Number(r.ewt_amount) > 0 ? r.net_payable : r.total) +
           (Number(r.ewt_amount) > 0 ? '<div class="sp-row-sub">net of EWT</div>' : '') + '</div></button>';
     }).join('');
   }
   $('poSearch').addEventListener('input', poRenderList);
+  if($('poReceiptFilter')) $('poReceiptFilter').addEventListener('change', poRenderList);
   $('poStatusTabs').addEventListener('click', (e)=>{
     const tab = e.target.closest('.seg-tab');
     if(!tab || tab.dataset.status === poStatusFilter) return;
@@ -20192,6 +20208,274 @@
 
 
   // =====================================================================
+  // Purchased Items (Purchasing page) — every item bought, by the DATE IT WAS
+  // RECEIVED, over a month or any date range, totalled per item or line by line,
+  // with a PDF of the same view.
+  //
+  // Data: the database function purchased_items_report(from, to)
+  // (migrations 20261020_01 + 20261022_01 + 20261024_01). Each row is one received
+  // line, dated by the Philippine day it arrived; peso values only for people who
+  // may see prices. Supplier / search / grouping are applied here, on what came
+  // back, so the screen and the PDF always show the same rows and totals.
+  // =====================================================================
+
+  const pi = { rows:[], money:false, mode:'month', view:'item', supplier:'', q:'', from:'', to:'', loaded:false, loading:false, seq:0 };
+  const PI_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  const piPad = (n)=> String(n).padStart(2, '0');
+  const piLastDay = (y, m)=> new Date(Date.UTC(y, m, 0)).getUTCDate();   // m is 1-12
+  function piMonthRange(ym){
+    const [y, m] = String(ym).split('-').map(Number);
+    return { from: y + '-' + piPad(m) + '-01', to: y + '-' + piPad(m) + '-' + piPad(piLastDay(y, m)) };
+  }
+  function piDateLabel(iso){
+    const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+    return d + ' ' + PI_MONTHS[m - 1].slice(0, 3) + ' ' + y;
+  }
+  function piCoverageLabel(){
+    if(pi.mode === 'month'){ const [y, m] = pi.from.split('-').map(Number); return PI_MONTHS[m - 1] + ' ' + y; }
+    return pi.from === pi.to ? piDateLabel(pi.from) : piDateLabel(pi.from) + ' to ' + piDateLabel(pi.to);
+  }
+  const piMoney = (n)=> n == null || n === '' ? '\u2014' : '\u20B1' + Number(n).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const piQty = (n)=> Number(n || 0).toLocaleString('en-PH', { maximumFractionDigits:3 });
+
+  // ---------- coverage controls ----------
+  function piSetMode(mode){
+    pi.mode = mode;
+    $('piModeMonth').classList.toggle('active', mode === 'month');
+    $('piModeRange').classList.toggle('active', mode === 'range');
+    $('piMonthWrap').style.display = mode === 'month' ? '' : 'none';
+    $('piRangeWrap').style.display = mode === 'range' ? '' : 'none';
+    if(mode === 'month'){
+      const r = piMonthRange($('piMonth').value || poToday().slice(0, 7));
+      pi.from = r.from; pi.to = r.to;
+    }else{
+      pi.from = $('piFrom').value || pi.from; pi.to = $('piTo').value || pi.to;
+    }
+  }
+  function piApplyRangeFields(from, to){
+    $('piFrom').value = from; $('piTo').value = to; pi.from = from; pi.to = to;
+  }
+  function piShiftMonth(delta){
+    const [y, m] = ($('piMonth').value || poToday().slice(0, 7)).split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+    $('piMonth').value = d.getUTCFullYear() + '-' + piPad(d.getUTCMonth() + 1);
+    piSetMode('month'); piLoad();
+  }
+  function piPreset(kind){
+    const today = poToday(), y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
+    if(kind === 'this'){ $('piMonth').value = today.slice(0, 7); piSetMode('month'); }
+    else if(kind === 'last'){ const d = new Date(Date.UTC(y, m - 2, 1)); $('piMonth').value = d.getUTCFullYear() + '-' + piPad(d.getUTCMonth() + 1); piSetMode('month'); }
+    else if(kind === 'year'){ piApplyRangeFields(y + '-01-01', today); piSetMode('range'); }
+    piLoad();
+  }
+
+  // ---------- load ----------
+  async function piShow(){
+    if(!pi.loaded){
+      $('piMonth').value = poToday().slice(0, 7);
+      piSetMode('month');
+    }
+    await piLoad();
+  }
+  async function piLoad(){
+    const box = $('piBody');
+    if(pi.mode === 'range'){ pi.from = $('piFrom').value; pi.to = $('piTo').value; }
+    if(!pi.from || !pi.to){ box.innerHTML = '<div class="empty-state">Choose the dates to cover.</div>'; return; }
+    if(pi.to < pi.from){ box.innerHTML = '<div class="empty-state">The end date is before the start date.</div>'; return; }
+    const seq = ++pi.seq;
+    pi.loading = true;
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    $('piCoverage').textContent = piCoverageLabel();
+    if(!(await ensureCloud())){ box.innerHTML = '<div class="empty-state">Not connected \u2014 this page needs a connection.</div>'; pi.loading = false; return; }
+    try{
+      const { data, error } = await db.rpc('purchased_items_report', { p_from: pi.from, p_to: pi.to });
+      if(seq !== pi.seq) return;   // a newer request owns the screen
+      if(error) throw error;
+      pi.rows = (data && data.rows) || [];
+      pi.money = !!(data && data.money);
+      pi.loaded = true;
+      piFillSuppliers();
+      piRender();
+    }catch(e){
+      if(seq !== pi.seq) return;
+      console.error('purchased items failed', describeCloudError(e));
+      const msg = (typeof purchIsAuthError === 'function' && purchIsAuthError(e)) ? PURCH_EXPIRED_HTML
+        : /purchased_items_report|PGRST202|42883/.test(describeCloudError(e)) ? 'This page needs migration 20261020_01_purchased_items.sql to be run in Supabase first.'
+        : /access/i.test(describeCloudError(e)) ? 'You don\u2019t have access to Purchased Items.'
+        : 'Couldn\u2019t load purchased items: ' + escapeHtml(describeCloudError(e));
+      box.innerHTML = '<div class="empty-state">' + msg + '</div>';
+    }finally{ if(seq === pi.seq) pi.loading = false; }
+  }
+
+  // ---------- filtering and totals ----------
+  function piFillSuppliers(){
+    const names = Array.from(new Set(pi.rows.map(r=> r.supplier))).sort((a, b)=> a.localeCompare(b));
+    const keep = names.includes(pi.supplier) ? pi.supplier : '';
+    pi.supplier = keep;
+    $('piSupplier').innerHTML = '<option value="">All suppliers</option>' + names.map(n=> '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+    $('piSupplier').value = keep;
+  }
+  function piFiltered(){
+    const q = pi.q.trim().toLowerCase();
+    return pi.rows.filter(r=>{
+      if(pi.supplier && r.supplier !== pi.supplier) return false;
+      if(!q) return true;
+      return [r.description, r.code, r.po_no, r.receipt_no, r.supplier, r.reference].filter(Boolean).join(' ').toLowerCase().includes(q);
+    });
+  }
+  // One row per item (and unit) with its totals
+  function piGroup(rows){
+    const map = new Map();
+    rows.forEach(r=>{
+      const key = (r.material_id || (String(r.code || '').toLowerCase() + '|' + String(r.description || '').toLowerCase())) + '|' + String(r.unit || '').toLowerCase();
+      let g = map.get(key);
+      if(!g){ g = { code: r.code || '', description: r.description, unit: r.unit || '', qty:0, amount:0, docs:new Set(), suppliers:new Set(), hasAmount:false }; map.set(key, g); }
+      g.qty += Number(r.qty || 0);
+      if(r.amount != null){ g.amount += Number(r.amount); g.hasAmount = true; }
+      g.docs.add(piDoc(r)); g.suppliers.add(r.supplier);
+    });
+    return Array.from(map.values()).sort((a, b)=> a.description.localeCompare(b.description));
+  }
+  const piDoc = (r)=> r.receipt_no || r.doc_no || r.po_no || '';
+  function piTotals(rows){
+    const amount = rows.reduce((a, r)=> a + (r.amount != null ? Number(r.amount) : 0), 0);
+    return { lines: rows.length, items: piGroup(rows).length, deliveries: new Set(rows.map(piDoc)).size, amount };
+  }
+
+  // ---------- render ----------
+  function piRender(){
+    const rows = piFiltered(), t = piTotals(rows);
+    $('piCoverage').textContent = piCoverageLabel();
+    $('piSummary').innerHTML =
+      '<div class="pi-stat"><span>Items</span><b>' + t.items.toLocaleString('en-PH') + '</b></div>' +
+      '<div class="pi-stat"><span>Lines received</span><b>' + t.lines.toLocaleString('en-PH') + '</b></div>' +
+      '<div class="pi-stat"><span>Deliveries</span><b>' + t.deliveries.toLocaleString('en-PH') + '</b></div>' +
+      (pi.money ? '<div class="pi-stat total"><span>Total amount</span><b>' + piMoney(t.amount) + '</b></div>' : '');
+    $('piViewItem').classList.toggle('active', pi.view === 'item');
+    $('piViewLine').classList.toggle('active', pi.view === 'line');
+    $('piPdf').disabled = !rows.length;
+    const box = $('piBody');
+    if(!rows.length){
+      box.innerHTML = '<div class="empty-state">' + (pi.rows.length ? 'Nothing matches those filters.' : 'Nothing was received in ' + escapeHtml(piCoverageLabel()) + '.') + '</div>';
+      return;
+    }
+    let head, body, foot;
+    if(pi.view === 'item'){
+      head = ['Item', 'Unit', 'Qty received', 'Deliveries'].concat(pi.money ? ['Amount'] : []);
+      body = piGroup(rows).map(g=> '<tr><td><b>' + escapeHtml(g.description) + '</b>' + (g.code ? '<div class="sp-row-sub">' + escapeHtml(g.code) + '</div>' : '') +
+        (g.suppliers.size ? '<div class="sp-row-sub">' + escapeHtml(Array.from(g.suppliers).join(', ')) + '</div>' : '') + '</td><td>' + escapeHtml(g.unit) + '</td><td class="num">' + piQty(g.qty) + '</td><td class="num">' + g.docs.size + '</td>' +
+        (pi.money ? '<td class="num">' + (g.hasAmount ? piMoney(g.amount) : '\u2014') + '</td>' : '') + '</tr>').join('');
+      foot = '<tr class="pi-total"><td colspan="3">Total</td><td class="num">' + t.deliveries + '</td>' + (pi.money ? '<td class="num">' + piMoney(t.amount) + '</td>' : '') + '</tr>';
+    }else{
+      head = ['Date received', 'Receipt', 'PO no.', 'Supplier', 'Item', 'Qty', 'Unit'].concat(pi.money ? ['Unit price'] : []).concat(['Received at']).concat(pi.money ? ['Amount'] : []);
+      body = rows.map(r=> '<tr><td>' + escapeHtml(piDateLabel(r.received_on)) + '</td><td>' + escapeHtml(r.receipt_no || r.doc_no || '') + '</td><td>' + escapeHtml(r.po_no || '') + '</td><td>' + escapeHtml(r.supplier) + '</td><td><b>' + escapeHtml(r.description) + '</b>' + (r.code ? '<div class="sp-row-sub">' + escapeHtml(r.code) + '</div>' : '') + '</td>' +
+        '<td class="num">' + piQty(r.qty) + '</td><td>' + escapeHtml(r.unit || '') + '</td>' + (pi.money ? '<td class="num">' + piMoney(r.unit_price) + '</td>' : '') +
+        '<td>' + escapeHtml(r.where || '') + '</td>' + (pi.money ? '<td class="num">' + piMoney(r.amount) + '</td>' : '') + '</tr>').join('');
+      foot = '<tr class="pi-total"><td colspan="' + (pi.money ? 10 : 8) + '">Total</td>' + (pi.money ? '<td class="num">' + piMoney(t.amount) + '</td>' : '<td></td>') + '</tr>';
+    }
+    box.innerHTML = '<div class="pi-scroll"><table class="pi-table"><thead><tr>' + head.map((h, i)=> '<th' + (/^(Qty|Qty received|Deliveries|Unit price|Amount)$/.test(h) ? ' class="num"' : '') + '>' + h + '</th>').join('') + '</tr></thead><tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table></div>' +
+      '<p class="pi-note">' + 'Counted on the day the goods were received. ' + (pi.money ? 'Amounts are quantity received \u00D7 the PO unit price, before the purchase order\u2019s discount and VAT. ' : 'Quantities only \u2014 you can\u2019t see prices. ') +
+      'Includes goods received into a warehouse, goods a worker received on site, and items a worker bought. Goods received with no purchase order are not included.</p>';
+  }
+
+  // ---------- events ----------
+  $('piModeMonth').addEventListener('click', ()=>{ piSetMode('month'); piLoad(); });
+  $('piModeRange').addEventListener('click', ()=>{
+    if(!$('piFrom').value){ piApplyRangeFields(pi.from, pi.to); }
+    piSetMode('range'); piLoad();
+  });
+  $('piPrev').addEventListener('click', ()=> piShiftMonth(-1));
+  $('piNext').addEventListener('click', ()=> piShiftMonth(1));
+  $('piMonth').addEventListener('change', ()=>{ piSetMode('month'); piLoad(); });
+  $('piFrom').addEventListener('change', ()=>{ pi.from = $('piFrom').value; piLoad(); });
+  $('piTo').addEventListener('change', ()=>{ pi.to = $('piTo').value; piLoad(); });
+  $('piPresets').addEventListener('click', (e)=>{ const b = e.target.closest('[data-preset]'); if(b) piPreset(b.dataset.preset); });
+  $('piSupplier').addEventListener('change', ()=>{ pi.supplier = $('piSupplier').value; piRender(); });
+  $('piSearch').addEventListener('input', ()=>{ pi.q = $('piSearch').value; piRender(); });
+  $('piViewItem').addEventListener('click', ()=>{ pi.view = 'item'; piRender(); });
+  $('piViewLine').addEventListener('click', ()=>{ pi.view = 'line'; piRender(); });
+
+  // ---------- PDF ----------
+  $('piPdf').addEventListener('click', ()=> piExportPdf());
+  async function piExportPdf(){
+    const rows = piFiltered();
+    if(!rows.length){ toast('Nothing to print'); return; }
+    try{
+      await loadAwesScript('jspdf', awesLibs.jspdf); await loadAwesScript('autotable', awesLibs.autotable);
+      await poLoadSettings().catch(()=>{});
+      const co = poSettingsData || {}, style = co.header_style || 'green';
+      const logo = co.logo_path ? await poLoadImage(co.logo_path).then(img=> poLogoForStyle(img, style)) : await poDefaultLogo(style);
+      const fonts = await poLoadFonts();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4', compress:true });
+      let F = 'helvetica', FB = ['helvetica', 'bold'];
+      if(fonts){ try{
+        doc.addFileToVFS('Inter-Regular.ttf', fonts.regular); doc.addFont('Inter-Regular.ttf', 'Inter', 'normal');
+        doc.addFileToVFS('Inter-Bold.ttf', fonts.bold); doc.addFont('Inter-Bold.ttf', 'InterBold', 'normal');
+        F = 'Inter'; FB = ['InterBold', 'normal'];
+      }catch(e){} }
+      const peso = F === 'Inter' ? '\u20B1' : 'PHP ';
+      const money = (n)=> n == null ? '' : peso + Number(n).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 30;
+      const G = [21, 77, 52], SUB = [96, 108, 101], INK = [28, 34, 30], LINE = [216, 223, 219];
+      const green = style !== 'white', t = piTotals(rows), cover = piCoverageLabel();
+      const header = ()=>{
+        if(green){ doc.setFillColor(...G); doc.rect(0, 0, W, 64, 'F'); } else { doc.setFillColor(...G); doc.rect(0, 61, W, 3, 'F'); }
+        if(logo && logo.w){ const r = Math.min(110 / logo.w, 32 / logo.h); try{ doc.addImage(logo.dataUrl, 'PNG', M, 16, logo.w * r, logo.h * r, 'pi-logo', 'FAST'); }catch(e){} }
+        doc.setTextColor(...(green ? [255, 255, 255] : G));
+        doc.setFont(FB[0], FB[1]); doc.setFontSize(15); doc.text('PURCHASED ITEMS', W - M, 30, { align:'right' });
+        doc.setFont(F, 'normal'); doc.setFontSize(8.5); doc.text('Received ' + cover + '   \u2022   ' + (co.company_name || ''), W - M, 46, { align:'right' });
+      };
+      header();
+      let y = 82;
+      doc.setFont(F, 'normal'); doc.setFontSize(8.5); doc.setTextColor(...INK);
+      const sum = ['Items: ' + t.items, 'Lines received: ' + t.lines, 'Deliveries: ' + t.deliveries].concat(pi.money ? ['Total: ' + money(t.amount)] : []);
+      doc.text(sum.join('     '), M, y); y += 12;
+      const filt = [pi.supplier ? 'Supplier: ' + pi.supplier : '', pi.q.trim() ? 'Search: ' + pi.q.trim() : '', pi.view === 'item' ? 'Totals per item' : 'Every line'].filter(Boolean).join('   \u2022   ');
+      doc.setFontSize(7.5); doc.setTextColor(...SUB); doc.text(filt, M, y); y += 8;
+      const num = (list)=> Object.fromEntries(list.map(i=> [i, { halign:'right' }]));
+      let head, body, foot, colStyles;
+      if(pi.view === 'item'){
+        const g = piGroup(rows);
+        head = ['Item', 'Code', 'Suppliers', 'Unit', 'Qty received', 'Deliveries'].concat(pi.money ? ['Amount'] : []);
+        body = g.map(x=> [x.description, x.code, Array.from(x.suppliers).join(', '), x.unit, piQty(x.qty), String(x.docs.size)].concat(pi.money ? [x.hasAmount ? money(x.amount) : ''] : []));
+        foot = [{ content:'Total', colSpan:5, styles:{ fontStyle:'bold' } }, { content:String(t.deliveries), styles:{ halign:'right', fontStyle:'bold' } }].concat(pi.money ? [{ content: money(t.amount), styles:{ halign:'right', fontStyle:'bold' } }] : []);
+        colStyles = Object.assign({ 3:{ cellWidth:44 } }, num(pi.money ? [4, 5, 6] : [4, 5]));
+      }else{
+        head = ['Date received', 'Receipt', 'PO no.', 'Supplier', 'Item', 'Qty', 'Unit'].concat(pi.money ? ['Unit price'] : []).concat(['Received at']).concat(pi.money ? ['Amount'] : []);
+        body = rows.map(r=> [piDateLabel(r.received_on), r.receipt_no || r.doc_no || '', r.po_no || '', r.supplier, r.description + (r.code ? '  (' + r.code + ')' : ''), piQty(r.qty), r.unit || ''].concat(pi.money ? [money(r.unit_price)] : []).concat([r.where || '']).concat(pi.money ? [money(r.amount)] : []));
+        foot = [{ content:'Total', colSpan: pi.money ? 10 : 8, styles:{ fontStyle:'bold' } }].concat(pi.money ? [{ content: money(t.amount), styles:{ halign:'right', fontStyle:'bold' } }] : [{ content:'' }]);
+        colStyles = Object.assign({ 0:{ cellWidth:58 }, 1:{ cellWidth:66 }, 2:{ cellWidth:66 }, 6:{ cellWidth:38 } }, num(pi.money ? [5, 7, 9] : [5]));
+      }
+      doc.autoTable({
+        startY: y + 4, margin:{ left:M, right:M, top:78, bottom:36 }, head:[head], body, foot:[foot], showFoot:'lastPage',
+        theme:'plain',
+        styles:{ font:F, fontSize:8, cellPadding:{ top:3.5, bottom:3.5, left:4, right:4 }, textColor:INK, lineColor:LINE, lineWidth:{ bottom:0.4 } },
+        headStyles:{ font:F, fontStyle:'bold', fillColor:G, textColor:255, fontSize:7.2 },
+        footStyles:{ font:F, fillColor:[233, 243, 237], textColor:G, fontSize:8.2 },
+        alternateRowStyles:{ fillColor:[247, 250, 248] },
+        columnStyles: colStyles,
+        didParseCell: (c)=>{ if(c.section === 'head' && colStyles[c.column.index] && colStyles[c.column.index].halign === 'right') c.cell.styles.halign = 'right'; },
+        didDrawPage: ()=>{ header(); }
+      });
+      const pages = doc.internal.getNumberOfPages();
+      for(let p = 1; p <= pages; p++){
+        doc.setPage(p); doc.setFont(F, 'normal'); doc.setFontSize(7); doc.setTextColor(...SUB);
+        doc.text('Generated ' + new Date().toLocaleString('en-PH') + (pi.money ? '' : ' \u00B7 quantities only') + ' \u00B7 by date received', M, H - 16);
+        doc.text('Page ' + p + ' of ' + pages, W - M, H - 16, { align:'right' });
+      }
+      const title = 'Purchased Items';
+      $('previewOverlay').querySelector('h3').textContent = title;
+      $('previewOkBtn').textContent = 'Close';
+      $('previewOverlay').style.zIndex = '99';
+      $('previewOverlay').classList.add('open');
+      await renderPdfPreview(doc, 'Purchased-Items-' + pi.from + '-to-' + pi.to + '.pdf', title);
+    }catch(e){ console.error('purchased items pdf failed', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
+  }
+
+
+  // =====================================================================
   // Purchasing — Material Requisition (MRF)
   //
   // Technician side (purchPanel_myRequests): create / edit / submit own
@@ -20296,8 +20580,9 @@
         (r.urgency !== 'normal' ? ' <span class="mr-urg ' + r.urgency + '">' + escapeHtml(MR_URGENCY[r.urgency]) + '</span>' : '') + '</div>' +
         '<div class="sp-row-sub">' + escapeHtml(jo) + ' · ' + n + ' item' + (n === 1 ? '' : 's') + (r.needed_by ? ' · needed ' + escapeHtml(mrDate(r.needed_by)) : '') + '</div>' +
         (r.status === 'returned' || r.status === 'rejected' ? '<div class="sp-row-sub" style="color:#9A6212;">Admin: ' + escapeHtml(r.review_note) + '</div>' : '') +
-        '</div></button>';
+        '<div class="mm-chips" data-chip="' + escapeHtml(r.id) + '"></div></div></button>';
     }).join('');
+    mmFillMine(list);
   }
   $('mrtList').addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) mrtLoadList(); }); return; }
@@ -20312,7 +20597,9 @@
   async function mrtOpen(id){
     if(!(await ensureCloud())){ toast('Not connected'); return; }
     try{
-      const jobsP = (typeof dtListForWorker === 'function' ? dtListForWorker(currentUser.id) : Promise.resolve([])).catch(()=> []);
+      // Dispatch holders (the Operations head, Operations staff) may request for ANY job order; everyone else for the ones they are on
+      const seesAllJobs = isStaffUser() && can('ops.dispatch', 'view') && typeof dtListAll === 'function';
+      const jobsP = (seesAllJobs ? dtListAll() : typeof dtListForWorker === 'function' ? dtListForWorker(currentUser.id) : Promise.resolve([])).catch(()=> []);
       await mrLoadCatalog();
       let h = null, items = [];
       if(id){
@@ -20351,7 +20638,33 @@
       mrtRenderJobInfo();
       mrtDirty = false;
       mrtShowForm();
+      mrtMountTrailAndCollector(h);
     }catch(e){ purchFail('Couldn\u2019t open the request: ', e); }
+  }
+  // The per-item trail once the request has been sent; the "who collects" choice while it is still editable
+  async function mrtMountTrailAndCollector(h){
+    const sent = !!(h && h.id && !['draft', 'returned'].includes(h.status));
+    $('mrtTrailSec').style.display = sent ? '' : 'none';
+    if(sent) mtMountTrail($('mrtTrail'), h.id);
+    const field = $('mrtCollectorField');
+    field.style.display = sent ? 'none' : '';    // once sent, the trail's own "Who collects" picker takes over
+    if(sent) return;
+    await mtLoadWorkers();
+    let cur = '';
+    if(h && h.id){ try{ const c = await db.from('material_requisition_collectors').select('collector_id').eq('mr_id', h.id).maybeSingle(); cur = c.data ? c.data.collector_id : ''; }catch(e){} }
+    $('mrtCollector').innerHTML = mtWorkerOptions(cur, 'Me (' + (currentUser.name || 'the requester') + ')', currentUser.id);
+    $('mrtCollector').dataset.was = cur;
+  }
+  async function mrtSaveCollector(id){
+    const sel = $('mrtCollector'); if(!sel || $('mrtCollectorField').style.display === 'none') return;
+    const now = sel.value || '';
+    if(now === (sel.dataset.was || '')) return;
+    try{
+      const { error } = await db.rpc('mr_set_collector', { p_mr: id, p_collector: now || null });
+      if(error) throw error;
+      sel.dataset.was = now;
+      if(now) notifyUser(now, 'You will collect materials', (mrtEditing && mrtEditing.mrf_no || 'A request') + ' — ' + (currentUser.name || 'a worker') + ' named you to collect them.', 'mt-col-' + id);
+    }catch(e){ console.warn('collector not saved', describeCloudError(e)); toast('The request was saved, but the collector wasn\u2019t: ' + describeCloudError(e)); }
   }
   function mrtBlank(){ return { key: ++mrtKey, id: null, material_id: null, code: '', description: '', unit: '', qty: '', qty_approved: null }; }
   function mrtEditable(){ return !mrtEditing || mrtEditing.status === 'draft' || mrtEditing.status === 'returned'; }
@@ -20496,6 +20809,7 @@
         if(error) throw error;
         id = data.id; mrtEditing = data; purchMarkOwn(id);
       }
+      await mrtSaveCollector(id);
       const clean = mrtItems.filter(it=> String(it.description || '').trim());
       clean.forEach(it=>{ if(!it.id) it.id = poUuid(); });
       if(clean.length){
@@ -20588,6 +20902,7 @@
   async function mrShow(){
     if(mrDetailVisible()) mrShowListView();
     if(await mrLoadList()) mrRenderList();
+    if($('mrMonitorView').style.display !== 'none') mmShowOffice();   // the Monitor is the first thing they see
   }
   function mrShowListView(){ $('mrDetailView').style.display = 'none'; $('mrListView').style.display = ''; $('purchasingView').classList.remove('po-wide'); mrOpenRow = null; }
   function mrShowDetailView(){ $('mrListView').style.display = 'none'; $('mrDetailView').style.display = ''; $('purchasingView').classList.add('po-wide'); window.scrollTo({ top:0 }); }
@@ -20634,8 +20949,9 @@
         ' <span class="po-status ' + r.status + '">' + escapeHtml(MR_STATUS_LABEL[r.status]) + '</span>' +
         (r.urgency !== 'normal' ? ' <span class="mr-urg ' + r.urgency + '">' + escapeHtml(MR_URGENCY[r.urgency]) + '</span>' : '') + '</div>' +
         '<div class="sp-row-sub">' + escapeHtml(jo) + ' · ' + n + ' item' + (n === 1 ? '' : 's') + (r.needed_by ? ' · needed ' + escapeHtml(mrDate(r.needed_by)) : '') +
-        (r.submitted_at ? ' · sent ' + escapeHtml(mrWhen(r.submitted_at)) : '') + '</div></div></button>';
+        (r.submitted_at ? ' · sent ' + escapeHtml(mrWhen(r.submitted_at)) : '') + '</div><div class="mm-chips" data-chip="' + escapeHtml(r.id) + '"></div></div></button>';
     }).join('');
+    mmFillChips(list);
   }
   $('mrSearch').addEventListener('input', mrRenderList);
   $('mrFilterStatus').addEventListener('change', mrRenderList);
@@ -20661,6 +20977,8 @@
       $('mrStaleNote').style.display = 'none';
       mrRenderDetail();
       mrShowDetailView();
+      $('mrTrailTitle').style.display = $('mrTrail').style.display = ['draft'].includes(mrOpenRow.status) ? 'none' : '';
+      if(mrOpenRow.status !== 'draft') mtMountTrail($('mrTrail'), mrOpenRow.id);
     }catch(e){ purchFail('Couldn\u2019t open the request: ', e); }
   }
   function mrRenderDetail(){
@@ -20725,15 +21043,17 @@
       if(st === 'approved') html += b('cancel', 'Cancel Request', 'danger');
     }else html = b('pdf', 'View PDF');
     // Staff: deciding needs Approve; fulfilment needs Edit (+ PO Edit to create POs)
+    // Nobody reviews their own request (the database enforces it too; the Super Admin is exempt)
+    const ownReview = reviewing && isStaffUser() && mrOpenRow.requested_by === currentUser.id;
     if(isStaffUser()){
       const tmp = document.createElement('div'); tmp.innerHTML = html;
-      const ok = { approve: can('pur.requisitions', 'approve'), return: can('pur.requisitions', 'approve'), reject: can('pur.requisitions', 'approve'),
+      const ok = { approve: can('pur.requisitions', 'approve') && !ownReview, return: can('pur.requisitions', 'approve') && !ownReview, reject: can('pur.requisitions', 'approve') && !ownReview,
                    techbuy: can('pur.requisitions', 'edit'), cancel: can('pur.requisitions', 'edit'),
                    createpo: can('pur.requisitions', 'edit') && can('pur.purchase_orders', 'edit') };
       tmp.querySelectorAll('[data-mr]').forEach(el=>{ if(ok[el.dataset.mr] === false) el.remove(); });
       html = tmp.innerHTML;
     }
-    $('mrActions').innerHTML = html;
+    $('mrActions').innerHTML = html + (ownReview ? '<p class="mr-own-note">This is your own request, so another approver has to review it.</p>' : '');
   }
   // Link a technician's typed line to a Materials Database item (needed
   // before it can go on a Purchase Order, which accepts catalog items only)
@@ -20804,6 +21124,7 @@
       toast(msg);
       await mrOpen(mrOpenRow.id);
       mrLoadList({ silent:true }).then(ok=>{ if(ok) mrRenderList(); });
+      if($('mrMonitorView').style.display !== 'none') mmLoad().then(mmRenderOffice);
       return true;
     }catch(err){ purchFail('Couldn\u2019t update the request: ', err); return false; }
   }
@@ -20844,14 +21165,18 @@
   async function mrMarkTechBuy(){
     const sel = mrSelectedOpen();
     if(!sel.length){ toast('Tick the lines the technician will buy'); return; }
-    if(!await uiConfirm('Mark ' + sel.length + ' line' + (sel.length === 1 ? '' : 's') + ' as bought by ' + (mrOpenRow.requester_name || 'the technician') + ' (cash advance)?')) return;
+    const buyer = await mtChooseBuyer(sel.length, mrOpenRow.requester_name || 'the requester', mrOpenRow.requested_by);
+    if(buyer === null) return;   // cancelled; '' = the requester buys
     if(!(await purchEnsureSession())) return;
     try{
       purchMarkOwn(mrOpenRow.id);
       const { error } = await db.from('material_requisition_items').update({ fulfilled_by:'tech_buy' }).in('id', sel.map(it=> it.id));
       if(error) throw error;
+      if(buyer){
+        for(const it of sel){ const r2 = await db.rpc('mr_set_buyer', { p_item: it.id, p_buyer: buyer }); if(r2.error) throw r2.error; }
+      }
       toast('Marked as tech buys');
-      notifyUser(mrOpenRow.requested_by, 'Materials: please purchase', mrOpenRow.mrf_no + ': ' + sel.length + ' item' + (sel.length === 1 ? '' : 's') + ' approved for you to buy (cash advance).', 'mrf-' + mrOpenRow.id);
+      notifyUser(buyer || mrOpenRow.requested_by, 'Materials: please purchase', mrOpenRow.mrf_no + ': ' + sel.length + ' item' + (sel.length === 1 ? '' : 's') + ' approved for you to buy (cash advance). Record what you buy in My Requests.', 'mrf-' + mrOpenRow.id);
       await mrOpen(mrOpenRow.id);
     }catch(err){ purchFail('Couldn\u2019t update the lines: ', err); }
   }
@@ -20990,6 +21315,373 @@
       $('previewOverlay').classList.add('open');
       await renderPdfPreview(doc, filename, title);
     }catch(e){ console.error('MRF pdf failed', e); toast('Couldn\u2019t build the PDF: ' + (e && e.message ? e.message : e)); }
+  }
+
+
+  // =====================================================================
+  // Materials trail — the journey of every ITEM on a material request
+  //
+  //   Request > Approve > Buy > Arrive > Hand over > Return
+  //
+  // Up to approval a request moves as one; after that each item takes its own path
+  // (a PO, the worker buying it, or stock), so each item gets its own trail.
+  // Data: mr_trail(request) / mr_progress(requests[]) (migration 20261025_01), which
+  // also say what the caller may do next:
+  //   * the requester or the collector can record "I received this" on a PO line
+  //     (po_worker_receive) — no warehouse stock, the goods are with the worker;
+  //   * the person assigned to buy a "tech buys" line can record the purchase with the
+  //     store, price and a receipt photo (mr_record_purchase).
+  // The collector (who will pick the materials up) and the buyer are chosen with
+  // mr_set_collector / mr_set_buyer (migration 20261024_01).
+  // =====================================================================
+
+  const MT_STEPS = ['Request', 'Approve', 'Buy', 'Arrive', 'Hand over', 'Return'];
+  let mtWorkers = null;
+  const mtQty = (n)=> Number(n || 0).toLocaleString('en-PH', { maximumFractionDigits:3 });
+  const mtMoneyFmt = (n)=> n == null ? '' : '\u20B1' + Number(n).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  const mtDay = (ts)=> { try{ return new Date(ts).toLocaleDateString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric' }); }catch(e){ return ''; } };
+
+  async function mtLoadWorkers(){
+    if(mtWorkers) return mtWorkers;
+    try{
+      const { data, error } = await db.rpc('worker_names');
+      if(error) throw error;
+      mtWorkers = data || [];
+    }catch(e){ mtWorkers = []; }
+    return mtWorkers;
+  }
+  // exclude: the requester is already the "default" choice, so they are not listed again
+  const mtWorkerOptions = (selected, blankLabel, exclude)=> '<option value="">' + escapeHtml(blankLabel) + '</option>' +
+    (mtWorkers || []).filter(w=> !exclude || w.id !== exclude).map(w=> '<option value="' + escapeHtml(w.id) + '"' + (w.id === selected ? ' selected' : '') + '>' + escapeHtml(w.name) + (w.role === 'technician' ? '' : ' (office)') + '</option>').join('');
+
+  // ---------- what each item's situation is, in plain words ----------
+  function mtRouteChip(it){
+    const r = it.route;
+    return r === 'po' ? 'Purchase order' : r === 'tech_buy' ? 'A worker buys it' : r === 'stock' ? 'From stock' : r === 'none' ? 'Not needed' : 'Not planned yet';
+  }
+  function mtFacts(it, money){
+    const out = [];
+    const need = mtQty(it.qty_need) + ' ' + (it.unit || '');
+    if(it.route === 'none') return ['The office approved 0 of this, so nothing is needed.'];
+    if(it.route === 'po' && it.po){
+      const po = it.po;
+      if(po.status === 'cancelled') out.push('<b>' + escapeHtml(po.po_no || 'The PO') + ' was cancelled.</b> The office is making a new order.');
+      else if(po.status === 'draft') out.push((po.waiting_approval ? 'The order is waiting for approval' : 'The office is preparing the order') + ' (' + escapeHtml(po.po_no || 'PO') + ').');
+      else{
+        out.push('Ordered on <b>' + escapeHtml(po.po_no || 'PO') + '</b>' + (po.delivery_date ? ', supplier delivers ' + escapeHtml(mtDay(po.delivery_date + 'T12:00:00+08:00')) : '') + '.');
+        out.push('Arrived: <b>' + mtQty(it.po_received) + ' of ' + mtQty(it.po_qty) + '</b>' +
+          (it.po_received > 0 ? ' (' + [it.po_received_in_warehouse > 0 ? mtQty(it.po_received_in_warehouse) + ' in the warehouse' : '', it.po_received_by_workers > 0 ? mtQty(it.po_received_by_workers) + ' received by workers' : ''].filter(Boolean).join(', ') + ')' : '') + '.');
+      }
+    }else if(it.route === 'tech_buy'){
+      const b = it.buyer && it.buyer.name ? escapeHtml(it.buyer.name) : 'The requester';
+      out.push('<b>' + b + '</b> buys this (cash advance).');
+      out.push('Bought so far: <b>' + mtQty(it.bought_qty) + ' of ' + mtQty(it.qty_need) + '</b>' + (money && it.bought_amount != null && Number(it.bought_qty) > 0 ? ' \u00B7 ' + mtMoneyFmt(it.bought_amount) : '') + '.');
+    }else if(it.route === 'stock'){
+      out.push('Taken from warehouse stock.');
+    }else if(it.progress >= 2){
+      out.push('Waiting for the office to decide how to get this (' + escapeHtml(need) + ').');
+    }
+    (it.issued || []).forEach(s=>{
+      out.push('Issued <b>' + mtQty(s.qty) + '</b> to <b>' + escapeHtml(s.worker || '') + '</b> (' + escapeHtml(s.slip_no || '') + ') \u2014 ' +
+        (s.status === 'acknowledged' ? 'signed' + (s.ack_at ? ' ' + escapeHtml(mtDay(s.ack_at)) : '') : '<span class="mt-wait">waiting for their signature</span>') + '.');
+    });
+    if(Number(it.returned_good) + Number(it.returned_damaged) > 0)
+      out.push('Returned: ' + [Number(it.returned_good) > 0 ? mtQty(it.returned_good) + ' good' : '', Number(it.returned_damaged) > 0 ? mtQty(it.returned_damaged) + ' damaged' : ''].filter(Boolean).join(', ') + '.');
+    return out;
+  }
+
+  function mtPathHtml(p){
+    // done: steps 1..p ; next: p+1 (blue) ; after the hand-over the return is optional
+    return '<div class="mt-path" role="list">' + MT_STEPS.map((label, i)=>{
+      const n = i + 1, done = n <= p, next = n === p + 1 && n <= 5;
+      return '<div class="mt-node ' + (done ? 'done' : next ? 'next' : '') + '" role="listitem" aria-label="' + escapeHtml(label) + (done ? ', done' : next ? ', next' : '') + '">' +
+        '<span class="mt-dot">' + (done ? '\u2713' : n) + '</span><span class="mt-lab">' + escapeHtml(label) + '</span></div>';
+    }).join('') + '</div>';
+  }
+
+  function mtItemHtml(it, money){
+    const actions = (it.can_receive ? '<button type="button" class="btn btn-primary mt-act" data-mt-act="receive" data-item="' + escapeHtml(it.id) + '">I received this</button>' : '') +
+      (it.can_buy ? '<button type="button" class="btn btn-primary mt-act" data-mt-act="buy" data-item="' + escapeHtml(it.id) + '">I bought this</button>' : '');
+    return '<div class="mt-item" data-item="' + escapeHtml(it.id) + '">' +
+      '<div class="mt-item-head"><div class="mt-item-name">' + escapeHtml(it.description) + (it.code ? ' <span class="mt-code">' + escapeHtml(it.code) + '</span>' : '') + '</div>' +
+      '<div class="mt-item-qty">' + mtQty(it.qty_need) + ' ' + escapeHtml(it.unit || '') + '</div></div>' +
+      '<div class="mt-route">' + escapeHtml(mtRouteChip(it)) + '</div>' + (it.route === 'none' ? '' : mtPathHtml(it.progress)) +
+      '<ul class="mt-facts">' + mtFacts(it, money).map(f=> '<li>' + f + '</li>').join('') + '</ul>' +
+      (actions ? '<div class="mt-actions">' + actions + '</div>' : '') + '</div>';
+  }
+
+  // ---------- who collects ----------
+  function mtCollectorHtml(t){
+    const mr = t.mr, mine = mr.requested_by === currentUser.id;
+    const canSet = mine || (isStaffUser() && can('pur.requisitions', 'edit')) || (currentUser && currentUser.role === 'admin');
+    const open = !['cancelled', 'rejected'].includes(mr.status);
+    const name = mr.collector ? escapeHtml(mr.collector.name) : escapeHtml(mr.requester_name || 'The requester');
+    if(!(canSet && open)) return '<div class="mt-collector"><span>Collector:</span> <b>' + name + '</b></div>';
+    return '<div class="mt-collector"><label>Who collects the materials? <select data-mt-collector>' + mtWorkerOptions(mr.collector ? mr.collector.id : '', (mr.requester_name || 'The requester') + ' (default)', mr.requested_by) + '</select></label>' +
+      '<button type="button" class="btn btn-secondary mt-small" data-mt-act="setcollector" style="display:none;">Save</button></div>';
+  }
+
+  async function mtMountTrail(host, mrId){
+    if(!host) return;
+    host.innerHTML = '<div class="empty-state">Loading the trail\u2026</div>';
+    try{
+      await mtLoadWorkers();
+      const { data, error } = await db.rpc('mr_trail', { p_mr: mrId });
+      if(error) throw error;
+      host._mt = { mrId, trail: data };
+      const items = data.items || [];
+      // Simple by default: a one-line answer on top, the steps of each item folded away.
+      // It opens by itself only when the caller has something to do (receive / buy).
+      const todo = items.some(it=> it.can_receive || it.can_buy);
+      const mmRow = (typeof mm !== 'undefined' && mm.rows.find(r=> r.id === mrId)) || null;
+      const line = mmRow ? '<div class="mt-now ' + mmRow.stage + '"><b>' + escapeHtml(mmLabel(mmRow.stage, data.mr.requested_by === currentUser.id)) + '</b>' +
+        (mmRow.stage === 'done' ? '' : ' \u2014 waiting on <b>' + escapeHtml(mmRow.waiting_on || '') + '</b>' + (mmRow.days != null ? ' \u00B7 ' + escapeHtml(mmDays(mmRow.days)) : '')) + '</div>' : '';
+      host.innerHTML = '<div class="mt-trail">' + line + mtCollectorHtml(data) +
+        '<details class="mt-more"' + (todo ? ' open' : '') + '><summary>' + (todo ? 'What you need to do' : 'Show each item\u2019s steps') + '</summary>' +
+        (items.length ? items.map(it=> mtItemHtml(it, data.money)).join('') : '<div class="empty-state">No items.</div>') + '</details></div>';
+    }catch(e){
+      const m = describeCloudError(e);
+      host.innerHTML = '<div class="empty-state">' + (/mr_trail|PGRST202|42883/.test(m) ? 'The trail needs migration 20261025_01_materials_trail_and_issue.sql to be run in Supabase.' : 'Couldn\u2019t load the trail: ' + escapeHtml(m)) + '</div>';
+    }
+  }
+  const mtRefresh = (host)=> host && host._mt ? mtMountTrail(host, host._mt.mrId) : null;
+
+  // ---------- small form dialog (receive / purchase) ----------
+  function mtDialog(title, bodyHtml, okLabel, onOk){
+    let ov = $('mtOverlay');
+    if(!ov){
+      ov = document.createElement('div'); ov.id = 'mtOverlay'; ov.className = 'overlay';
+      ov.innerHTML = '<div class="sheet"><div class="sheet-head"><h3></h3><button type="button" class="sheet-x" data-mt-x aria-label="Close">\u00D7</button></div><div class="sheet-body" id="mtBody"></div><div class="sheet-foot"><button type="button" class="btn btn-secondary" data-mt-x>Cancel</button><button type="button" class="btn btn-primary" id="mtOk"></button></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', (e)=>{ if(e.target === ov || e.target.closest('[data-mt-x]')) ov.classList.remove('open'); });
+    }
+    ov.querySelector('h3').textContent = title;
+    $('mtBody').innerHTML = bodyHtml;
+    const ok = $('mtOk'); ok.textContent = okLabel; ok.disabled = false;
+    ok.onclick = async ()=>{ ok.disabled = true; try{ const done = await onOk($('mtBody')); if(done !== false) ov.classList.remove('open'); }finally{ ok.disabled = false; } };
+    ov.style.zIndex = '99'; ov.classList.add('open');
+  }
+  async function mtUploadPhoto(file, prefix){
+    if(!file) return '';
+    const path = currentUser.id + '/' + prefix + '-' + Date.now() + '.jpg';
+    const up = await db.storage.from(MR_PHOTO_BUCKET).upload(path, file, { contentType: file.type || 'image/jpeg', upsert:false });
+    if(up.error) throw up.error;
+    return path;
+  }
+  const mtErr = (e)=> { const m = describeCloudError(e); return m.replace(/^.*?:\s*(?=[A-Z])/, ''); };
+
+  function mtReceiveDialog(host, it){
+    const left = Math.max(0, Number(it.po_qty) - Number(it.po_received));
+    mtDialog('I received this',
+      '<p class="mt-dlg-p"><b>' + escapeHtml(it.description) + '</b><br>' + mtQty(left) + ' ' + escapeHtml(it.unit || '') + ' still to arrive on ' + escapeHtml((it.po && it.po.po_no) || 'the PO') + '.</p>' +
+      '<div class="field"><label>How many did you receive?</label><input type="text" inputmode="decimal" data-f="qty" value="' + escapeHtml(String(left)) + '"></div>' +
+      '<div class="field"><label>Note <span class="mt-hint">optional</span></label><input type="text" data-f="note" placeholder="e.g. delivered to the site, signed by the guard"></div>' +
+      '<div class="field"><label>Photo <span class="mt-hint">optional</span></label><input type="file" accept="image/*" data-f="photo"></div>' +
+      '<p class="mt-dlg-hint">This records that the goods are with you. It does not add stock to a warehouse.</p>',
+      'Save receipt', async (body)=>{
+        const qty = Number(body.querySelector('[data-f="qty"]').value.replace(/,/g, ''));
+        if(!(qty > 0)){ toast('Enter how many you received'); return false; }
+        if(qty > left + 1e-9){ toast('Only ' + mtQty(left) + ' is left to receive'); return false; }
+        try{
+          const photo = await mtUploadPhoto(body.querySelector('[data-f="photo"]').files[0], 'received');
+          const { data, error } = await db.rpc('po_worker_receive', { p: { po_item_id: it.po_item_id, qty, note: body.querySelector('[data-f="note"]').value.trim(), photo_path: photo } });
+          if(error) throw error;
+          toast('Saved \u2014 ' + (data && Number(data.left) > 0 ? mtQty(data.left) + ' still to arrive' : 'all received'));
+          if(host._mt && typeof notifyAdmins === 'function') notifyAdmins('Materials received by a worker', (host._mt.trail.mr.mrf_no || '') + ': ' + mtQty(qty) + ' ' + (it.unit || '') + ' of ' + it.description + ' \u2014 ' + (currentUser.name || 'a worker'), 'mt-rcv-' + it.id);
+          mtRefresh(host);
+        }catch(e){ toast('Couldn\u2019t save: ' + mtErr(e)); return false; }
+      });
+  }
+  function mtBuyDialog(host, it, money){
+    const left = Math.max(0, Number(it.qty_need) - Number(it.bought_qty));
+    mtDialog('I bought this',
+      '<p class="mt-dlg-p"><b>' + escapeHtml(it.description) + '</b><br>' + mtQty(left) + ' ' + escapeHtml(it.unit || '') + ' still to buy.</p>' +
+      '<div class="field"><label>How many did you buy?</label><input type="text" inputmode="decimal" data-f="qty" value="' + escapeHtml(String(left)) + '"></div>' +
+      '<div class="field"><label>Price for each (\u20B1)</label><input type="text" inputmode="decimal" data-f="price" placeholder="0.00"></div>' +
+      '<div class="field"><label>Store</label><input type="text" data-f="store" placeholder="e.g. Hardware Depot, Pasay"></div>' +
+      '<div class="field"><label>Date bought</label><input type="date" data-f="date" value="' + escapeHtml(poToday()) + '" max="' + escapeHtml(poToday()) + '"></div>' +
+      '<div class="field"><label>Photo of the receipt</label><input type="file" accept="image/*" data-f="photo"></div>',
+      'Save purchase', async (body)=>{
+        const f = (k)=> body.querySelector('[data-f="' + k + '"]');
+        const qty = Number(f('qty').value.replace(/,/g, '')), price = Number(String(f('price').value || '0').replace(/[\u20B1,\s]/g, ''));
+        if(!(qty > 0)){ toast('Enter how many you bought'); return false; }
+        if(qty > left + 1e-9){ toast('Only ' + mtQty(left) + ' is left to buy'); return false; }
+        if(!isFinite(price) || price < 0){ toast('Enter the price for each'); return false; }
+        if(!f('store').value.trim()){ toast('Enter the store'); return false; }
+        try{
+          const receipt = await mtUploadPhoto(f('photo').files[0], 'receipt');
+          const { data, error } = await db.rpc('mr_record_purchase', { p: { mr_item_id: it.id, qty, unit_price: price, store: f('store').value.trim(), purchased_on: f('date').value, receipt_path: receipt, note: '' } });
+          if(error) throw error;
+          toast('Saved \u2014 ' + (data && Number(data.left) > 0 ? mtQty(data.left) + ' still to buy' : 'all bought'));
+          if(typeof notifyAdmins === 'function') notifyAdmins('Materials bought by a worker', (host._mt.trail.mr.mrf_no || '') + ': ' + mtQty(qty) + ' ' + (it.unit || '') + ' of ' + it.description + ' \u2014 ' + (currentUser.name || 'a worker'), 'mt-buy-' + it.id);
+          mtRefresh(host);
+        }catch(e){ toast('Couldn\u2019t save: ' + mtErr(e)); return false; }
+      });
+  }
+
+  // one delegated handler for every mounted trail
+  document.addEventListener('change', (ev)=>{
+    const sel = ev.target.closest && ev.target.closest('[data-mt-collector]'); if(!sel) return;
+    const btn = sel.closest('.mt-collector').querySelector('[data-mt-act="setcollector"]'); if(btn) btn.style.display = '';
+  });
+  document.addEventListener('click', async (ev)=>{
+    const b = ev.target.closest && ev.target.closest('[data-mt-act]'); if(!b) return;
+    const host = b.closest('.mt-trail') && b.closest('.mt-trail').parentElement; if(!host || !host._mt) return;
+    const act = b.getAttribute('data-mt-act'), t = host._mt.trail;
+    if(act === 'setcollector'){
+      const sel = host.querySelector('[data-mt-collector]');
+      b.disabled = true;
+      try{
+        const { error } = await db.rpc('mr_set_collector', { p_mr: host._mt.mrId, p_collector: sel.value || null });
+        if(error) throw error;
+        toast(sel.value ? 'Saved \u2014 ' + sel.options[sel.selectedIndex].text + ' collects' : 'Saved \u2014 the requester collects');
+        if(sel.value) notifyUser(sel.value, 'You will collect materials', (t.mr.mrf_no || '') + ' \u2014 ' + (t.mr.requester_name || 'a worker') + ' named you to collect them.', 'mt-col-' + host._mt.mrId);
+        mtRefresh(host);
+      }catch(e){ toast('Couldn\u2019t save: ' + mtErr(e)); b.disabled = false; }
+      return;
+    }
+    const it = (t.items || []).find(x=> x.id === b.getAttribute('data-item')); if(!it) return;
+    if(act === 'receive'){
+      if(!it.po_item_id){ toast('Couldn\u2019t find the order line \u2014 ask the office'); return; }
+      mtReceiveDialog(host, it);
+    }else if(act === 'buy') mtBuyDialog(host, it, t.money);
+  });
+
+  // ---------- list rows: one little path per item ----------
+  async function mtFillProgress(list, ids){
+    if(!list || !ids.length) return;
+    try{
+      const { data, error } = await db.rpc('mr_progress', { p_ids: ids });
+      if(error || !data) return;
+      list.querySelectorAll('[data-dots]').forEach(el=>{
+        const arr = data[el.getAttribute('data-dots')];
+        if(!arr || !arr.length){ el.innerHTML = ''; return; }
+        el.innerHTML = arr.map(p=> '<span class="mt-mini" title="' + escapeHtml(p >= 6 ? 'Returned' : p >= 5 ? 'Handed over' : p >= 4 ? 'Arrived' : p >= 3 ? 'Being bought / ordered' : p >= 2 ? 'Approved' : 'Sent') + '">' +
+          MT_STEPS.slice(0, 5).map((_, i)=> '<i class="' + (i < Math.min(p, 5) ? 'on' : i === Math.min(p, 5) ? 'next' : '') + '"></i>').join('') + '</span>').join('');
+      });
+    }catch(e){}
+  }
+
+  // ---------- the office picks WHO buys (any worker) ----------
+  function mtChooseBuyer(count, requesterName, requesterId){
+    return new Promise(async (resolve)=>{
+      await mtLoadWorkers();
+      mtDialog('Who buys ' + (count === 1 ? 'this item' : 'these ' + count + ' items') + '?',
+        '<p class="mt-dlg-p">Any worker can buy it. They record the store, price and receipt in My Requests.</p>' +
+        '<div class="field"><label>Buyer</label><select data-f="buyer">' + mtWorkerOptions('', requesterName + ' (the requester)', requesterId) + '</select></div>',
+        'Mark as bought by them', async (body)=>{ resolve(body.querySelector('[data-f="buyer"]').value || ''); });
+      const ov = $('mtOverlay');
+      const onClose = (e)=>{ if(e.target === ov || (e.target.closest && e.target.closest('[data-mt-x]'))){ ov.removeEventListener('click', onClose); resolve(null); } };
+      ov.addEventListener('click', onClose);
+    });
+  }
+
+  // =====================================================================
+  // Materials Monitor — the SIMPLE view: five stages, one list, one answer per request:
+  // "who has to act next, and for how many days?"   (mr_monitor, migration 20261026_01)
+  //   To approve > Being bought > Ready to hand over > Waiting for signature > Done
+  // =====================================================================
+  const MM_STAGES = [
+    { k:'approval', label:'To approve',            mine:'Waiting for approval' },
+    { k:'buying',   label:'Being bought',          mine:'Being bought' },
+    { k:'ready',    label:'Ready to hand over',    mine:'Ready to collect' },
+    { k:'sign',     label:'Waiting for signature', mine:'Sign for it' },
+    { k:'done',     label:'Done',                  mine:'Done' }
+  ];
+  const mm = { rows:[], stage:'', loaded:false, ok:true };
+  const mmLabel = (k, mine)=> (MM_STAGES.find(s=> s.k === k) || {})[mine ? 'mine' : 'label'] || k;
+  const mmDays = (n)=> n == null ? '' : n === 0 ? 'today' : n === 1 ? '1 day' : n + ' days';
+
+  async function mmLoad(){
+    try{
+      const { data, error } = await db.rpc('mr_monitor', { p_days: 60 });
+      if(error) throw error;
+      mm.rows = (data && data.rows) || []; mm.ok = true; mm.error = null;
+    }catch(e){
+      mm.rows = []; mm.ok = false;
+      mm.error = /mr_monitor|PGRST202|42883/.test(describeCloudError(e)) ? 'The monitor needs migration 20261026_01_materials_monitor.sql to be run in Supabase.' : 'Couldn\u2019t load the monitor: ' + describeCloudError(e);
+    }
+    mm.loaded = true;
+    return mm.ok;
+  }
+  const mmCount = (k)=> mm.rows.filter(r=> r.stage === k).length;
+
+  function mmRowHtml(r, mine){
+    const sub = r.stage === 'done' ? 'Everything handed over' : 'Waiting on <b>' + escapeHtml(r.waiting_on || '') + '</b>' + (r.days != null ? ' \u00B7 ' + escapeHtml(mmDays(r.days)) : '');
+    const jo = r.job_order ? r.job_order.id + (r.job_order.custName ? ' \u00B7 ' + r.job_order.custName : '') : '';
+    const part = r.total > 1 && r.stage !== 'approval' ? (r.counts.done || 0) + ' of ' + r.total + ' items done' : '';
+    return '<button type="button" class="mm-row ' + r.stage + '" data-id="' + escapeHtml(r.id) + '"><span class="mm-bar"></span><span class="mm-main">' +
+      '<span class="mm-top"><b>' + escapeHtml(r.mrf_no) + '</b>' + (mine ? '' : ' \u00B7 ' + escapeHtml(r.requester_name || 'Worker')) + (r.late ? ' <span class="mm-late">Late</span>' : '') +
+      (r.urgency && r.urgency !== 'normal' ? ' <span class="mm-late">' + escapeHtml(r.urgency === 'emergency' ? 'Emergency' : 'Urgent') + '</span>' : '') + '</span>' +
+      '<span class="mm-stage">' + escapeHtml(mmLabel(r.stage, mine)) + '</span>' +
+      '<span class="mm-sub">' + sub + '</span>' +
+      (jo || part ? '<span class="mm-meta">' + escapeHtml([jo, part].filter(Boolean).join(' \u00B7 ')) + '</span>' : '') + '</span></button>';
+  }
+  function mmSorted(rows){
+    const rank = { approval:0, buying:1, ready:2, sign:3, done:4 };
+    return rows.slice().sort((a, b)=> (b.late ? 1 : 0) - (a.late ? 1 : 0) || rank[a.stage] - rank[b.stage] || (b.days || 0) - (a.days || 0));
+  }
+
+  // ---------- office: tiles + one list ----------
+  function mmRenderOffice(){
+    const tiles = $('mmTiles'), list = $('mmList'); if(!tiles || !list) return;
+    if(!mm.ok){ tiles.innerHTML = ''; $('mmTitle').textContent = ''; list.innerHTML = '<div class="empty-state">' + escapeHtml(mm.error || '') + '</div>'; return; }
+    tiles.innerHTML = MM_STAGES.map(s=> '<button type="button" class="mm-tile ' + s.k + (mm.stage === s.k ? ' on' : '') + '" data-stage="' + s.k + '"><span class="mm-n">' + mmCount(s.k) + '</span><span class="mm-l">' + escapeHtml(s.label) + '</span></button>').join('');
+    const late = mm.rows.filter(r=> r.late).length;
+    const rows = mm.stage ? mm.rows.filter(r=> r.stage === mm.stage) : mm.rows.filter(r=> r.stage !== 'done');
+    $('mmTitle').innerHTML = (mm.stage ? escapeHtml(mmLabel(mm.stage)) + ' \u00B7 tap it again to see everything' : 'Everything that is not done yet') + (late ? ' <span class="mm-late">' + late + ' late</span>' : '');
+    list.innerHTML = rows.length ? mmSorted(rows).map(r=> mmRowHtml(r, false)).join('') : '<div class="empty-state">' + (mm.rows.length ? 'Nothing here.' : 'No material requests yet.') + '</div>';
+  }
+  async function mmShowOffice(){
+    if(!mm.loaded) $('mmList').innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    await mmLoad(); mmRenderOffice();
+  }
+  document.addEventListener('click', (ev)=>{
+    const tile = ev.target.closest && ev.target.closest('#mmTiles [data-stage]');
+    if(tile){ mm.stage = mm.stage === tile.dataset.stage ? '' : tile.dataset.stage; mmRenderOffice(); return; }
+    const row = ev.target.closest && ev.target.closest('#mmList .mm-row');
+    if(row){ mrOpen(row.dataset.id); return; }
+    const tab = ev.target.closest && ev.target.closest('#mrTabs [data-tab]');
+    if(tab){
+      $$('#mrTabs .seg-tab').forEach(b=> b.classList.toggle('active', b === tab));
+      $('mrMonitorView').style.display = tab.dataset.tab === 'monitor' ? '' : 'none';
+      $('mrAllView').style.display = tab.dataset.tab === 'all' ? '' : 'none';
+      if(tab.dataset.tab === 'monitor') mmShowOffice();
+    }
+  });
+
+  // ---------- workers: three plain tiles + a plain line on each of their requests ----------
+  function mmRenderMine(){
+    const box = $('mmMyTiles'); if(!box) return;
+    if(!mm.ok || !mm.rows.length){ box.innerHTML = ''; return; }
+    const n = (ks)=> mm.rows.filter(r=> ks.includes(r.stage)).length;
+    const mine = [['Waiting', ['approval', 'buying'], 'buying'], ['Ready for you', ['ready', 'sign'], 'ready'], ['Done', ['done'], 'done']];
+    box.innerHTML = mine.map(m=> '<div class="mm-tile ' + m[2] + '"><span class="mm-n">' + n(m[1]) + '</span><span class="mm-l">' + m[0] + '</span></div>').join('');
+  }
+  async function mmFillMine(list){
+    await mmLoad(); mmRenderMine();
+    if(!list || !mm.ok) return;
+    const by = new Map(mm.rows.map(r=> [r.id, r]));
+    list.querySelectorAll('[data-chip]').forEach(el=>{
+      const r = by.get(el.getAttribute('data-chip'));
+      if(!r){ el.innerHTML = ''; return; }
+      el.innerHTML = '<span class="mm-chip ' + r.stage + '">' + escapeHtml(mmLabel(r.stage, true)) + '</span>' +
+        (r.stage === 'done' ? '' : '<span class="mm-chip-sub">Waiting on ' + escapeHtml(r.waiting_on || '') + (r.days != null ? ' \u00B7 ' + escapeHtml(mmDays(r.days)) : '') + '</span>') +
+        (r.late ? '<span class="mm-late">Late</span>' : '');
+    });
+  }
+
+  // office "All requests" rows get the same plain chip (from the already loaded monitor data)
+  function mmFillChips(list){
+    if(!list) return;
+    const paint = ()=>{
+      const by = new Map(mm.rows.map(r=> [r.id, r]));
+      list.querySelectorAll('[data-chip]').forEach(el=>{
+        const r = by.get(el.getAttribute('data-chip'));
+        el.innerHTML = r ? '<span class="mm-chip ' + r.stage + '">' + escapeHtml(mmLabel(r.stage, false)) + '</span>' + (r.stage === 'done' ? '' : '<span class="mm-chip-sub">Waiting on ' + escapeHtml(r.waiting_on || '') + (r.days != null ? ' \u00B7 ' + escapeHtml(mmDays(r.days)) : '') + '</span>') + (r.late ? '<span class="mm-late">Late</span>' : '') : '';
+      });
+    };
+    if(mm.loaded) paint(); else mmLoad().then(paint);
   }
 
 
@@ -21714,41 +22406,65 @@
   // stock_on_hand_qty works the same for admins and storekeepers.
   async function invLoadCtx(){
     invX.isAdmin = invIsAdmin();
-    invX.allWh = invX.isAdmin || isStaffUser();
+    invX.allWh = invX.isAdmin || isStaffUser();   // reports / stock views: unchanged
     invX.money = staffSeesCosts();
     invX.direct = invX.isAdmin || (isStaffUser() && can('inv.receive', 'edit'));
-    const [cat, whs, keep, av, wk, pr, jobs] = await Promise.all([
+    const [cat, whs, keep, av, wk, pr, jobs, scope] = await Promise.all([
       db.from('materials').select('id, code, name, unit, pack_unit, pack_qty, category, family, specs, brand').eq('is_active', true).order('name'),
       db.from('warehouses').select('*').order('code'),
-      invX.allWh ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
+      // the warehouses this person keeps (storekeepers AND office staff assigned to a warehouse; 20261023_01)
+      invX.isAdmin ? Promise.resolve({ data:null }) : db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', currentUser.id),
       db.from('stock_on_hand_qty').select('*'),
-      db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'),
+      // technicians AND office staff (messengers, the Operations head, ...) — inv_workers(), 20261021_01; falls back to technicians only
+      (async ()=>{ const w = await db.rpc('inv_workers'); if(!w.error) return w; return db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name'); })(),
       db.from('projects').select('id, project_no, name, status').in('status', ['planning', 'active', 'on_hold']).order('project_no', { ascending:false }),
-      db.rpc('inv_open_job_orders')
+      db.rpc('inv_open_job_orders'),
+      // office staff: is "all warehouses" switched on for them?
+      isStaffUser() ? db.from('inventory_staff_scope').select('all_warehouses').eq('user_id', currentUser.id).maybeSingle() : Promise.resolve({ data:null })
     ]);
     for(const r of [cat, whs, av, wk, pr]) if(r.error) throw r.error;
     invX.cat = (cat.data || []).map(m=> Object.assign({}, m, { specs: m.specs || {} }));
     invX.catById = new Map(invX.cat.map(m=> [m.id, m]));
     invX.whs = whs.data || [];
-    const keepIds = keep.data ? new Set(keep.data.map(k=> k.warehouse_id)) : null;
-    invX.mine = invX.whs.filter(w=> w.is_active && (!keepIds || keepIds.has(w.id)));
+    const keepIds = (keep.data && !keep.error) ? new Set(keep.data.map(k=> k.warehouse_id)) : new Set();
+    // Stock going OUT (Issue, the "from" side of a Transfer): only your own warehouses —
+    // everything for the Super Admin and for office staff with "all warehouses" switched on.
+    // (Before 20261023_01 staff worked across all warehouses, so with no setting row they still do.)
+    const scopeTableMissing = !!scope.error;   // migration not run yet: staff keep working across all warehouses
+    invX.outAll = invX.isAdmin || (isStaffUser() && (scopeTableMissing || !!(scope.data && scope.data.all_warehouses)));
+    invX.mine = invX.whs.filter(w=> w.is_active && (invX.outAll || keepIds.has(w.id)));
+    // Stock coming IN (Receive, Returns): choose ANY active warehouse — the database decides who may post.
+    invX.inWh = (invX.isAdmin || isStaffUser() || keepIds.size) ? invX.whs.filter(w=> w.is_active) : [];
     invX.avail = new Map((av.data || []).map(b=> [invAvailKey(b.warehouse_id, b.material_id), Number(b.qty_on_hand)]));
     invX.workers = wk.data || [];
     invX.projects = pr.data || [];
     invX.jobs = jobs.error ? [] : (jobs.data || []);
   }
+  // Tell the requester AND the collector of the requests a movement concerns (not the person who just posted it,
+  // and not anyone already told). The database function returns the people; push is best-effort.
+  async function invNotifyTargets(fn, arg, title, message, tag, skip){
+    try{
+      const { data, error } = await db.rpc(fn, arg);
+      if(error || !data) return;
+      const told = new Set([currentUser.id].concat(skip || []));
+      data.forEach(t=>{
+        if(!t.user_id || told.has(t.user_id)) return;
+        told.add(t.user_id);
+        notifyUser(t.user_id, title, message(t), tag + '-' + t.user_id);
+      });
+    }catch(e){}
+  }
   function invOpts(list, val, label, empty){
     return (empty != null ? '<option value="">' + escapeHtml(empty) + '</option>' : '') + list.map(x=> '<option value="' + escapeHtml(val(x)) + '">' + escapeHtml(label(x)) + '</option>').join('');
   }
-  function invFillCommon(prefix){
-    const whOpts = invOpts(invX.mine, w=> w.id, w=> w.code + ' · ' + w.name);
-    return whOpts;
+  function invFillCommon(list){
+    return invOpts(list || invX.mine, w=> w.id, w=> w.code + ' · ' + w.name);
   }
   function invFillProjJob(projSel, jobSel){
     $(projSel).innerHTML = invOpts(invX.projects, p=> p.id, p=> p.project_no + ' — ' + p.name, '— none —');
     $(jobSel).innerHTML = invOpts(invX.jobs, j=> j.id, j=> j.id + (j.cust_name ? ' — ' + j.cust_name : ''), '— none —');
   }
-  async function invEnter(render){
+  async function invEnter(render, which){
     const host = $('purchasingView');
     if(!(await ensureCloud())){ toast('Not connected'); return false; }
     try{ await invLoadCtx(); }
@@ -21756,9 +22472,16 @@
       purchFail(invMissingTables(e) ? 'Run migration 20260923_08_inventory_movements.sql first: ' : 'Couldn\u2019t load inventory: ', e);
       return false;
     }
-    if(!invX.mine.length){ toast(invX.allWh ? 'Add an active warehouse first' : 'You aren\u2019t assigned to a warehouse'); return false; }
+    const list = which === 'in' ? invX.inWh : invX.mine;
+    if(!list.length){
+      toast(!invX.whs.some(w=> w.is_active) ? 'Add an active warehouse first'
+        : which === 'in' ? 'You can\u2019t receive stock into a warehouse'
+        : 'You aren\u2019t assigned to a warehouse \u2014 ask the Super Admin to assign one');
+      return false;
+    }
     host.classList.add('po-wide');
     render();
+    if(typeof IT !== 'undefined') IT.onEnter();   // inventory-wizard.js: back to step 1, redraw the pictures
     return true;
   }
   // storekeeper hub navigation
@@ -21871,7 +22594,7 @@
   let invRcvMode = 'po', invRcvPos = [], invRcvPoLines = [];
   async function invShowReceive(){
     await invEnter(async ()=>{
-      $('invRcvWh').innerHTML = invFillCommon();
+      $('invRcvWh').innerHTML = invFillCommon(invX.inWh);
       let sup = await db.from('suppliers_directory').select('id, display_name').order('display_name');
       $('invRcvSupplier').innerHTML = invOpts(sup.data || [], s=> s.id, s=> s.display_name, '— not specified —');
       invFillProjJob('invRcvProject', 'invRcvJob');
@@ -21879,7 +22602,7 @@
       invLEBind('rcv', 'invRcvLines', { cost: invX.money, avail:false, wh:'invRcvWh' });
       await invRcvLoadPos();
       invRcvSetMode('po');
-    });
+    }, 'in');
   }
   async function invRcvLoadPos(){
     const { data, error } = await db.rpc('inv_pos_to_receive');
@@ -21951,7 +22674,7 @@
     });
   });
   $('invRcvPost').addEventListener('click', async ()=>{
-    const wh = invX.mine.find(w=> w.id === $('invRcvWh').value);
+    const wh = invX.inWh.find(w=> w.id === $('invRcvWh').value);
     const payload = { warehouse_id: wh.id, supplier_ref: $('invRcvRef').value.trim(), note: $('invRcvNote').value.trim() };
     let summary;
     if(invRcvMode === 'po'){
@@ -21980,11 +22703,13 @@
       payload.direct_project_id = $('invRcvProject').value || null; payload.direct_job_order_id = $('invRcvJob').value || null;
       if(!payload.direct_project_id && !payload.direct_job_order_id){ toast('Choose the project or job order it was delivered to'); return; }
     }
-    if(!await uiConfirm('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
+    if(!await invAsk('Receive ' + summary + ' into ' + wh.code + '?' + (direct ? '\n\nDelivered straight to site: charged to the project, not kept in stock.' : ''))) return;
     const btn = $('invRcvPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_receipt', payload); if(!r) return;
       toast(r.receipt_no + ' posted');
+      if(payload.po_id) invNotifyTargets('po_notify_targets', { p_po: payload.po_id }, 'Materials arrived',
+        (t)=> (t.mrf_no || 'Your request') + ': goods on your order arrived at ' + wh.code + ' (' + r.receipt_no + ')' + (t.kind === 'collector' ? ' \u2014 you are to collect them.' : '.'), 'rcv-' + r.id);
       invAfterPost('rcv', r.id);
     }catch(e){ purchFail('Couldn\u2019t post the receipt: ', e); }
     finally{ btn.disabled = false; }
@@ -21996,17 +22721,20 @@
   let invIssMode = 'mrf', invIssMrs = [];
   async function invShowIssue(){
     await invEnter(async ()=>{
-      $('invIssWh').innerHTML = invFillCommon();
+      $('invIssWh').innerHTML = invFillCommon(invX.mine);
       $('invIssWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
       invFillProjJob('invIssProject', 'invIssJob');
       $('invIssNote').value = '';
       invLEBind('iss', 'invIssLines', { cost:false, avail:true, wh:'invIssWh' });
       const r = await db.from('material_requisitions').select('id, mrf_no, requested_by, requester_name, job_order_id, job_order, urgency, material_requisition_items(*)')
         .eq('status', 'approved').order('created_at', { ascending:false });
-      invIssMrs = (r.data || []).map(m=> Object.assign(m, { open: (m.material_requisition_items || []).filter(i=>
-        i.material_id && !i.po_id && i.fulfilled_by !== 'tech_buy' && Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0) > 0) })).filter(m=> m.open.length);
+      const leftOf = (i)=> Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
+      // lines from stock, plus lines covered by a PO (issuable once the goods are in the warehouse — checked when the request is chosen)
+      invIssMrs = (r.data || []).map(m=> Object.assign(m, {
+        open: (m.material_requisition_items || []).filter(i=> i.material_id && !i.po_id && i.fulfilled_by !== 'tech_buy' && leftOf(i) > 0),
+        poLines: (m.material_requisition_items || []).filter(i=> i.material_id && i.po_id && leftOf(i) > 0) })).filter(m=> m.open.length || m.poLines.length);
       $('invIssMr').innerHTML = '<option value="">' + (invIssMrs.length ? 'Choose an approved request…' : 'No approved requests with items to issue') + '</option>' +
-        invIssMrs.map(m=> '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.mrf_no + ' — ' + (m.requester_name || '') + (m.job_order ? ' · ' + m.job_order.id : '') + ' · ' + m.open.length + ' item' + (m.open.length === 1 ? '' : 's')) + '</option>').join('');
+        invIssMrs.map(m=> '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.mrf_no + ' — ' + (m.requester_name || '') + (m.job_order ? ' · ' + m.job_order.id : '') + ' · ' + (m.open.length + m.poLines.length) + ' item' + (m.open.length + m.poLines.length === 1 ? '' : 's') + (m.poLines.length ? ' (' + m.poLines.length + ' on a PO)' : '')) + '</option>').join('');
       invIssSetMode(invIssMrs.length ? 'mrf' : 'free');
     });
   }
@@ -22022,15 +22750,33 @@
   $('invIssAdd').addEventListener('click', ()=>{ invLE.iss.lines.push(invLEBlank()); invLERender('iss'); });
   $('invIssMr').addEventListener('change', invIssFromMr);
   $('invIssWh').addEventListener('change', ()=> invLERender('iss'));
-  function invIssFromMr(){
+  let invIssFromSeq = 0;
+  async function invIssFromMr(){
     const m = invIssMrs.find(x=> x.id === $('invIssMr').value);
     if(!m){ invLE.iss.lines = [invLEBlank()]; invLERender('iss'); return; }
-    $('invIssWorker').value = m.requested_by || '';
+    const seq = ++invIssFromSeq;
     $('invIssJob').value = m.job_order_id && invX.jobs.some(j=> j.id === m.job_order_id) ? m.job_order_id : '';
-    invLE.iss.lines = m.open.map(i=>{
-      const left = Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
-      return { key: ++invLEKey, material_id: i.material_id, qty: String(left), unit_cost:'', mr_item_id: i.id, max: left, locked:true, text:'' };
-    });
+    // who the materials go to: the collector named on the request, else the requester (always changeable)
+    let to = m.requested_by || '';
+    try{ const c = await db.from('material_requisition_collectors').select('collector_id').eq('mr_id', m.id).maybeSingle(); if(c.data && c.data.collector_id) to = c.data.collector_id; }catch(e){}
+    if(seq !== invIssFromSeq) return;
+    $('invIssWorker').value = invX.workers.some(w=> w.id === to) ? to : (invX.workers.some(w=> w.id === m.requested_by) ? m.requested_by : '');
+    const left = (i)=> Number(i.qty_approved != null ? i.qty_approved : i.qty_requested) - Number(i.qty_issued || 0);
+    const lines = m.open.map(i=> ({ key: ++invLEKey, material_id: i.material_id, qty: String(left(i)), unit_cost:'', mr_item_id: i.id, max: left(i), locked:true, text:'' }));
+    // lines covered by a PO: issuable up to what has reached the warehouse on that PO and not yet been issued
+    if(m.poLines.length){
+      try{
+        const { data } = await db.rpc('mr_trail', { p_mr: m.id });
+        if(seq !== invIssFromSeq) return;
+        (data && data.items || []).forEach(t=>{
+          const src = m.poLines.find(i=> i.id === t.id); if(!src) return;
+          const can = Math.min(left(src), Math.max(0, Number(t.po_received_in_warehouse) - Number(t.issued_qty)));
+          if(can > 0) lines.push({ key: ++invLEKey, material_id: src.material_id, qty: String(can), unit_cost:'', mr_item_id: src.id, max: can, locked:true, text:'' });
+        });
+      }catch(e){}
+    }
+    invLE.iss.lines = lines.length ? lines : [invLEBlank()];
+    if(!lines.length) toast('Nothing on this request is ready to issue yet \u2014 goods on a PO have to be received into the warehouse first');
     invLERender('iss');
   }
   $('invIssPost').addEventListener('click', async ()=>{
@@ -22042,13 +22788,14 @@
     if(short.length){ toast('Not enough stock in ' + wh.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
     const mr = invIssMode === 'mrf' ? invIssMrs.find(x=> x.id === $('invIssMr').value) : null;
     if(invIssMode === 'mrf' && !mr){ toast('Choose the request'); return; }
-    if(!await uiConfirm('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
+    if(!await invAsk('Issue ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + wh.code + ' to ' + worker.name + (mr ? ' for ' + mr.mrf_no : '') + '?')) return;
     const btn = $('invIssPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_issue', { warehouse_id: wh.id, worker_id: worker.id, mr_id: mr ? mr.id : null,
         project_id: $('invIssProject').value || null, job_order_id: $('invIssJob').value || null, note: $('invIssNote').value.trim(), lines });
       if(!r) return;
       notifyUser(worker.id, 'Materials issued to you', r.slip_no + ' — ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + '. Please open My Materials and sign to acknowledge.', 'iss-' + r.id);
+      if(mr) invNotifyTargets('slip_notify_targets', { p_slip: r.id }, 'Materials issued', (t)=> (t.mrf_no || 'Your request') + ': ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' issued to ' + worker.name + ' (' + r.slip_no + ').', 'iss-' + r.id, [worker.id]);
       toast(r.slip_no + ' posted — ' + worker.name + ' has been asked to acknowledge');
       invAfterPost('iss', r.id);
     }catch(e){ purchFail('Couldn\u2019t post the issue: ', e); }
@@ -22061,11 +22808,11 @@
   let invRetHold = [];
   async function invShowReturns(){
     await invEnter(()=>{
-      $('invRetWh').innerHTML = invFillCommon();
+      $('invRetWh').innerHTML = invFillCommon(invX.inWh);
       $('invRetWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
       $('invRetNote').value = ''; invRetHold = [];
       $('invRetLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose who is returning materials.</div>';
-    });
+    }, 'in');
   }
   function invPrjLabel(pid, job){
     const p = invX.projects.find(x=> x.id === pid);
@@ -22096,7 +22843,7 @@
   $('invRetLines').addEventListener('input', (e)=>{ if(e.target.dataset.rq) invRetHold[Number(e.target.closest('[data-h]').dataset.h)].ret = e.target.value.trim(); });
   $('invRetLines').addEventListener('change', (e)=>{ if(e.target.dataset.rc) invRetHold[Number(e.target.closest('[data-h]').dataset.h)].cond = e.target.value; });
   $('invRetPost').addEventListener('click', async ()=>{
-    const wh = invX.mine.find(w=> w.id === $('invRetWh').value), wid = $('invRetWorker').value;
+    const wh = invX.inWh.find(w=> w.id === $('invRetWh').value), wid = $('invRetWorker').value;
     if(!wid){ toast('Choose who is returning'); return; }
     const picked = [];
     for(const h of invRetHold){
@@ -22111,7 +22858,7 @@
     const groups = new Map();
     picked.forEach(h=>{ const k = (h.project_id || '') + '|' + (h.job_order_id || ''); if(!groups.has(k)) groups.set(k, []); groups.get(k).push(h); });
     const dmg = picked.filter(h=> h.cond === 'damaged').length;
-    if(!await uiConfirm('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
+    if(!await invAsk('Post ' + groups.size + ' return slip' + (groups.size === 1 ? '' : 's') + ' into ' + wh.code + '?' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + ' will be recorded but not restocked.' : ''))) return;
     const btn = $('invRetPost'); btn.disabled = true;
     const done = [];
     try{
@@ -22122,6 +22869,9 @@
         done.push(r);
       }
       toast(done.map(r=> r.return_no).join(', ') + ' posted');
+      const rname = (invX.workers.find(w=> w.id === wid) || {}).name || 'A worker';
+      done.forEach(r=> invNotifyTargets('return_notify_targets', { p_return: r.id }, 'Materials returned', (t)=> (t.mrf_no || 'A request') + ': ' + rname + ' returned materials (' + r.return_no + ').', 'ret-' + r.id, [wid]));
+      notifyAdmins('Materials returned', rname + ' returned materials to ' + wh.code + ' (' + done.map(r=> r.return_no).join(', ') + ').', 'ret-' + done[0].id);
       invAfterPost('ret', done[0].id);
     }catch(e){ purchFail('Couldn\u2019t post the return' + (done.length ? ' (posted ' + done.map(r=> r.return_no).join(', ') + ' before the error)' : '') + ': ', e); }
     finally{ btn.disabled = false; }
@@ -22132,7 +22882,7 @@
   // =====================================================================
   async function invShowTransfers(){
     await invEnter(()=>{
-      $('invTrfFrom').innerHTML = invFillCommon();
+      $('invTrfFrom').innerHTML = invFillCommon(invX.mine);
       invTrfFillTo();
       $('invTrfNote').value = '';
       invLEBind('trf', 'invTrfLines', { cost:false, avail:true, wh:'invTrfFrom' });
@@ -22152,7 +22902,7 @@
     if(typeof lines === 'string'){ toast(lines); return; }
     const short = lines.filter(l=> l.qty > invAvail(from.id, l.material_id));
     if(short.length){ toast('Not enough stock in ' + from.code + ' for ' + short.map(l=> invX.catById.get(l.material_id).code).join(', ')); return; }
-    if(!await uiConfirm('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
+    if(!await invAsk('Transfer ' + lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' from ' + from.code + ' to ' + to.code + '?')) return;
     const btn = $('invTrfPost'); btn.disabled = true;
     try{
       const r = await invRpc('inv_post_transfer', { from_warehouse_id: from.id, to_warehouse_id: to.id, note: $('invTrfNote').value.trim(), lines });
@@ -22456,6 +23206,351 @@
     }catch(e){ purchFail('Couldn\u2019t acknowledge: ', e); }
     finally{ btn.disabled = false; }
   });
+
+
+  // =====================================================================
+  // Warehouse movements — the four-step screen (From > To > Items > Review)
+  //
+  // Receive, Issue, Return and Transfer share one layout:
+  //   1 From   2 To   3 Items   4 Review & confirm
+  // with a stepper, a live "From > To > n items" line, drawn warehouse tiles (each sign
+  // carries that warehouse's own code), and a review that says what will change.
+  // The person doing the movement is ALWAYS the signed-in account — it is shown as a badge,
+  // never asked for.
+  //
+  // It is a layer over the existing forms: the real fields (selects, line editors, buttons)
+  // are MOVED into the steps and keep their ids, so every posting rule is unchanged, and the
+  // last step's button presses the original Post button. Nothing here talks to the database.
+  // =====================================================================
+
+  const IT = (function(){
+    const G = '#0F5A40', G2 = '#17714F', Y = '#F2B84B', YD = '#7A4B00', B = '#1F5FAE', BD = '#17488A', SK = '#FDE3C8', SH = '#D5E2DA', AM = '#B9770A';
+    const S = (w, inner)=> '<svg width="' + w + '" viewBox="0 0 160 110" aria-hidden="true" focusable="false" style="display:block;margin:0 auto;max-width:100%;height:auto">' + inner + '</svg>';
+    const person = (x, body, dark)=> '<rect x="' + (x - 9) + '" y="80" width="8" height="18" fill="' + dark + '"/><rect x="' + (x + 1) + '" y="80" width="8" height="18" fill="' + dark + '"/>' +
+      '<rect x="' + (x - 16) + '" y="46" width="32" height="38" rx="8" fill="' + body + '" stroke="' + dark + '" stroke-width="3"/><path d="M' + (x - 6) + ' 46V84M' + (x + 6) + ' 46V84" stroke="' + Y + '" stroke-width="4"/>' +
+      '<circle cx="' + x + '" cy="31" r="11" fill="' + SK + '" stroke="' + YD + '" stroke-width="2.5"/><path d="M' + (x - 13) + ' 29A13 13 0 0 1 ' + (x + 13) + ' 29Z" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5" stroke-linejoin="round"/><path d="M' + (x - 15) + ' 29H' + (x + 15) + '" stroke="' + YD + '" stroke-width="3" stroke-linecap="round"/>';
+    const esc = (t)=> String(t == null ? '' : t).replace(/[&<>"]/g, c=> ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+    const art = {
+      // the warehouse, with its own code on the sign
+      wh(code, w){
+        const t = String(code || '').slice(0, 8), big = t.length <= 2, sw = big ? 40 : Math.min(76, 24 + t.length * 8), lx = 80 - sw / 2, fs = t.length > 6 ? 11 : 13;
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="70" ry="5" fill="' + SH + '"/><rect x="18" y="46" width="124" height="54" fill="#fff" stroke="' + G + '" stroke-width="3"/><path d="M8 50L80 14L152 50Z" fill="' + G2 + '" stroke="' + G + '" stroke-width="3" stroke-linejoin="round"/><path d="M26 47L80 20" stroke="#fff" stroke-width="2" stroke-opacity=".5"/>' +
+          '<rect x="' + lx + '" y="27" width="' + sw + '" height="21" rx="4" fill="' + Y + '" stroke="' + G + '" stroke-width="2.5"/><text x="80" y="42" text-anchor="middle" font-size="' + fs + '" font-weight="500" fill="#2A1D00">' + esc(t) + '</text>' +
+          '<rect x="30" y="62" width="44" height="38" fill="#DCE8E0" stroke="' + G + '" stroke-width="2.5"/><rect x="86" y="62" width="44" height="38" fill="#DCE8E0" stroke="' + G + '" stroke-width="2.5"/>' +
+          '<path d="M30 70H74M30 78H74M30 86H74M30 94H74M86 70H130M86 78H130M86 86H130M86 94H130" stroke="' + G + '" stroke-width="1.8"/><rect x="142" y="86" width="15" height="14" fill="' + Y + '" stroke="' + YD + '" stroke-width="2"/><path d="M142 93H157" stroke="' + YD + '" stroke-width="1.5"/>');
+      },
+      project(w){
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="70" ry="5" fill="' + SH + '"/><rect x="14" y="38" width="62" height="62" fill="#EAF1FB" stroke="' + B + '" stroke-width="3"/><path d="M14 56H76M14 74H76M14 92H76" stroke="' + B + '" stroke-width="3"/><path d="M34 38V100M56 38V100" stroke="' + B + '" stroke-width="2"/><rect x="18" y="78" width="14" height="12" fill="' + B + '" fill-opacity=".25"/>' +
+          '<rect x="100" y="12" width="7" height="88" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5"/><path d="M100 24L107 34M100 44L107 54M100 64L107 74M100 84L107 94" stroke="' + YD + '" stroke-width="2"/><path d="M62 16H152" stroke="' + YD + '" stroke-width="5" stroke-linecap="round"/><rect x="138" y="17" width="12" height="9" fill="' + YD + '"/><path d="M126 18V56" stroke="#444441" stroke-width="2"/><rect x="116" y="56" width="20" height="14" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5"/><path d="M142 100L148 86L154 100Z" fill="#E8742A" stroke="#7A3A0A" stroke-width="2" stroke-linejoin="round"/>');
+      },
+      custody(w){
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="40" ry="5" fill="' + SH + '"/>' + person(80, B, BD) + '<path d="M66 56L52 70M94 56L108 70" stroke="' + BD + '" stroke-width="7" stroke-linecap="round"/><rect x="46" y="64" width="68" height="32" fill="#E9B15A" stroke="' + YD + '" stroke-width="3"/><path d="M80 64V96M46 76H114" stroke="' + YD + '" stroke-width="2"/>');
+      },
+      // a delivery truck (supplier / purchase order)
+      truck(w){
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="68" ry="5" fill="' + SH + '"/><rect x="14" y="34" width="86" height="54" fill="#fff" stroke="' + AM + '" stroke-width="3"/><path d="M100 50H128L146 68V88H100Z" fill="#FDF1DC" stroke="' + AM + '" stroke-width="3" stroke-linejoin="round"/><path d="M108 56H126L138 68H108Z" fill="#EAF1FB" stroke="' + AM + '" stroke-width="2"/>' +
+          '<rect x="26" y="46" width="22" height="18" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5"/><rect x="52" y="46" width="22" height="18" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5"/><rect x="39" y="64" width="22" height="18" fill="#E9B15A" stroke="' + YD + '" stroke-width="2.5"/>' +
+          '<circle cx="42" cy="90" r="9" fill="#444441" stroke="#2C2C2A" stroke-width="2"/><circle cx="42" cy="90" r="3" fill="#B4B2A9"/><circle cx="122" cy="90" r="9" fill="#444441" stroke="#2C2C2A" stroke-width="2"/><circle cx="122" cy="90" r="3" fill="#B4B2A9"/>');
+      },
+      // a purchase-order paper
+      po(w){
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="50" ry="5" fill="' + SH + '"/><rect x="42" y="12" width="76" height="88" rx="4" fill="#fff" stroke="' + AM + '" stroke-width="3"/><path d="M54 30H106M54 42H106M54 54H92M54 66H106" stroke="' + AM + '" stroke-width="2.5" stroke-linecap="round"/><circle cx="98" cy="84" r="12" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5"/><path d="M92 84L97 89L105 79" fill="none" stroke="#2A1D00" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>');
+      },
+      box(w){
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="48" ry="5" fill="' + SH + '"/><path d="M34 38L80 22L126 38V84L80 100L34 84Z" fill="#E9B15A" stroke="' + YD + '" stroke-width="3" stroke-linejoin="round"/><path d="M34 38L80 54L126 38M80 54V100" fill="none" stroke="' + YD + '" stroke-width="2.5" stroke-linejoin="round"/><path d="M58 30L104 46V58L58 42Z" fill="#fff" fill-opacity=".55" stroke="' + YD + '" stroke-width="1.5"/>');
+      },
+      // an approved request (clipboard with a tick)
+      request(w){
+        return S(w || 128, '<ellipse cx="80" cy="102" rx="46" ry="5" fill="' + SH + '"/><rect x="44" y="16" width="72" height="84" rx="5" fill="#fff" stroke="' + G + '" stroke-width="3"/><rect x="64" y="8" width="32" height="14" rx="4" fill="' + Y + '" stroke="' + YD + '" stroke-width="2.5"/><path d="M56 40H70M56 58H70M56 76H70" stroke="' + G + '" stroke-width="3" stroke-linecap="round"/><path d="M78 40H104M78 58H104M78 76H98" stroke="#B4B2A9" stroke-width="3" stroke-linecap="round"/><path d="M92 82L99 89L112 72" fill="none" stroke="' + G2 + '" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>');
+      }
+    };
+
+    // ---------- the selects that become drawn tiles ----------
+    const WH_SELECTS = ['invRcvWh', 'invIssWh', 'invRetWh', 'invTrfFrom', 'invTrfTo'];
+    const optInfo = (o)=> { const parts = String(o.textContent || '').split(' \u00B7 '); return { value:o.value, code:(parts[0] || '').trim(), name:(parts.slice(1).join(' \u00B7 ') || parts[0] || '').trim() }; };
+
+    function renderTiles(id){
+      const sel = $(id); if(!sel) return;
+      let host = sel.parentNode.querySelector('[data-tiles-for="' + id + '"]');
+      if(!host){
+        host = document.createElement('div'); host.className = 'inv-tiles'; host.setAttribute('data-tiles-for', id); host.setAttribute('role', 'group');
+        sel.insertAdjacentElement('afterend', host);
+        sel.setAttribute('data-tiled', '1');
+      }
+      const opts = Array.from(sel.options).filter(o=> o.value);
+      host.setAttribute('aria-label', (sel.parentNode.querySelector('label') || {}).textContent || 'Warehouse');
+      if(!opts.length){ host.innerHTML = '<div class="inv-tiles-empty">No warehouse to choose from.</div>'; return; }
+      host.innerHTML = opts.map(o=>{
+        const i = optInfo(o), on = o.value === sel.value;
+        return '<button type="button" class="inv-tile' + (on ? ' on' : '') + '" data-v="' + esc(i.value) + '" aria-pressed="' + (on ? 'true' : 'false') + '" aria-label="Warehouse ' + esc(i.code) + (i.name && i.name !== i.code ? ', ' + esc(i.name) : '') + '">' +
+          '<span class="inv-art">' + art.wh(i.code, 104) + '</span><span class="inv-tile-t">' + esc(i.code) + '</span>' + (i.name && i.name !== i.code ? '<span class="inv-tile-s">' + esc(i.name) + '</span>' : '') +
+          (on ? '<span class="inv-ck" aria-hidden="true">\u2713</span>' : '') + '</button>';
+      }).join('');
+    }
+    // ---------- the "Source" buttons get a drawing ----------
+    const MODE_ART = { invRcvMode:{ po:'po', free:'box' }, invIssMode:{ mrf:'request', free:'box' } };
+    function decorateModes(){
+      Object.keys(MODE_ART).forEach(id=>{
+        const grp = $(id); if(!grp) return;
+        grp.classList.add('inv-modes');
+        grp.querySelectorAll('button[data-m]').forEach(b=>{
+          if(b.querySelector('.inv-mode-art')) return;
+          const k = MODE_ART[id][b.getAttribute('data-m')];
+          if(k) b.insertAdjacentHTML('afterbegin', '<span class="inv-mode-art">' + art[k](72) + '</span>');
+        });
+      });
+    }
+
+    // ---------- the four-step wizard over the existing forms ----------
+    const CFG = {
+      receive:  { panel:'purchPanel_receive',   role:'Receiver',   verb:'Receive',  post:'invRcvPost', le:'rcv',
+        steps:[ { n:'From',  q:'Where is it coming from?',            h:'Choose the kind of delivery.' },
+                { n:'To',    q:'Where is it going?',                  h:'Pick the warehouse that receives it. Any warehouse will do.' },
+                { n:'Items', q:'Which items arrived?',                h:'Enter what actually arrived.' } ] },
+      issue:    { panel:'purchPanel_issue',     role:'Issuer',     verb:'Issue',    post:'invIssPost', le:'iss',
+        steps:[ { n:'From',  q:'Which warehouse is it leaving from?', h:'You can only take stock out of your own warehouses.' },
+                { n:'To',    q:'Who gets it?',                        h:'The worker signs for it on their phone.' },
+                { n:'Items', q:'Which items, and how many?',          h:'Only what is in stock can be issued.' } ] },
+      returns:  { panel:'purchPanel_returns',   role:'Returner',   verb:'Return',   post:'invRetPost',
+        steps:[ { n:'From',  q:'Whose custody is it in?',             h:'Pick the worker who is returning the materials.' },
+                { n:'To',    q:'Which warehouse takes it back?',      h:'Good items go back into stock.' },
+                { n:'Items', q:'What is being returned?',             h:'Only what the worker holds is listed.' } ] },
+      transfer: { panel:'purchPanel_transfers', role:'Transferer', verb:'Transfer', post:'invTrfPost', le:'trf',
+        steps:[ { n:'From',  q:'Which warehouse is it leaving?',      h:'You can only take stock out of your own warehouses.' },
+                { n:'To',    q:'Which warehouse is it going to?',     h:'It goes into that warehouse\u2019s stock.' },
+                { n:'Items', q:'Which items, and how many?',          h:'You can only move what is in stock.' } ] }
+    };
+    // which real fields live in which step (and how wide): [id, columns of 12]
+    const LAYOUT = {
+      issue:    [ [['invIssWh', 12], ['invIssMode', 12], ['invIssMrWrap', 12]],
+                  [['invIssWorker', 12, 'recipient'], ['invIssProject', 6], ['invIssJob', 6], ['invIssNote', 12]] ],
+      receive:  [ [['invRcvMode', 12], ['invRcvPoWrap', 6], ['invRcvSupWrap', 6], ['invRcvRef', 6]],
+                  [['invRcvWh', 12], ['invRcvDirectWrap', 12], ['invRcvProjWrap', 6], ['invRcvJobWrap', 6], ['invRcvNote', 12]] ],
+      returns:  [ [['invRetWorker', 12, 'recipient']],
+                  [['invRetWh', 12], ['invRetNote', 12]] ],
+      transfer: [ [['invTrfFrom', 12]],
+                  [['invTrfTo', 12], ['invTrfNote', 12]] ]
+    };
+    const LABELS = { invIssWh:'From warehouse', invIssWorker:'Worker who gets it', invRetWorker:'Worker whose custody it is in', invRetWh:'Into warehouse', invRcvWh:'Receiving warehouse', invTrfFrom:'From warehouse', invTrfTo:'To warehouse', invRcvMode:'Kind of delivery', invIssMode:'Based on' };
+    const wz = {};   // per screen: { el, step }
+    const fieldOf = (id)=> { const e = $(id); return e ? (e.closest('.field') || e) : null; };
+    const selText = (id)=> { const s = $(id); if(!s || !s.value) return ''; const o = s.options && s.options[s.selectedIndex]; return o ? String(o.textContent || '').trim() : ''; };
+    const whName = (id)=> { const t = selText(id); return t ? 'Warehouse ' + t.split(' \u00B7 ')[0].trim() : ''; };
+    const mode = (id)=> { const b = $(id) && $(id).querySelector('button.on[data-m]'); return b ? b.getAttribute('data-m') : ''; };
+    const initials = (n)=> String(n || '?').trim().split(/\s+/).slice(0, 2).map(w=> w[0]).join('').toUpperCase() || '?';
+
+    function build(key){
+      const cfg = CFG[key], panel = $(cfg.panel); if(!panel || wz[key]) return;
+      const body = panel.querySelector('.card-body'), top = body && body.querySelector('.po-ed-top'); if(!top) return;
+      const sections = Array.from(body.querySelectorAll(':scope > section.po-sec'));
+      const itemsSec = sections[1], actions = body.querySelector(':scope > .po-actions');
+      const el = document.createElement('div'); el.className = 'wz'; el.id = 'wz-' + key;
+      el.innerHTML =
+        '<div class="wz-head"><div class="wz-acct" title="The person doing this is always the signed-in account"><span class="wz-av"></span><span class="wz-who"><b></b><i></i></span></div></div>' +
+        '<ol class="wz-steps">' + cfg.steps.concat([{ n:'Review' }]).map((s, i)=> '<li><button type="button" class="wz-stp" data-go="' + i + '"><span class="wz-dot">' + (i + 1) + '</span><span class="wz-sl">' + s.n + '</span></button></li>').join('') + '</ol>' +
+        '<div class="wz-bar" aria-live="polite"></div>' +
+        cfg.steps.concat([{ q:'Check and confirm', h:'Nothing is posted until you confirm.' }]).map((s, i)=> '<section class="wz-step" data-s="' + i + '"><h3 class="wz-q">' + s.q + '</h3><p class="wz-help">' + s.h + '</p><div class="wz-body"></div></section>').join('') +
+        '<div class="wz-err" role="alert"></div>' +
+        '<div class="wz-foot"><button type="button" class="btn btn-secondary wz-back">Back</button><button type="button" class="btn btn-primary wz-next">Next</button></div>';
+      top.insertAdjacentElement('afterend', el);
+      const bodies = el.querySelectorAll('.wz-body');
+      // move the real fields into steps 1 and 2
+      LAYOUT[key].forEach((fields, si)=>{
+        const grid = document.createElement('div'); grid.className = 'po-grid wz-grid'; bodies[si].appendChild(grid);
+        fields.forEach(([id, span, kind])=>{
+          const f = fieldOf(id); if(!f) return;
+          f.classList.remove('po-c3', 'po-c6', 'po-c12'); f.classList.add('po-c' + span);
+          if(LABELS[id]){ const l = f.querySelector('label'); if(l && l.firstChild) l.firstChild.textContent = LABELS[id] + ' '; }
+          if(kind === 'recipient'){
+            const wrap = document.createElement('div'); wrap.className = 'wz-recipient po-c12'; wrap.innerHTML = '<span class="wz-recipient-art">' + art.custody(96) + '</span>';
+            wrap.appendChild(f); f.className = 'field wz-recipient-f'; grid.appendChild(wrap);
+          }else grid.appendChild(f);
+        });
+      });
+      // the items section moves whole into step 3; its title is replaced by the step heading
+      if(itemsSec){ itemsSec.classList.add('wz-items'); bodies[2].appendChild(itemsSec); }
+      // the original first section and Post button stay in the page, hidden
+      sections.forEach(s=>{ if(s !== itemsSec) s.classList.add('wz-legacy'); });
+      if(actions) actions.classList.add('wz-legacy');
+      wz[key] = { el, step:0 };
+      el.addEventListener('click', (ev)=>{
+        const go = ev.target.closest('.wz-stp'); if(go){ const g = Number(go.dataset.go); if(g < wz[key].step) show(key, g); return; }
+        if(ev.target.closest('.wz-back')){ show(key, Math.max(0, wz[key].step - 1)); return; }
+        if(ev.target.closest('.wz-next')) next(key);
+      });
+    }
+
+    // ---------- the items, as the real forms hold them ----------
+    function readItems(key){
+      const out = { rows:[], err:'' };
+      const unit = (m)=> m ? m.unit : '';
+      if(key === 'receive' && mode('invRcvMode') === 'po'){
+        for(const i of (typeof invRcvPoLines !== 'undefined' ? invRcvPoLines : [])){
+          if(!String(i.now == null ? '' : i.now).trim()) continue;
+          const q = spParseMoney(i.now), rem = Number(i.qty) - Number(i.qty_received);
+          if(q == null || Number.isNaN(q) || q <= 0){ out.err = i.description + ': enter a quantity above 0'; return out; }
+          if(q > rem){ out.err = i.description + ': only ' + invQty(rem) + ' ' + i.unit + ' left on this PO'; return out; }
+          if(!i.map){ out.err = i.description + ': choose which catalog item it is'; return out; }
+          out.rows.push({ name:i.description, qty:q, unit:i.unit });
+        }
+        if(!out.rows.length) out.err = 'Enter what was received.';
+        return out;
+      }
+      if(key === 'returns'){
+        for(const h of invRetHold){
+          if(!String(h.ret).trim()) continue;
+          const q = spParseMoney(h.ret), m = invX.catById.get(h.material_id);
+          if(q == null || Number.isNaN(q) || q <= 0){ out.err = (m ? m.code : 'Item') + ': enter a quantity above 0'; return out; }
+          if(q > Number(h.holding)){ out.err = (m ? m.code : 'Item') + ': they only hold ' + invQty(h.holding); return out; }
+          out.rows.push({ name:m ? m.name : 'Item', qty:q, unit:unit(m), note:h.cond === 'damaged' ? 'damaged' : '' });
+        }
+        if(!out.rows.length) out.err = 'Enter what is being returned.';
+        return out;
+      }
+      const lines = invLECollect(CFG[key].le);
+      if(typeof lines === 'string'){ out.err = lines; return out; }
+      if(!lines.length){ out.err = 'Add at least one item.'; return out; }
+      const whId = key === 'issue' ? $('invIssWh').value : key === 'transfer' ? $('invTrfFrom').value : '';
+      for(const l of lines){
+        const m = invX.catById.get(l.material_id);
+        if(whId && l.qty > invAvail(whId, l.material_id)){ out.err = 'Not enough stock in ' + whName(key === 'issue' ? 'invIssWh' : 'invTrfFrom').replace('Warehouse ', '') + ' for ' + (m ? m.code : 'an item') + '.'; return out; }
+        out.rows.push({ name:m ? m.name : 'Item', qty:l.qty, unit:unit(m) });
+      }
+      return out;
+    }
+    // what each step needs before it can move on ('' = fine)
+    function check(key, s){
+      if(key === 'issue'){
+        if(s === 0){ if(!$('invIssWh').value) return 'Choose the warehouse.'; if(mode('invIssMode') === 'mrf' && !$('invIssMr').value) return 'Choose the request, or switch to Direct.'; }
+        if(s === 1 && !$('invIssWorker').value) return 'Choose who gets it.';
+      }
+      if(key === 'receive'){
+        if(s === 0 && mode('invRcvMode') === 'po' && !$('invRcvPo').value) return 'Choose the purchase order.';
+        if(s === 1){ if(!$('invRcvWh').value) return 'Choose the warehouse.'; if($('invRcvDirect').checked && !$('invRcvProject').value && !$('invRcvJob').value) return 'Choose the project or job order it is charged to.'; }
+      }
+      if(key === 'returns'){ if(s === 0 && !$('invRetWorker').value) return 'Choose the worker.'; if(s === 1 && !$('invRetWh').value) return 'Choose the warehouse.'; }
+      if(key === 'transfer'){
+        if(s === 0 && !$('invTrfFrom').value) return 'Choose the warehouse it is leaving.';
+        if(s === 1){ if(!$('invTrfTo').value) return 'Choose the warehouse it is going to.'; if($('invTrfTo').value === $('invTrfFrom').value) return 'Choose a different warehouse.'; }
+      }
+      if(s === 2) return readItems(key).err;
+      return '';
+    }
+
+    // ---------- the live line under the stepper ----------
+    function ends(key){
+      if(key === 'issue') return [whName('invIssWh'), selText('invIssWorker')];
+      if(key === 'returns') return [selText('invRetWorker'), whName('invRetWh')];
+      if(key === 'transfer') return [whName('invTrfFrom'), whName('invTrfTo')];
+      const po = mode('invRcvMode') === 'po';
+      return [po ? (selText('invRcvPo') || 'Purchase order') : 'Delivery without a PO', $('invRcvDirect') && $('invRcvDirect').checked ? 'Direct to project' : whName('invRcvWh')];
+    }
+    function countItems(key){
+      if(key === 'receive' && mode('invRcvMode') === 'po') return (typeof invRcvPoLines !== 'undefined' ? invRcvPoLines : []).filter(i=> String(i.now == null ? '' : i.now).trim()).length;
+      if(key === 'returns') return invRetHold.filter(h=> String(h.ret).trim()).length;
+      return invLE[CFG[key].le] ? invLE[CFG[key].le].lines.filter(l=> l.material_id && String(l.qty).trim()).length : 0;
+    }
+    function renderBar(key){
+      const w = wz[key]; if(!w) return;
+      const [f, t] = ends(key), n = countItems(key);
+      w.el.querySelector('.wz-bar').innerHTML =
+        '<span class="wz-chip' + (f ? ' set' : '') + '">' + esc(f || 'From') + '</span><span class="wz-arr" aria-hidden="true">\u2192</span>' +
+        '<span class="wz-chip' + (t ? ' set' : '') + '">' + esc(t || 'To') + '</span>' +
+        (n ? '<span class="wz-chip">' + n + ' item' + (n === 1 ? '' : 's') + '</span>' : '');
+    }
+    // ---------- the review ----------
+    function effects(key){
+      const [f, t] = ends(key), row = (cls, sym, x)=> '<div><span class="wz-ico ' + cls + '" aria-hidden="true">' + sym + '</span><span>' + esc(x) + '</span></div>';
+      const up = (x)=> row('', '+', x), down = (x)=> row('down', '\u2212', x), ok = (x)=> row('', '\u2713', x);
+      if(key === 'issue') return down('Stock in ' + f + ' goes down') + ok(t + ' is asked to sign on their phone');
+      if(key === 'receive') return ($('invRcvDirect').checked ? ok('The cost is charged to the project and the goods do not stay in stock') : up('Stock in ' + t + ' goes up')) +
+        (mode('invRcvMode') === 'po' ? ok('The purchase order shows what has arrived') : ok('Recorded without a purchase order'));
+      if(key === 'returns') return up('Good items go back into ' + t) + down(f + ' no longer holds them') + (readItems(key).rows.some(r=> r.note) ? row('warn', '!', 'Damaged items are recorded but not put back in stock') : '');
+      return down('Stock in ' + f + ' goes down') + up('Stock in ' + t + ' goes up by the same amount');
+    }
+    function buildReview(key){
+      const cfg = CFG[key], it = readItems(key), [f, t] = ends(key), me = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) || 'You';
+      const extra = [];
+      if(key === 'issue'){ const p = selText('invIssProject'), j = selText('invIssJob'); if($('invIssProject').value) extra.push(['Project', p]); if($('invIssJob').value) extra.push(['Job order', j]); if(mode('invIssMode') === 'mrf' && $('invIssMr').value) extra.push(['Request', selText('invIssMr')]); }
+      if(key === 'receive'){ if($('invRcvRef').value.trim()) extra.push(['Delivery receipt', $('invRcvRef').value.trim()]); if($('invRcvDirect').checked){ const p = $('invRcvProject').value ? selText('invRcvProject') : selText('invRcvJob'); if(p) extra.push(['Charged to', p]); } }
+      const noteId = { issue:'invIssNote', receive:'invRcvNote', returns:'invRetNote', transfer:'invTrfNote' }[key];
+      if($(noteId) && $(noteId).value.trim()) extra.push(['Note', $(noteId).value.trim()]);
+      const rows = it.rows.map(r=> '<div class="wz-li"><span>' + esc(r.name) + (r.note ? ' <em>' + esc(r.note) + '</em>' : '') + '</span><b>' + esc(invQty(r.qty)) + ' ' + esc(r.unit) + '</b></div>').join('');
+      wz[key].el.querySelector('.wz-step[data-s="3"] .wz-body').innerHTML =
+        '<dl class="wz-sum"><dt>From</dt><dd>' + esc(f) + '</dd><dt>To</dt><dd>' + esc(t) + '</dd><dt>' + cfg.role + '</dt><dd>You \u2014 ' + esc(me) + '</dd>' + extra.map(e=> '<dt>' + esc(e[0]) + '</dt><dd>' + esc(e[1]) + '</dd>').join('') + '</dl>' +
+        '<div class="wz-lines">' + rows + '</div><div class="wz-what">What happens</div><div class="wz-eff">' + effects(key) + '</div>';
+      return it.rows.length;
+    }
+
+    // ---------- moving between steps ----------
+    function show(key, s){
+      const w = wz[key]; if(!w) return;
+      w.step = s; const cfg = CFG[key];
+      w.el.querySelectorAll('.wz-step').forEach(x=> x.classList.toggle('on', Number(x.dataset.s) === s));
+      w.el.querySelectorAll('.wz-stp').forEach((b, i)=>{
+        const li = b.closest('li'); li.className = i < s ? 'done' : i === s ? 'cur' : '';
+        b.querySelector('.wz-dot').textContent = i < s ? '\u2713' : String(i + 1);
+        b.setAttribute('aria-current', i === s ? 'step' : 'false'); b.disabled = i > s;
+      });
+      w.el.querySelector('.wz-err').textContent = '';
+      w.el.querySelector('.wz-back').style.visibility = s === 0 ? 'hidden' : '';
+      let label = 'Next: ' + (s === 0 ? 'to' : s === 1 ? 'items' : 'review');
+      if(s === 3){ const n = buildReview(key); label = cfg.verb + ' ' + n + ' item' + (n === 1 ? '' : 's'); }
+      w.el.querySelector('.wz-next').textContent = label;
+      renderBar(key);
+      if(w.el.scrollIntoView && s > 0) w.el.scrollIntoView({ block:'nearest' });
+    }
+    function next(key){
+      const w = wz[key], s = w.step, err = check(key, s);
+      if(err){ w.el.querySelector('.wz-err').textContent = err; return; }
+      if(s < 3){ show(key, s + 1); return; }
+      // last step: re-check everything, then press the real Post button (the review was the confirmation)
+      for(let i = 0; i < 3; i++){ const e = check(key, i); if(e){ show(key, i); w.el.querySelector('.wz-err').textContent = e; return; } }
+      invWz.skipConfirm = true;
+      try{ $(CFG[key].post).click(); } finally { invWz.skipConfirm = false; }
+    }
+    function onEnter(){
+      const me = (typeof currentUser !== 'undefined' && currentUser && currentUser.name) || '';
+      Object.keys(CFG).forEach(key=>{
+        build(key); const w = wz[key]; if(!w) return;
+        w.el.querySelector('.wz-av').textContent = initials(me);
+        w.el.querySelector('.wz-who b').textContent = me || 'Signed in';
+        w.el.querySelector('.wz-who i').textContent = CFG[key].role + ' \u00B7 signed in';
+        show(key, 0);
+      });
+    }
+    function syncAll(){
+      WH_SELECTS.forEach(renderTiles);
+      decorateModes();
+      Object.keys(wz).forEach(key=>{ renderBar(key); if(wz[key].step === 3) buildReview(key); });
+    }
+    return { art, syncAll, onEnter, renderTiles, WH_SELECTS, wz, show, readItems };
+  })();
+
+  // the posting handlers ask "are you sure?" — the review step already did, so it skips the second question
+  const invWz = { skipConfirm:false };
+  function invAsk(msg){ if(invWz.skipConfirm){ invWz.skipConfirm = false; return Promise.resolve(true); } return uiConfirm(msg); }
+
+  // a tile tap sets the real select and tells the page, exactly as if the person had used the drop-down
+  document.addEventListener('click', (ev)=>{
+    const t = ev.target.closest && ev.target.closest('.inv-tile[data-v]'); if(!t) return;
+    const host = t.closest('[data-tiles-for]'), sel = host && $(host.getAttribute('data-tiles-for')); if(!sel) return;
+    sel.value = t.getAttribute('data-v');
+    sel.dispatchEvent(new Event('change', { bubbles:true }));
+    IT.syncAll();
+  });
+  // anything that changes a choice on these screens refreshes the pictures and the line under the stepper
+  document.addEventListener('change', (ev)=>{ const id = ev.target && ev.target.id; if(id && /^(invRcv|invIss|invRet|invTrf)/.test(id)) IT.syncAll(); });
+  document.addEventListener('input', (ev)=>{ if(ev.target && ev.target.closest && ev.target.closest('.wz')) IT.syncAll(); });
+  document.addEventListener('click', (ev)=>{
+    if(ev.target.closest && ev.target.closest('#invRcvMode, #invIssMode, #invRcvDirect')) setTimeout(()=> IT.syncAll(), 0);
+  });
+  (function(){
+    const mo = new MutationObserver(()=>{ if(!mo._busy){ mo._busy = true; Promise.resolve().then(()=>{ try{ IT.syncAll(); }finally{ mo._busy = false; } }); } });
+    IT.WH_SELECTS.concat(['invRcvPo', 'invRcvSupplier', 'invIssWorker', 'invRetWorker', 'invIssProject', 'invIssJob', 'invRcvProject', 'invRcvJob', 'invIssMr']).forEach(id=>{ const s = document.getElementById(id); if(s) mo.observe(s, { childList:true }); });
+    ['invRcvLines', 'invIssLines', 'invRetLines', 'invTrfLines'].forEach(id=>{ const s = document.getElementById(id); if(s) mo.observe(s, { childList:true }); });
+    IT.onEnter();
+  })();
 
 
   // =====================================================================
@@ -28977,6 +30072,7 @@
     tlReports:      { nav:'sbNavTlReports',      title:'Tool Reports',         sub:'Movements, custody, defects, register' },
     myTools:        { nav:'',                    title:'My Tools',             sub:'Sign for tools, see what you hold' },
     purchaseOrders: { nav:'sbNavPurchaseOrders', title:'Purchase Orders',      sub:'Create, issue & download POs' },
+    purchasedItems: { nav:'sbNavPurchasedItems', title:'Purchased Items',      sub:'Every item bought, by the date received' },
     paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
     admPermits:     { nav:'sbNavAdmPermits',     title:'Permits & Licenses',   sub:'Registrations, licenses & expiry alerts' },
     admVehicles:    { nav:'sbNavAdmVehicles',    title:'Vehicles',             sub:'Trip tickets, fuel, PMS, OR/CR & insurance' },
@@ -29643,7 +30739,7 @@
   // instead of a link, so nobody lands on a screen that can't load its data.
   const STAFF_READY_MODULES = [
     // Purchasing — 20260926_02_purchasing_staff_access.sql
-    'pur.materials', 'pur.suppliers', 'pur.requisitions', 'pur.purchase_orders',
+    'pur.materials', 'pur.suppliers', 'pur.requisitions', 'pur.purchase_orders', 'pur.purchased_items',
     // Inventory — 20260926_03_inventory_staff_access.sql
     'inv.stock', 'inv.warehouses', 'inv.receive', 'inv.issue', 'inv.returns', 'inv.transfers', 'inv.slips', 'inv.reports',
     // Accounting & Finance — 20260926_04_finance_staff_access.sql
@@ -30307,6 +31403,57 @@
 
     staffWireEditor(target);
     if(isSuper && !isNew && stf.round2 && p && p.active) staffRenderDelegationCard(target, s.id, ()=> staffOpenEditor(s.id));
+    // Inventory warehouses (20261023_01): which warehouses this person may take stock out of
+    if(isSuper && !isNew && p && p.active && Object.keys(s.grants || {}).some(k=> /^inv\./.test(k) && s.grants[k] && s.grants[k].level)) staffRenderWarehouseCard(target, s.id);
+  }
+
+  // Warehouses card (Super Admin, on a staff member who holds an Inventory page).
+  // Receiving and returning: anyone with the page picks ANY warehouse. This only limits
+  // stock going OUT — issuing and transfers out — to the warehouses ticked here, unless
+  // "all warehouses" is on. Saved on its own (not part of "Save Changes").
+  async function staffRenderWarehouseCard(target, userId){
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<div class="card-head"><span>Warehouses</span></div><div class="card-body"><div class="empty-state">Loading\u2026</div></div>';
+    target.appendChild(card);
+    const body = card.querySelector('.card-body');
+    try{
+      const [w, k, sc] = await Promise.all([
+        db.from('warehouses').select('id, code, name, is_active').order('code'),
+        db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', userId),
+        db.from('inventory_staff_scope').select('all_warehouses').eq('user_id', userId).maybeSingle()
+      ]);
+      if(w.error) throw w.error;
+      if(sc.error){ body.innerHTML = '<p class="stf-note" style="margin:0;">Run migration 20261023_01_warehouse_rules.sql in Supabase to set warehouses for staff.</p>'; return; }
+      const mine = new Set((k.data || []).map(x=> x.warehouse_id));
+      const all = !!(sc.data && sc.data.all_warehouses);
+      const list = (w.data || []).filter(x=> x.is_active || mine.has(x.id));
+      body.innerHTML =
+        '<p class="stf-note" style="margin-top:0;">Receiving and returning: they can choose <b>any</b> warehouse. This only decides which warehouses they can <b>take stock out of</b> \u2014 Issue to Worker and Transfers.</p>' +
+        '<label class="restrict-row"><input type="checkbox" data-wh-all' + (all ? ' checked' : '') + '><span class="rtxt"><span class="rt-title">All warehouses</span></span></label>' +
+        '<div data-wh-list' + (all ? ' style="opacity:.5;"' : '') + '>' + (list.length ? list.map(x=>
+          '<label class="restrict-row"><input type="checkbox" data-wh="' + escapeHtml(x.id) + '"' + (mine.has(x.id) ? ' checked' : '') + (all ? ' disabled' : '') + '><span class="rtxt"><span class="rt-title">' + escapeHtml(x.code + ' \u00B7 ' + x.name) + '</span></span></label>').join('')
+          : '<div class="stf-note">Add a warehouse first in Inventory \u203A Warehouses.</div>') + '</div>' +
+        (!all && !mine.size ? '<div class="stf-hint">Nothing ticked: they can receive and return, but not issue or transfer out.</div>' : '') +
+        '<div class="stf-save-bar"><button type="button" class="btn btn-primary" data-wh-save>Save warehouses</button></div>';
+      const allBox = body.querySelector('[data-wh-all]');
+      allBox.addEventListener('change', ()=>{
+        body.querySelectorAll('[data-wh]').forEach(c=>{ c.disabled = allBox.checked; });
+        body.querySelector('[data-wh-list]').style.opacity = allBox.checked ? '.5' : '';
+      });
+      body.querySelector('[data-wh-save]').addEventListener('click', async (ev)=>{
+        const btn = ev.currentTarget; btn.disabled = true;
+        try{
+          const ids = Array.from(body.querySelectorAll('[data-wh]')).filter(c=> c.checked).map(c=> c.getAttribute('data-wh'));
+          const r = await db.rpc('inv_set_staff_scope', { p_user: userId, p_all: allBox.checked, p_warehouses: ids });
+          if(r.error) throw r.error;
+          toast(allBox.checked ? 'Saved: all warehouses' : 'Saved: ' + (ids.length ? ids.length + ' warehouse' + (ids.length === 1 ? '' : 's') : 'no warehouses to issue from'));
+        }catch(e){ toast('Couldn\u2019t save: ' + describeCloudError(e)); }
+        finally{ btn.disabled = false; }
+      });
+    }catch(e){
+      body.innerHTML = '<p class="stf-note" style="margin:0;">Couldn\u2019t load warehouses: ' + escapeHtml(describeCloudError(e)) + '</p>';
+    }
   }
 
   function staffSyncFromForm(target){
@@ -31275,6 +32422,7 @@
     bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
     bind('staffNavMyPayslips', ()=>{ showPurchasingView('myPayslips'); setSidebarActive('staffNavMyPayslips'); });
     bind('staffNavErrandReq', ()=>{ showPurchasingView('errandRequests'); setSidebarActive('staffNavErrandReq'); });
+    bind('staffNavMatReq', ()=>{ showPurchasingView('myRequests'); setSidebarActive('staffNavMatReq'); });   // every worker can request materials
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -31305,13 +32453,14 @@
   }
   // Shorter sidebar names (the access catalog keeps its full labels)
   const STAFF_NAV_LABELS = { 'ops.dispatch':'Dispatch', 'adm.equipment':'Equipment', 'pur.materials':'Materials', 'pur.suppliers':'Suppliers',
-    'pur.requisitions':'Material Requisitions', 'hr.staff_attendance':'Office Staff Attendance', 'adm.my_errands':'My Errands', 'adm.announcements':'Memos & Announcements' };
+    'pur.requisitions':'Material Requisitions', 'pur.purchased_items':'Purchased Items', 'hr.staff_attendance':'Office Staff Attendance', 'adm.my_errands':'My Errands', 'adm.announcements':'Memos & Announcements' };
   function staffNavId(key){ if(STAFF_TECH_HUB.includes(key)) key = 'tech.hub'; return 'staffNavMod_' + String(key).replace(/[^a-z0-9]/gi, '_'); }
   const STAFF_MODULE_OPENERS = {
     'pur.materials':       ()=> showPurchasingView('materials'),
     'pur.suppliers':       ()=> showPurchasingView('suppliers'),
     'pur.requisitions':    ()=> showPurchasingView('requisitions'),
     'pur.purchase_orders': ()=> showPurchasingView('purchaseOrders'),
+    'pur.purchased_items': ()=> showPurchasingView('purchasedItems'),
     // Without "See peso values", Stock on Hand is the quantities-only screen
     // storekeepers use (all warehouses for staff).
     'inv.stock':           ()=> showPurchasingView(staffSeesCosts() ? 'stock' : 'myStock'),
@@ -31375,7 +32524,7 @@
   // screens (My Requests / Materials / Tools) are never for staff.
   function staffPurchPageAllowed(key){
     if(!isStaffUser()) return true;
-    if(key === 'myPayslips' || key === 'errandRequests') return true;   // everyone's own payslips / errand requests
+    if(key === 'myPayslips' || key === 'errandRequests' || key === 'myRequests') return true;   // everyone's own payslips / errand requests / material requests
     if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
     return purchStaffAllowed(key);
   }
@@ -31478,7 +32627,7 @@
   // ---------------------------------------------------------------------
   // Purchasing screens (purchasing.js / purchase-orders.js / requisitions.js)
   // ---------------------------------------------------------------------
-  const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
+  const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders', purchasedItems:'pur.purchased_items',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
     paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands',
@@ -31888,7 +33037,7 @@
   }
   const MSGR_GROUP_ICON = { 'Operations':'truck', 'Customers':'people', 'Purchasing':'cart', 'Inventory':'box', 'Tools':'tool', 'Human Resources':'people', 'Finance':'cash', 'Administration':'building', 'System':'gear' };
   const MSGR_PAGE_HINT = {
-    'pur.requisitions':'Ask for materials', 'pur.purchase_orders':'Orders to suppliers', 'pur.materials':'Material list', 'pur.suppliers':'Supplier list',
+    'pur.requisitions':'Ask for materials', 'pur.purchase_orders':'Orders to suppliers', 'pur.purchased_items':'Everything bought, by date received', 'pur.materials':'Material list', 'pur.suppliers':'Supplier list',
     'inv.stock':'What is in the warehouse', 'inv.receive':'Items coming in', 'inv.issue':'Items going out', 'inv.returns':'Items coming back', 'inv.transfers':'Move items between places',
     'inv.slips':'Past slips', 'inv.reports':'Stock reports', 'inv.warehouses':'Warehouse list',
     'tools.register':'All tools', 'tools.issue':'Give a tool to a worker', 'tools.return':'Take a tool back', 'tools.handover':'Pass a tool on', 'tools.defects':'Report a broken tool', 'tools.maintenance':'Tool servicing', 'tools.slips':'Past tool slips', 'tools.reports':'Tool reports',
@@ -31946,7 +33095,8 @@
       msgrMenuRow('cash', 'My cash advance', 'Money for errands', 'data-msgr-go="cashNew"', msgr.cash.pending || '') +
       msgrMenuRow('liq', 'My liquidation', 'Send in your receipts', 'data-msgr-go="liq"', msgr.cash.toLiq || '') +
       msgrMenuRow('refund', 'My reimbursement', 'Money you paid first', 'data-msgr-go="reimb"') +
-      '<div class="msgr-label">ASK THE OFFICE</div>' + msgrMenuRow('plus', 'Errand requests', 'Ask for a messenger', 'data-msgr-go="errandReq"') + '</div>';
+      '<div class="msgr-label">ASK THE OFFICE</div>' + msgrMenuRow('plus', 'Errand requests', 'Ask for a messenger', 'data-msgr-go="errandReq"') +
+      msgrMenuRow('box', 'Request materials', 'Ask for what you need', 'data-msgr-go="requestMaterials"') + '</div>';
   }
 
   // ---------- My account ----------
@@ -31983,6 +33133,7 @@
       case 'liq': msgrSetTab('cash'); return showCashAdvanceView(true, 'liquidate');
       case 'reimb': msgrSetTab('cash'); return showCashAdvanceView(true, 'reimburse');
       case 'errandReq': return showPurchasingView('errandRequests');
+      case 'requestMaterials': return showPurchasingView('myRequests');
       case 'password': return showChangePasswordScreen(false);
       case 'activity': return staffOpenActivity();
       case 'signout':
