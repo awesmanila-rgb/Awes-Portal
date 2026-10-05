@@ -560,15 +560,16 @@
     finally{ btn.disabled = false; }
   }
 
-  async function erDeliver(preHow){
+  async function erDeliver(preHow, preName){
     const x = er.cur;
     const how = (preHow === true || preHow === false) ? preHow : await uiConfirm('Hand over the items\n\nWill the receiver sign on your phone? Government offices and banks usually stamp a receiving copy instead \u2014 then take a photo of it.',
       { ok:'Receiver signs', cancel:'Photo of stamped copy' });
     const p = { items: x.items || [] };
     if(how){
-      const name = await uiPrompt('Receiver\u2019s name', x.contact_name || '', { ok:'Next', multiline:false });
+      // preName: the guided screen already asked for the name (and skips the position question)
+      const name = preName != null ? preName : await uiPrompt('Receiver\u2019s name', x.contact_name || '', { ok:'Next', multiline:false });
       if(name == null) return; if(!name.trim()){ toast('Enter the receiver\u2019s name'); return; }
-      const pos = await uiPrompt('Receiver\u2019s position / office (optional)', '', { ok:'Next', multiline:false });
+      const pos = preName != null ? '' : await uiPrompt('Receiver\u2019s position / office (optional)', '', { ok:'Next', multiline:false });
       if(pos == null) return;
       const rs = await erSignature('Receiver: ' + name.trim(), 'Received the items listed on ' + x.errand_no);
       if(!rs) return;
@@ -657,13 +658,19 @@
   // My Errands (messenger)
   // =====================================================================
   async function erShowMine(){
-    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // list uses the normal header
+    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // messenger list draws its own heading
     const box = $('erMyBody');
     box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     try{
       const { data, error } = await db.from('errands').select('*').eq('assigned_to', currentUser.id).order('due_at', { ascending:true, nullsFirst:false }).limit(200);
       if(error) throw error;
       const all = data || [];
+      // Messenger accounts: the simple Errands tab (messenger.js); open a chosen errand straight away
+      if(typeof msgrRenderMine === 'function' && isMessengerUser()){
+        const pid = er.pendingOpen; er.pendingOpen = null;
+        if(pid){ erOpenDetail(pid); return; }
+        msgrRenderMine(box, all); return;
+      }
       const open = all.filter(e=> ['assigned', 'in_progress'].includes(e.status));
       const recent = all.filter(e=> ['done', 'failed', 'closed'].includes(e.status)).reverse().slice(0, 15);
       const late = open.filter(erOverdue).length;

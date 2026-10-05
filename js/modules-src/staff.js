@@ -266,7 +266,9 @@
     templates:{ nav:'',                 title:'Role Templates',   sub:'Saved sets of departments & page levels' },
     inbox:    { nav:'',                 title:'Inbox',            sub:'Work waiting on you, oldest first' },
     msgrMenu:    { nav:'', title:'Menu',       sub:'' },
-    msgrAccount: { nav:'', title:'My account', sub:'' }
+    msgrAccount: { nav:'', title:'My account', sub:'' },
+    msgrAlerts:  { nav:'', title:'Alerts',     sub:'' },
+    msgrCash:    { nav:'', title:'Cash',       sub:'' }
   };
   let staffViewHiding = false;
 
@@ -1389,6 +1391,7 @@
   }
 
   async function staffOpenInbox(){
+    if(typeof isMessengerUser === 'function' && isMessengerUser()) return msgrShowAlerts();   // messenger.js: simple Alerts screen
     showStaffView('inbox');
     const target = $('staffPanel_inbox');
     target.innerHTML = '<div class="empty-state">Loading\u2026</div>';
