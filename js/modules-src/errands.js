@@ -657,10 +657,11 @@
   // =====================================================================
   // My Errands (messenger)
   // =====================================================================
-  async function erShowMine(){
-    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // messenger list draws its own heading
+  async function erShowMine(quiet){
+    if(typeof msgrOnHeader === 'function' && quiet !== true) msgrOnHeader('My Errands');   // messenger list draws its own heading
     const box = $('erMyBody');
-    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    quiet = quiet === true;   // background refresh (messenger.js): keep what is on screen, never flash "Loading"
+    if(!quiet) box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     try{
       const { data, error } = await db.from('errands').select('*').eq('assigned_to', currentUser.id).order('due_at', { ascending:true, nullsFirst:false }).limit(200);
       if(error) throw error;
@@ -669,7 +670,7 @@
       if(typeof msgrRenderMine === 'function' && isMessengerUser()){
         const pid = er.pendingOpen; er.pendingOpen = null;
         if(pid){ erOpenDetail(pid); return; }
-        msgrRenderMine(box, all); return;
+        msgrRenderMine(box, all, quiet); return;
       }
       const open = all.filter(e=> ['assigned', 'in_progress'].includes(e.status));
       const recent = all.filter(e=> ['done', 'failed', 'closed'].includes(e.status)).reverse().slice(0, 15);
@@ -682,7 +683,7 @@
         (recent.length ? '<div class="po-sec-title" style="margin-top:14px;">Recent</div>' + recent.map(e=> erRow(e, { mine:true })).join('') : '');
       // opened from the messenger Home: go straight to that errand (messenger.js)
       if(er.pendingOpen){ const pid = er.pendingOpen; er.pendingOpen = null; erOpenDetail(pid); }
-    }catch(e){ box.innerHTML = '<div class="empty-state">' + erErr('Couldn\u2019t load your errands: ', e) + '</div>'; }
+    }catch(e){ if(!quiet) box.innerHTML = '<div class="empty-state">' + erErr('Couldn\u2019t load your errands: ', e) + '</div>'; }
   }
   $('erMyBody').addEventListener('click', (e)=>{
     const row = e.target.closest('.sp-row[data-er]');

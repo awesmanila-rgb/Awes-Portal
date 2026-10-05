@@ -1,3 +1,6 @@
+// Bumped to v208 — messenger live updates (real-time + refresh on return + 1-minute refresh) and the
+// notifications prompt on Home (messenger.js, errands.js, auth.js, css/app.css). Re-fetch css/app.css/js/app.bundle.js.
+//
 // Bumped to v207 — messenger Alerts (bell), Errands tab, Cash tab, hand-over name screen
 // (messenger.js, errands.js, staff.js, index.html, css/app.css). Re-fetch index.html/css/app.css/js/app.bundle.js.
 //
@@ -1100,7 +1103,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v207';
+const CACHE_NAME = 'awes-sr-v208';
 
 // Split into two lists on purpose.
 //

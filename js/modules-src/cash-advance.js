@@ -675,7 +675,7 @@
     if(!row) return;
     row.scrollIntoView({behavior:'smooth', block:'center'});
     row.style.transition = 'background-color 0.3s';
-    row.style.backgroundColor = '#E3EFE6';
+    row.style.backgroundColor = '#DFF3E3';
     setTimeout(()=>{ row.style.backgroundColor = ''; }, 1400);
   }
 

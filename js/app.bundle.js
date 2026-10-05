@@ -2648,6 +2648,7 @@
     if(typeof srAdminTeardown === 'function') srAdminTeardown();
     if(typeof purchRealtimeTeardown === 'function') purchRealtimeTeardown();
     if(typeof mrtRealtimeTeardown === 'function') mrtRealtimeTeardown();
+    if(typeof msgrRealtimeTeardown === 'function') msgrRealtimeTeardown();
     if(typeof cpTeardownRealtime === 'function') cpTeardownRealtime();
     // Job order ticket stream. Channel names are keyed by user id, so
     // without this an account switch on a shared device would leave the
@@ -26320,10 +26321,11 @@
   // =====================================================================
   // My Errands (messenger)
   // =====================================================================
-  async function erShowMine(){
-    if(typeof msgrOnHeader === 'function') msgrOnHeader('My Errands');   // messenger list draws its own heading
+  async function erShowMine(quiet){
+    if(typeof msgrOnHeader === 'function' && quiet !== true) msgrOnHeader('My Errands');   // messenger list draws its own heading
     const box = $('erMyBody');
-    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    quiet = quiet === true;   // background refresh (messenger.js): keep what is on screen, never flash "Loading"
+    if(!quiet) box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
     try{
       const { data, error } = await db.from('errands').select('*').eq('assigned_to', currentUser.id).order('due_at', { ascending:true, nullsFirst:false }).limit(200);
       if(error) throw error;
@@ -26332,7 +26334,7 @@
       if(typeof msgrRenderMine === 'function' && isMessengerUser()){
         const pid = er.pendingOpen; er.pendingOpen = null;
         if(pid){ erOpenDetail(pid); return; }
-        msgrRenderMine(box, all); return;
+        msgrRenderMine(box, all, quiet); return;
       }
       const open = all.filter(e=> ['assigned', 'in_progress'].includes(e.status));
       const recent = all.filter(e=> ['done', 'failed', 'closed'].includes(e.status)).reverse().slice(0, 15);
@@ -26345,7 +26347,7 @@
         (recent.length ? '<div class="po-sec-title" style="margin-top:14px;">Recent</div>' + recent.map(e=> erRow(e, { mine:true })).join('') : '');
       // opened from the messenger Home: go straight to that errand (messenger.js)
       if(er.pendingOpen){ const pid = er.pendingOpen; er.pendingOpen = null; erOpenDetail(pid); }
-    }catch(e){ box.innerHTML = '<div class="empty-state">' + erErr('Couldn\u2019t load your errands: ', e) + '</div>'; }
+    }catch(e){ if(!quiet) box.innerHTML = '<div class="empty-state">' + erErr('Couldn\u2019t load your errands: ', e) + '</div>'; }
   }
   $('erMyBody').addEventListener('click', (e)=>{
     const row = e.target.closest('.sp-row[data-er]');
@@ -31499,6 +31501,7 @@
     const nav = $('msgrNav');
     if(nav) nav.style.display = on ? '' : 'none';
     if(!on) document.body.classList.remove('msgr-own-head');
+    if(on){ msgrLiveStart(); msgrRealtimeStart(); } else msgrRealtimeTeardown();
   }
   // Header: messenger screens that draw their own heading hide the top bar.
   function msgrOnHeader(title){
@@ -31614,6 +31617,32 @@
     return { open, done, failed };
   }
 
+  // ---------- new-errand notice + notifications prompt ----------
+  function msgrNoticeNew(open, quiet){
+    const ids = new Set(open.map(e=> e.id));
+    if(quiet && msgr.seen){
+      const fresh = open.filter(e=> !msgr.seen.has(e.id));
+      if(fresh.length){
+        toast(fresh.length === 1 ? 'New errand: ' + fresh[0].title : fresh.length + ' new errands');
+        try{ if(navigator.vibrate) navigator.vibrate([150, 80, 150]); }catch(e){}
+      }
+    }
+    msgr.seen = ids;
+  }
+  function msgrPushHtml(){
+    if(typeof pushSupported !== 'function' || !pushSupported()) return '';
+    if(Notification.permission === 'default'){
+      if(typeof pushPromptSnoozed === 'function' && pushPromptSnoozed()) return '';
+      return '<div class="msgr-push"><div class="msgr-push-top"><span class="msgr-mic warn">' + msgrIc('bell', 24) + '</span><div><div class="msgr-push-t">Turn on notifications</div>' +
+        '<div class="msgr-push-s">So your phone tells you when the office gives you a new errand, even when the app is closed.</div></div></div>' +
+        '<button type="button" class="msgr-big" data-msgr="pushon">' + msgrIc('bell', 30) + '<span>TURN ON</span></button>' +
+        '<button type="button" class="msgr-textbtn" data-msgr="pushlater">Not now</button></div>';
+    }
+    if(Notification.permission === 'denied')
+      return '<div class="msgr-banner">' + msgrIc('bell', 22) + '<span><b>Notifications are blocked.</b> You will not be told about new errands unless you open the app. Turn them on in your phone\u2019s browser settings for this app.</span></div>';
+    return '';
+  }
+
   // ---------- Home ----------
   function msgrBellHtml(){
     const n = msgrNeedsYou().length;
@@ -31649,10 +31678,11 @@
   const msgrBtn = (act, label, icon, id)=> '<button type="button" class="msgr-big" data-msgr="' + act + '"' + (id ? ' data-id="' + msgrEsc(id) + '"' : '') + '>' + msgrIc(icon, 30) + '<span>' + label + '</span></button>';
   const msgrTap = (txt)=> '<div class="msgr-tap">' + msgrIc('arrow', 20, 2.6) + '<div><b>When you tap:</b> ' + txt + '</div></div>';
 
-  async function msgrRenderHome(target){
-    target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+  async function msgrRenderHome(target, quiet){
+    if(!quiet) target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
     const [data] = await Promise.all([msgrLoad(), (typeof staffLoadInbox === 'function' ? staffLoadInbox() : null)]);
     if(!data.ok){
+      if(quiet) return;   // a background refresh never replaces a good screen with an error
       target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-hello">' + msgrGreeting() + '</div><div class="msgr-name">' + msgrEsc(msgrFirstName()) + '</div></div>' + msgrBellHtml() + '</div>' +
         '<div class="msgr-card"><div class="msgr-card-t">Can\u2019t load your errands</div><p class="msgr-p">Check your connection, then try again.</p>' + msgrBtn('retry', 'TRY AGAIN', 'refund') + '</div></div>';
       return;
@@ -31660,6 +31690,7 @@
     const tIn = data.dtr && data.dtr.timeIn, tOut = data.dtr && data.dtr.timeOut;
     const { open, done, failed } = msgrSplit(data.errands);
     msgr.openErrands = open.length;
+    msgrNoticeNew(open, quiet);
     const total = open.length + done.length + failed.length;
     const featured = open[0] || null;
     const inProg = open.filter(e=> e.status === 'in_progress').length;
@@ -31713,7 +31744,7 @@
 
     target.innerHTML = '<div class="msgr-page">' +
       '<div class="msgr-head"><div><div class="msgr-hello">' + msgrGreeting() + '</div><div class="msgr-name">' + msgrEsc(msgrFirstName()) + '</div></div>' + msgrBellHtml() + '</div>' +
-      chip + msgrSummary(total, done.length, inProg, segs) + card +
+      msgrPushHtml() + chip + msgrSummary(total, done.length, inProg, segs) + card +
       (listRows ? '<div class="msgr-label">' + listTitle + '</div><div class="msgr-list">' + listRows + '</div>' : '') +
       (finishedRows ? '<div class="msgr-label">DONE TODAY</div><div class="msgr-list">' + finishedRows + '</div>' : '') + '</div>';
   }
@@ -31749,6 +31780,11 @@
     const act = b.getAttribute('data-msgr'), id = b.getAttribute('data-id');
     if(act === 'alerts'){ msgrShowAlerts(); }
     else if(act === 'retry') msgrRenderHome(home);
+    else if(act === 'pushon'){ b.disabled = true; try{ await pushRequestPermission(); }finally{ msgrRenderHome(home, true); } }
+    else if(act === 'pushlater'){
+      try{ localStorage.setItem(pushPromptSnoozeKey(), String(Date.now() + 7 * 86400000)); }catch(e){}
+      msgrRenderHome(home, true);
+    }
     else if(act === 'timein'){ b.disabled = true; try{ await dtrDoTimeIn(); }finally{ b.disabled = false; } msgrRenderHome(home); }
     else if(act === 'timeout'){
       if(!(await uiConfirm('Time out for today?', { ok:'Time out', cancel:'Not yet' }))) return;
@@ -32103,11 +32139,13 @@
   // Alerts (the bell) — everything waiting on him, most urgent first
   // =====================================================================
   const MSGR_ALERT_ICON = { adm:'list', fin:'cash', hr:'clock', inv:'box', pur:'cart', tools:'tool', ops:'truck' };
-  async function msgrShowAlerts(){
-    msgrSetTab('home');
-    showStaffView('msgrAlerts');
+  async function msgrShowAlerts(quiet){
     const target = $('staffPanel_msgrAlerts');
-    target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    if(!quiet){
+      msgrSetTab('home');
+      showStaffView('msgrAlerts');
+      target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    }
     await Promise.all([msgrLoad(), (typeof staffLoadInbox === 'function' ? staffLoadInbox() : null)]);
     const list = msgr.alerts = msgrAlertList();
     const card = (a, i)=>{
@@ -32143,8 +32181,9 @@
   // =====================================================================
   // Errands tab — to do (in order), done today, earlier
   // =====================================================================
-  function msgrRenderMine(box, all){
+  function msgrRenderMine(box, all, quiet){
     const { open, done, failed } = msgrSplit(all);
+    msgrNoticeNew(open, quiet);
     const late = open.filter(e=> typeof erOverdue === 'function' && erOverdue(e)).length;
     const doneIds = new Set(done.concat(failed).map(e=> e.id));
     const earlier = all.filter(e=> ['done', 'failed', 'closed'].includes(e.status) && !doneIds.has(e.id))
@@ -32152,7 +32191,7 @@
     const sub = open.length ? open.length + ' to do' + (late ? ' \u00B7 ' + late + ' late' : '') : 'Nothing to do right now';
     const rowFor = (e, n, kind)=> msgrRow(e, n, kind);
     document.body.classList.add('msgr-own-head');
-    box.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-title">My errands</div><div class="msgr-g-sub" style="margin-top:4px;">' + sub + '</div></div>' + msgrBellHtml() + '</div>' +
+    box.innerHTML = '<div class="msgr-page" data-msgr-screen="errands"><div class="msgr-head"><div><div class="msgr-title">My errands</div><div class="msgr-g-sub" style="margin-top:4px;">' + sub + '</div></div>' + msgrBellHtml() + '</div>' +
       (late ? '<div class="msgr-banner">' + msgrIc('clock', 22) + '<span><b>' + late + ' late.</b> Finish ' + (late === 1 ? 'it' : 'them') + ', or open it and tap \u201CCan\u2019t finish\u201D so the office can reschedule.</span></div>' : '') +
       (open.length ? '<div class="msgr-label">TO DO, IN THIS ORDER</div><div class="msgr-list">' + open.map((e, i)=> rowFor(e, i + 1, e.status === 'in_progress' ? 'prog' : 'todo')).join('') + '</div>'
         : '<div class="msgr-card"><div class="msgr-done-line">' + msgrCircle('done') + '<div><div class="msgr-card-t">All caught up</div><p class="msgr-p">The office will tell you when a new errand is ready.</p></div></div></div>') +
@@ -32187,6 +32226,74 @@
       card('cashNew', 'cash', 'Ask for cash', 'Cash advance', 'Need money for an errand? Ask here first.', msgr.cash.pending) +
       card('liq', 'liq', 'Send in your receipts', 'Liquidation', 'Show how you used the cash.', msgr.cash.toLiq) +
       card('reimb', 'refund', 'Money I paid first', 'Reimbursement', 'Paid with your own money? Ask to get it back.', 0) + '</div>';
+  }
+
+  // =====================================================================
+  // Live updates — so a new errand shows up without anyone tapping anything
+  //   1. database real-time (errands assigned to him; migration 20261018_01),
+  //   2. refresh when the app comes back to the front or the phone is online again,
+  //   3. a quiet refresh about once a minute while Home / Errands / Alerts is open.
+  // Only those three list screens ever refresh. A guided errand step, a dialog
+  // or the Menu is never redrawn underneath him. If real-time is not set up
+  // (or drops) 2 and 3 still keep the screen current.
+  // =====================================================================
+  const msgrVisible = (el)=> !!el && el.offsetParent !== null;
+  function msgrActiveScreen(){
+    if(!currentUser || !isMessengerUser()) return null;
+    const home = $('staffPanel_home'), al = $('staffPanel_msgrAlerts'), mine = $('erMyBody');
+    if(msgrVisible(home) && home.querySelector('.msgr-page')) return 'home';
+    if(msgrVisible(al) && al.querySelector('.msgr-page')) return 'alerts';
+    if(msgrVisible(mine) && er.mode === 'messenger' && mine.querySelector('[data-msgr-screen="errands"]')) return 'errands';
+    return null;
+  }
+  let msgrBusy = false, msgrDeb = null, msgrLiveWired = false;
+  async function msgrRefreshNow(){
+    if(msgrBusy || document.hidden || navigator.onLine === false) return;
+    const s = msgrActiveScreen(); if(!s) return;
+    if(document.querySelector('.overlay.open')) return;   // a dialog (signature box, question) is open
+    msgrBusy = true;
+    try{
+      if(s === 'home') await msgrRenderHome($('staffPanel_home'), true);
+      else if(s === 'alerts') await msgrShowAlerts(true);
+      else await erShowMine(true);
+    }catch(e){}
+    finally{ msgrBusy = false; }
+  }
+  function msgrRefreshSoon(){ clearTimeout(msgrDeb); msgrDeb = setTimeout(msgrRefreshNow, 700); }   // a burst of changes -> one refresh
+  function msgrLiveStart(){
+    if(msgrLiveWired) return;
+    msgrLiveWired = true;
+    setInterval(msgrRefreshNow, 60000);
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) msgrRefreshSoon(); });
+    window.addEventListener('online', msgrRefreshSoon);
+    window.addEventListener('pageshow', msgrRefreshSoon);
+  }
+  let msgrRt = null, msgrRtUid = null, msgrRtTries = 0;
+  function msgrRealtimeStart(){
+    if(!currentUser || !isMessengerUser() || typeof db === 'undefined' || !db || !db.channel) return;
+    if(msgrRt && msgrRtUid === currentUser.id) return;
+    msgrRealtimeTeardown();
+    msgrRtUid = currentUser.id;
+    try{
+      const ch = db.channel('errands-me-' + currentUser.id);
+      msgrRt = ch;
+      ch.on('postgres_changes', { event:'*', schema:'public', table:'errands', filter:'assigned_to=eq.' + currentUser.id }, msgrRefreshSoon)
+        .subscribe((status)=>{
+          if(msgrRt !== ch) return;   // torn down on purpose (sign out)
+          if(status === 'SUBSCRIBED'){ msgrRtTries = 0; return; }
+          if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+            // dropped (network change, sleep) or not enabled yet: retry with a growing pause; the 1-minute refresh covers the gap
+            msgrRt = null; msgrRtUid = null;
+            try{ db.removeChannel(ch); }catch(_){}
+            const wait = Math.min(300000, 5000 * Math.pow(2, msgrRtTries++));
+            setTimeout(()=>{ if(currentUser && isMessengerUser()) msgrRealtimeStart(); }, wait);
+          }
+        });
+    }catch(e){ msgrRt = null; msgrRtUid = null; }
+  }
+  function msgrRealtimeTeardown(){
+    const old = msgrRt; msgrRt = null; msgrRtUid = null; msgrRtTries = 0;
+    if(old){ try{ db.removeChannel(old); }catch(_){} }
   }
 
 

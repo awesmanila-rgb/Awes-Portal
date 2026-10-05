@@ -539,7 +539,7 @@
       const time = new Date(m.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
       return '<div class="dt-msg-row" style="text-align:'+(mine?'right':'left')+';">'+
         '<div class="dt-msg-meta">'+escapeHtml(m.sender_name)+' · '+time+'</div>'+
-        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#E6EEE8')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
+        '<div class="dt-msg-bubble" style="background:'+(mine?'var(--green)':'#EEF1EE')+'; color:'+(mine?'#fff':'var(--text)')+';">'+escapeHtml(m.body)+'</div>'+
       '</div>';
     }).join('');
     list.scrollTop = list.scrollHeight;

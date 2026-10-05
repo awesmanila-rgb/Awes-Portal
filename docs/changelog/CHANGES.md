@@ -1,3 +1,27 @@
+# AWES App — messenger live updates + notifications prompt (sw v208)
+
+Messenger accounts (staff with My Errands) only. Includes ONE new migration.
+
+- **Run first (Supabase SQL editor or `supabase db push`):** `supabase/migrations/20261018_01_errands_realtime.sql`
+  adds `public.errands` to the `supabase_realtime` publication. Safe to re-run. Without it everything
+  below except the instant push still works (items 2 and 3).
+- **1. Real-time:** the app subscribes to errands assigned to the signed-in messenger
+  (`assigned_to=eq.<id>`, RLS `errands_read` applies). A change refreshes the screen within ~1 second.
+  A dropped connection retries with a growing pause (5 s up to 5 min); sign out closes it.
+- **2. Refresh on return:** when the app comes back to the front, the phone comes back online, or the
+  page is restored.
+- **3. Quiet refresh about once a minute** while Home, the Errands tab or Alerts is open.
+- Only those three list screens ever refresh; a guided errand step, an open dialog (signature box,
+  confirm) and the Menu are never redrawn underneath him. A background refresh never shows "Loading"
+  and never replaces a good screen with an error.
+- A newly assigned errand shows a toast ("New errand: ...") and a short vibration.
+- **Notifications prompt on Home** (it was missing from the messenger Home): a big TURN ON card while
+  permission is undecided ("Not now" hides it for 7 days, same rule as the rest of the app) and a
+  warning when notifications are blocked. Push is how he hears about an errand while the app is closed.
+- `auth.js`: sign out also closes the messenger live channel.
+
+---
+
 # AWES App — messenger Alerts, Errands tab, Cash tab, hand-over name (sw v207)
 
 Phase 3 — completes the simplified messenger experience (v205 Home/bar/Menu/Account, v206 guided errand).

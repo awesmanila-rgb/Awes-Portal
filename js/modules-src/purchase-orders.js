@@ -1193,7 +1193,7 @@
   // precached by the service worker for offline use. If it can't load, the
   // PDF falls back to jsPDF's built-in Helvetica (which has no ₱ glyph, so
   // amounts then print as "PHP").
-  const PO_FONT_FILES = { regular:'fonts/Inter-Regular.ttf', semibold:'fonts/Inter-SemiBold.ttf', bold:'fonts/Inter-Bold.ttf' };
+  const PO_FONT_FILES = { regular:'assets/fonts/Inter-Regular.ttf', semibold:'assets/fonts/Inter-SemiBold.ttf', bold:'assets/fonts/Inter-Bold.ttf' };
   let poFontData = null, poFontTried = false;
   async function poLoadFonts(){
     if(poFontData || poFontTried) return poFontData;
