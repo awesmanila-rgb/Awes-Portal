@@ -1,3 +1,59 @@
+# AWES App — review comments (sw v223)
+
+**Run first:** `supabase/migrations/20261030_01_dashboard_groups_and_leave_alert.sql` (safe to re-run). Without it the screens work as before:
+the tiles stay in their old groups and HR does not get the early leave heads-up.
+
+1. **Dashboard cards re-grouped.** *Operations* now holds Open job orders, Late job orders, New service requests, **Equipment overdue for PM,
+   PM due in the next 30 days, Customers**. *Administration* now holds POs waiting to be received, Materials to reorder, **Tools overdue for
+   return, Tools overdue for calibration**. Same figures, same permissions, same page each tile opens (database function `dept_dashboard`).
+2. **Job order list card (admin / Operations).** The "Open Job Order" button and the "Status: ..." pill are gone from the card. Each progress
+   line now has its own label — Acknowledged / On site / Reported / Closed — ticked (✓) when complete, amber when part-way (phones show "Ack").
+   Tapping the job order shows the summary, with the status at the top; below it a **More** button opens the full job order.
+   Technician cards and the job order screen's own header are unchanged.
+3. **"Operations today" card removed** from the Operations home (it repeated the Needs you now list, Job order progress and Technicians status).
+4. **Leave requests.** The decision comment now reads "Comment (visible to the employee)" — on leave, and the same wording on cash advance,
+   liquidation and reimbursement decisions. A leave request that is still waiting for its Head's endorsement now reaches the **HR approvers**
+   at once: it appears in their **Inbox** ("Leave waiting for endorsement · <name> — <type> · waiting for <Head>'s endorsement") and in a new
+   **Needs you now** card on their home (leave to decide, waiting for endorsement, and — for a Head — leave to endorse). HR still cannot
+   decide it until it is endorsed. The endorsing Head keeps their own "to endorse" item, with no duplicate.
+
+Not done: a push notification to the HR Head the moment leave is filed (today only the Super Admin is pushed; HR sees it in the Inbox and on
+Needs you now). It needs the app to know who holds HR approval; say if you want it.
+
+---
+
+# AWES App — faster loading (sw v222)
+
+**Run first:** `supabase/migrations/20261029_01_lite_list_views.sql` (safe to re-run; needs PostgreSQL 15+, which Supabase has).
+Without it everything works exactly as before, just not faster.
+
+**Why it was slow.** Every service report stores its two signatures inline as base64 pictures (`data:image/png;base64,...`),
+and every cash advance / reimbursement stores its receipt photos inline in `data`. The Super Admin dashboard, the Operations
+dashboard and the technician home read EVERY report and EVERY cash advance to count and list things, so they downloaded all those
+pictures (many megabytes, growing every week, in serial pages of 200 reports) and then threw them away on the phone.
+In a test with 150 reports and 120 cash advances that was about 7 MB + 14 MB of picture data for answers that needed ~40 KB.
+
+**What changed**
+- Two read-only views, `service_reports_lite` and `cash_advance_requests_lite`: the same rows without the pictures
+  (security_invoker, so row-level security is exactly the real tables'). Nothing is moved or deleted; a report or an attachment is
+  still fetched whole when someone opens it.
+- The admin dashboard, the Operations dashboard and the technician home read the lite views; the lite report list pages by 1000
+  (2,300 reports = 3 requests instead of 12). History, customer history and anything that prints a signature still read the full table.
+- `index.html`: the Google Fonts stylesheet no longer blocks the first paint, and the Supabase library starts downloading in parallel
+  with the app script instead of after it.
+
+**Checked and not the cause:** the new Materials Monitor (0.45 s for 600 requests, 22 ms for a screenful) and the app script
+itself (about 0.5 s of work on a phone-class processor).
+
+**Measure your own data** (Supabase SQL editor):
+`select count(*) as reports, pg_size_pretty(sum(pg_column_size(customer_signature) + pg_column_size(technician_signature))) as signature_bytes from service_reports;`
+`select count(*) as requests, pg_size_pretty(sum(pg_column_size(data))) as data_bytes from cash_advance_requests;`
+
+**Still open (not done):** minifying the 2.4 MB script (about a third smaller to download, but harder to read in error messages), and
+moving signatures / receipt photos out of the database rows into Storage for good (the long-term fix).
+
+---
+
 # AWES App — no more blank white screen when files are out of step (sw v221)
 
 **Symptom fixed:** the Super Admin dashboard stayed empty under the stale header "Technician's Homepage". Cause: the new scripts were
