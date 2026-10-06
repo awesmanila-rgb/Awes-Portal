@@ -16,7 +16,16 @@
   const msgr = { tab:'home', cash:{ toLiq:0, pending:0 }, openErrands:0 };
   const MSGR_OWN_HEADER = ['Home', 'Menu', 'My account', 'Alerts', 'Cash', 'My Errands'];   // screens that draw their own heading
 
-  function isMessengerUser(){ return !!(typeof isStaffUser === 'function' && isStaffUser() && can('adm.my_errands', 'view')); }
+  // A messenger is office staff whose job IS errands. A manager who merely HOLDS the My Errands page (a department Head, someone
+  // who sets errands for others, or anyone who can approve something) keeps the normal office layout — My Errands is simply one
+  // more page in their menu. (Before, holding the page was enough, so a Head given it suddenly got the messenger screen.)
+  function isMessengerUser(){
+    if(!(typeof isStaffUser === 'function' && isStaffUser() && can('adm.my_errands', 'view'))) return false;
+    if(typeof staffIsHead === 'function' && staffIsHead()) return false;
+    if(can('adm.errands', 'view')) return false;
+    const g = ((currentUser && currentUser.access) || {}).access || {};
+    return !Object.keys(g).some(k=> can(k, 'approve'));
+  }
 
   // Called whenever the signed-in user or their access may have changed.
   function msgrApply(){
@@ -270,7 +279,40 @@
       '<div class="msgr-head"><div><div class="msgr-hello">' + msgrGreeting() + '</div><div class="msgr-name">' + msgrEsc(msgrFirstName()) + '</div></div>' + msgrBellHtml() + '</div>' +
       msgrPushHtml() + chip + msgrSummary(total, done.length, inProg, segs) + card +
       (listRows ? '<div class="msgr-label">' + listTitle + '</div><div class="msgr-list">' + listRows + '</div>' : '') +
-      (finishedRows ? '<div class="msgr-label">DONE TODAY</div><div class="msgr-list">' + finishedRows + '</div>' : '') + '</div>';
+      (finishedRows ? '<div class="msgr-label">DONE TODAY</div><div class="msgr-list">' + finishedRows + '</div>' : '') +
+      (await msgrWaitingHtml()) + msgrTilesHtml() + '</div>';
+  }
+
+  // "Waiting for approval" / "Approved — what happens next" for the messenger's own requests (same rows as the technician home)
+  async function msgrWaitingHtml(){
+    try{
+      const uid = currentUser.id;
+      const [cash, leaves, rq] = await Promise.all([
+        (typeof caListForUser === 'function' ? caListForUser(uid) : Promise.resolve([])).catch(()=> []),
+        (typeof leaveListForUser === 'function' ? leaveListForUser(uid) : Promise.resolve([])).catch(()=> []),
+        db.from('material_requisitions').select('id, mrf_no, status, job_order, created_at, reviewed_at').eq('requested_by', uid).order('created_at', { ascending:false }).limit(30).then(r=> (r && !r.error) ? (r.data || []) : []).catch(()=> [])
+      ]);
+      const { wait, appr, approvedIds } = thWaitingRows(cash, leaves, rq);
+      const go = { cashadvance:'cash', reimburse:'cash', liquidate:'liq', leave:'leave', requests:'requestMaterials' };
+      const conv = (h)=> h.replace(/data-th-act="(\w+)"/g, (_, a)=> 'data-msgr-go="' + (go[a] || 'menu') + '"');
+      if(approvedIds.length) setTimeout(()=> thRefineApproved(approvedIds, '#msgrApprovedList', 'msgrApprovedWrap'), 0);
+      return (wait.length ? '<div class="msgr-wait"><div class="th-sec"><h2 class="th-sec-title">Waiting for approval</h2><span class="th-sec-count">Admin is reviewing</span></div><div class="th-box">' + conv(wait.join('')) + '</div></div>' : '') +
+        (appr.length ? '<div class="msgr-wait" id="msgrApprovedWrap"><div class="th-sec"><h2 class="th-sec-title">Approved</h2><span class="th-sec-count">What happens next</span></div><div class="th-box" id="msgrApprovedList">' + conv(appr.join('')) + '</div></div>' : '');
+    }catch(e){ return ''; }
+  }
+
+  // The same "What do you need?" shortcut grid the technician home has: grouped, big icon, short label, no sub-label.
+  // Every tile opens a page the Menu already opens (data-msgr-go).
+  function msgrTilesHtml(){
+    const tile = (go, ic, tone, label, n)=> '<button type="button" class="th-tile th-' + tone + '" data-msgr-go="' + go + '"><span class="th-tile-ic">' + msgrIc(ic, 30, 2) + '</span>' +
+      '<span class="th-tile-label">' + msgrEsc(label) + '</span>' + (n ? '<span class="th-tile-badge">' + n + '</span>' : '') + '</button>';
+    const group = (title, tiles)=> '<div class="th-group"><h3 class="th-group-title">' + title + '</h3><div class="th-grid">' + tiles.join('') + '</div></div>';
+    return '<div class="msgr-tiles"><div class="msgr-label">WHAT DO YOU NEED?</div>' +
+      group('My work', [tile('errands', 'list', 'orange', 'My errands', msgr.openErrands || ''), tile('dtr', 'clock', 'green', 'Attendance')]) +
+      group('Time and pay', [tile('leave', 'leave', 'violet', 'File a leave'), tile('payslips', 'slip', 'purple', 'My payslips')]) +
+      group('Money', [tile('cashNew', 'cash', 'green', 'Cash advance', msgr.cash.pending || ''), tile('liq', 'liq', 'green', 'Liquidation', msgr.cash.toLiq || ''), tile('reimb', 'refund', 'green', 'Reimbursement')]) +
+      group('Ask the office', [tile('errandReq', 'plus', 'teal', 'Errand request'), tile('requestMaterials', 'box', 'brown', 'Request materials'), tile('myDeliveries', 'truck', 'brown', 'My deliveries')]) +
+      '</div>';
   }
 
   async function msgrShowHome(){
@@ -326,7 +368,7 @@
   }
   const MSGR_GROUP_ICON = { 'Operations':'truck', 'Customers':'people', 'Purchasing':'cart', 'Inventory':'box', 'Tools':'tool', 'Human Resources':'people', 'Finance':'cash', 'Administration':'building', 'System':'gear' };
   const MSGR_PAGE_HINT = {
-    'pur.requisitions':'Ask for materials', 'pur.purchase_orders':'Orders to suppliers', 'pur.materials':'Material list', 'pur.suppliers':'Supplier list',
+    'pur.requisitions':'Ask for materials', 'pur.purchase_orders':'Orders to suppliers', 'pur.purchased_items':'Everything bought, by date received', 'pur.materials':'Material list', 'pur.suppliers':'Supplier list',
     'inv.stock':'What is in the warehouse', 'inv.receive':'Items coming in', 'inv.issue':'Items going out', 'inv.returns':'Items coming back', 'inv.transfers':'Move items between places',
     'inv.slips':'Past slips', 'inv.reports':'Stock reports', 'inv.warehouses':'Warehouse list',
     'tools.register':'All tools', 'tools.issue':'Give a tool to a worker', 'tools.return':'Take a tool back', 'tools.handover':'Pass a tool on', 'tools.defects':'Report a broken tool', 'tools.maintenance':'Tool servicing', 'tools.slips':'Past tool slips', 'tools.reports':'Tool reports',
@@ -384,7 +426,9 @@
       msgrMenuRow('cash', 'My cash advance', 'Money for errands', 'data-msgr-go="cashNew"', msgr.cash.pending || '') +
       msgrMenuRow('liq', 'My liquidation', 'Send in your receipts', 'data-msgr-go="liq"', msgr.cash.toLiq || '') +
       msgrMenuRow('refund', 'My reimbursement', 'Money you paid first', 'data-msgr-go="reimb"') +
-      '<div class="msgr-label">ASK THE OFFICE</div>' + msgrMenuRow('plus', 'Errand requests', 'Ask for a messenger', 'data-msgr-go="errandReq"') + '</div>';
+      '<div class="msgr-label">ASK THE OFFICE</div>' + msgrMenuRow('plus', 'Errand requests', 'Ask for a messenger', 'data-msgr-go="errandReq"') +
+      msgrMenuRow('box', 'Request materials', 'Ask for what you need', 'data-msgr-go="requestMaterials"') +
+      msgrMenuRow('truck', 'My deliveries', 'Receive at a site, with photos', 'data-msgr-go="myDeliveries"') + '</div>';
   }
 
   // ---------- My account ----------
@@ -421,6 +465,8 @@
       case 'liq': msgrSetTab('cash'); return showCashAdvanceView(true, 'liquidate');
       case 'reimb': msgrSetTab('cash'); return showCashAdvanceView(true, 'reimburse');
       case 'errandReq': return showPurchasingView('errandRequests');
+      case 'requestMaterials': return showPurchasingView('myRequests');
+      case 'myDeliveries': return showPurchasingView('myDeliveries');
       case 'password': return showChangePasswordScreen(false);
       case 'activity': return staffOpenActivity();
       case 'signout':
@@ -433,6 +479,12 @@
     if(nav) nav.addEventListener('click', (ev)=>{
       const b = ev.target.closest('[data-msgr-tab]'); if(!b) return;
       msgrGo(b.getAttribute('data-msgr-tab'));
+    });
+    // the shortcut tiles on the Home screen (its other buttons have their own handlers)
+    const home = $('staffPanel_home');
+    if(home) home.addEventListener('click', (ev)=>{
+      const go = ev.target.closest && ev.target.closest('.msgr-tiles [data-msgr-go], .msgr-wait [data-msgr-go]');
+      if(go && isMessengerUser()) msgrGo(go.getAttribute('data-msgr-go'));
     });
     ['staffPanel_msgrMenu', 'staffPanel_msgrAccount', 'staffPanel_msgrAlerts', 'staffPanel_msgrCash'].forEach(id=>{
       const el = $(id); if(!el) return;

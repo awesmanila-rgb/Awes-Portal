@@ -72,7 +72,7 @@
       if(sd.openAfter){ const id = sd.openAfter; sd.openAfter = null; if(sd.mine.some(d=> d.id === id && d.status === 'assigned')) sdOpenReceive(id); }
     }catch(e){
       const m = describeCloudError(e);
-      $live('sdMineList').innerHTML = '<div class="empty-state">' + (/site_deliveries|PGRST205|42P01/.test(m) ? 'This page needs migration 20261027_01_site_deliveries.sql to be run in Supabase.' : 'Couldn\u2019t load your deliveries: ' + escapeHtml(m)) + '</div>';
+      $live('sdMineList').innerHTML = '<div class="empty-state">' + (/site_deliveries|PGRST205|42P01/.test(m) ? 'This page needs migration 20261027_01_site_deliveries.sql to be run in Supabase (it is inside RUN_THIS_IN_SUPABASE.sql).' : 'Couldn\u2019t load your deliveries: ' + escapeHtml(m)) + '</div>';
     }
   }
   function sdItemsLine(d){
@@ -359,7 +359,7 @@
       sd.list = data || []; sdRenderList();
     }catch(e){
       const m = describeCloudError(e);
-      $live('sdList').innerHTML = '<div class="empty-state">' + (/site_deliveries|PGRST205|42P01/.test(m) ? 'This page needs migration 20261027_01_site_deliveries.sql to be run in Supabase.' : 'Couldn\u2019t load deliveries: ' + escapeHtml(m)) + '</div>';
+      $live('sdList').innerHTML = '<div class="empty-state">' + (/site_deliveries|PGRST205|42P01/.test(m) ? 'This page needs migration 20261027_01_site_deliveries.sql to be run in Supabase (it is inside RUN_THIS_IN_SUPABASE.sql).' : 'Couldn\u2019t load deliveries: ' + escapeHtml(m)) + '</div>';
     }
   }
   function sdRenderList(){

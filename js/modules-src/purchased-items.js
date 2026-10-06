@@ -92,7 +92,7 @@
       if(seq !== pi.seq) return;
       console.error('purchased items failed', describeCloudError(e));
       const msg = (typeof purchIsAuthError === 'function' && purchIsAuthError(e)) ? PURCH_EXPIRED_HTML
-        : /purchased_items_report|PGRST202|42883/.test(describeCloudError(e)) ? 'This page needs migration 20261020_01_purchased_items.sql to be run in Supabase first.'
+        : /purchased_items_report|PGRST202|42883/.test(describeCloudError(e)) ? 'This page needs migration 20261020_01_purchased_items.sql to be run in Supabase (it is inside RUN_THIS_IN_SUPABASE.sql) first.'
         : /access/i.test(describeCloudError(e)) ? 'You don\u2019t have access to Purchased Items.'
         : 'Couldn\u2019t load purchased items: ' + escapeHtml(describeCloudError(e));
       box.innerHTML = '<div class="empty-state">' + msg + '</div>';

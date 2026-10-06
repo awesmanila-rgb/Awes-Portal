@@ -339,7 +339,7 @@
     const [tickets, reporterTickets, reports, cashAdvances, leaves, unreadCount, todayDtr, extras] = await Promise.all([
       dtListForWorker(currentUser.id).catch(()=>[]),
       dtListForReporter(currentUser.id).catch(()=>[]),
-      cloudListReports().catch(()=>null),
+      cloudListReports({ lite:true }).catch(()=>null),
       caListForUser(currentUser.id).catch(()=>[]),
       leaveListForUser(currentUser.id).catch(()=>[]),
       dtCountUnreadMessages().catch(()=>0),
@@ -491,6 +491,7 @@
     thRenderTasks(tasks);
     thRenderWaiting(cashAdvances, leaves, extras.reqs);
     thRenderUpcoming(live);
+    thSyncGroups();
 
     // Tile badges + the shared bell / nav badges.
     const msgB = $('techQaMsgBadge');
@@ -549,29 +550,67 @@
     }).join('');
   }
 
-  function thRenderWaiting(cashAdvances, leaves, reqs){
-    const rows = [];
-    const row = (label, status, tone, act)=> rows.push(
-      '<button type="button" class="th-wait-row" data-th-act="'+act+'"><span class="th-wait-label">'+label+'</span>'+
-      '<span class="th-wait-st th-'+tone+'-txt">'+status+'</span></button>');
+  // "Waiting for approval" lists ONLY what is still waiting for the admin. Anything already approved moves to its own
+  // "Approved — what happens next" block, with a line saying what the next step is (and who has to do it).
+  // The rows for "Waiting for approval" and "Approved" — shared by the technician home and the messenger home.
+  function thWaitingRows(cashAdvances, leaves, reqs){
+    const wait = [], appr = [], approvedIds = [];
+    const row = (list, label, status, tone, act, next, attrs)=> list.push(
+      '<button type="button" class="th-wait-row" data-th-act="'+act+'"'+(attrs||'')+'><span class="th-wait-label">'+label+'</span>'+
+      '<span class="th-wait-st th-'+tone+'-txt">'+status+'</span>'+(next ? '<span class="th-wait-next">'+next+'</span>' : '')+'</button>');
     (cashAdvances||[]).forEach(r=>{
       const what = r.kind==='reimbursement' ? 'Reimbursement' : 'Cash advance';
       const act = r.kind==='reimbursement' ? 'reimburse' : 'cashadvance';
-      if(r.status==='pending') row(what+' · '+caFmtPeso(r.amount), 'Pending', 'amber', act);
-      else if(r.status==='approved' && r.kind!=='reimbursement' && !r.disbursed) row(what+' · '+caFmtPeso(r.amount), 'Approved, not yet released', 'green', act);
-      if(r.liquidation && r.liquidation.status==='pending') row('Liquidation · '+caFmtPeso(r.amount), 'Pending', 'amber', 'liquidate');
+      if(r.status==='pending') row(wait, what+' · '+caFmtPeso(r.amount), 'Pending', 'amber', act);
+      else if(r.status==='approved' && r.kind!=='reimbursement' && !r.disbursed) row(appr, what+' · '+caFmtPeso(r.amount), 'Approved', 'green', act, 'Admin will release the cash. You will be told when it is ready to collect.');
+      if(r.liquidation && r.liquidation.status==='pending') row(wait, 'Liquidation · '+caFmtPeso(r.amount), 'Pending', 'amber', 'liquidate');
     });
     (leaves||[]).filter(l=> l.status==='pending').forEach(l=>{
-      row(escapeHtml(l.leaveType||'Leave')+' · '+leaveFmtDate(l.dateFrom), 'Pending', 'amber', 'leave');
+      row(wait, escapeHtml(l.leaveType||'Leave')+' · '+leaveFmtDate(l.dateFrom), 'Pending', 'amber', 'leave');
     });
     const weekAgo = new Date(Date.now() - 7*864e5).toISOString();
     (reqs||[]).forEach(q=>{
       const lbl = 'Material request '+escapeHtml(q.mrf_no || '');
-      if(q.status==='submitted') row(lbl, 'Pending', 'amber', 'requests');
-      else if(q.status==='approved' && String(q.reviewed_at||q.created_at||'') >= weekAgo) row(lbl, 'Approved', 'green', 'requests');
+      if(q.status==='submitted') row(wait, lbl, 'Pending', 'amber', 'requests');
+      else if(q.status==='approved' && String(q.reviewed_at||q.created_at||'') >= weekAgo){
+        approvedIds.push(q.id);
+        row(appr, lbl, 'Approved', 'green', 'requests', 'The office is arranging your materials. Nothing for you to do yet.', ' data-mr="'+escapeHtml(q.id)+'"');
+      }
     });
-    $('thWaitWrap').style.display = rows.length ? '' : 'none';
-    $('thWaitList').innerHTML = rows.join('');
+    return { wait, appr, approvedIds };
+  }
+  function thRenderWaiting(cashAdvances, leaves, reqs){
+    const { wait, appr, approvedIds } = thWaitingRows(cashAdvances, leaves, reqs);
+    $('thWaitWrap').style.display = wait.length ? '' : 'none';
+    $('thWaitList').innerHTML = wait.join('');
+    if($('thApprovedWrap')){   // (older index.html files do not have this block)
+      $('thApprovedWrap').style.display = appr.length ? '' : 'none';
+      $('thApprovedList').innerHTML = appr.join('');
+    }
+    if(approvedIds.length) thRefineApproved(approvedIds, '#thApprovedList', 'thApprovedWrap');
+  }
+  // Where an approved material request really is (mr_progress): being bought, arrived, handed over.
+  // Falls back to the plain message above when the materials migration has not been run.
+  async function thRefineApproved(ids, listSel, wrapId){
+    try{
+      const { data, error } = await db.rpc('mr_progress', { p_ids: ids });
+      if(error || !data) return;
+      ids.forEach(id=>{
+        const el = document.querySelector(listSel+' [data-mr="'+id+'"]'); if(!el) return;
+        const arr = data[id] || []; if(!arr.length) return;
+        const next = el.querySelector('.th-wait-next'), st = el.querySelector('.th-wait-st');
+        if(arr.every(p=> p >= 5)){ el.remove(); return; }   // handed over: nothing left to wait for (sign for it in My materials)
+        if(arr.some(p=> p === 4)){ st.textContent = 'Arrived'; if(next) next.textContent = 'Your materials have arrived. Collect them from the warehouse.'; }
+        else if(arr.some(p=> p === 3)){ st.textContent = 'Being bought'; if(next) next.textContent = 'The materials are being bought or ordered. You will be told when they arrive.'; }
+      });
+      if($(wrapId) && !document.querySelector(listSel+' .th-wait-row')) $(wrapId).style.display = 'none';
+    }catch(e){}
+  }
+  // Hide a shortcut group whose tiles are all hidden (a tile is hidden by the person's restrictions or access)
+  function thSyncGroups(){
+    document.querySelectorAll('#techQuickActionsCard .th-group').forEach(g=>{
+      g.style.display = [...g.querySelectorAll('.th-tile')].some(t=> t.style.display !== 'none') ? '' : 'none';
+    });
   }
 
   function thRenderUpcoming(live){
@@ -677,7 +716,7 @@
         // Mirrors loadHistory()'s cloud-first / local-fallback read, without
         // scoping to one technician's device-only drafts.
         if(await ensureCloud()){
-          const cloudRows = await cloudListReports().catch(()=>null);
+          const cloudRows = await cloudListReports({ lite:true }).catch(()=>null);   // the dashboard counts reports; it never draws a signature
           if(cloudRows) return cloudRows;
         }
         const out = [];
