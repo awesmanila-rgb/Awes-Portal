@@ -5550,22 +5550,21 @@ body.has-ops-dash #staffPanel_home > .card{ margin:0; }
    runs full-width below them. */
 body.role-admin #opsDash #adminDash.adm-v2{
   grid-template-columns:minmax(0,1fr) !important;
-  grid-template-areas:"ops" "prio" "board" "track" "prog" "ptech" "cal" !important;
+  grid-template-areas:"prio" "board" "track" "prog" "ptech" "cal" !important;
 }
 @media (min-width:1100px){
   body.role-admin #opsDash #adminDash.adm-v2{
     grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) !important;
-    grid-template-areas:"ops ops" "prio prio" "board board" "prog ptech" "cal cal" !important;       /* Dispatch only: the table gets the wider column */
+    grid-template-areas:"prio prio" "board board" "prog ptech" "cal cal" !important;       /* Dispatch only: the table gets the wider column */
   }
   body.role-admin #opsDash #adminDash.adm-v2.ops-map{
-    grid-template-areas:"ops ops" "prio prio" "track track" !important;                                /* Live Tracker only */
+    grid-template-areas:"prio prio" "track track" !important;                                /* Live Tracker only */
   }
   body.role-admin #opsDash #adminDash.adm-v2.ops-map.ops-disp{
     grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
-    grid-template-areas:"ops ops" "prio prio" "board board" "track prog" "ptech ptech" "cal cal" !important;   /* map | Job order progress, then the full-width table */
+    grid-template-areas:"prio prio" "board board" "track prog" "ptech ptech" "cal cal" !important;   /* map | Job order progress, then the full-width table */
   }
 }
-body.role-admin #opsDash #opsStatsCard{ grid-area:ops !important; }
 body.role-admin #opsDash #prioCard{ grid-area:prio !important; }
 body.role-admin #opsDash #prioBoardCard{ grid-area:board !important; }
 body.role-admin #opsDash #prioTechCard{ grid-area:ptech !important; }
@@ -5580,12 +5579,6 @@ body.role-admin #opsDash #homeTrackerCard{ grid-area:track !important; }
   body.role-admin #opsDash #adminDash.ops-map.ops-disp #prioProgressCard{ align-self:stretch; }
 }
 }
-#opsStats{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
-#opsStatsCard .card-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-#opsStatsCard .ops-asof{ font-size:12px; font-weight:600; color:var(--text-muted); }
-#opsStats .overview-stat:focus-visible{ outline:3px solid #1F5FAE; outline-offset:2px; }
-#opsStats .overview-stat.ops-warn{ border-color:#E5A93B; }
-
 /* ---------- Admin Equipment / Customers pages: equipment totals ---------- */
 .eq-total-bar{ display:flex; align-items:center; gap:14px; background:var(--green-light, #E3EFE6); border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:0 0 14px; }
 .eq-total-num{ font-size:30px; font-weight:800; line-height:1; color:var(--green-dark, #0F5A40); min-width:34px; }
@@ -5869,3 +5862,13 @@ button.sd-card{ cursor:pointer; } button.sd-card:hover{ border-color:#0F5A40; }
 .cf-lbl{ display:block; font-size:13px; font-weight:800; color:var(--text-muted); margin:0 0 6px; }
 #invMineAck.cf-warn{ background:#C26A00; border-color:#C26A00; }
 .mt-row.mv-del{ border-left:6px solid #2E7D5B; } .mt-row[data-kind="iss"]{ border-left:6px solid #2F6DB5; } .mt-row[data-kind="rcv"]{ border-left:6px solid #2E7D5B; } .mt-row[data-kind="trf"]{ border-left:6px solid #D9731A; } .mt-row[data-kind="ret"]{ border-left:6px solid #B5413F; }
+
+/* ---------- Job order list card: labelled progress + "More" ---------- */
+.jo-stage{ flex:1 1 0; min-width:0; }
+.jo-stage-lab{ margin-top:3px; font-size:10.5px; line-height:1.2; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.jo-stage.done .jo-stage-lab{ color:var(--green-dark); font-weight:800; }
+.jo-stage.part .jo-stage-lab{ color:var(--amber, #B8860B); font-weight:700; }
+.jo-status-row{ margin:0 0 10px; }
+.jo-more-btn{ width:100%; min-height:44px; margin-top:10px; font-weight:800; }
+.jo-lab-s{ display:none; }
+@media (max-width:430px){ .jo-lab-f{ display:none; } .jo-lab-s{ display:inline; } }
