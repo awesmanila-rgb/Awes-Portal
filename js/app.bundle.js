@@ -623,23 +623,36 @@
   // app even though they were sitting in the database. Page through instead.
   const REPORT_PAGE = 200;      // Supabase caps a single response at 1000 rows
   const REPORT_MAX_ROWS = 5000; // hard stop so a huge table can't exhaust memory
-  async function cloudListReports(){
+  // { lite:true } reads service_reports_lite (migration 20261029_01): the same rows WITHOUT the two inline
+  // signature pictures, in pages of 1000 instead of 200. Use it for lists, counts and dashboards that never
+  // draw a signature; anything that prints or shows a signature must use the full list or load one report.
+  // If the view isn't there yet it quietly falls back to the full table, so nothing breaks.
+  async function cloudListReports(opts){
     if(!(await ensureCloud())) return null;
-    try{
+    const lite = !!(opts && opts.lite), page = lite ? 1000 : REPORT_PAGE;
+    const load = async (table)=>{
       const rows = [];
-      for(let from = 0; from < REPORT_MAX_ROWS; from += REPORT_PAGE){
-        const { data, error } = await db.from('service_reports')
+      for(let from = 0; from < REPORT_MAX_ROWS; from += page){
+        const { data, error } = await db.from(table)
           .select('*')
           .order('date',{ascending:false})
           .order('sr_no',{ascending:false})   // stable tiebreak: without it, rows
                                               // sharing a date can repeat or be
                                               // skipped across page boundaries
-          .range(from, from + REPORT_PAGE - 1);
+          .range(from, from + page - 1);
         if(error) throw error;
         const batch = data || [];
         rows.push(...batch);
-        if(batch.length < REPORT_PAGE) break;
+        if(batch.length < page) break;
       }
+      return rows;
+    };
+    try{
+      let rows;
+      if(lite){
+        try{ rows = await load('service_reports_lite'); }
+        catch(e){ if(!/service_reports_lite|PGRST205|42P01/.test(describeCloudError(e))) throw e; rows = await load('service_reports'); }
+      }else rows = await load('service_reports');
       return rows.map(rowToReport);
     }catch(e){ console.error('cloud list failed', describeCloudError(e)); return null; }
   }
@@ -8554,7 +8567,7 @@
           '<button data-act="review" class="primary">'+(r.status==='pending' ? 'Review' : 'Change Decision')+'</button>'+
         '</div>'+
         '<div class="user-edit-panel" data-panel="1">'+
-          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
             '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
@@ -10606,7 +10619,12 @@
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) dtTimerTick(); });
 
   function dtCardHtml(r, forAdmin, extraBodyHtml, hideOpenBtn){
+    // The admin / operations LIST card is a summary: no "Open Job Order" button and no status pill in the head (the
+    // progress labels say what is done). Tapping the card shows the summary, with the status at the top and a "More"
+    // button at the bottom that opens the full job order. Technician cards and the job order screen's own header keep theirs.
+    const summaryCard = !!forAdmin && !hideOpenBtn;
     const detailBody =
+      (summaryCard ? '<div class="jo-status-row">'+dtStatusPill(r)+'</div>' : '')+
       (extraBodyHtml || '')+
       (r.siteAddress ? '<div class="leave-comment"><b>Site Address</b>'+escapeHtml(r.siteAddress)+'</div>' : '')+
       (forAdmin && r.reportAllowedWorkerNames && r.reportAllowedWorkerNames.length ? '<div class="leave-comment"><b>Can Create Service Report</b>'+escapeHtml(r.reportAllowedWorkerNames.join(', '))+'</div>' : '')+
@@ -10614,7 +10632,8 @@
       dtEquipmentSummaryBlock(r)+
       (r.remarks ? '<div class="leave-comment"><b>Special Instructions</b>'+escapeHtml(r.remarks)+'</div>' : '')+
       '<div class="leave-comment"><b>Requirements</b>'+dtReqSummary(r)+'</div>'+
-      (forAdmin ? '<div class="leave-comment"><b>Created by</b>'+escapeHtml(r.createdBy||'Admin')+'</div>' : '');
+      (forAdmin ? '<div class="leave-comment"><b>Created by</b>'+escapeHtml(r.createdBy||'Admin')+'</div>' : '')+
+      (summaryCard ? '<button type="button" class="btn btn-secondary jo-more-btn" data-jo-open="'+escapeHtml(r.id)+'">More</button>' : '');
     return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
@@ -10625,8 +10644,8 @@
           (forAdmin ? dtAdminProgressHtml(r) : '')+
         '</div>'+
         '<div class="jo-card-head-actions">'+
-          (hideOpenBtn ? '' : '<button type="button" class="jo-open-btn" data-jo-open="'+escapeHtml(r.id)+'">Open Job Order</button>')+
-          dtStatusPill(r)+'<span class="jo-caret">▾</span>'+
+          (hideOpenBtn || summaryCard ? '' : '<button type="button" class="jo-open-btn" data-jo-open="'+escapeHtml(r.id)+'">Open Job Order</button>')+
+          (summaryCard ? '' : dtStatusPill(r))+'<span class="jo-caret">▾</span>'+
         '</div>'+
       '</div>'+
       '<div class="jo-card-body" style="display:none;">'+detailBody+'</div>';
@@ -10663,17 +10682,20 @@
     // Each is filled/half/empty rather than a single percentage, because
     // "which stage is it stuck at" is the question, not "how far along".
     const stages = [
-      { label:'Ack',      done: assigned>0 && acked>=assigned, part: acked>0 },
-      { label:'On Site',  done: !!r.arrivedAt,                 part: !!r.arrivedAt },
-      { label:'Reported', done: units>0 && resolved>=units,    part: resolved>0 },
+      { label:'Acknowledged', short:'Ack', done: assigned>0 && acked>=assigned, part: acked>0 },
+      { label:'On site',      done: !!r.arrivedAt,                 part: !!r.arrivedAt },
+      { label:'Reported',     done: units>0 && resolved>=units,    part: resolved>0 },
       // Half-lit at Completed: the work is done and the job order is now
       // waiting on ADMIN to review and close it. That distinction is the
       // whole reason this bar exists on the admin list.
-      { label:'Closed',   done: status==='closed',             part: status==='completed' }
+      { label:'Closed',       done: status==='closed',             part: status==='completed' }
     ];
+    // Each stage carries its own label so a finished line reads "\u2713 On site" without opening the card.
     const bar = stages.map(s=>{
       const color = s.done ? 'var(--green)' : (s.part ? 'var(--amber, #B8860B)' : 'var(--border)');
-      return '<div style="flex:1; height:5px; border-radius:3px; background:'+color+';"></div>';
+      return '<div class="jo-stage'+(s.done ? ' done' : s.part ? ' part' : '')+'">'+
+        '<div style="height:5px; border-radius:3px; background:'+color+';"></div>'+
+        '<div class="jo-stage-lab">'+(s.done ? '\u2713 ' : '')+'<span class="jo-lab-f">'+s.label+'</span><span class="jo-lab-s">'+(s.short || s.label)+'</span></div></div>';
     }).join('');
 
     // Counts only where they carry information. "2 of 3 acknowledged" tells
@@ -13937,10 +13959,19 @@
   function caKindLabel(rec){ return rec && rec.kind==='reimbursement' ? 'Reimbursement' : 'Cash advance'; }
 
   const CA_PAGE = 200;
-  async function caFetchPaged(applyFilter){
+  // lite = cash_advance_requests_lite (migration 20261029_01): the same rows with the receipt pictures already
+  // removed on the server. Used for summary lists; falls back to the real table if the view isn't there yet.
+  async function caFetchPaged(applyFilter, lite){
+    if(lite){
+      try{ return await caFetchPagedFrom('cash_advance_requests_lite', applyFilter); }
+      catch(e){ if(!/cash_advance_requests_lite|PGRST205|42P01/.test(describeCloudError(e))) throw e; }
+    }
+    return caFetchPagedFrom('cash_advance_requests', applyFilter);
+  }
+  async function caFetchPagedFrom(table, applyFilter){
     const out = [];
     for(let from = 0; ; from += CA_PAGE){
-      let q = db.from('cash_advance_requests').select('data').order('submitted_at',{ascending:false}).range(from, from+CA_PAGE-1);
+      let q = db.from(table).select('data').order('submitted_at',{ascending:false}).range(from, from+CA_PAGE-1);
       if(applyFilter) q = applyFilter(q);
       const { data, error } = await q;
       if(error) throw error;
@@ -13995,7 +14026,7 @@
     const summary = !(opts && opts.full);
     if(await ensureCloud()){
       try{
-        const rows = await caFetchPaged(null);
+        const rows = await caFetchPaged(null, summary);
         return summary ? rows.map(caStripAttachments) : rows;
       }catch(e){ console.error('cash advance list failed', describeCloudError(e)); }
     }
@@ -14009,7 +14040,7 @@
     const summary = !(opts && opts.full);
     if(await ensureCloud()){
       try{
-        const rows = await caFetchPaged(q=> q.eq('technician_id', userId));
+        const rows = await caFetchPaged(q=> q.eq('technician_id', userId), summary);
         return summary ? rows.map(caStripAttachments) : rows;
       }catch(e){ console.error('cash advance list (user) failed', describeCloudError(e)); }
     }
@@ -15271,7 +15302,7 @@
         '</div>'+
         (r.status==='cancelled' ? '' :
         '<div class="user-edit-panel" data-panel="decision">'+
-          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
             '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
@@ -15446,7 +15477,7 @@
     if(liq.userNotes) html += '<div class="leave-comment"><b>Technician notes</b>'+escapeHtml(liq.userNotes)+'</div>';
     if(liq.status==='pending'){
       html +=
-        '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="liqComment" rows="2" placeholder="Optional for approval, recommended for disapproval"></textarea></div>'+
+        '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="liqComment" rows="2" placeholder="Optional for approval, recommended for disapproval"></textarea></div>'+
         '<div class="edit-save-row">'+
           '<button class="cancel-btn" data-act="liq-disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
           '<button class="save-btn" data-act="liq-approve" type="button">Approve Liquidation</button>'+
@@ -15895,7 +15926,7 @@
         '</div>'+
         (r.status==='cancelled' ? '' :
         '<div class="user-edit-panel" data-panel="decision">'+
-          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
             '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
@@ -29386,7 +29417,7 @@
   // heads-up (below reorder level). A category shows the total of its pages.
   // Inbox items the list already has a rule for; prioBuild and the counts below
   // must agree on this, so there is one copy.
-  const PRIO_COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide',
+  const PRIO_COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide','leave_waiting',
     'jo_review','report_signoff','sr_new','jo_late','jo_overdue','po_draft']);
   const SB_MODULE_LINK = {
     'pur.requisitions':'sbNavRequisitions', 'pur.purchase_orders':'sbNavPurchaseOrders', 'pur.suppliers':'sbNavSuppliers', 'pur.materials':'sbNavMaterials',
@@ -29963,7 +29994,7 @@
     const [tickets, reporterTickets, reports, cashAdvances, leaves, unreadCount, todayDtr, extras] = await Promise.all([
       dtListForWorker(currentUser.id).catch(()=>[]),
       dtListForReporter(currentUser.id).catch(()=>[]),
-      cloudListReports().catch(()=>null),
+      cloudListReports({ lite:true }).catch(()=>null),
       caListForUser(currentUser.id).catch(()=>[]),
       leaveListForUser(currentUser.id).catch(()=>[]),
       dtCountUnreadMessages().catch(()=>0),
@@ -30301,7 +30332,7 @@
         // Mirrors loadHistory()'s cloud-first / local-fallback read, without
         // scoping to one technician's device-only drafts.
         if(await ensureCloud()){
-          const cloudRows = await cloudListReports().catch(()=>null);
+          const cloudRows = await cloudListReports({ lite:true }).catch(()=>null);   // the dashboard counts reports; it never draws a signature
           if(cloudRows) return cloudRows;
         }
         const out = [];
@@ -32640,6 +32671,18 @@
       '<small>' + (x.state === 'escalated' ? 'escalated' : x.state === 'overdue' ? 'overdue' : 'waiting') + '</small></span></button>';
   }
 
+  // What a tap on an inbox row does (the Inbox page and the Needs you now card share it)
+  function staffInboxGo(b){
+    // "…to endorse (your team)" items are handled on My Team
+    if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam();
+    else if(b.dataset.kind === 'report_signoff') srOpenReviewQueue();
+    else if(b.dataset.kind === 'jo_review'){ showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); }); }
+    else staffOpenModule(b.dataset.open);
+  }
+  // Leave requests that need this person: to endorse (their team), waiting for the Head's endorsement (HR sees it
+  // straight away) and ready to decide. Shown as a "Needs you now" card above the Inbox summary, like the Super Admin's.
+  const STF_NEEDS_LEAVE = ['leave_decide', 'leave_waiting', 'leave_endorse'];
+
   // Summary card at the top of the staff home
   async function staffRenderInboxSummary(target){
     if(!(await staffLoadInbox()) || !stfInbox.items.length) { if(stfInbox.ok) staffRenderPushPrompt(target); return; }
@@ -32657,6 +32700,17 @@
     const first = target.querySelector('.card');
     if(first && first.nextSibling) target.insertBefore(card, first.nextSibling); else target.appendChild(card);
     card.querySelector('[data-act="inbox"]').addEventListener('click', ()=> staffOpenInbox());
+    const leaveItems = stfInbox.items.filter(x=> STF_NEEDS_LEAVE.indexOf(x.kind) >= 0);
+    if(leaveItems.length){
+      const urgent = leaveItems.some(x=> x.state === 'escalated' || x.state === 'overdue');
+      const nc = document.createElement('div');
+      nc.className = 'card stf-inbox-card stf-needs';
+      nc.innerHTML = '<div class="card-head"><span>Needs you now</span></div><div class="card-body">' +
+        '<div class="stf-inbox-counts"><span class="stf-count-pill' + (urgent ? ' ovd' : '') + '">' + leaveItems.length + ' leave request' + (leaveItems.length === 1 ? '' : 's') + '</span></div>' +
+        '<div class="stf-inbox-list">' + leaveItems.slice(0, 5).map(staffInboxRowHtml).join('') + '</div></div>';
+      target.insertBefore(nc, card);
+      nc.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=> staffInboxGo(b)));
+    }
     staffRenderPushPrompt(target);
   }
 
@@ -32701,13 +32755,7 @@
         (currentUser.role === 'admin' ? '<button type="button" class="btn btn-secondary" data-act="sla" style="width:100%; margin-top:10px;">Response times\u2026</button>' : '') +
       '</div></div>';
     target.querySelectorAll('[data-filter]').forEach(b=> b.addEventListener('click', ()=>{ stfInbox.filter = b.dataset.filter; staffRenderInbox(); }));
-    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=>{
-      // "…to endorse (your team)" items are handled on My Team
-      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam();
-      else if(b.dataset.kind === 'report_signoff') srOpenReviewQueue();
-      else if(b.dataset.kind === 'jo_review'){ showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); }); }
-      else staffOpenModule(b.dataset.open);
-    }));
+    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=> staffInboxGo(b)));
     const sla = target.querySelector('[data-act="sla"]'); if(sla) sla.addEventListener('click', ()=> staffOpenSla());
   }
 
@@ -34063,7 +34111,7 @@
   //
   //   Needs you now ........ Dispatch, Service Requests or Service Reports (View)
   //                          and only the items from those pages
-  //   Operations today ..... one tile per page they hold (job orders, late,
+  //   (the "Operations today" tile card was removed as redundant)  (was: one tile per page they held, job orders, late,
   //                          awaiting review, new requests, reports to sign off,
   //                          technicians timed in)
   //   Dispatch board, Job order progress,
@@ -34146,57 +34194,9 @@
     el.style.display = on ? '' : 'none';
   }
 
-  // ---------- numbers for the tiles ----------
-  function opsStatTile(cls, title, value, sub, open, warn){
-    return '<div class="overview-stat ' + cls + (warn ? ' ops-warn' : '') + (Number(value) === 0 ? ' ov-zero' : '') + '" data-open="' + open + '" style="cursor:pointer;" role="button" tabindex="0">' +
-      '<div class="overview-stat-head"><span class="overview-stat-title">' + escapeHtml(title) + '</span></div>' +
-      '<div class="overview-stat-value">' + escapeHtml(String(value)) + '</div><div class="overview-stat-sub">' + escapeHtml(sub) + '</div></div>';
-  }
-  function opsRenderStats(p, base, extra){
-    const tk = base.tickets || [], today = todayISO(), tiles = [];
-    if(p.d){
-      const live = tk.filter(t=> !dtIsTerminal(t) || dtEffectiveStatus(t) === 'completed');
-      const un = live.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
-      const late = tk.filter(t=> t.date === today && dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').length;
-      const missed = tk.filter(t=> t.date === today && dtEffectiveStatus(t) === 'expired').length;
-      const review = tk.filter(t=> t.status === 'completed').length;
-      tiles.push(opsStatTile('ov-blue', 'Live job orders', live.length, (live.length - un) + ' assigned \u00B7 ' + un + ' unassigned', 'ops.dispatch'));
-      tiles.push(opsStatTile('ov-amber', 'Late today', late, late ? 'Not en route yet' : 'None late', 'ops.dispatch', late > 0));
-      if(missed) tiles.push(opsStatTile('ov-gray', 'Missed today', missed, 'No one acknowledged', 'ops.dispatch'));
-      if(review) tiles.push(opsStatTile('ov-amber', 'Awaiting review', review, 'Job orders to close', 'ops.dispatch', true));
-    }
-    if(p.sr){
-      const n = (extra.srNew || []).length;
-      tiles.push(opsStatTile('ov-purple', 'New service requests', n, n ? 'From customers' : 'Nothing new', 'ops.service_requests', n > 0));
-    }
-    if(p.rep){
-      const rp = base.reports || [];
-      const draft = rp.filter(r=> !r.completed).length;
-      const openSr = new Set();
-      tk.filter(t=> ['open', 'preparing', 'acknowledged', 'in_progress', 'completed', 'scheduled'].includes(t.status))
-        .forEach(t=> (t.equipmentList || []).forEach(u=>{ if(u.reportSrNo) openSr.add(u.reportSrNo); }));
-      const toSign = rp.filter(r=> r.completed && !r.signedOffAt && !openSr.has(r.srNo)).length;
-      tiles.push(opsStatTile('ov-gray', 'Service reports', toSign || draft, toSign ? toSign + ' to sign off \u00B7 ' + draft + ' draft' + (draft === 1 ? '' : 's') : draft + ' pending sign-off', 'ops.service_reports', toSign > 0));
-    }
-    if(p.dtr && base.users && base.users.length){
-      const act = base.users.filter(u=> u.active !== false);
-      const inIds = new Set((base.dtrToday || []).filter(d=> d && d.timeIn).map(d=> d.technicianId));
-      const n = act.filter(u=> inIds.has(u.id)).length;
-      tiles.push(opsStatTile('ov-green', 'Technicians timed in', n + ' / ' + act.length, act.length ? Math.round(n / act.length * 100) + '% check-in rate' : '', 'hr.attendance'));
-    }
-    let card = document.getElementById('opsStatsCard');
-    const dash = document.getElementById('adminDash');
-    if(!card && dash){
-      card = document.createElement('div'); card.className = 'card'; card.id = 'opsStatsCard';
-      card.innerHTML = '<div class="card-head"><span>Operations today</span><span class="ops-asof" id="opsAsOf"></span></div><div class="card-body"><div class="overview-grid" id="opsStats"></div></div>';
-      dash.insertBefore(card, dash.firstChild);
-    }
-    if(!card) return;
-    card.style.display = tiles.length ? '' : 'none';
-    const grid = document.getElementById('opsStats'); if(grid) grid.innerHTML = tiles.join('');
-    const asof = document.getElementById('opsAsOf');
-    if(asof) asof.textContent = 'Updated ' + new Date().toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' });
-  }
+  // The "Operations today" card of tiles was removed: the Needs you now list, the Job order progress and the
+  // Technicians status already show the same figures. A copy left over from an earlier version is cleaned up here.
+  function opsRemoveStatsCard(){ const stale = document.getElementById('opsStatsCard'); if(stale && stale.parentNode) stale.parentNode.removeChild(stale); }
 
   // ---------- render ----------
   async function opsRenderDashboard(target, quiet){
@@ -34225,7 +34225,7 @@
         p.d ? dtListAll().catch(()=> null) : Promise.resolve([]),
         (p.d || p.dtr) ? cloudListUsers().catch(()=> null) : Promise.resolve([]),
         p.dtr ? dtrListAllForDate(todayISO()).catch(()=> null) : Promise.resolve([]),
-        p.rep ? (async ()=>{ try{ return (await cloudListReports()) || []; }catch(e){ return null; } })() : Promise.resolve([]),
+        p.rep ? (async ()=>{ try{ return (await cloudListReports({ lite:true })) || []; }catch(e){ return null; } })() : Promise.resolve([]),
         p.sr ? prioLoadExtras().catch(()=> ({})) : Promise.resolve({})
       ]);
       if(quiet && p.d && tickets === null) return;   // a failed background refresh keeps what is on screen
@@ -34234,7 +34234,7 @@
       let items = [];
       try{ items = prioBuild(base, ex).filter(it=> opsItemAllowed(it.key)); }catch(e){ console.warn('ops dashboard: priority list failed', e); }
       prioLastItems = items; prioLastBase = base;
-      opsRenderStats(p, base, ex);
+      opsRemoveStatsCard();
       if(p.d || p.sr || p.rep) prioRenderList();
       if(p.d){
         prioRenderTechs(prioTechStatus(base));
@@ -34254,13 +34254,6 @@
     }finally{ opsDock.busy = false; }
   }
 
-  // Stat tiles open the page they count; keyboard users get Enter / Space too
-  document.addEventListener('keydown', (ev)=>{
-    if(ev.key !== 'Enter' && ev.key !== ' ') return;
-    const t = ev.target.closest && ev.target.closest('#opsStats [data-open]');
-    if(t){ ev.preventDefault(); staffOpenModule(t.getAttribute('data-open')); }
-  });
-  // (mouse / touch clicks on a tile are handled by the staff home's own [data-open] handler in staff.js)
 
   // ---------- live: real-time (when published) + 60 s + on return ----------
   function opsHomeVisible(){
@@ -34941,7 +34934,7 @@
       tl:{ p:'Bawat bisita sa customer na ito, pinakabago muna.', s:['Buksan ang bisita para sa report nito.'], tip:'' } },
     'equipment': { roles:['admin','staff'], module:'adm.equipment', go:{ admin:'menuManageEquipment', staff:'adm.equipment' },
       en:{ t:'Customer Equipment', p:'Every aircon unit and piece of equipment you service, with photos, next PM date and history.',
-           s:['Add equipment for a customer, or scan its QR.', 'Open a unit for its details, photos and service history.'], tip:'Units overdue for PM show on the Administration dashboard.' },
+           s:['Add equipment for a customer, or scan its QR.', 'Open a unit for its details, photos and service history.'], tip:'Units overdue for PM show on the Operations dashboard.' },
       tl:{ p:'Bawat aircon unit at equipment na sine-service mo, may litrato, susunod na PM at history.',
            s:['Magdagdag ng equipment sa customer, o i-scan ang QR nito.', 'Buksan ang unit para sa detalye, litrato at service history.'], tip:'Lumalabas sa Administration dashboard ang mga unit na overdue sa PM.' } },
     'ann': { roles:['admin','staff'], module:'adm.announcements', go:{ admin:'menuManageAnnouncements', staff:'adm.announcements' },
