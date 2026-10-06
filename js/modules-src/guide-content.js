@@ -354,7 +354,7 @@
       tl:{ p:'Bawat bisita sa customer na ito, pinakabago muna.', s:['Buksan ang bisita para sa report nito.'], tip:'' } },
     'equipment': { roles:['admin','staff'], module:'adm.equipment', go:{ admin:'menuManageEquipment', staff:'adm.equipment' },
       en:{ t:'Customer Equipment', p:'Every aircon unit and piece of equipment you service, with photos, next PM date and history.',
-           s:['Add equipment for a customer, or scan its QR.', 'Open a unit for its details, photos and service history.'], tip:'Units overdue for PM show on the Administration dashboard.' },
+           s:['Add equipment for a customer, or scan its QR.', 'Open a unit for its details, photos and service history.'], tip:'Units overdue for PM show on the Operations dashboard.' },
       tl:{ p:'Bawat aircon unit at equipment na sine-service mo, may litrato, susunod na PM at history.',
            s:['Magdagdag ng equipment sa customer, o i-scan ang QR nito.', 'Buksan ang unit para sa detalye, litrato at service history.'], tip:'Lumalabas sa Administration dashboard ang mga unit na overdue sa PM.' } },
     'ann': { roles:['admin','staff'], module:'adm.announcements', go:{ admin:'menuManageAnnouncements', staff:'adm.announcements' },

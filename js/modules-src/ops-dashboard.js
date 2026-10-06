@@ -7,7 +7,7 @@
   //
   //   Needs you now ........ Dispatch, Service Requests or Service Reports (View)
   //                          and only the items from those pages
-  //   Operations today ..... one tile per page they hold (job orders, late,
+  //   (the "Operations today" tile card was removed as redundant)  (was: one tile per page they held, job orders, late,
   //                          awaiting review, new requests, reports to sign off,
   //                          technicians timed in)
   //   Dispatch board, Job order progress,
@@ -90,57 +90,9 @@
     el.style.display = on ? '' : 'none';
   }
 
-  // ---------- numbers for the tiles ----------
-  function opsStatTile(cls, title, value, sub, open, warn){
-    return '<div class="overview-stat ' + cls + (warn ? ' ops-warn' : '') + (Number(value) === 0 ? ' ov-zero' : '') + '" data-open="' + open + '" style="cursor:pointer;" role="button" tabindex="0">' +
-      '<div class="overview-stat-head"><span class="overview-stat-title">' + escapeHtml(title) + '</span></div>' +
-      '<div class="overview-stat-value">' + escapeHtml(String(value)) + '</div><div class="overview-stat-sub">' + escapeHtml(sub) + '</div></div>';
-  }
-  function opsRenderStats(p, base, extra){
-    const tk = base.tickets || [], today = todayISO(), tiles = [];
-    if(p.d){
-      const live = tk.filter(t=> !dtIsTerminal(t) || dtEffectiveStatus(t) === 'completed');
-      const un = live.filter(t=> !(t.assignedWorkerIds && t.assignedWorkerIds.length)).length;
-      const late = tk.filter(t=> t.date === today && dtIsLateDispatch(t) && dtEffectiveStatus(t) !== 'expired').length;
-      const missed = tk.filter(t=> t.date === today && dtEffectiveStatus(t) === 'expired').length;
-      const review = tk.filter(t=> t.status === 'completed').length;
-      tiles.push(opsStatTile('ov-blue', 'Live job orders', live.length, (live.length - un) + ' assigned \u00B7 ' + un + ' unassigned', 'ops.dispatch'));
-      tiles.push(opsStatTile('ov-amber', 'Late today', late, late ? 'Not en route yet' : 'None late', 'ops.dispatch', late > 0));
-      if(missed) tiles.push(opsStatTile('ov-gray', 'Missed today', missed, 'No one acknowledged', 'ops.dispatch'));
-      if(review) tiles.push(opsStatTile('ov-amber', 'Awaiting review', review, 'Job orders to close', 'ops.dispatch', true));
-    }
-    if(p.sr){
-      const n = (extra.srNew || []).length;
-      tiles.push(opsStatTile('ov-purple', 'New service requests', n, n ? 'From customers' : 'Nothing new', 'ops.service_requests', n > 0));
-    }
-    if(p.rep){
-      const rp = base.reports || [];
-      const draft = rp.filter(r=> !r.completed).length;
-      const openSr = new Set();
-      tk.filter(t=> ['open', 'preparing', 'acknowledged', 'in_progress', 'completed', 'scheduled'].includes(t.status))
-        .forEach(t=> (t.equipmentList || []).forEach(u=>{ if(u.reportSrNo) openSr.add(u.reportSrNo); }));
-      const toSign = rp.filter(r=> r.completed && !r.signedOffAt && !openSr.has(r.srNo)).length;
-      tiles.push(opsStatTile('ov-gray', 'Service reports', toSign || draft, toSign ? toSign + ' to sign off \u00B7 ' + draft + ' draft' + (draft === 1 ? '' : 's') : draft + ' pending sign-off', 'ops.service_reports', toSign > 0));
-    }
-    if(p.dtr && base.users && base.users.length){
-      const act = base.users.filter(u=> u.active !== false);
-      const inIds = new Set((base.dtrToday || []).filter(d=> d && d.timeIn).map(d=> d.technicianId));
-      const n = act.filter(u=> inIds.has(u.id)).length;
-      tiles.push(opsStatTile('ov-green', 'Technicians timed in', n + ' / ' + act.length, act.length ? Math.round(n / act.length * 100) + '% check-in rate' : '', 'hr.attendance'));
-    }
-    let card = document.getElementById('opsStatsCard');
-    const dash = document.getElementById('adminDash');
-    if(!card && dash){
-      card = document.createElement('div'); card.className = 'card'; card.id = 'opsStatsCard';
-      card.innerHTML = '<div class="card-head"><span>Operations today</span><span class="ops-asof" id="opsAsOf"></span></div><div class="card-body"><div class="overview-grid" id="opsStats"></div></div>';
-      dash.insertBefore(card, dash.firstChild);
-    }
-    if(!card) return;
-    card.style.display = tiles.length ? '' : 'none';
-    const grid = document.getElementById('opsStats'); if(grid) grid.innerHTML = tiles.join('');
-    const asof = document.getElementById('opsAsOf');
-    if(asof) asof.textContent = 'Updated ' + new Date().toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' });
-  }
+  // The "Operations today" card of tiles was removed: the Needs you now list, the Job order progress and the
+  // Technicians status already show the same figures. A copy left over from an earlier version is cleaned up here.
+  function opsRemoveStatsCard(){ const stale = document.getElementById('opsStatsCard'); if(stale && stale.parentNode) stale.parentNode.removeChild(stale); }
 
   // ---------- render ----------
   async function opsRenderDashboard(target, quiet){
@@ -169,7 +121,7 @@
         p.d ? dtListAll().catch(()=> null) : Promise.resolve([]),
         (p.d || p.dtr) ? cloudListUsers().catch(()=> null) : Promise.resolve([]),
         p.dtr ? dtrListAllForDate(todayISO()).catch(()=> null) : Promise.resolve([]),
-        p.rep ? (async ()=>{ try{ return (await cloudListReports()) || []; }catch(e){ return null; } })() : Promise.resolve([]),
+        p.rep ? (async ()=>{ try{ return (await cloudListReports({ lite:true })) || []; }catch(e){ return null; } })() : Promise.resolve([]),
         p.sr ? prioLoadExtras().catch(()=> ({})) : Promise.resolve({})
       ]);
       if(quiet && p.d && tickets === null) return;   // a failed background refresh keeps what is on screen
@@ -178,7 +130,7 @@
       let items = [];
       try{ items = prioBuild(base, ex).filter(it=> opsItemAllowed(it.key)); }catch(e){ console.warn('ops dashboard: priority list failed', e); }
       prioLastItems = items; prioLastBase = base;
-      opsRenderStats(p, base, ex);
+      opsRemoveStatsCard();
       if(p.d || p.sr || p.rep) prioRenderList();
       if(p.d){
         prioRenderTechs(prioTechStatus(base));
@@ -198,13 +150,6 @@
     }finally{ opsDock.busy = false; }
   }
 
-  // Stat tiles open the page they count; keyboard users get Enter / Space too
-  document.addEventListener('keydown', (ev)=>{
-    if(ev.key !== 'Enter' && ev.key !== ' ') return;
-    const t = ev.target.closest && ev.target.closest('#opsStats [data-open]');
-    if(t){ ev.preventDefault(); staffOpenModule(t.getAttribute('data-open')); }
-  });
-  // (mouse / touch clicks on a tile are handled by the staff home's own [data-open] handler in staff.js)
 
   // ---------- live: real-time (when published) + 60 s + on return ----------
   function opsHomeVisible(){

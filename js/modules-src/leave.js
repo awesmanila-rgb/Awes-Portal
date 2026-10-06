@@ -233,7 +233,7 @@
           '<button data-act="review" class="primary">'+(r.status==='pending' ? 'Review' : 'Change Decision')+'</button>'+
         '</div>'+
         '<div class="user-edit-panel" data-panel="1">'+
-          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
             '<button class="save-btn" data-act="approve" type="button">Approve</button>'+

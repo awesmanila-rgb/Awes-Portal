@@ -26,7 +26,7 @@
   // instead of a link, so nobody lands on a screen that can't load its data.
   const STAFF_READY_MODULES = [
     // Purchasing — 20260926_02_purchasing_staff_access.sql
-    'pur.materials', 'pur.suppliers', 'pur.requisitions', 'pur.purchase_orders',
+    'pur.materials', 'pur.suppliers', 'pur.requisitions', 'pur.purchase_orders', 'pur.purchased_items',
     // Inventory — 20260926_03_inventory_staff_access.sql
     'inv.stock', 'inv.warehouses', 'inv.receive', 'inv.issue', 'inv.returns', 'inv.transfers', 'inv.slips', 'inv.reports',
     // Accounting & Finance — 20260926_04_finance_staff_access.sql
@@ -690,6 +690,57 @@
 
     staffWireEditor(target);
     if(isSuper && !isNew && stf.round2 && p && p.active) staffRenderDelegationCard(target, s.id, ()=> staffOpenEditor(s.id));
+    // Inventory warehouses (20261023_01): which warehouses this person may take stock out of
+    if(isSuper && !isNew && p && p.active && Object.keys(s.grants || {}).some(k=> /^inv\./.test(k) && s.grants[k] && s.grants[k].level)) staffRenderWarehouseCard(target, s.id);
+  }
+
+  // Warehouses card (Super Admin, on a staff member who holds an Inventory page).
+  // Receiving and returning: anyone with the page picks ANY warehouse. This only limits
+  // stock going OUT — issuing and transfers out — to the warehouses ticked here, unless
+  // "all warehouses" is on. Saved on its own (not part of "Save Changes").
+  async function staffRenderWarehouseCard(target, userId){
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<div class="card-head"><span>Warehouses</span></div><div class="card-body"><div class="empty-state">Loading\u2026</div></div>';
+    target.appendChild(card);
+    const body = card.querySelector('.card-body');
+    try{
+      const [w, k, sc] = await Promise.all([
+        db.from('warehouses').select('id, code, name, is_active').order('code'),
+        db.from('warehouse_storekeepers').select('warehouse_id').eq('user_id', userId),
+        db.from('inventory_staff_scope').select('all_warehouses').eq('user_id', userId).maybeSingle()
+      ]);
+      if(w.error) throw w.error;
+      if(sc.error){ body.innerHTML = '<p class="stf-note" style="margin:0;">Run migration 20261023_01_warehouse_rules.sql in Supabase to set warehouses for staff.</p>'; return; }
+      const mine = new Set((k.data || []).map(x=> x.warehouse_id));
+      const all = !!(sc.data && sc.data.all_warehouses);
+      const list = (w.data || []).filter(x=> x.is_active || mine.has(x.id));
+      body.innerHTML =
+        '<p class="stf-note" style="margin-top:0;">Receiving and returning: they can choose <b>any</b> warehouse. This only decides which warehouses they can <b>take stock out of</b> \u2014 Issue to Worker and Transfers.</p>' +
+        '<label class="restrict-row"><input type="checkbox" data-wh-all' + (all ? ' checked' : '') + '><span class="rtxt"><span class="rt-title">All warehouses</span></span></label>' +
+        '<div data-wh-list' + (all ? ' style="opacity:.5;"' : '') + '>' + (list.length ? list.map(x=>
+          '<label class="restrict-row"><input type="checkbox" data-wh="' + escapeHtml(x.id) + '"' + (mine.has(x.id) ? ' checked' : '') + (all ? ' disabled' : '') + '><span class="rtxt"><span class="rt-title">' + escapeHtml(x.code + ' \u00B7 ' + x.name) + '</span></span></label>').join('')
+          : '<div class="stf-note">Add a warehouse first in Inventory \u203A Warehouses.</div>') + '</div>' +
+        (!all && !mine.size ? '<div class="stf-hint">Nothing ticked: they can receive and return, but not issue or transfer out.</div>' : '') +
+        '<div class="stf-save-bar"><button type="button" class="btn btn-primary" data-wh-save>Save warehouses</button></div>';
+      const allBox = body.querySelector('[data-wh-all]');
+      allBox.addEventListener('change', ()=>{
+        body.querySelectorAll('[data-wh]').forEach(c=>{ c.disabled = allBox.checked; });
+        body.querySelector('[data-wh-list]').style.opacity = allBox.checked ? '.5' : '';
+      });
+      body.querySelector('[data-wh-save]').addEventListener('click', async (ev)=>{
+        const btn = ev.currentTarget; btn.disabled = true;
+        try{
+          const ids = Array.from(body.querySelectorAll('[data-wh]')).filter(c=> c.checked).map(c=> c.getAttribute('data-wh'));
+          const r = await db.rpc('inv_set_staff_scope', { p_user: userId, p_all: allBox.checked, p_warehouses: ids });
+          if(r.error) throw r.error;
+          toast(allBox.checked ? 'Saved: all warehouses' : 'Saved: ' + (ids.length ? ids.length + ' warehouse' + (ids.length === 1 ? '' : 's') : 'no warehouses to issue from'));
+        }catch(e){ toast('Couldn\u2019t save: ' + describeCloudError(e)); }
+        finally{ btn.disabled = false; }
+      });
+    }catch(e){
+      body.innerHTML = '<p class="stf-note" style="margin:0;">Couldn\u2019t load warehouses: ' + escapeHtml(describeCloudError(e)) + '</p>';
+    }
   }
 
   function staffSyncFromForm(target){
@@ -1359,6 +1410,18 @@
       '<small>' + (x.state === 'escalated' ? 'escalated' : x.state === 'overdue' ? 'overdue' : 'waiting') + '</small></span></button>';
   }
 
+  // What a tap on an inbox row does (the Inbox page and the Needs you now card share it)
+  function staffInboxGo(b){
+    // "…to endorse (your team)" items are handled on My Team
+    if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam();
+    else if(b.dataset.kind === 'report_signoff') srOpenReviewQueue();
+    else if(b.dataset.kind === 'jo_review'){ showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); }); }
+    else staffOpenModule(b.dataset.open);
+  }
+  // Leave requests that need this person: to endorse (their team), waiting for the Head's endorsement (HR sees it
+  // straight away) and ready to decide. Shown as a "Needs you now" card above the Inbox summary, like the Super Admin's.
+  const STF_NEEDS_LEAVE = ['leave_decide', 'leave_waiting', 'leave_endorse'];
+
   // Summary card at the top of the staff home
   async function staffRenderInboxSummary(target){
     if(!(await staffLoadInbox()) || !stfInbox.items.length) { if(stfInbox.ok) staffRenderPushPrompt(target); return; }
@@ -1376,6 +1439,17 @@
     const first = target.querySelector('.card');
     if(first && first.nextSibling) target.insertBefore(card, first.nextSibling); else target.appendChild(card);
     card.querySelector('[data-act="inbox"]').addEventListener('click', ()=> staffOpenInbox());
+    const leaveItems = stfInbox.items.filter(x=> STF_NEEDS_LEAVE.indexOf(x.kind) >= 0);
+    if(leaveItems.length){
+      const urgent = leaveItems.some(x=> x.state === 'escalated' || x.state === 'overdue');
+      const nc = document.createElement('div');
+      nc.className = 'card stf-inbox-card stf-needs';
+      nc.innerHTML = '<div class="card-head"><span>Needs you now</span></div><div class="card-body">' +
+        '<div class="stf-inbox-counts"><span class="stf-count-pill' + (urgent ? ' ovd' : '') + '">' + leaveItems.length + ' leave request' + (leaveItems.length === 1 ? '' : 's') + '</span></div>' +
+        '<div class="stf-inbox-list">' + leaveItems.slice(0, 5).map(staffInboxRowHtml).join('') + '</div></div>';
+      target.insertBefore(nc, card);
+      nc.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=> staffInboxGo(b)));
+    }
     staffRenderPushPrompt(target);
   }
 
@@ -1420,13 +1494,7 @@
         (currentUser.role === 'admin' ? '<button type="button" class="btn btn-secondary" data-act="sla" style="width:100%; margin-top:10px;">Response times\u2026</button>' : '') +
       '</div></div>';
     target.querySelectorAll('[data-filter]').forEach(b=> b.addEventListener('click', ()=>{ stfInbox.filter = b.dataset.filter; staffRenderInbox(); }));
-    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=>{
-      // "…to endorse (your team)" items are handled on My Team
-      if(/_endorse$/.test(b.dataset.kind || '')) staffOpenTeam();
-      else if(b.dataset.kind === 'report_signoff') srOpenReviewQueue();
-      else if(b.dataset.kind === 'jo_review'){ showDispatchView('all').then(()=>{ if(typeof dtSetAdminFilter === 'function') dtSetAdminFilter('completed'); }); }
-      else staffOpenModule(b.dataset.open);
-    }));
+    target.querySelectorAll('[data-open]').forEach(b=> b.addEventListener('click', ()=> staffInboxGo(b)));
     const sla = target.querySelector('[data-act="sla"]'); if(sla) sla.addEventListener('click', ()=> staffOpenSla());
   }
 
@@ -1658,6 +1726,8 @@
     bind('staffNavMyReimb', ()=>{ showCashAdvanceView(true, 'reimburse'); setSidebarActive('staffNavMyReimb'); });
     bind('staffNavMyPayslips', ()=>{ showPurchasingView('myPayslips'); setSidebarActive('staffNavMyPayslips'); });
     bind('staffNavErrandReq', ()=>{ showPurchasingView('errandRequests'); setSidebarActive('staffNavErrandReq'); });
+    bind('staffNavMatReq', ()=>{ showPurchasingView('myRequests'); setSidebarActive('staffNavMatReq'); });
+    bind('staffNavMyDeliveries', ()=>{ showPurchasingView('myDeliveries'); setSidebarActive('staffNavMyDeliveries'); });   // every worker can request materials
     bind('staffNavInbox', ()=> staffOpenInbox());
     bind('menuInbox', ()=> staffOpenInbox());
     const pages = $('staffNavPages');
@@ -1688,13 +1758,14 @@
   }
   // Shorter sidebar names (the access catalog keeps its full labels)
   const STAFF_NAV_LABELS = { 'ops.dispatch':'Dispatch', 'adm.equipment':'Equipment', 'pur.materials':'Materials', 'pur.suppliers':'Suppliers',
-    'pur.requisitions':'Material Requisitions', 'hr.staff_attendance':'Office Staff Attendance', 'adm.my_errands':'My Errands', 'adm.announcements':'Memos & Announcements' };
+    'pur.requisitions':'Material Requisitions', 'pur.purchased_items':'Purchased Items', 'hr.staff_attendance':'Office Staff Attendance', 'adm.my_errands':'My Errands', 'adm.announcements':'Memos & Announcements' };
   function staffNavId(key){ if(STAFF_TECH_HUB.includes(key)) key = 'tech.hub'; return 'staffNavMod_' + String(key).replace(/[^a-z0-9]/gi, '_'); }
   const STAFF_MODULE_OPENERS = {
     'pur.materials':       ()=> showPurchasingView('materials'),
     'pur.suppliers':       ()=> showPurchasingView('suppliers'),
     'pur.requisitions':    ()=> showPurchasingView('requisitions'),
     'pur.purchase_orders': ()=> showPurchasingView('purchaseOrders'),
+    'pur.purchased_items': ()=> showPurchasingView('purchasedItems'),
     // Without "See peso values", Stock on Hand is the quantities-only screen
     // storekeepers use (all warehouses for staff).
     'inv.stock':           ()=> showPurchasingView(staffSeesCosts() ? 'stock' : 'myStock'),
@@ -1758,7 +1829,7 @@
   // screens (My Requests / Materials / Tools) are never for staff.
   function staffPurchPageAllowed(key){
     if(!isStaffUser()) return true;
-    if(key === 'myPayslips' || key === 'errandRequests') return true;   // everyone's own payslips / errand requests
+    if(key === 'myPayslips' || key === 'errandRequests' || key === 'myRequests' || key === 'myDeliveries') return true;   // everyone's own payslips / errand requests / material requests
     if(key === 'tlHub' || STAFF_TOOL_KEYS[key]) return staffToolPageAllowed(key);
     return purchStaffAllowed(key);
   }
@@ -1861,7 +1932,7 @@
   // ---------------------------------------------------------------------
   // Purchasing screens (purchasing.js / purchase-orders.js / requisitions.js)
   // ---------------------------------------------------------------------
-  const STAFF_PURCH_KEYS = { suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders',
+  const STAFF_PURCH_KEYS = { siteDelivery:'inv.receive', suppliers:'pur.suppliers', materials:'pur.materials', requisitions:'pur.requisitions', purchaseOrders:'pur.purchase_orders', purchasedItems:'pur.purchased_items',
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
     paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands',

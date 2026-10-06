@@ -559,7 +559,7 @@
   // heads-up (below reorder level). A category shows the total of its pages.
   // Inbox items the list already has a rule for; prioBuild and the counts below
   // must agree on this, so there is one copy.
-  const PRIO_COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide',
+  const PRIO_COVERED = new Set(['mr_review','ca_approve','rb_approve','ca_release','rb_pay','liq_review','liq_settle','leave_decide','leave_waiting',
     'jo_review','report_signoff','sr_new','jo_late','jo_overdue','po_draft']);
   const SB_MODULE_LINK = {
     'pur.requisitions':'sbNavRequisitions', 'pur.purchase_orders':'sbNavPurchaseOrders', 'pur.suppliers':'sbNavSuppliers', 'pur.materials':'sbNavMaterials',

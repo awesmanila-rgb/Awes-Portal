@@ -113,10 +113,19 @@
   function caKindLabel(rec){ return rec && rec.kind==='reimbursement' ? 'Reimbursement' : 'Cash advance'; }
 
   const CA_PAGE = 200;
-  async function caFetchPaged(applyFilter){
+  // lite = cash_advance_requests_lite (migration 20261029_01): the same rows with the receipt pictures already
+  // removed on the server. Used for summary lists; falls back to the real table if the view isn't there yet.
+  async function caFetchPaged(applyFilter, lite){
+    if(lite){
+      try{ return await caFetchPagedFrom('cash_advance_requests_lite', applyFilter); }
+      catch(e){ if(!/cash_advance_requests_lite|PGRST205|42P01/.test(describeCloudError(e))) throw e; }
+    }
+    return caFetchPagedFrom('cash_advance_requests', applyFilter);
+  }
+  async function caFetchPagedFrom(table, applyFilter){
     const out = [];
     for(let from = 0; ; from += CA_PAGE){
-      let q = db.from('cash_advance_requests').select('data').order('submitted_at',{ascending:false}).range(from, from+CA_PAGE-1);
+      let q = db.from(table).select('data').order('submitted_at',{ascending:false}).range(from, from+CA_PAGE-1);
       if(applyFilter) q = applyFilter(q);
       const { data, error } = await q;
       if(error) throw error;
@@ -171,7 +180,7 @@
     const summary = !(opts && opts.full);
     if(await ensureCloud()){
       try{
-        const rows = await caFetchPaged(null);
+        const rows = await caFetchPaged(null, summary);
         return summary ? rows.map(caStripAttachments) : rows;
       }catch(e){ console.error('cash advance list failed', describeCloudError(e)); }
     }
@@ -185,7 +194,7 @@
     const summary = !(opts && opts.full);
     if(await ensureCloud()){
       try{
-        const rows = await caFetchPaged(q=> q.eq('technician_id', userId));
+        const rows = await caFetchPaged(q=> q.eq('technician_id', userId), summary);
         return summary ? rows.map(caStripAttachments) : rows;
       }catch(e){ console.error('cash advance list (user) failed', describeCloudError(e)); }
     }
@@ -1447,7 +1456,7 @@
         '</div>'+
         (r.status==='cancelled' ? '' :
         '<div class="user-edit-panel" data-panel="decision">'+
-          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
             '<button class="save-btn" data-act="approve" type="button">Approve</button>'+
@@ -1622,7 +1631,7 @@
     if(liq.userNotes) html += '<div class="leave-comment"><b>Technician notes</b>'+escapeHtml(liq.userNotes)+'</div>';
     if(liq.status==='pending'){
       html +=
-        '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="liqComment" rows="2" placeholder="Optional for approval, recommended for disapproval"></textarea></div>'+
+        '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="liqComment" rows="2" placeholder="Optional for approval, recommended for disapproval"></textarea></div>'+
         '<div class="edit-save-row">'+
           '<button class="cancel-btn" data-act="liq-disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
           '<button class="save-btn" data-act="liq-approve" type="button">Approve Liquidation</button>'+
@@ -2071,7 +2080,7 @@
         '</div>'+
         (r.status==='cancelled' ? '' :
         '<div class="user-edit-panel" data-panel="decision">'+
-          '<div class="field"><label>Comment (visible to the technician)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
+          '<div class="field"><label>Comment (visible to the employee)</label><textarea data-f="comment" rows="2" placeholder="Optional for approval, recommended for disapproval">'+escapeHtml(r.comment||'')+'</textarea></div>'+
           '<div class="edit-save-row">'+
             '<button class="cancel-btn" data-act="disapprove" type="button" style="color:var(--danger); border-color:#F1C4BC;">Disapprove</button>'+
             '<button class="save-btn" data-act="approve" type="button">Approve</button>'+

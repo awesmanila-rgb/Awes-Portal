@@ -1973,7 +1973,12 @@
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) dtTimerTick(); });
 
   function dtCardHtml(r, forAdmin, extraBodyHtml, hideOpenBtn){
+    // The admin / operations LIST card is a summary: no "Open Job Order" button and no status pill in the head (the
+    // progress labels say what is done). Tapping the card shows the summary, with the status at the top and a "More"
+    // button at the bottom that opens the full job order. Technician cards and the job order screen's own header keep theirs.
+    const summaryCard = !!forAdmin && !hideOpenBtn;
     const detailBody =
+      (summaryCard ? '<div class="jo-status-row">'+dtStatusPill(r)+'</div>' : '')+
       (extraBodyHtml || '')+
       (r.siteAddress ? '<div class="leave-comment"><b>Site Address</b>'+escapeHtml(r.siteAddress)+'</div>' : '')+
       (forAdmin && r.reportAllowedWorkerNames && r.reportAllowedWorkerNames.length ? '<div class="leave-comment"><b>Can Create Service Report</b>'+escapeHtml(r.reportAllowedWorkerNames.join(', '))+'</div>' : '')+
@@ -1981,7 +1986,8 @@
       dtEquipmentSummaryBlock(r)+
       (r.remarks ? '<div class="leave-comment"><b>Special Instructions</b>'+escapeHtml(r.remarks)+'</div>' : '')+
       '<div class="leave-comment"><b>Requirements</b>'+dtReqSummary(r)+'</div>'+
-      (forAdmin ? '<div class="leave-comment"><b>Created by</b>'+escapeHtml(r.createdBy||'Admin')+'</div>' : '');
+      (forAdmin ? '<div class="leave-comment"><b>Created by</b>'+escapeHtml(r.createdBy||'Admin')+'</div>' : '')+
+      (summaryCard ? '<button type="button" class="btn btn-secondary jo-more-btn" data-jo-open="'+escapeHtml(r.id)+'">More</button>' : '');
     return '<div class="user-card-head jo-card-toggle" data-jo-toggle>'+
         '<div>'+
           '<div class="u-name">'+escapeHtml(r.jobOrderNo)+' — '+escapeHtml(r.custName)+'</div>'+
@@ -1992,8 +1998,8 @@
           (forAdmin ? dtAdminProgressHtml(r) : '')+
         '</div>'+
         '<div class="jo-card-head-actions">'+
-          (hideOpenBtn ? '' : '<button type="button" class="jo-open-btn" data-jo-open="'+escapeHtml(r.id)+'">Open Job Order</button>')+
-          dtStatusPill(r)+'<span class="jo-caret">▾</span>'+
+          (hideOpenBtn || summaryCard ? '' : '<button type="button" class="jo-open-btn" data-jo-open="'+escapeHtml(r.id)+'">Open Job Order</button>')+
+          (summaryCard ? '' : dtStatusPill(r))+'<span class="jo-caret">▾</span>'+
         '</div>'+
       '</div>'+
       '<div class="jo-card-body" style="display:none;">'+detailBody+'</div>';
@@ -2030,17 +2036,20 @@
     // Each is filled/half/empty rather than a single percentage, because
     // "which stage is it stuck at" is the question, not "how far along".
     const stages = [
-      { label:'Ack',      done: assigned>0 && acked>=assigned, part: acked>0 },
-      { label:'On Site',  done: !!r.arrivedAt,                 part: !!r.arrivedAt },
-      { label:'Reported', done: units>0 && resolved>=units,    part: resolved>0 },
+      { label:'Acknowledged', short:'Ack', done: assigned>0 && acked>=assigned, part: acked>0 },
+      { label:'On site',      done: !!r.arrivedAt,                 part: !!r.arrivedAt },
+      { label:'Reported',     done: units>0 && resolved>=units,    part: resolved>0 },
       // Half-lit at Completed: the work is done and the job order is now
       // waiting on ADMIN to review and close it. That distinction is the
       // whole reason this bar exists on the admin list.
-      { label:'Closed',   done: status==='closed',             part: status==='completed' }
+      { label:'Closed',       done: status==='closed',             part: status==='completed' }
     ];
+    // Each stage carries its own label so a finished line reads "\u2713 On site" without opening the card.
     const bar = stages.map(s=>{
       const color = s.done ? 'var(--green)' : (s.part ? 'var(--amber, #B8860B)' : 'var(--border)');
-      return '<div style="flex:1; height:5px; border-radius:3px; background:'+color+';"></div>';
+      return '<div class="jo-stage'+(s.done ? ' done' : s.part ? ' part' : '')+'">'+
+        '<div style="height:5px; border-radius:3px; background:'+color+';"></div>'+
+        '<div class="jo-stage-lab">'+(s.done ? '\u2713 ' : '')+'<span class="jo-lab-f">'+s.label+'</span><span class="jo-lab-s">'+(s.short || s.label)+'</span></div></div>';
     }).join('');
 
     // Counts only where they carry information. "2 of 3 acknowledged" tells
