@@ -1,3 +1,6 @@
+// Bumped to v224 — Heads keep the office layout, messenger home shortcuts, technician home groups, approved-vs-waiting fix.
+// Re-fetch index.html/css/app.css/js/app.bundle.js.
+//
 // Bumped to v223 — review comments: dashboard tile groups, job order card, Operations today removed, leave wording + HR Head alert.
 // Re-fetch index.html/css/app.css/js/app.bundle.js.
 //
@@ -1148,7 +1151,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v223';
+const CACHE_NAME = 'awes-sr-v224';
 
 // Split into two lists on purpose.
 //

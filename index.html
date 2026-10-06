@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta name="awes-index-version" content="221">
+<meta name="awes-index-version" content="224">
 <meta charset="UTF-8">
 <!-- Pinch-to-zoom disabled per explicit request (was deliberately left
      enabled before — see git history — because maximum-scale=1/
@@ -496,6 +496,10 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
       <div class="th-sec"><h2 class="th-sec-title">Waiting for approval</h2><span class="th-sec-count">Admin is reviewing</span></div>
       <div class="th-box" id="thWaitList"></div>
     </div>
+    <div id="thApprovedWrap" style="display:none;">
+      <div class="th-sec"><h2 class="th-sec-title">Approved</h2><span class="th-sec-count">What happens next</span></div>
+      <div class="th-box" id="thApprovedList"></div>
+    </div>
     <div id="thUpcomingWrap" style="display:none;">
       <div class="th-sec"><h2 class="th-sec-title">Coming up</h2></div>
       <div id="thUpcomingList"></div>
@@ -506,76 +510,85 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
        Button ids techQaMyTools / techQaMyMaterials / techQaStock (and their
        badges) are bound in tools.js / inventory-moves.js / inventory.js. -->
   <div id="techQuickActionsCard" class="th-wrap" style="display:none;">
-    <div class="th-sec"><h2 class="th-sec-title">Request or check</h2></div>
-    <div class="th-grid">
+    <!-- "What do you need?" — technician only. Everything a technician can start on their own, in groups, as big-icon tiles
+         with a short label. (Was one "Request or check" grid: it also held attendance, job orders and calculators, which
+         are neither requests nor checks.) Button ids techQa* are bound in home.js / tools.js / inventory-moves.js /
+         inventory.js and are unchanged; a group whose tiles are all hidden hides itself (see thSyncGroups). -->
+    <div class="th-sec"><h2 class="th-sec-title">What do you need?</h2></div>
+    <div class="th-group">
+      <h3 class="th-group-title">My work</h3>
+      <div class="th-grid">
         <button type="button" class="th-tile th-orange" id="techQaJobOrder">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="1.5"/><circle cx="17.5" cy="18" r="1.5"/></svg></span>
           <span class="th-tile-label">My job orders</span>
-          <span class="th-tile-desc">All jobs assigned to you</span>
         </button>
         <button type="button" class="th-tile th-purple" id="techQaServiceReport">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>
           <span class="th-tile-label">Service reports</span>
-          <span class="th-tile-desc">New, drafts, and filed</span>
-        </button>
-        <button type="button" class="th-tile th-green" id="techQaAttendance">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
-          <span class="th-tile-label">Attendance</span>
-          <span class="th-tile-desc">Time in and time out</span>
         </button>
         <button type="button" class="th-tile th-teal" id="techQaMessages">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg></span>
           <span class="th-tile-label">Messages</span>
-          <span class="th-tile-desc">Job order chats</span>
           <span class="th-tile-badge" id="techQaMsgBadge" style="display:none;"></span>
-        </button>
-        <button type="button" class="th-tile th-brown" id="techQaMaterials">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
-          <span class="th-tile-label">Request materials</span>
-          <span class="th-tile-desc">For a job order</span>
-        </button>
-        <button type="button" class="th-tile th-brown" id="techQaDeliveries">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg></span>
-          <span class="th-tile-label">My deliveries</span>
-          <span class="th-tile-desc">Receive at a site</span>
-        </button>
-        <button type="button" class="th-tile th-green" id="techQaCashAdvance">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>
-          <span class="th-tile-label">Cash advance</span>
-          <span class="th-tile-desc">Ask for money for a job</span>
-        </button>
-        <button type="button" class="th-tile th-green" id="techQaReimburse">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg></span>
-          <span class="th-tile-label">Reimbursement</span>
-          <span class="th-tile-desc">Get back money you spent</span>
-        </button>
-        <button type="button" class="th-tile th-violet" id="techQaLeave">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span>
-          <span class="th-tile-label">File a leave</span>
-          <span class="th-tile-desc">Request a day off</span>
-        </button>
-        <button type="button" class="th-tile th-blue" id="techQaMyTools">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span>
-          <span class="th-tile-label">My tools</span>
-          <span class="th-tile-desc">Tools issued to you</span>
-          <span class="th-tile-badge" id="techQaMyToolsBadge" style="display:none;"></span>
-        </button>
-        <button type="button" class="th-tile th-orange" id="techQaMyMaterials">
-          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg></span>
-          <span class="th-tile-label">My materials</span>
-          <span class="th-tile-desc">Materials issued to you</span>
-          <span class="th-tile-badge" id="techQaMyMatBadge" style="display:none;"></span>
         </button>
         <button type="button" class="th-tile th-violet" id="techQaCalculators">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8"/><path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/></svg></span>
           <span class="th-tile-label">Calculators</span>
-          <span class="th-tile-desc">Ductulator, standards &amp; troubleshooting</span>
+        </button>
+      </div>
+    </div>
+    <div class="th-group">
+      <h3 class="th-group-title">Attendance and leave</h3>
+      <div class="th-grid">
+        <button type="button" class="th-tile th-green" id="techQaAttendance">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+          <span class="th-tile-label">Attendance</span>
+        </button>
+        <button type="button" class="th-tile th-violet" id="techQaLeave">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></span>
+          <span class="th-tile-label">File a leave</span>
+        </button>
+      </div>
+    </div>
+    <div class="th-group">
+      <h3 class="th-group-title">Materials and tools</h3>
+      <div class="th-grid">
+        <button type="button" class="th-tile th-brown" id="techQaMaterials">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>
+          <span class="th-tile-label">Request materials</span>
+        </button>
+        <button type="button" class="th-tile th-orange" id="techQaMyMaterials">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg></span>
+          <span class="th-tile-label">My materials</span>
+          <span class="th-tile-badge" id="techQaMyMatBadge" style="display:none;"></span>
+        </button>
+        <button type="button" class="th-tile th-brown" id="techQaDeliveries">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg></span>
+          <span class="th-tile-label">My deliveries</span>
+        </button>
+        <button type="button" class="th-tile th-blue" id="techQaMyTools">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg></span>
+          <span class="th-tile-label">My tools</span>
+          <span class="th-tile-badge" id="techQaMyToolsBadge" style="display:none;"></span>
         </button>
         <button type="button" class="th-tile th-teal" id="techQaStock" style="display:none;">
           <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v13H3z"/><path d="M3 7l3-4h12l3 4"/><path d="M9 12h6"/></svg></span>
           <span class="th-tile-label">Warehouse stock</span>
-          <span class="th-tile-desc">Check stock levels</span>
         </button>
+      </div>
+    </div>
+    <div class="th-group">
+      <h3 class="th-group-title">Money</h3>
+      <div class="th-grid">
+        <button type="button" class="th-tile th-green" id="techQaCashAdvance">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg></span>
+          <span class="th-tile-label">Cash advance</span>
+        </button>
+        <button type="button" class="th-tile th-green" id="techQaReimburse">
+          <span class="th-tile-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></svg></span>
+          <span class="th-tile-label">Reimbursement</span>
+        </button>
+      </div>
     </div>
   </div>
   <!-- Announcements — technician only. Admin authors these from the

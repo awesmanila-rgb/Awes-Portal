@@ -16,7 +16,7 @@ MODULES = [
 # through starting (a blank white page), so the very first thing the bundle does is check the version
 # marker in index.html (<meta name="awes-index-version">) and show a clear message when it is too old.
 # Bump INDEX_MIN only in a release that changes index.html, and update the meta tag to match.
-INDEX_MIN = 221
+INDEX_MIN = 224
 GUARD = """
   (function(){
     var NEED = %d;

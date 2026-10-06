@@ -5872,3 +5872,24 @@ button.sd-card{ cursor:pointer; } button.sd-card:hover{ border-color:#0F5A40; }
 .jo-more-btn{ width:100%; min-height:44px; margin-top:10px; font-weight:800; }
 .jo-lab-s{ display:none; }
 @media (max-width:430px){ .jo-lab-f{ display:none; } .jo-lab-s{ display:inline; } }
+
+/* ---------- Home shortcut tiles (technician and messenger): groups, big icon, short label, no sub-label ---------- */
+.th-group{ margin:0 0 14px; }
+.th-group-title{ margin:0 2px 8px; font-size:12px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--text-muted); }
+.th-wrap .th-grid, .msgr-tiles .th-grid{ grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; }
+.th-wrap .th-tile, .msgr-tiles .th-tile{ align-items:center; justify-content:flex-start; text-align:center; gap:8px; padding:14px 6px 12px; min-height:112px; }
+.th-wrap .th-tile-ic, .msgr-tiles .th-tile-ic{ width:60px; height:60px; border-radius:18px; margin:0; }
+.th-wrap .th-tile-ic .ic, .msgr-tiles .th-tile-ic .ic, .msgr-tiles .th-tile-ic svg{ width:34px; height:34px; }
+.th-wrap .th-tile-label, .msgr-tiles .th-tile-label{ font-size:13px; font-weight:700; line-height:1.2; }
+.th-wrap .th-tile-desc{ display:none; }
+.th-wrap .th-tile-badge, .msgr-tiles .th-tile-badge{ top:8px; right:8px; font-size:11px; padding:2px 8px; }
+.msgr-tiles{ margin-top:6px; }
+.msgr-tiles .th-tile{ background:var(--surface, #fff); border:1px solid var(--border); border-radius:16px; position:relative; display:flex; flex-direction:column; cursor:pointer; font:inherit; color:var(--text, #14221a); }
+.msgr-tiles .th-tile-ic{ display:flex; align-items:center; justify-content:center; }
+.th-group:not(:has(.th-tile:not([style*="none"]))){ display:none; }
+@media (max-width:360px){ .th-wrap .th-tile-label, .msgr-tiles .th-tile-label{ font-size:12px; } .th-wrap .th-tile-ic, .msgr-tiles .th-tile-ic{ width:54px; height:54px; } }
+/* Approved block on the technician home: each row says what happens next */
+.th-wait-row{ flex-wrap:wrap; }
+.th-wait-next{ flex:1 0 100%; display:block; margin:2px 0 8px; font-size:13px; line-height:1.35; color:var(--text-muted); text-align:left; }
+/* the office dashboard cards never belong on a technician's or a customer's home, whatever state the page was left in */
+body.role-tech #adminDash, body.role-customer #adminDash, body.role-tech #opsDash, body.role-customer #opsDash{ display:none !important; }
