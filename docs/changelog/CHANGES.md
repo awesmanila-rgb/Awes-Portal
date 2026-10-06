@@ -1,3 +1,30 @@
+# AWES App — second review round (sw v224)
+
+**Run first:** open `supabase/RUN_THIS_IN_SUPABASE.sql` in the Supabase SQL editor and run it ONCE. It contains every migration from
+20261020_01 to 20261030_01 in order (including `20261027_01_site_deliveries.sql`, which was missing from the deployment), and every part
+is safe to run again. The screens that need a migration now say "it is inside RUN_THIS_IN_SUPABASE.sql".
+**Upload `index.html` together with the script** (this release adds elements the new script uses; the version marker is now 224).
+
+1. **Magielyn's account became a messenger home.** The messenger layout was switched on for ANY office staff holding the My Errands page,
+   so a department Head given that page lost the office layout. Now only people whose job is errands get it: a Head, anyone who can set
+   errands for others (Errands page) and anyone who can approve something keep the normal office layout; My Errands is just another page in
+   their menu. A team member with My Errands (like Erwin) is still a messenger.
+2. **Messenger home (Erwin).** Same pattern as the technician home: a "What do you need?" grid under today's errands, grouped — My work · Time
+   and pay · Money · Ask the office — with big icons and short labels. Every tile opens the page the Menu already opens.
+   It also gets the technician's **Waiting for approval** and **Approved · What happens next** blocks (their own pending cash advances,
+   leave and material requests, with the same next-step lines), above the grid. Nothing waiting: no blocks.
+3. **Technician home grid.** "Request or check" did not fit (it also held attendance, job orders and calculators), so it is now
+   **"What do you need?"**, split into My work · Attendance and leave · Materials and tools · Money. Bigger icon, smaller label, no
+   sub-label. A group whose tiles are all hidden hides itself. Every button keeps its id.
+4. **"Waiting for approval" showed approved items.** It now lists only what is still waiting for the admin. Approved items move to their own
+   **Approved · What happens next** block, each with its next step: material request — "The office is arranging your materials",
+   then (from the real progress) "Being bought", "Arrived — collect them from the warehouse"; handed-over requests drop off. Approved cash
+   advance — "Admin will release the cash. You will be told when it is ready to collect."
+5. **Office cards on a technician home.** The dispatch board / Needs you now cards are now forced hidden on technician and customer screens
+   whatever state the page was left in.
+
+---
+
 # AWES App — review comments (sw v223)
 
 **Run first:** `supabase/migrations/20261030_01_dashboard_groups_and_leave_alert.sql` (safe to re-run). Without it the screens work as before:
