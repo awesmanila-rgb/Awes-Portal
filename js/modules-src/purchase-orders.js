@@ -16,7 +16,7 @@
 
   const PO_BUCKET = 'purchasing-assets';
   const PO_VAT_RATE = 0.12;
-  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, approval_requested_at, returned_at, suppliers(name, trade_name), purchase_order_items(count)';
+  const PO_LIST_SELECT = 'id, po_no, status, po_date, total, ewt_amount, net_payable, reference, supplier_id, supplier_snapshot, updated_at, approval_requested_at, returned_at, suppliers(name, trade_name), purchase_order_items(qty, qty_received)';
 
   let poCache = [];
   let poStatusFilter = '';   // '' = all, else draft / issued / cancelled (status tabs)
@@ -239,8 +239,20 @@
   function poListSupplier(r){
     return poSupplierName(r.suppliers) || poSupplierName(r.supplier_snapshot) || '— no supplier yet —';
   }
+  // How much has arrived on an ISSUED PO — derived from its lines (the PO's own status stays draft / issued / cancelled):
+  // 'none' (nothing yet) | 'partial' | 'full' (every line complete). Drafts and cancelled POs have no receipt state.
+  const poItemsOf = (r)=> Array.isArray(r.purchase_order_items) ? r.purchase_order_items : [];
+  function poReceiptState(r){
+    if(r.status !== 'issued') return '';
+    const items = poItemsOf(r); if(!items.length) return '';
+    const got = items.reduce((a, i)=> a + Number(i.qty_received || 0), 0);
+    if(got <= 0) return 'none';
+    return items.every(i=> Number(i.qty_received || 0) >= Number(i.qty || 0)) ? 'full' : 'partial';
+  }
+  const PO_RECEIPT_LABEL = { none:'Not received', partial:'Partly received', full:'Fully received' };
   function poRenderList(){
     const q = ($('poSearch').value || '').trim().toLowerCase();
+    const rf = $('poReceiptFilter') ? $('poReceiptFilter').value : '';
     const st = poStatusFilter;
     const counts = poCache.reduce((a, r)=>{ a[r.status] = (a[r.status] || 0) + 1; if(poPending(r)) a.approval = (a.approval || 0) + 1; return a; }, {});
     document.querySelectorAll('#poStatusTabs .po-tab-count').forEach(el=>{
@@ -254,6 +266,7 @@
     const rows = poCache.filter(r=>{
       if(st === 'approval'){ if(!poPending(r)) return false; }
       else if(st && r.status !== st) return false;
+      if(rf && poReceiptState(r) !== rf) return false;
       if(!q) return true;
       return [r.po_no, poListSupplier(r), r.reference].join(' ').toLowerCase().includes(q);
     });
@@ -266,17 +279,19 @@
       return;
     }
     list.innerHTML = rows.map(r=>{
-      const n = Array.isArray(r.purchase_order_items) && r.purchase_order_items[0] ? r.purchase_order_items[0].count : 0;
+      const n = poItemsOf(r).length, rs = poReceiptState(r);
       return '<button type="button" class="mt-row' + (r.status === 'cancelled' ? ' inactive' : '') + '" data-id="' + escapeHtml(r.id) + '">' +
         '<div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(r.po_no || '—') + '</span>' +
           escapeHtml(poListSupplier(r)) + ' <span class="po-status ' + escapeHtml(poPending(r) ? 'approval' : r.status) + '">' +
-            escapeHtml(poPending(r) ? 'for approval' : (r.status === 'draft' && r.returned_at ? 'returned' : r.status)) + '</span></div>' +
+            escapeHtml(poPending(r) ? 'for approval' : (r.status === 'draft' && r.returned_at ? 'returned' : r.status)) + '</span>' +
+            (rs ? ' <span class="po-rcv ' + rs + '">' + PO_RECEIPT_LABEL[rs] + '</span>' : '') + '</div>' +
           '<div class="sp-row-sub">' + escapeHtml([poDateLong(r.po_date), n + ' item' + (n === 1 ? '' : 's'), r.reference].filter(Boolean).join(' · ')) + '</div></div>' +
         '<div class="mt-row-price">₱' + poFmt(Number(r.ewt_amount) > 0 ? r.net_payable : r.total) +
           (Number(r.ewt_amount) > 0 ? '<div class="sp-row-sub">net of EWT</div>' : '') + '</div></button>';
     }).join('');
   }
   $('poSearch').addEventListener('input', poRenderList);
+  if($('poReceiptFilter')) $('poReceiptFilter').addEventListener('change', poRenderList);
   $('poStatusTabs').addEventListener('click', (e)=>{
     const tab = e.target.closest('.seg-tab');
     if(!tab || tab.dataset.status === poStatusFilter) return;

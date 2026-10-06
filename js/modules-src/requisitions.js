@@ -103,8 +103,9 @@
         (r.urgency !== 'normal' ? ' <span class="mr-urg ' + r.urgency + '">' + escapeHtml(MR_URGENCY[r.urgency]) + '</span>' : '') + '</div>' +
         '<div class="sp-row-sub">' + escapeHtml(jo) + ' · ' + n + ' item' + (n === 1 ? '' : 's') + (r.needed_by ? ' · needed ' + escapeHtml(mrDate(r.needed_by)) : '') + '</div>' +
         (r.status === 'returned' || r.status === 'rejected' ? '<div class="sp-row-sub" style="color:#9A6212;">Admin: ' + escapeHtml(r.review_note) + '</div>' : '') +
-        '</div></button>';
+        '<div class="mm-chips" data-chip="' + escapeHtml(r.id) + '"></div></div></button>';
     }).join('');
+    mmFillMine(list);
   }
   $('mrtList').addEventListener('click', (e)=>{
     if(e.target.closest('[data-purch-reauth]')){ purchReauth().then(ok=>{ if(ok) mrtLoadList(); }); return; }
@@ -119,7 +120,9 @@
   async function mrtOpen(id){
     if(!(await ensureCloud())){ toast('Not connected'); return; }
     try{
-      const jobsP = (typeof dtListForWorker === 'function' ? dtListForWorker(currentUser.id) : Promise.resolve([])).catch(()=> []);
+      // Dispatch holders (the Operations head, Operations staff) may request for ANY job order; everyone else for the ones they are on
+      const seesAllJobs = isStaffUser() && can('ops.dispatch', 'view') && typeof dtListAll === 'function';
+      const jobsP = (seesAllJobs ? dtListAll() : typeof dtListForWorker === 'function' ? dtListForWorker(currentUser.id) : Promise.resolve([])).catch(()=> []);
       await mrLoadCatalog();
       let h = null, items = [];
       if(id){
@@ -158,7 +161,33 @@
       mrtRenderJobInfo();
       mrtDirty = false;
       mrtShowForm();
+      mrtMountTrailAndCollector(h);
     }catch(e){ purchFail('Couldn\u2019t open the request: ', e); }
+  }
+  // The per-item trail once the request has been sent; the "who collects" choice while it is still editable
+  async function mrtMountTrailAndCollector(h){
+    const sent = !!(h && h.id && !['draft', 'returned'].includes(h.status));
+    $('mrtTrailSec').style.display = sent ? '' : 'none';
+    if(sent) mtMountTrail($('mrtTrail'), h.id);
+    const field = $('mrtCollectorField');
+    field.style.display = sent ? 'none' : '';    // once sent, the trail's own "Who collects" picker takes over
+    if(sent) return;
+    await mtLoadWorkers();
+    let cur = '';
+    if(h && h.id){ try{ const c = await db.from('material_requisition_collectors').select('collector_id').eq('mr_id', h.id).maybeSingle(); cur = c.data ? c.data.collector_id : ''; }catch(e){} }
+    $('mrtCollector').innerHTML = mtWorkerOptions(cur, 'Me (' + (currentUser.name || 'the requester') + ')', currentUser.id);
+    $('mrtCollector').dataset.was = cur;
+  }
+  async function mrtSaveCollector(id){
+    const sel = $('mrtCollector'); if(!sel || $('mrtCollectorField').style.display === 'none') return;
+    const now = sel.value || '';
+    if(now === (sel.dataset.was || '')) return;
+    try{
+      const { error } = await db.rpc('mr_set_collector', { p_mr: id, p_collector: now || null });
+      if(error) throw error;
+      sel.dataset.was = now;
+      if(now) notifyUser(now, 'You will collect materials', (mrtEditing && mrtEditing.mrf_no || 'A request') + ' — ' + (currentUser.name || 'a worker') + ' named you to collect them.', 'mt-col-' + id);
+    }catch(e){ console.warn('collector not saved', describeCloudError(e)); toast('The request was saved, but the collector wasn\u2019t: ' + describeCloudError(e)); }
   }
   function mrtBlank(){ return { key: ++mrtKey, id: null, material_id: null, code: '', description: '', unit: '', qty: '', qty_approved: null }; }
   function mrtEditable(){ return !mrtEditing || mrtEditing.status === 'draft' || mrtEditing.status === 'returned'; }
@@ -303,6 +332,7 @@
         if(error) throw error;
         id = data.id; mrtEditing = data; purchMarkOwn(id);
       }
+      await mrtSaveCollector(id);
       const clean = mrtItems.filter(it=> String(it.description || '').trim());
       clean.forEach(it=>{ if(!it.id) it.id = poUuid(); });
       if(clean.length){
@@ -395,6 +425,7 @@
   async function mrShow(){
     if(mrDetailVisible()) mrShowListView();
     if(await mrLoadList()) mrRenderList();
+    if($('mrMonitorView').style.display !== 'none') mmShowOffice();   // the Monitor is the first thing they see
   }
   function mrShowListView(){ $('mrDetailView').style.display = 'none'; $('mrListView').style.display = ''; $('purchasingView').classList.remove('po-wide'); mrOpenRow = null; }
   function mrShowDetailView(){ $('mrListView').style.display = 'none'; $('mrDetailView').style.display = ''; $('purchasingView').classList.add('po-wide'); window.scrollTo({ top:0 }); }
@@ -441,8 +472,9 @@
         ' <span class="po-status ' + r.status + '">' + escapeHtml(MR_STATUS_LABEL[r.status]) + '</span>' +
         (r.urgency !== 'normal' ? ' <span class="mr-urg ' + r.urgency + '">' + escapeHtml(MR_URGENCY[r.urgency]) + '</span>' : '') + '</div>' +
         '<div class="sp-row-sub">' + escapeHtml(jo) + ' · ' + n + ' item' + (n === 1 ? '' : 's') + (r.needed_by ? ' · needed ' + escapeHtml(mrDate(r.needed_by)) : '') +
-        (r.submitted_at ? ' · sent ' + escapeHtml(mrWhen(r.submitted_at)) : '') + '</div></div></button>';
+        (r.submitted_at ? ' · sent ' + escapeHtml(mrWhen(r.submitted_at)) : '') + '</div><div class="mm-chips" data-chip="' + escapeHtml(r.id) + '"></div></div></button>';
     }).join('');
+    mmFillChips(list);
   }
   $('mrSearch').addEventListener('input', mrRenderList);
   $('mrFilterStatus').addEventListener('change', mrRenderList);
@@ -468,6 +500,8 @@
       $('mrStaleNote').style.display = 'none';
       mrRenderDetail();
       mrShowDetailView();
+      $('mrTrailTitle').style.display = $('mrTrail').style.display = ['draft'].includes(mrOpenRow.status) ? 'none' : '';
+      if(mrOpenRow.status !== 'draft') mtMountTrail($('mrTrail'), mrOpenRow.id);
     }catch(e){ purchFail('Couldn\u2019t open the request: ', e); }
   }
   function mrRenderDetail(){
@@ -532,15 +566,17 @@
       if(st === 'approved') html += b('cancel', 'Cancel Request', 'danger');
     }else html = b('pdf', 'View PDF');
     // Staff: deciding needs Approve; fulfilment needs Edit (+ PO Edit to create POs)
+    // Nobody reviews their own request (the database enforces it too; the Super Admin is exempt)
+    const ownReview = reviewing && isStaffUser() && mrOpenRow.requested_by === currentUser.id;
     if(isStaffUser()){
       const tmp = document.createElement('div'); tmp.innerHTML = html;
-      const ok = { approve: can('pur.requisitions', 'approve'), return: can('pur.requisitions', 'approve'), reject: can('pur.requisitions', 'approve'),
+      const ok = { approve: can('pur.requisitions', 'approve') && !ownReview, return: can('pur.requisitions', 'approve') && !ownReview, reject: can('pur.requisitions', 'approve') && !ownReview,
                    techbuy: can('pur.requisitions', 'edit'), cancel: can('pur.requisitions', 'edit'),
                    createpo: can('pur.requisitions', 'edit') && can('pur.purchase_orders', 'edit') };
       tmp.querySelectorAll('[data-mr]').forEach(el=>{ if(ok[el.dataset.mr] === false) el.remove(); });
       html = tmp.innerHTML;
     }
-    $('mrActions').innerHTML = html;
+    $('mrActions').innerHTML = html + (ownReview ? '<p class="mr-own-note">This is your own request, so another approver has to review it.</p>' : '');
   }
   // Link a technician's typed line to a Materials Database item (needed
   // before it can go on a Purchase Order, which accepts catalog items only)
@@ -611,6 +647,7 @@
       toast(msg);
       await mrOpen(mrOpenRow.id);
       mrLoadList({ silent:true }).then(ok=>{ if(ok) mrRenderList(); });
+      if($('mrMonitorView').style.display !== 'none') mmLoad().then(mmRenderOffice);
       return true;
     }catch(err){ purchFail('Couldn\u2019t update the request: ', err); return false; }
   }
@@ -651,14 +688,18 @@
   async function mrMarkTechBuy(){
     const sel = mrSelectedOpen();
     if(!sel.length){ toast('Tick the lines the technician will buy'); return; }
-    if(!await uiConfirm('Mark ' + sel.length + ' line' + (sel.length === 1 ? '' : 's') + ' as bought by ' + (mrOpenRow.requester_name || 'the technician') + ' (cash advance)?')) return;
+    const buyer = await mtChooseBuyer(sel.length, mrOpenRow.requester_name || 'the requester', mrOpenRow.requested_by);
+    if(buyer === null) return;   // cancelled; '' = the requester buys
     if(!(await purchEnsureSession())) return;
     try{
       purchMarkOwn(mrOpenRow.id);
       const { error } = await db.from('material_requisition_items').update({ fulfilled_by:'tech_buy' }).in('id', sel.map(it=> it.id));
       if(error) throw error;
+      if(buyer){
+        for(const it of sel){ const r2 = await db.rpc('mr_set_buyer', { p_item: it.id, p_buyer: buyer }); if(r2.error) throw r2.error; }
+      }
       toast('Marked as tech buys');
-      notifyUser(mrOpenRow.requested_by, 'Materials: please purchase', mrOpenRow.mrf_no + ': ' + sel.length + ' item' + (sel.length === 1 ? '' : 's') + ' approved for you to buy (cash advance).', 'mrf-' + mrOpenRow.id);
+      notifyUser(buyer || mrOpenRow.requested_by, 'Materials: please purchase', mrOpenRow.mrf_no + ': ' + sel.length + ' item' + (sel.length === 1 ? '' : 's') + ' approved for you to buy (cash advance). Record what you buy in My Requests.', 'mrf-' + mrOpenRow.id);
       await mrOpen(mrOpenRow.id);
     }catch(err){ purchFail('Couldn\u2019t update the lines: ', err); }
   }

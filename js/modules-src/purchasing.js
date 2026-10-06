@@ -136,6 +136,8 @@
   function purchOnShow(key){
     purchLoadCategories();   // cached after the first load; realtime keeps it fresh
     if(key === 'myRequests'){ if(currentUser) mrtShow(); return; }   // technician screen
+    if(key === 'myDeliveries'){ if(currentUser) sdMineShow(); return; }   // every worker: deliveries assigned to them
+    if(key === 'siteDelivery'){ if(currentUser){ if(isStaffUser() && !purchStaffAllowed(key)) return; purchApplyStaffMode(); sdOfficeShow(); } return; }   // office: assign + see proof
     // Payroll (payroll.js): Super Admin, or staff with that page
     if(key === 'paySetup' || key === 'payRules'){ if(currentUser && purchStaffAllowed(key)) payOnShow(key); return; }
     if(key === 'myPayslips'){ if(currentUser) prMyPayslipsShow(); return; }
@@ -178,6 +180,7 @@
     if(key === 'suppliers') spShow();
     if(key === 'materials') mtShow();
     if(key === 'purchaseOrders') poShow();
+    if(key === 'purchasedItems') piShow();
     if(key === 'requisitions') mrShow();
     if(key === 'stock') invShowStock();
     if(key === 'warehouses') invShowWarehouses();
