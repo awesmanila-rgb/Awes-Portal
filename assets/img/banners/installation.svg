@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#113F47"/><stop offset=".6" stop-color="#1A5F69"/><stop offset="1" stop-color="#23808A"/></linearGradient>
+    <linearGradient id="cu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F6FAFA"/><stop offset="1" stop-color="#D7E6E8"/></linearGradient>
+    <radialGradient id="glow" cx=".74" cy=".52" r=".45"><stop offset="0" stop-color="#9EE7F0" stop-opacity=".25"/><stop offset="1" stop-color="#9EE7F0" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <rect width="1200" height="600" fill="url(#glow)"/>
+  <circle cx="1100" cy="560" r="200" fill="#FFFFFF" opacity=".05"/>
+  <circle cx="700" cy="40" r="150" fill="#FFFFFF" opacity=".04"/>
+  <!-- indoor unit (small, top) -->
+  <g transform="translate(720 170)">
+    <rect width="230" height="72" rx="16" fill="#FFFFFF"/>
+    <rect y="50" width="230" height="22" rx="11" fill="#CFE2E5"/>
+    <rect x="18" y="57" width="194" height="4" rx="2" fill="#9DC3C9"/>
+    <circle cx="208" cy="24" r="5" fill="#35C4D3"/>
+  </g>
+  <!-- copper line set -->
+  <path d="M950 206 h40 q20 0 20 20 v90" fill="none" stroke="#E09A5B" stroke-width="10" stroke-linecap="round"/>
+  <path d="M950 226 h24 q16 0 16 16 v74" fill="none" stroke="#C97C3F" stroke-width="8" stroke-linecap="round"/>
+  <!-- outdoor condensing unit -->
+  <g transform="translate(860 300)">
+    <rect width="290" height="200" rx="18" fill="url(#cu)"/>
+    <rect x="228" y="24" width="40" height="152" rx="8" fill="#C4D8DB"/>
+    <g fill="#AFC9CD"><rect x="236" y="40" width="24" height="5" rx="2"/><rect x="236" y="56" width="24" height="5" rx="2"/><rect x="236" y="72" width="24" height="5" rx="2"/><rect x="236" y="88" width="24" height="5" rx="2"/><rect x="236" y="104" width="24" height="5" rx="2"/><rect x="236" y="120" width="24" height="5" rx="2"/></g>
+    <circle cx="112" cy="100" r="78" fill="#23596A"/>
+    <circle cx="112" cy="100" r="78" fill="none" stroke="#FFFFFF" stroke-width="4" opacity=".5"/>
+    <circle cx="112" cy="100" r="56" fill="none" stroke="#FFFFFF" stroke-width="3" opacity=".35"/>
+    <circle cx="112" cy="100" r="34" fill="none" stroke="#FFFFFF" stroke-width="3" opacity=".3"/>
+    <g fill="#8ED4DD" opacity=".9">
+      <path d="M112 100 q-8 -46 22 -60 q6 28 -22 60z"/>
+      <path d="M112 100 q46 -8 60 22 q-28 6 -60 -22z"/>
+      <path d="M112 100 q8 46 -22 60 q-6 -28 22 -60z"/>
+      <path d="M112 100 q-46 8 -60 -22 q28 -6 60 22z"/>
+    </g>
+    <circle cx="112" cy="100" r="10" fill="#FFFFFF"/>
+    <rect x="20" y="200" width="30" height="12" rx="3" fill="#0E3A42"/>
+    <rect x="240" y="200" width="30" height="12" rx="3" fill="#0E3A42"/>
+  </g>
+  <!-- wrench badge -->
+  <g transform="translate(790 410)">
+    <circle r="56" fill="#FFFFFF"/>
+    <path d="M14.7 -18.7 a22 22 0 0 0 -29.7 29.7 L-34 30 l6 6 l19 -19 a22 22 0 0 0 29.7 -29.7 l-13.7 13.7 l-13 -3.3 l-3.3 -13z" fill="#1F6F7A"/>
+  </g>
+</svg>

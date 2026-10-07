@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5E1E15"/><stop offset=".6" stop-color="#8E2F21"/><stop offset="1" stop-color="#B8432D"/></linearGradient>
+    <radialGradient id="glow" cx=".74" cy=".45" r=".45"><stop offset="0" stop-color="#FFC7A8" stop-opacity=".25"/><stop offset="1" stop-color="#FFC7A8" stop-opacity="0"/></radialGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#C9CED3"/><stop offset=".5" stop-color="#F4F6F8"/><stop offset="1" stop-color="#B7BDC3"/></linearGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <rect width="1200" height="600" fill="url(#glow)"/>
+  <circle cx="1120" cy="520" r="200" fill="#FFFFFF" opacity=".05"/>
+  <circle cx="650" cy="60" r="140" fill="#FFFFFF" opacity=".04"/>
+  <!-- ceiling -->
+  <rect x="700" y="150" width="500" height="14" fill="#FFFFFF" opacity=".25"/>
+  <!-- sprinkler head -->
+  <g transform="translate(860 164)">
+    <rect x="-14" y="0" width="28" height="30" fill="url(#metal)"/>
+    <path d="M-30 30 h60 l-10 22 h-40z" fill="url(#metal)"/>
+    <rect x="-5" y="52" width="10" height="36" fill="#E24B3B"/>
+    <path d="M-44 96 h88" stroke="url(#metal)" stroke-width="10" stroke-linecap="round"/>
+    <path d="M-20 52 l-20 44 M20 52 l20 44" stroke="#C9CED3" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <!-- water spray -->
+  <g fill="#BFE7FF" opacity=".9">
+    <path d="M790 300 q-6 -12 0 -22 q6 10 0 22z"/><path d="M830 330 q-6 -12 0 -22 q6 10 0 22z"/>
+    <path d="M860 350 q-6 -12 0 -22 q6 10 0 22z"/><path d="M890 330 q-6 -12 0 -22 q6 10 0 22z"/>
+    <path d="M930 300 q-6 -12 0 -22 q6 10 0 22z"/><path d="M760 360 q-6 -12 0 -22 q6 10 0 22z"/>
+    <path d="M810 390 q-6 -12 0 -22 q6 10 0 22z"/><path d="M860 410 q-6 -12 0 -22 q6 10 0 22z"/>
+    <path d="M910 390 q-6 -12 0 -22 q6 10 0 22z"/><path d="M960 360 q-6 -12 0 -22 q6 10 0 22z"/>
+  </g>
+  <!-- smoke detector -->
+  <g transform="translate(1060 164)">
+    <ellipse cx="0" cy="10" rx="80" ry="22" fill="#FFFFFF"/>
+    <rect x="-80" y="-2" width="160" height="12" fill="#FFFFFF"/>
+    <ellipse cx="0" cy="-2" rx="80" ry="10" fill="#E6E9EC"/>
+    <circle cx="44" cy="14" r="6" fill="#E24B3B"/>
+    <g stroke="#D5DADE" stroke-width="3"><path d="M-40 14 h50"/><path d="M-34 22 h38"/></g>
+  </g>
+  <!-- alarm bell -->
+  <g transform="translate(1040 390)">
+    <circle r="70" fill="#FFFFFF"/>
+    <circle r="54" fill="#E24B3B"/>
+    <path d="M-22 16 q0 -40 22 -42 q22 2 22 42 l8 8 h-60z" fill="#FFFFFF"/>
+    <circle cx="0" cy="32" r="7" fill="#FFFFFF"/>
+    <g fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity=".9">
+      <path d="M-86 -30 q-14 30 0 60"/><path d="M86 -30 q14 30 0 60"/>
+    </g>
+  </g>
+</svg>

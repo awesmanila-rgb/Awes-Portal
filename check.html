@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AWES — what is deployed?</title>
+<style>
+body{font:16px/1.45 system-ui,sans-serif;margin:0;background:#F0F6F2;color:#14221a}
+main{max-width:640px;margin:0 auto;padding:18px}
+h1{font-size:20px;margin:0 0 4px} p{margin:6px 0 14px;color:#4a5a50}
+.row{background:#fff;border:1px solid #cfdcd3;border-radius:12px;padding:12px 14px;margin:0 0 10px}
+.row b{display:block;margin-bottom:2px} .ok{color:#1d7a4d;font-weight:700} .bad{color:#b3402d;font-weight:700} .dim{color:#5c6b61;font-size:13.5px}
+button{font:inherit;font-weight:700;border:0;border-radius:12px;padding:14px 16px;width:100%;margin:6px 0;background:#0F5A40;color:#fff;cursor:pointer}
+button.alt{background:#fff;color:#0F5A40;border:2px solid #0F5A40}
+#verdict{font-weight:800;font-size:17px;padding:14px;border-radius:12px;margin:0 0 14px}
+#verdict.good{background:#DDF1E5;color:#14502f} #verdict.warn{background:#FBE3DF;color:#7a2418}
+</style></head><body><main>
+<h1>What is deployed on this site?</h1>
+<p>This page reads the files straight from the server (not from any cache) and tells you whether the newest release is there.</p>
+<div id="verdict">Checking…</div>
+<div id="rows"></div>
+<div class="row"><b>What this phone / browser is holding</b><div id="cache" class="dim">…</div></div>
+<button id="clear">Refresh from the server and open the app</button>
+<button class="alt" id="again">Check again</button>
+<script>
+const WANT='v226';
+const checks=[
+ {file:'sw.js', label:'sw.js (release number)', test:t=>{const m=t.match(/awes-sr-(v\d+)/); return m?{ok:m[1]===WANT,text:'release '+m[1]}:{ok:false,text:'no release number found'};}},
+ {file:'index.html', label:'index.html', test:t=>{const m=t.match(/awes-index-version" content="(\d+)"/); return m?{ok:Number(m[1])>=224,text:'page version '+m[1]+(Number(m[1])>=224?'':' (needs 224)')}:{ok:false,text:'old index.html (no version marker)'};}},
+ {file:'js/app.bundle.js', label:'js/app.bundle.js (the app itself)', test:t=>{const v=t.match(/AWES_VERSION = '(v\d+)'/); const tiles=t.includes('msgrTilesHtml'), wait=t.includes('thWaitingRows'); return {ok:!!v&&v[1]===WANT&&tiles&&wait,text:(v?'release '+v[1]:'old file: no release number')+' · messenger shortcuts '+(tiles?'yes':'NO')+' · approved block '+(wait?'yes':'NO')};}},
+ {file:'css/app.css', label:'css/app.css (the look)', test:t=>{const g=t.includes('.th-group-title'); return {ok:g,text:g?'has the new tile groups':'old file: no tile groups'};}}
+];
+async function run(){
+  const rows=document.getElementById('rows'); rows.innerHTML=''; let all=true, bundleOld=false, staleHere=false;
+  for(const c of checks){
+    const row=document.createElement('div'); row.className='row'; row.innerHTML='<b>'+c.label+'</b><span class="dim">checking…</span>'; rows.appendChild(row);
+    try{
+      const r=await fetch(c.file+'?x='+Date.now(),{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status+' — the file is not on the server');
+      const t=await r.text(), res=c.test(t);
+      // what this browser would actually use (goes through the saved copy the app keeps)
+      let local='', stale=false;
+      try{ const r2=await fetch(c.file); const t2=await r2.text(); stale=(t2.length!==t.length); local=stale?'<br><span class="bad">⚠ this device would use an OLDER saved copy ('+Math.round(t2.length/1024)+' KB). Tap "Refresh from the server" below.</span>':''; }catch(e){}
+      if(stale) staleHere=true;
+      row.lastChild.outerHTML='<span class="'+(res.ok?'ok':'bad')+'">'+(res.ok?'✓ ':'✗ ')+res.text+'</span> <span class="dim">('+Math.round(t.length/1024)+' KB on the server)</span>'+local;
+      if(!res.ok){ all=false; if(c.file==='js/app.bundle.js') bundleOld=true; }
+    }catch(e){ all=false; if(c.file==='js/app.bundle.js') bundleOld=true; row.lastChild.outerHTML='<span class="bad">✗ '+String(e.message||e)+'</span>'; }
+  }
+  const v=document.getElementById('verdict');
+  if(all && staleHere){ v.className='warn'; v.textContent='The server has the newest release, but THIS device is holding an older saved copy. Tap "Refresh from the server" below.'; }
+  else if(all){ v.className='good'; v.textContent='The server has the newest release and this device is using it. If the app still looks old, close it fully and open it again.'; }
+  else { v.className='warn'; v.textContent= bundleOld ? 'The newest app file is NOT on the server. Upload js/app.bundle.js (from the zip) to the repo root folder "js", wait for the site to publish, then check again.' : 'Some files are old or missing — see the red lines. Upload them from the zip, wait for the site to publish, then check again.'; }
+  try{
+    const regs=await navigator.serviceWorker.getRegistrations(), keys=await caches.keys();
+    document.getElementById('cache').textContent='Service workers: '+regs.length+' · saved copies: '+(keys.length?keys.join(', '):'none');
+  }catch(e){ document.getElementById('cache').textContent='Not available in this browser'; }
+}
+document.getElementById('again').onclick=run;
+document.getElementById('clear').onclick=async()=>{
+  // 1) replace the browser's own saved copies with fresh ones from the server (cache:'reload' rewrites them)
+  for(const f of ['index.html','manifest.json','css/app.css','js/app.bundle.js','sw.js']){ try{ await fetch(f,{cache:'reload'}); }catch(e){} }
+  // 2) drop the app's own saved copy and the service worker, then open the app
+  try{ const regs=await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r=>r.unregister())); }catch(e){}
+  try{ const keys=await caches.keys(); await Promise.all(keys.map(k=>caches.delete(k))); }catch(e){}
+  location.href='./?fresh='+Date.now();
+};
+run();
+</script></main></body></html>
