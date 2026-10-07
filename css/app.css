@@ -6170,3 +6170,18 @@ body:has(#loginOverlay.open){ overflow:hidden; }
   .login-heading{ margin-top:18px; }
   .login-tagline{ margin-bottom:14px; }
 }
+
+/* ---------- Pop-ups built as <div class="overlay"><div class="modal">… (errand signature, etc.) ----------
+   They had no card of their own (the text sat on the dimmed page) and, for the messenger, the fixed bottom bar
+   (z-index 60) sat on top of the pop-up (z-index 50) and covered its Clear / Cancel / OK buttons. */
+.overlay > .modal{
+  background:#fff; width:94%; max-width:520px; max-height:92vh; max-height:92dvh; overflow-y:auto; box-sizing:border-box;
+  border-radius:18px 18px 0 0; padding:18px 16px calc(16px + env(safe-area-inset-bottom, 0px)); overscroll-behavior:contain;
+}
+.overlay > .modal h3{ margin:0 0 6px; font-size:19px; }
+.overlay > .modal .pay-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.overlay > .modal .pay-actions .btn{ flex:1 1 130px; min-height:48px; }
+@media (min-width:700px){ .overlay:has(> .modal){ align-items:center; } .overlay > .modal{ border-radius:18px; } }
+/* every pop-up sits above the messenger's bottom bar; the "?" help button steps aside while one is open */
+body.role-messenger .overlay{ z-index:70; }
+body:has(.overlay.open:not(.login-overlay)) .gd-help-fab{ display:none; }
