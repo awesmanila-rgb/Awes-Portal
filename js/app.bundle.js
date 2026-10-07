@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v226';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v228';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -10912,16 +10912,37 @@
   // Must match the button marked .active in index.html. 'open' no longer
   // exists as a status, so leaving it here would open the admin list empty.
   let dtAdminFilter = 'preparing';
+  // Does a ticket belong under this chip? Late is not a status: it is the Preparing tickets whose dispatch time has passed with
+  // nobody acknowledged (so it is a part of Preparing, and was always empty when it looked for a status called 'late').
+  function dtMatchesAdminFilter(r, f){
+    if(f === 'all') return true;
+    if(f === 'late') return dtEffectiveStatus(r) === 'preparing' && dtIsLateDispatch(r);
+    return dtEffectiveStatus(r) === f;
+  }
+  // The number on every status chip (not Messages — it shows its own unread count)
+  function dtUpdateFilterCounts(all){
+    const row = $('dtAdminFilterRow'); if(!row || !Array.isArray(all)) return;
+    row.querySelectorAll('button[data-filter]').forEach(btn=>{
+      const f = btn.dataset.filter; if(f === 'messages') return;
+      const n = all.filter(r=> dtMatchesAdminFilter(r, f)).length;
+      let badge = btn.querySelector('.dt-count');
+      if(!badge){ badge = document.createElement('span'); badge.className = 'dt-count'; btn.appendChild(badge); }
+      badge.textContent = String(n);
+      badge.classList.toggle('zero', n === 0);
+      badge.setAttribute('aria-label', n + (n === 1 ? ' ticket' : ' tickets'));
+    });
+  }
   async function dtRenderAdminList(){
     const list = $('dtAdminList');
     list.innerHTML = '<div class="empty-state">Loading…</div>';
     const all = await dtListAll();
-    const items = dtAdminFilter==='all' ? all : all.filter(r=> dtEffectiveStatus(r)===dtAdminFilter);
+    dtUpdateFilterCounts(all);
+    const items = all.filter(r=> dtMatchesAdminFilter(r, dtAdminFilter));
     dtLastTicketsById = {};
     items.forEach(r=> dtLastTicketsById[r.id] = r);
     if(items.length===0){
       // Raw filter keys read badly here — "No in_progress dispatch tickets".
-      const FILTER_LABELS = { preparing:'preparing', acknowledged:'en route', in_progress:'in-progress',
+      const FILTER_LABELS = { preparing:'preparing', late:'late', acknowledged:'en route', in_progress:'in-progress',
         completed:'job orders awaiting review', scheduled:'scheduled', closed:'closed',
         expired:'expired', cancelled:'cancelled' };
       const label = dtAdminFilter==='all' ? 'dispatch tickets'
@@ -10951,7 +10972,7 @@
     const inbox = filter==='messages';
     if($('dtAdminList')) $('dtAdminList').style.display = inbox ? 'none' : '';
     if($('dtAdminInboxList')) $('dtAdminInboxList').style.display = inbox ? '' : 'none';
-    if(inbox) dtRenderChatInbox(); else dtRenderAdminList();
+    if(inbox){ dtRenderChatInbox(); dtListAll().then(dtUpdateFilterCounts).catch(()=>{}); } else dtRenderAdminList();
     return true;
   }
   document.querySelectorAll('#dtAdminFilterRow button').forEach(btn=>{
@@ -10962,7 +10983,7 @@
       const inboxSel = dtAdminFilter==='messages';
       if($('dtAdminList')) $('dtAdminList').style.display = inboxSel ? 'none' : '';
       if($('dtAdminInboxList')) $('dtAdminInboxList').style.display = inboxSel ? '' : 'none';
-      if(inboxSel){ dtRenderChatInbox(); return; }
+      if(inboxSel){ dtRenderChatInbox(); dtListAll().then(dtUpdateFilterCounts).catch(()=>{}); return; }
       dtRenderAdminList();
     });
   });
@@ -12603,7 +12624,8 @@
     dtCalRender('dtCal', dtCalTicketsCache);
   }
 
-  async function showDispatchView(initialTab){
+  // opts.fresh: opened from a menu — start from the default status chip instead of whichever one was left selected last time
+  async function showDispatchView(initialTab, opts){
     document.body.classList.remove('dashboard-active');
     $('homeScreen').style.display = 'none';
     $('serviceReportView').style.display = 'none';
@@ -12641,6 +12663,12 @@
     if(dtIsDispatcher()){
       $('dispatchTechArea').style.display = 'none';
       $('dispatchAdminArea').style.display = '';
+      if(opts && opts.fresh && (initialTab || 'all') === 'all'){
+        dtAdminFilter = 'preparing';
+        document.querySelectorAll('#dtAdminFilterRow button').forEach(b=> b.classList.toggle('active', b.dataset.filter === 'preparing'));
+        if($('dtAdminList')) $('dtAdminList').style.display = '';
+        if($('dtAdminInboxList')) $('dtAdminInboxList').style.display = 'none';
+      }
       // View-only dispatchers land on the list (they can't create)
       dtShowAdminTab(initialTab || (dtCanDispatch() ? 'new' : 'all'));
     }else{
@@ -30641,7 +30669,7 @@
     await showCashAdvanceView();
     caShowAdminSection('reimb');
   });
-  $('sbNavDispatch').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavDispatch'); showDispatchView(); });
+  $('sbNavDispatch').addEventListener('click', ()=>{ closeMainMenu(); setSidebarActive('sbNavDispatch'); showDispatchView('all', { fresh:true }); });   // the menu opens All Tickets
   $('menuManageReports').addEventListener('click', ()=>{
     closeMainMenu();
     setSidebarActive('menuManageReports');
@@ -33168,7 +33196,7 @@
     'adm.equipment':       ()=>{ admApplyStaffMode(); showEquipmentManagerView(); },
     'adm.announcements':   ()=>{ admApplyStaffMode(); annOpenAdmin(); },
     'adm.dropdowns':       ()=>{ admApplyStaffMode(); openManageLists(); },
-    'ops.dispatch':        ()=>{ opsApplyStaffMode(); showDispatchView(); },
+    'ops.dispatch':        ()=>{ opsApplyStaffMode(); showDispatchView('all', { fresh:true }); },   // the menu opens All Tickets
     'ops.service_requests':()=>{ opsApplyStaffMode(); showServiceRequestsView(); srAdminInit(); },   // srAdminInit: live-refreshing queue
     'ops.service_reports': ()=>{ opsApplyStaffMode(); showServiceReportsManagerView(); },
     'ops.past_service':    ()=>{ opsApplyStaffMode(); showServiceReport(); srShowTab('backentry'); },
@@ -35783,6 +35811,59 @@
     gdRender(true);
     if(!shown) setTimeout(()=>{ const c = gdEl('gdCard'); if(c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 40);
   }
+  // The floating ? must never sit on top of what the person is reading:
+  //  - it slides away while the page scrolls DOWN and comes back when they scroll UP (or are near the top);
+  //  - it can be dragged anywhere (the spot is remembered on this device); a plain tap still opens the help.
+  function gdFabBehave(f){
+    const KEY = 'awes-help-fab';
+    const clamp = ()=>{
+      const r = f.getBoundingClientRect(); if(!r.width) return;
+      const maxR = Math.max(0, window.innerWidth - r.width), maxB = Math.max(0, window.innerHeight - r.height);
+      const cs = getComputedStyle(f); let right = parseFloat(cs.right), bottom = parseFloat(cs.bottom);
+      if(isNaN(right) || isNaN(bottom)) return;
+      f.style.right = Math.min(maxR, Math.max(0, right)) + 'px'; f.style.bottom = Math.min(maxB, Math.max(0, bottom)) + 'px';
+    };
+    try{
+      const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if(saved && typeof saved.r === 'number' && typeof saved.b === 'number'){ f.style.right = saved.r + 'px'; f.style.bottom = saved.b + 'px'; }
+    }catch(e){}
+    // ---- drag (mouse, touch, pen) ----
+    let drag = null, moved = false;
+    f.addEventListener('pointerdown', (ev)=>{
+      if(ev.button && ev.button !== 0) return;
+      const r = f.getBoundingClientRect();
+      drag = { x:ev.clientX, y:ev.clientY, right:window.innerWidth - r.right, bottom:window.innerHeight - r.bottom, id:ev.pointerId }; moved = false;
+      try{ f.setPointerCapture(ev.pointerId); }catch(e){}
+    });
+    f.addEventListener('pointermove', (ev)=>{
+      if(!drag || ev.pointerId !== drag.id) return;
+      const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+      if(!moved && Math.hypot(dx, dy) < 8) return;
+      moved = true; f.classList.add('gd-fab-drag');
+      const w = f.offsetWidth, h = f.offsetHeight;
+      f.style.right  = Math.min(window.innerWidth - w,  Math.max(0, drag.right  - dx)) + 'px';
+      f.style.bottom = Math.min(window.innerHeight - h, Math.max(0, drag.bottom - dy)) + 'px';
+    });
+    const end = (ev)=>{
+      if(!drag || (ev && ev.pointerId !== drag.id)) return;
+      try{ f.releasePointerCapture(drag.id); }catch(e){}
+      drag = null; f.classList.remove('gd-fab-drag');
+      if(moved){ try{ localStorage.setItem(KEY, JSON.stringify({ r:parseFloat(f.style.right) || 0, b:parseFloat(f.style.bottom) || 0 })); }catch(e){} }
+    };
+    f.addEventListener('pointerup', end); f.addEventListener('pointercancel', end);
+    // a drag must not also count as a tap
+    f.addEventListener('click', (ev)=>{ if(moved){ ev.stopImmediatePropagation(); ev.preventDefault(); moved = false; } }, true);
+    // ---- slide away while scrolling down ----
+    const last = new WeakMap();
+    document.addEventListener('scroll', (ev)=>{
+      const t = ev.target === document ? (document.scrollingElement || document.documentElement) : ev.target;
+      if(!t || typeof t.scrollTop !== 'number') return;
+      const y = t.scrollTop, prev = last.has(t) ? last.get(t) : y; last.set(t, y);
+      if(y > prev + 6 && y > 80) f.classList.add('gd-fab-away');
+      else if(y < prev - 6 || y <= 80) f.classList.remove('gd-fab-away');
+    }, true);
+    window.addEventListener('resize', clamp);
+  }
   (function gdWire(){
     // One floating ? on every page — no header button, no menu entries.
     if(!gdEl('gdHelpFab')){
@@ -35791,6 +35872,7 @@
       f.setAttribute('aria-label', 'About this page'); f.style.display = 'none';
       f.addEventListener('click', gdHelpClick);
       document.body.appendChild(f);
+      gdFabBehave(f);
     }
 
     // Follow sign-in / sign-out and every screen change

@@ -5908,3 +5908,18 @@ body.role-tech #adminDash, body.role-customer #adminDash, body.role-tech #opsDas
 .msgr-page .th-wait-row:last-child{ border-bottom:none; }
 .msgr-page .th-wait-st{ font-size:14px; font-weight:800; white-space:nowrap; } .msgr-page .th-amber-txt{ color:#9A6200; } .msgr-page .th-green-txt{ color:#1d7a4d; }
 .msgr-tiles .th-group{ margin:0 0 14px; } .msgr-tiles .th-group-title{ margin:0 2px 8px; }
+
+/* the floating ? stays out of the way: smaller, a little see-through, slides off while scrolling down, draggable */
+.gd-help-fab{ width:40px; height:40px; font-size:18px; opacity:.8; touch-action:none; transition:transform .25s ease, opacity .25s ease; }
+.gd-help-fab:hover, .gd-help-fab:active, .gd-help-fab:focus-visible{ opacity:1; }
+.gd-help-fab.gd-fab-away{ transform:translateX(72px); opacity:0; pointer-events:none; }
+.gd-help-fab.gd-fab-drag{ transition:none; opacity:1; cursor:grabbing; box-shadow:0 8px 22px rgba(0,0,0,.28); }
+
+/* Dispatch > All Tickets: a number on every status chip */
+#dtAdminFilterRow button .dt-count{ display:inline-block; min-width:20px; margin-left:7px; padding:0 6px; border-radius:999px; background:rgba(15,90,64,.14); color:inherit; font-size:12px; font-weight:800; line-height:20px; text-align:center; }
+#dtAdminFilterRow button.active .dt-count{ background:rgba(255,255,255,.24); }
+#dtAdminFilterRow button .dt-count.zero{ opacity:.5; }
+#dtAdminFilterRow button[data-filter="late"] .dt-count:not(.zero), #dtAdminFilterRow button[data-filter="expired"] .dt-count:not(.zero){ background:#F8D7DA; color:#B02A37; }
+#dtAdminFilterRow button.active[data-filter="late"] .dt-count:not(.zero), #dtAdminFilterRow button.active[data-filter="expired"] .dt-count:not(.zero){ background:#fff; color:#B02A37; }
+/* progress labels on wider screens: give each stage room so "Acknowledged" is not cut off (phones use the short "Ack") */
+@media (min-width:431px){ .jo-stage{ min-width:92px; } }
