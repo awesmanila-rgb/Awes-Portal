@@ -1,9 +1,3 @@
-// Bumped to v228 — Dispatch menu opens All Tickets; every status chip shows a count; the Late chip works.
-// Re-fetch css/app.css/js/app.bundle.js.
-//
-// Bumped to v227 — the floating ? slides away while scrolling down, can be dragged, and is smaller.
-// Re-fetch css/app.css/js/app.bundle.js.
-//
 // Bumped to v226 — file paths repaired after the assets move (logo, icons, banners, fonts); old source map removed.
 // Re-fetch index.html/sw.js/js/app.bundle.js.
 //
@@ -1163,7 +1157,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v228';
+const CACHE_NAME = 'awes-sr-v229';
 
 // Split into two lists on purpose.
 //

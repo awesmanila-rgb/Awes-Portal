@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta name="awes-index-version" content="224">
+<meta name="awes-index-version" content="225">
 <meta charset="UTF-8">
 <!-- Pinch-to-zoom disabled per explicit request (was deliberately left
      enabled before — see git history — because maximum-scale=1/
@@ -3237,6 +3237,18 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
     <div class="card-head"><span><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg> Return to Stock</span><span class="purch-head-right"><span class="purch-live connecting"></span></span></div>
     <div class="card-body">
       <div class="po-ed-top inv-mv-top"><button type="button" class="po-back" data-inv-hub="1">&larr; Warehouse Stock</button></div>
+      <div id="wmStoreWrap" style="display:none;">
+        <section class="po-sec">
+          <div class="po-sec-title">Return requests from workers <span class="po-tab-count" id="wmRrCount"></span></div>
+          <div id="wmRrOpen"></div>
+          <div id="wmRrDoneWrap" style="display:none;"><div class="po-sec-title" style="margin-top:14px;">Recently handled</div><div id="wmRrDone"></div></div>
+          <div class="po-hint">A worker tells you here that they are bringing materials back. When they arrive, open the request, check what they brought (change the quantity or condition if it differs) and post it &mdash; that creates the return slip. You can still record a return yourself below.</div>
+          <details class="wm-det"><summary>Handovers between workers (recent)</summary>
+            <div id="wmHoRecent"></div>
+            <div class="po-hint">Technicians pass materials to each other on site. The materials stay charged to the same job order; the Unreturned report follows the new holder.</div>
+          </details>
+        </section>
+      </div>
       <section class="po-sec">
         <div class="po-sec-title">Return</div>
         <div class="po-grid">
@@ -3307,8 +3319,21 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
         </div>
         <div class="po-sec-title" style="margin-top:0;">Waiting for your signature</div>
         <div id="invMinePending"><div class="empty-state">Loading…</div></div>
+        <div id="wmIncomingWrap" style="display:none;">
+          <div class="po-sec-title" style="margin-top:16px;">Handed over to you — check and accept</div>
+          <div id="wmIncoming"></div>
+        </div>
         <div class="po-sec-title" style="margin-top:16px;">Materials with you</div>
         <div id="invMineHold"></div>
+        <div id="wmMineWrap" style="display:none;">
+          <div class="wm-actions">
+            <button type="button" class="btn btn-primary" id="wmBtnReturn">Return to warehouse</button>
+            <button type="button" class="btn btn-secondary" id="wmBtnHandover">Hand over to a co-worker</button>
+          </div>
+          <div class="po-hint" id="wmHint"></div>
+          <div class="po-sec-title" style="margin-top:16px;">My returns &amp; handovers</div>
+          <div id="wmMine"></div>
+        </div>
         <div class="po-sec-title" style="margin-top:16px;">Recent slips</div>
         <div id="invMineRecent"></div>
       </div>
@@ -3675,6 +3700,57 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
 <!-- Purchasing: sign in again after the Supabase session expired. Keeps
      whatever sheet/form is open underneath. Wired in purchasing.js
      (purchReauth*). -->
+<!-- Worker returns & handovers (worker-moves.js) -->
+<div class="overlay" id="wmReturnOverlay" style="z-index:90;">
+  <div class="sheet" style="max-width:640px;">
+    <div class="sheet-head"><h3>Return to warehouse</h3><button class="sheet-close" type="button" data-wm-close="wmReturnOverlay">&times;</button></div>
+    <div class="field"><label>Bring them to <span class="req">*</span></label><select id="wmRetWh"></select></div>
+    <div class="po-sec-title">How much are you returning?</div>
+    <div id="wmRetLines"></div>
+    <div class="po-hint">Fill in only what you are bringing back. Mark anything broken as Damaged. You will be able to cancel until the storekeeper receives it.</div>
+    <div class="field"><label>Note (optional)</label><input type="text" id="wmRetNote" maxlength="500"></div>
+    <button type="button" class="btn btn-primary wm-big" id="wmRetSend">Send return request</button>
+  </div>
+</div>
+<div class="overlay" id="wmHandoverOverlay" style="z-index:90;">
+  <div class="sheet" style="max-width:640px;">
+    <div class="sheet-head"><h3>Hand over to a co-worker</h3><button class="sheet-close" type="button" data-wm-close="wmHandoverOverlay">&times;</button></div>
+    <div class="field"><label>Hand over to <span class="req">*</span></label><select id="wmHoTo"></select></div>
+    <div class="po-sec-title">How much are you handing over?</div>
+    <div id="wmHoLines"></div>
+    <div class="po-hint">They have to accept and sign. Until they do, the materials still count as yours. The cost stays with the same job order.</div>
+    <div class="field"><label>Note (optional)</label><input type="text" id="wmHoNote" maxlength="500"></div>
+    <button type="button" class="btn btn-primary wm-big" id="wmHoSend">Send handover</button>
+  </div>
+</div>
+<div class="overlay" id="wmAcceptOverlay" style="z-index:90;">
+  <div class="sheet" style="max-width:560px;">
+    <div class="sheet-head"><h3>Materials handed to you</h3><button class="sheet-close" type="button" data-wm-close="wmAcceptOverlay">&times;</button></div>
+    <div id="wmAccInfo" class="mr-info"></div>
+    <div id="wmAccItems" style="margin:10px 0;"></div>
+    <div class="po-hint">Check that you really received these. Signing makes them yours &mdash; you will be responsible for them until you use or return them.</div>
+    <div class="po-sec-title">Your signature</div>
+    <div class="inv-sigpad"><canvas id="wmAccSig"></canvas></div>
+    <button type="button" class="btn btn-secondary mt-small-btn" id="wmAccClear">Clear</button>
+    <div class="wm-actions">
+      <button type="button" class="btn btn-primary" id="wmAccYes">Accept &amp; sign</button>
+      <button type="button" class="btn btn-secondary" id="wmAccNo">Decline</button>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="wmReceiveOverlay" style="z-index:90;">
+  <div class="sheet" style="max-width:660px;">
+    <div class="sheet-head"><h3>Receive returned materials</h3><button class="sheet-close" type="button" data-wm-close="wmReceiveOverlay">&times;</button></div>
+    <div id="wmRcvInfo" class="mr-info"></div>
+    <div class="po-sec-title" style="margin-top:12px;">What did the worker bring?</div>
+    <div id="wmRcvLines"></div>
+    <div class="field" id="wmRcvNoteWrap"><label>Note (optional)</label><input type="text" id="wmRcvNote" maxlength="500"></div>
+    <div class="wm-actions" id="wmRcvActions">
+      <button type="button" class="btn btn-primary" id="wmRcvYes">Receive &amp; post return</button>
+      <button type="button" class="btn btn-secondary" id="wmRcvNo">Decline</button>
+    </div>
+  </div>
+</div>
 <div class="overlay" id="purchReauthOverlay" style="z-index:95;">
   <div class="sheet" style="max-width:440px;">
     <div class="sheet-head">

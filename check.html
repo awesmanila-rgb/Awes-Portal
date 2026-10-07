@@ -20,7 +20,7 @@ button.alt{background:#fff;color:#0F5A40;border:2px solid #0F5A40}
 <button id="clear">Refresh from the server and open the app</button>
 <button class="alt" id="again">Check again</button>
 <script>
-const WANT='v228';
+const WANT='v226';
 const checks=[
  {file:'sw.js', label:'sw.js (release number)', test:t=>{const m=t.match(/awes-sr-(v\d+)/); return m?{ok:m[1]===WANT,text:'release '+m[1]}:{ok:false,text:'no release number found'};}},
  {file:'index.html', label:'index.html', test:t=>{const m=t.match(/awes-index-version" content="(\d+)"/); return m?{ok:Number(m[1])>=224,text:'page version '+m[1]+(Number(m[1])>=224?'':' (needs 224)')}:{ok:false,text:'old index.html (no version marker)'};}},

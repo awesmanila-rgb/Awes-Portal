@@ -2,7 +2,7 @@
   "use strict";
 
   (function(){
-    var NEED = 224;
+    var NEED = 225;
     function show(msg){
       try{
         var d = document.createElement('div');
@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v228';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v229';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -22924,12 +22924,13 @@
   // =====================================================================
   let invRetHold = [];
   async function invShowReturns(){
-    await invEnter(()=>{
+    const entered = await invEnter(()=>{
       $('invRetWh').innerHTML = invFillCommon(invX.inWh);
       $('invRetWorker').innerHTML = invOpts(invX.workers, w=> w.id, w=> w.name, 'Choose a person…');
       $('invRetNote').value = ''; invRetHold = [];
       $('invRetLines').innerHTML = '<div class="empty-state" style="padding:12px;">Choose who is returning materials.</div>';
     }, 'in');
+    if(entered && typeof wmStoreRefresh === 'function') wmStoreRefresh();   // worker-moves.js: requests from workers, handovers
   }
   function invPrjLabel(pid, job){
     const p = invX.projects.find(x=> x.id === pid);
@@ -23256,13 +23257,17 @@
       });
       $('invMineHold').innerHTML = html || '<div class="empty-state" style="padding:12px;">You\u2019re not holding any issued materials.</div>';
       invSetMineBadge(pend.length + dels.length);
+      if(typeof wmMineRefresh === 'function') wmMineRefresh();   // worker-moves.js: return requests, handovers
     }catch(e){
       $('invMinePending').innerHTML = '<div class="empty-state">' + (purchIsAuthError(e) ? PURCH_EXPIRED_HTML : invMissingTables(e) ? 'Inventory isn\u2019t set up yet.' : 'Couldn\u2019t load: ' + escapeHtml(describeCloudError(e))) + '</div>';
     }
   }
+  let invMineBase = 0, wmIncoming = 0;   // slips + deliveries to sign for / handovers waiting for acceptance (worker-moves.js)
   function invSetMineBadge(n){
+    invMineBase = n || 0;
+    const t = invMineBase + wmIncoming;
     const b = document.getElementById('techQaMyMatBadge'); if(!b) return;
-    b.textContent = n ? n + ' to receive' : ''; b.style.display = n ? '' : 'none';
+    b.textContent = t ? t + ' to receive' : ''; b.style.display = t ? '' : 'none';
   }
   // cheap check on the home screen so the tile shows how many slips need signing
   async function invRefreshMineBadge(){
@@ -23271,6 +23276,7 @@
       const { data, error } = await db.from('issue_slips').select('id').eq('worker_id', currentUser.id).eq('status', 'issued');
       let n = error ? null : (data || []).length;
       try{ const dr = await db.from('site_deliveries').select('id').eq('assigned_to', currentUser.id).eq('status', 'assigned'); if(!dr.error && n != null) n += (dr.data || []).length; }catch(e){}
+      try{ const hr = await db.from('material_handovers').select('id').eq('to_worker_id', currentUser.id).eq('status', 'pending'); if(!hr.error) wmIncoming = (hr.data || []).length; }catch(e){}
       if(n != null) invSetMineBadge(n);
     }catch(e){}
   }
@@ -23391,6 +23397,444 @@
     }catch(e){ purchFail('Couldn\u2019t confirm: ', e); }
     finally{ btn.disabled = false; }
   });
+
+
+  // =====================================================================
+  // Worker returns & handovers  (migration 20261101_01_worker_returns_handovers.sql)
+  //
+  // TECHNICIAN  (My Materials page)
+  //   "Return to warehouse"  -> a return REQUEST (inv_rr_create): what, how much, good/damaged, which
+  //                             warehouse. The storekeeper is alerted; the request can be cancelled
+  //                             until it is received.
+  //   "Hand over to a co-worker" -> a HANDOVER (inv_ho_create) the other technician accepts with a
+  //                             signature (inv_ho_respond). Charged to the same project / job order.
+  //   Incoming handovers show under "Waiting for your signature" and as a Need-to-do-now card.
+  // STOREKEEPER / OFFICE  (Returns page)
+  //   Requests from workers: check what was brought, adjust quantity / condition, post (inv_rr_receive,
+  //   which posts a normal RET slip) or decline with a reason. Recent handovers are listed read-only.
+  //
+  // Everything here is optional: if the migration has not been run, the sections stay hidden.
+  // =====================================================================
+  const wm = { mats:new Map(), whs:[], prj:new Map(), avail:[], incoming:[], rrList:[], hoList:[],
+               pickRet:[], pickHo:[], sig:null, accept:null, rcv:null, busy:false };
+
+  function wmMissing(e){ return /material_handovers|material_return_request|inv_my_available|inv_rr_|inv_ho_|PGRST202|PGRST205|42P01|42883/.test(purchErrText(e)); }
+  function wmMat(id){ return wm.mats.get(id) || { id, code:'?', name:'(item)', unit:'' }; }
+  function wmPrj(pid, job){
+    const p = pid ? wm.prj.get(pid) : null;
+    return [p ? p.project_no + ' \u2014 ' + p.name : '', job].filter(Boolean).join(' \u00B7 ') || 'No project / job order';
+  }
+  function wmPill(status){
+    const map = { requested:['submitted', 'Waiting'], pending:['submitted', 'Waiting'], received:['fulfilled', 'Received'], accepted:['fulfilled', 'Accepted'],
+                  declined:['rejected', 'Declined'], cancelled:['cancelled', 'Cancelled'] };
+    const m = map[status] || ['draft', status];
+    return '<span class="po-status ' + m[0] + '">' + escapeHtml(m[1]) + '</span>';
+  }
+  function wmOpen(id){ const o = $(id); if(o) o.classList.add('open'); }
+  function wmClose(id){ const o = $(id); if(o) o.classList.remove('open'); }
+  function wmNum(v){ const q = spParseMoney(String(v || '').trim()); return (q == null || Number.isNaN(q)) ? NaN : q; }
+  function wmGroups(rows){
+    const g = new Map();
+    rows.forEach(r=>{
+      const k = (r.project_id || '') + '|' + (r.job_order_id || '');
+      if(!g.has(k)) g.set(k, { project_id:r.project_id || null, job_order_id:r.job_order_id || null, rows:[] });
+      g.get(k).rows.push(r);
+    });
+    return Array.from(g.values());
+  }
+  function wmItemsText(items){
+    const a = (items || []).slice().sort((x, y)=> x.line_no - y.line_no).map(i=>{ const m = wmMat(i.material_id); return invQty(i.qty_received != null ? i.qty_received : i.qty) + ' ' + m.unit + ' ' + m.name; });
+    return a.length > 2 ? a.slice(0, 2).join(', ') + ' +' + (a.length - 2) + ' more' : a.join(', ');
+  }
+  function wmPush(uid, title, msg, tag){ try{ if(uid) notifyUser(uid, title, msg, tag); }catch(e){} }
+
+  async function wmLoadCtx(){
+    const [cat, whs, pr] = await Promise.all([
+      db.from('materials').select('id, code, name, unit'),
+      db.from('warehouses').select('id, code, name, is_active').order('code'),
+      db.from('projects').select('id, project_no, name')
+    ]);
+    if(cat.data) wm.mats = new Map(cat.data.map(m=> [m.id, m]));
+    if(whs.data) wm.whs = whs.data.filter(w=> w.is_active);
+    if(pr.data) wm.prj = new Map(pr.data.map(p=> [p.id, p]));
+  }
+
+  // ---------------------------------------------------------------------
+  // TECHNICIAN — the My Materials page
+  // ---------------------------------------------------------------------
+  async function wmMineRefresh(){
+    const wrap = $('wmMineWrap'); if(!wrap || !currentUser) return;
+    try{
+      await wmLoadCtx();
+      const me = currentUser.id;
+      const [av, inc, rr, ho] = await Promise.all([
+        db.rpc('inv_my_available'),
+        db.from('material_handovers').select('*, material_handover_items(*)').eq('to_worker_id', me).eq('status', 'pending').order('created_at', { ascending:false }),
+        db.from('material_return_requests').select('*, material_return_request_items(*)').eq('worker_id', me).order('created_at', { ascending:false }).limit(12),
+        db.from('material_handovers').select('*, material_handover_items(*)').or('from_worker_id.eq.' + me + ',to_worker_id.eq.' + me).order('created_at', { ascending:false }).limit(12)
+      ]);
+      for(const r of [av, inc, rr, ho]) if(r.error) throw r.error;
+      wrap.style.display = '';
+      wm.avail = (av.data || []).filter(a=> Number(a.available) > 0);
+      wm.incoming = inc.data || [];
+      wmIncoming = wm.incoming.length;
+      invSetMineBadge(invMineBase);   // refresh the My Materials tile badge now that the handovers are known
+
+      $('wmIncomingWrap').style.display = wm.incoming.length ? '' : 'none';
+      $('wmIncoming').innerHTML = wm.incoming.map(h=>
+        '<button type="button" class="mt-row" data-wm-accept="' + escapeHtml(h.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(h.handover_no) + '</span>' +
+        escapeHtml(h.from_name) + ' handed you materials <span class="po-status returned">accept now</span></div>' +
+        '<div class="sp-row-sub">' + escapeHtml([wmItemsText(h.material_handover_items), wmPrj(h.project_id, h.job_order_id)].filter(Boolean).join(' \u00B7 ')) + '</div></div></button>').join('');
+
+      const none = !wm.avail.length;
+      $('wmBtnReturn').disabled = none; $('wmBtnHandover').disabled = none;
+      $('wmHint').textContent = none ? 'You are not holding any materials that are free to return or hand over.'
+        : 'Bring leftovers back to the warehouse, or pass them to another technician on site.';
+
+      const rows = [];
+      (rr.data || []).forEach(r=> rows.push({ kind:'rr', at:r.created_at, r }));
+      (ho.data || []).forEach(h=> rows.push({ kind:'ho', at:h.created_at, h }));
+      rows.sort((a, b)=> String(b.at).localeCompare(String(a.at)));
+      $('wmMine').innerHTML = rows.slice(0, 12).map(x=>{
+        if(x.kind === 'rr'){
+          const r = x.r, w = wm.whs.find(k=> k.id === r.warehouse_id);
+          return '<div class="mt-row wm-static"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(r.request_no) + '</span>Return to ' + escapeHtml(w ? w.code : 'warehouse') + wmPill(r.status) + '</div>' +
+            '<div class="sp-row-sub">' + escapeHtml([wmItemsText(r.material_return_request_items), wmWhen(r.created_at), r.status === 'declined' && r.decision_note ? 'Reason: ' + r.decision_note : ''].filter(Boolean).join(' \u00B7 ')) + '</div></div>' +
+            (r.status === 'requested' ? '<button type="button" class="btn btn-secondary mt-small-btn" data-wm-cancel-rr="' + escapeHtml(r.id) + '">Cancel</button>' : '') + '</div>';
+        }
+        const h = x.h, out = h.from_worker_id === currentUser.id;
+        return '<div class="mt-row wm-static"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(h.handover_no) + '</span>' +
+          (out ? 'Handed to ' + escapeHtml(h.to_name) : 'From ' + escapeHtml(h.from_name)) + wmPill(h.status) + '</div>' +
+          '<div class="sp-row-sub">' + escapeHtml([wmItemsText(h.material_handover_items), wmWhen(h.created_at), h.status === 'declined' && h.response_note ? 'Reason: ' + h.response_note : ''].filter(Boolean).join(' \u00B7 ')) + '</div></div>' +
+          (out && h.status === 'pending' ? '<button type="button" class="btn btn-secondary mt-small-btn" data-wm-cancel-ho="' + escapeHtml(h.id) + '">Cancel</button>' : '') + '</div>';
+      }).join('') || '<div class="empty-state" style="padding:12px;">Nothing yet.</div>';
+    }catch(e){
+      if(wmMissing(e)){ wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      $('wmMine').innerHTML = '<div class="empty-state">Couldn\u2019t load: ' + escapeHtml(describeCloudError(e)) + '</div>';
+    }
+  }
+  function wmWhen(t){ try{ return mrWhen(t); }catch(e){ return ''; } }
+
+  // one line per held item, grouped by project / job order
+  function wmLinesHtml(picks, withCond){
+    let html = '', last = null;
+    picks.forEach((p, n)=>{
+      const g = (p.row.project_id || '') + '|' + (p.row.job_order_id || '');
+      if(g !== last){ last = g; html += '<div class="inv-hold-grp">' + escapeHtml(wmPrj(p.row.project_id, p.row.job_order_id)) + '</div>'; }
+      const m = wmMat(p.row.material_id);
+      html += '<div class="wm-ln" data-i="' + n + '"><div class="wm-ln-main"><b>' + escapeHtml(m.name) + '</b><span>' + escapeHtml(m.code) + ' \u00B7 up to ' + invQty(p.row.available) + ' ' + escapeHtml(m.unit) + '</span></div>' +
+        '<input type="text" class="num wm-q" inputmode="decimal" placeholder="0" aria-label="Quantity"><span class="wm-u">' + escapeHtml(m.unit) + '</span>' +
+        (withCond ? '<select class="wm-c" aria-label="Condition"><option value="good">Good</option><option value="damaged">Damaged</option></select>' : '') + '</div>';
+    });
+    return html;
+  }
+  function wmCollect(picks, withCond){
+    const out = [];
+    for(const p of picks){
+      if(!String(p.qty || '').trim()) continue;
+      const q = wmNum(p.qty), m = wmMat(p.row.material_id);
+      if(Number.isNaN(q) || q <= 0){ toast(m.name + ': enter a quantity above 0'); return null; }
+      if(q > Number(p.row.available) + 1e-9){ toast(m.name + ': you can only use up to ' + invQty(p.row.available)); return null; }
+      out.push({ row:p.row, q, cond:withCond ? p.cond : 'good' });
+    }
+    if(!out.length){ toast('Enter how much you are using'); return null; }
+    return out;
+  }
+  // ----- return request form -----
+  function wmOpenReturn(){
+    if(!wm.avail.length){ toast('You are not holding anything to return'); return; }
+    wm.pickRet = wm.avail.map(r=> ({ row:r, qty:'', cond:'good' }));
+    $('wmRetWh').innerHTML = wm.whs.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.code + ' \u00B7 ' + (w.name || '')) + '</option>').join('');
+    // default: the warehouse most of it came from isn't known here, so keep the first; the technician chooses
+    $('wmRetNote').value = '';
+    $('wmRetLines').innerHTML = wmLinesHtml(wm.pickRet, true);
+    wmOpen('wmReturnOverlay');
+  }
+  async function wmSubmitReturn(){
+    if(wm.busy) return;
+    const whId = $('wmRetWh').value; if(!whId){ toast('Choose the warehouse you will bring them to'); return; }
+    const picked = wmCollect(wm.pickRet, true); if(!picked) return;
+    const groups = wmGroups(picked.map(x=> Object.assign({}, x.row, { _q:x.q, _c:x.cond })));
+    const wh = wm.whs.find(w=> w.id === whId);
+    const dmg = picked.filter(x=> x.cond === 'damaged').length;
+    if(!await uiConfirm('Send return request?\n\nThe storekeeper of ' + (wh ? wh.code : 'the warehouse') + ' will be told. Bring the materials to them \u2014 the return is posted once they have checked them.' + (dmg ? '\n\n' + dmg + ' line' + (dmg === 1 ? ' is' : 's are') + ' marked damaged.' : ''), { ok:'Send request' })) return;
+    if(!(await purchEnsureSession())) return;
+    wm.busy = true; $('wmRetSend').disabled = true;
+    const done = [];
+    try{
+      for(const g of groups){
+        const { data, error } = await db.rpc('inv_rr_create', { p:{ warehouse_id:whId, project_id:g.project_id, job_order_id:g.job_order_id, note:$('wmRetNote').value.trim(),
+          lines:g.rows.map(r=> ({ material_id:r.material_id, qty:r._q, condition:r._c })) } });
+        if(error) throw error;
+        done.push(data);
+      }
+      toast(done.map(d=> d.request_no).join(', ') + ' sent to ' + (wh ? wh.code : 'the warehouse'));
+      wmClose('wmReturnOverlay');
+      for(const d of done){
+        try{
+          const t = await db.rpc('inv_rr_notify_targets', { p_id:d.id });
+          (t.data || []).forEach(x=> wmPush(x.user_id, 'Worker returning materials', d.worker_name + ' is bringing materials back to ' + d.warehouse_code + ' (' + d.request_no + ').', 'rrq-' + d.id + '-' + x.user_id));
+        }catch(e){}
+      }
+      try{ if(typeof notifyAdmins === 'function') notifyAdmins('Worker returning materials', (done[0].worker_name || 'A worker') + ' sent a return request to ' + done[0].warehouse_code + ' (' + done.map(d=> d.request_no).join(', ') + ').', 'rrq-' + done[0].id); }catch(e){}
+    }catch(e){
+      purchFail('Couldn\u2019t send the request' + (done.length ? ' (' + done.map(d=> d.request_no).join(', ') + ' was sent before the error)' : '') + ': ', e);
+    }finally{ wm.busy = false; $('wmRetSend').disabled = false; wmMineRefresh(); }
+  }
+
+  // ----- handover form -----
+  async function wmOpenHandover(){
+    if(!wm.avail.length){ toast('You are not holding anything to hand over'); return; }
+    try{
+      const { data, error } = await db.rpc('worker_names');
+      if(error) throw error;
+      const people = (data || []).filter(w=> w.role === 'technician' && w.id !== currentUser.id);
+      if(!people.length){ toast('There is no other technician to hand over to'); return; }
+      $('wmHoTo').innerHTML = '<option value="">Choose a technician\u2026</option>' + people.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.name) + '</option>').join('');
+    }catch(e){ purchFail('Couldn\u2019t load the technicians: ', e); return; }
+    wm.pickHo = wm.avail.map(r=> ({ row:r, qty:'' }));
+    $('wmHoNote').value = '';
+    $('wmHoLines').innerHTML = wmLinesHtml(wm.pickHo, false);
+    wmOpen('wmHandoverOverlay');
+  }
+  async function wmSubmitHandover(){
+    if(wm.busy) return;
+    const to = $('wmHoTo').value; if(!to){ toast('Choose who you are handing over to'); return; }
+    const toName = $('wmHoTo').selectedOptions[0].textContent;
+    const picked = wmCollect(wm.pickHo, false); if(!picked) return;
+    const groups = wmGroups(picked.map(x=> Object.assign({}, x.row, { _q:x.q })));
+    if(!await uiConfirm('Hand over to ' + toName + '?\n\nThey must accept and sign. Until they do, these materials are still counted as yours. They stay charged to the same job order.', { ok:'Send handover' })) return;
+    if(!(await purchEnsureSession())) return;
+    wm.busy = true; $('wmHoSend').disabled = true;
+    const done = [];
+    try{
+      for(const g of groups){
+        const { data, error } = await db.rpc('inv_ho_create', { p:{ to_worker_id:to, project_id:g.project_id, job_order_id:g.job_order_id, note:$('wmHoNote').value.trim(),
+          lines:g.rows.map(r=> ({ material_id:r.material_id, qty:r._q })) } });
+        if(error) throw error;
+        done.push(data);
+      }
+      toast(done.map(d=> d.handover_no).join(', ') + ' sent to ' + toName);
+      wmClose('wmHandoverOverlay');
+      done.forEach(d=> wmPush(to, 'Materials handed over to you', d.from_name + ' handed you materials (' + d.handover_no + '). Open My Materials to accept and sign.', 'hnd-' + d.id));
+    }catch(e){
+      purchFail('Couldn\u2019t send the handover' + (done.length ? ' (' + done.map(d=> d.handover_no).join(', ') + ' was sent before the error)' : '') + ': ', e);
+    }finally{ wm.busy = false; $('wmHoSend').disabled = false; wmMineRefresh(); }
+  }
+
+  // ----- accept / decline an incoming handover -----
+  async function wmOpenAccept(id){
+    const h = wm.incoming.find(x=> x.id === id); if(!h) return;
+    wm.accept = h;
+    $('wmAccInfo').innerHTML = '<b>' + escapeHtml(h.handover_no) + '</b> \u00B7 from <b>' + escapeHtml(h.from_name) + '</b><br><span class="wm-sub">' + escapeHtml(wmPrj(h.project_id, h.job_order_id)) + '</span>' +
+      (h.note ? '<br><span class="wm-sub">Note: ' + escapeHtml(h.note) + '</span>' : '');
+    $('wmAccItems').innerHTML = (h.material_handover_items || []).slice().sort((a, b)=> a.line_no - b.line_no).map(i=>{
+      const m = wmMat(i.material_id);
+      return '<div class="wm-acc-row"><span>' + escapeHtml(m.name) + '<span class="wm-sub"> ' + escapeHtml(m.code) + '</span></span><b>' + invQty(i.qty) + ' ' + escapeHtml(m.unit) + '</b></div>';
+    }).join('');
+    wmOpen('wmAcceptOverlay');
+    try{
+      await loadAwesScript('signature', awesLibs.signature);
+      wm.sig = new SignaturePad($('wmAccSig'), { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+      wmSigFit();
+    }catch(e){ toast('Couldn\u2019t load the signature box: ' + describeCloudError(e)); }
+  }
+  function wmSigFit(){
+    const c = $('wmAccSig');
+    if(!wm.sig || !c || !c.offsetWidth) return;
+    const data = wm.sig.toData(), ratio = Math.max(window.devicePixelRatio || 1, 1);
+    c.width = c.offsetWidth * ratio; c.height = c.offsetHeight * ratio;
+    c.getContext('2d').scale(ratio, ratio);
+    wm.sig.clear();
+    if(data && data.length) wm.sig.fromData(data);
+  }
+  window.addEventListener('resize', ()=>{ if($('wmAcceptOverlay') && $('wmAcceptOverlay').classList.contains('open')) wmSigFit(); });
+  async function wmDoAccept(){
+    const h = wm.accept; if(!h || wm.busy) return;
+    if(!wm.sig || wm.sig.isEmpty()){ toast('Please sign in the box first'); return; }
+    if(!(await purchEnsureSession())) return;
+    wm.busy = true; $('wmAccYes').disabled = true;
+    try{
+      const cropped = (typeof poCleanSignature === 'function' && poCleanSignature($('wmAccSig'))) || $('wmAccSig');
+      const blob = await new Promise(res=> cropped.toBlob(res, 'image/png'));
+      const path = currentUser.id + '/hnd-' + h.id + '-' + Date.now() + '.png';
+      const up = await db.storage.from('inventory-signatures').upload(path, blob, { contentType:'image/png', upsert:false });
+      if(up.error) throw up.error;
+      const { data, error } = await db.rpc('inv_ho_respond', { p:{ id:h.id, accept:true, signature_path:path } });
+      if(error) throw error;
+      toast(h.handover_no + ' accepted \u2014 the materials are now yours');
+      wmPush(data.from_worker_id, 'Handover accepted', (data.to_name || 'The technician') + ' accepted ' + data.handover_no + '.', 'hnd-ok-' + h.id);
+      wmClose('wmAcceptOverlay');
+    }catch(e){ purchFail('Couldn\u2019t accept: ', e); }
+    finally{ wm.busy = false; $('wmAccYes').disabled = false; wmMineRefresh(); }
+  }
+  async function wmDoDecline(){
+    const h = wm.accept; if(!h || wm.busy) return;
+    const why = await uiPrompt('Decline ' + h.handover_no + '?\n\nWhy? ' + h.from_name + ' sees this.', '', { ok:'Decline', danger:true, multiline:false });
+    if(why == null) return;
+    if(!String(why).trim()){ toast('Please give a reason'); return; }
+    if(!(await purchEnsureSession())) return;
+    wm.busy = true;
+    try{
+      const { data, error } = await db.rpc('inv_ho_respond', { p:{ id:h.id, accept:false, note:String(why).trim() } });
+      if(error) throw error;
+      toast(h.handover_no + ' declined');
+      wmPush(data.from_worker_id, 'Handover declined', (data.to_name || 'The technician') + ' declined ' + data.handover_no + ': ' + String(why).trim(), 'hnd-no-' + h.id);
+      wmClose('wmAcceptOverlay');
+    }catch(e){ purchFail('Couldn\u2019t decline: ', e); }
+    finally{ wm.busy = false; wmMineRefresh(); }
+  }
+
+  // ---------------------------------------------------------------------
+  // STOREKEEPER / OFFICE — the Returns page
+  // ---------------------------------------------------------------------
+  async function wmStoreRefresh(){
+    const wrap = $('wmStoreWrap'); if(!wrap) return;
+    try{
+      if(!wm.mats.size && typeof invX !== 'undefined' && invX.catById) invX.catById.forEach((m, id)=> wm.mats.set(id, m));
+      if(typeof invX !== 'undefined'){ (invX.projects || []).forEach(p=> wm.prj.set(p.id, p)); wm.whs = (invX.whs || []).filter(w=> w.is_active); }
+      const [open, done, ho] = await Promise.all([
+        db.from('material_return_requests').select('*, material_return_request_items(*)').eq('status', 'requested').order('created_at', { ascending:true }),
+        db.from('material_return_requests').select('*, material_return_request_items(*)').neq('status', 'requested').order('decided_at', { ascending:false, nullsFirst:false }).limit(8),
+        db.from('material_handovers').select('*, material_handover_items(*)').order('created_at', { ascending:false }).limit(12)
+      ]);
+      for(const r of [open, done, ho]) if(r.error) throw r.error;
+      wrap.style.display = '';
+      wm.rrList = (open.data || []).concat(done.data || []);
+      const whCode = (id)=> { const w = (invX.whs || []).find(k=> k.id === id); return w ? w.code : 'warehouse'; };
+      const row = (r)=> '<button type="button" class="mt-row" data-wm-receive="' + escapeHtml(r.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(r.request_no) + '</span>' +
+        escapeHtml(r.worker_name) + ' \u2192 ' + escapeHtml(whCode(r.warehouse_id)) + wmPill(r.status) + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml([wmItemsText(r.material_return_request_items), wmPrj(r.project_id, r.job_order_id), wmWhen(r.created_at)].filter(Boolean).join(' \u00B7 ')) + '</div></div></button>';
+      $('wmRrOpen').innerHTML = (open.data || []).length ? open.data.map(row).join('') : '<div class="empty-state" style="padding:12px;">No worker is waiting to return anything. \uD83D\uDC4D</div>';
+      $('wmRrCount').textContent = (open.data || []).length ? String(open.data.length) : '';
+      $('wmRrDoneWrap').style.display = (done.data || []).length ? '' : 'none';
+      $('wmRrDone').innerHTML = (done.data || []).map(row).join('');
+      wm.hoList = ho.data || [];
+      $('wmHoRecent').innerHTML = wm.hoList.map(h=>
+        '<div class="mt-row wm-static"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(h.handover_no) + '</span>' +
+        escapeHtml(h.from_name) + ' \u2192 ' + escapeHtml(h.to_name) + wmPill(h.status) + '</div>' +
+        '<div class="sp-row-sub">' + escapeHtml([wmItemsText(h.material_handover_items), wmPrj(h.project_id, h.job_order_id), wmWhen(h.created_at)].filter(Boolean).join(' \u00B7 ')) + '</div></div></div>').join('')
+        || '<div class="empty-state" style="padding:12px;">No handovers yet.</div>';
+    }catch(e){
+      if(wmMissing(e)){ wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      $('wmRrOpen').innerHTML = '<div class="empty-state">Couldn\u2019t load: ' + escapeHtml(describeCloudError(e)) + '</div>';
+    }
+  }
+
+  function wmOpenReceive(id){
+    const r = wm.rrList.find(x=> x.id === id); if(!r) return;
+    const items = (r.material_return_request_items || []).slice().sort((a, b)=> a.line_no - b.line_no);
+    const open = r.status === 'requested';
+    wm.rcv = { r, items, qty:items.map(i=> String(Number(i.qty_received != null ? i.qty_received : i.qty))), cond:items.map(i=> i.condition_received || i.condition) };
+    const w = (typeof invX !== 'undefined' ? (invX.whs || []) : []).find(k=> k.id === r.warehouse_id);
+    $('wmRcvInfo').innerHTML = '<b>' + escapeHtml(r.request_no) + '</b> \u00B7 ' + escapeHtml(r.worker_name) + ' \u2192 <b>' + escapeHtml(w ? w.code : 'warehouse') + '</b>' + wmPill(r.status) +
+      '<br><span class="wm-sub">' + escapeHtml(wmPrj(r.project_id, r.job_order_id)) + '</span>' + (r.note ? '<br><span class="wm-sub">Note: ' + escapeHtml(r.note) + '</span>' : '') +
+      (r.status === 'declined' && r.decision_note ? '<br><span class="wm-sub">Declined: ' + escapeHtml(r.decision_note) + '</span>' : '');
+    $('wmRcvLines').innerHTML = items.map((it, n)=>{
+      const m = wmMat(it.material_id);
+      return '<div class="wm-ln" data-i="' + n + '"><div class="wm-ln-main"><b>' + escapeHtml(m.name) + '</b><span>' + escapeHtml(m.code) + ' \u00B7 asked ' + invQty(it.qty) + ' ' + escapeHtml(m.unit) + ' (' + escapeHtml(it.condition) + ')</span></div>' +
+        '<input type="text" class="num wm-q" inputmode="decimal" value="' + escapeHtml(wm.rcv.qty[n]) + '"' + (open ? '' : ' disabled') + ' aria-label="Quantity received"><span class="wm-u">' + escapeHtml(m.unit) + '</span>' +
+        '<select class="wm-c"' + (open ? '' : ' disabled') + ' aria-label="Condition"><option value="good"' + (wm.rcv.cond[n] === 'good' ? ' selected' : '') + '>Good</option><option value="damaged"' + (wm.rcv.cond[n] === 'damaged' ? ' selected' : '') + '>Damaged</option></select></div>';
+    }).join('');
+    $('wmRcvNote').value = ''; $('wmRcvNoteWrap').style.display = open ? '' : 'none';
+    $('wmRcvActions').style.display = open ? '' : 'none';
+    wmOpen('wmReceiveOverlay');
+  }
+  async function wmDoReceive(){
+    const s = wm.rcv; if(!s || wm.busy) return;
+    const lines = [];
+    for(let n = 0; n < s.items.length; n++){
+      const q = wmNum(s.qty[n]), it = s.items[n], m = wmMat(it.material_id);
+      if(Number.isNaN(q) || q < 0){ toast(m.name + ': enter the quantity received (0 if not brought)'); return; }
+      if(q > Number(it.qty) + 1e-9){ toast(m.name + ': only ' + invQty(it.qty) + ' was asked for'); return; }
+      lines.push({ item_id:it.id, qty:q, condition:s.cond[n] });
+    }
+    if(!lines.some(l=> l.qty > 0)){ toast('Nothing received? Decline the request instead'); return; }
+    const dmg = lines.filter(l=> l.qty > 0 && l.condition === 'damaged').length;
+    if(!await uiConfirm('Receive and post ' + s.r.request_no + '?\n\nA return slip is posted for what you entered. Good items go back into stock; damaged ones are recorded but not restocked.' + (dmg ? '\n\n' + dmg + ' damaged line' + (dmg === 1 ? '' : 's') + '.' : ''), { ok:'Receive & post' })) return;
+    if(!(await purchEnsureSession())) return;
+    wm.busy = true; $('wmRcvYes').disabled = true;
+    try{
+      const { data, error } = await db.rpc('inv_rr_receive', { p:{ id:s.r.id, note:$('wmRcvNote').value.trim(), lines } });
+      if(error) throw error;
+      toast(data.return_no + ' posted (' + data.request_no + ')');
+      wmPush(data.worker_id, 'Return received', data.request_no + ' was received and posted as ' + data.return_no + (data.short ? ' \u2014 with differences, check the slip.' : '.'), 'rrq-ok-' + s.r.id);
+      wmClose('wmReceiveOverlay');
+    }catch(e){ purchFail('Couldn\u2019t post: ', e); }
+    finally{ wm.busy = false; $('wmRcvYes').disabled = false; wmStoreRefresh(); }
+  }
+  async function wmDoRrDecline(){
+    const s = wm.rcv; if(!s || wm.busy) return;
+    const why = await uiPrompt('Decline ' + s.r.request_no + '?\n\nWhy? ' + s.r.worker_name + ' sees this.', '', { ok:'Decline', danger:true, multiline:false });
+    if(why == null) return;
+    if(!String(why).trim()){ toast('Please give a reason'); return; }
+    if(!(await purchEnsureSession())) return;
+    wm.busy = true;
+    try{
+      const { data, error } = await db.rpc('inv_rr_decline', { p_id:s.r.id, p_reason:String(why).trim() });
+      if(error) throw error;
+      toast(s.r.request_no + ' declined');
+      wmPush(data.worker_id, 'Return declined', data.request_no + ': ' + String(why).trim(), 'rrq-no-' + s.r.id);
+      wmClose('wmReceiveOverlay');
+    }catch(e){ purchFail('Couldn\u2019t decline: ', e); }
+    finally{ wm.busy = false; wmStoreRefresh(); }
+  }
+
+  // ---------------------------------------------------------------------
+  // wiring (all elements live in index.html; guarded so a missing one never aborts start-up)
+  // ---------------------------------------------------------------------
+  (function wmWire(){
+    const on = (id, ev, fn)=>{ const el = $(id); if(el) el.addEventListener(ev, fn); };
+    on('wmBtnReturn', 'click', wmOpenReturn);
+    on('wmBtnHandover', 'click', wmOpenHandover);
+    on('wmRetSend', 'click', wmSubmitReturn);
+    on('wmHoSend', 'click', wmSubmitHandover);
+    on('wmAccYes', 'click', wmDoAccept);
+    on('wmAccNo', 'click', wmDoDecline);
+    on('wmAccClear', 'click', ()=>{ if(wm.sig) wm.sig.clear(); });
+    on('wmRcvYes', 'click', wmDoReceive);
+    on('wmRcvNo', 'click', wmDoRrDecline);
+    // the pick arrays are replaced each time a form opens, so bind through a function that reads the current one
+    const bindDyn = (id, get, withCond)=>{
+      const host = $(id); if(!host) return;
+      host.addEventListener('input', (e)=>{ const l = e.target.closest('.wm-ln'); if(l && e.target.classList.contains('wm-q')) get()[Number(l.dataset.i)].qty = e.target.value; });
+      host.addEventListener('change', (e)=>{ const l = e.target.closest('.wm-ln'); if(l && withCond && e.target.classList.contains('wm-c')) get()[Number(l.dataset.i)].cond = e.target.value; });
+    };
+    bindDyn('wmHoLines', ()=> wm.pickHo, false);
+    bindDyn('wmRetLines', ()=> wm.pickRet, true);
+    const rcv = $('wmRcvLines');
+    if(rcv){
+      rcv.addEventListener('input', (e)=>{ const l = e.target.closest('.wm-ln'); if(l && wm.rcv && e.target.classList.contains('wm-q')) wm.rcv.qty[Number(l.dataset.i)] = e.target.value; });
+      rcv.addEventListener('change', (e)=>{ const l = e.target.closest('.wm-ln'); if(l && wm.rcv && e.target.classList.contains('wm-c')) wm.rcv.cond[Number(l.dataset.i)] = e.target.value; });
+    }
+    document.addEventListener('click', async (e)=>{
+      const close = e.target.closest('[data-wm-close]');
+      if(close){ wmClose(close.dataset.wmClose); return; }
+      const acc = e.target.closest('[data-wm-accept]');
+      if(acc){ wmOpenAccept(acc.dataset.wmAccept); return; }
+      const rc = e.target.closest('[data-wm-receive]');
+      if(rc){ wmOpenReceive(rc.dataset.wmReceive); return; }
+      const cr = e.target.closest('[data-wm-cancel-rr]');
+      if(cr){
+        if(!await uiConfirm('Cancel this return request?', { ok:'Cancel request', danger:true })) return;
+        try{ const { error } = await db.rpc('inv_rr_cancel', { p_id:cr.dataset.wmCancelRr }); if(error) throw error; toast('Request cancelled'); }
+        catch(err){ purchFail('Couldn\u2019t cancel: ', err); }
+        wmMineRefresh(); return;
+      }
+      const ch = e.target.closest('[data-wm-cancel-ho]');
+      if(ch){
+        if(!await uiConfirm('Cancel this handover?', { ok:'Cancel handover', danger:true })) return;
+        try{
+          const { data, error } = await db.rpc('inv_ho_cancel', { p_id:ch.dataset.wmCancelHo }); if(error) throw error;
+          toast('Handover cancelled');
+          if(data) wmPush(data.to_worker_id, 'Handover cancelled', (data.from_name || 'A technician') + ' cancelled ' + data.handover_no + '.', 'hnd-x-' + ch.dataset.wmCancelHo);
+        }catch(err){ purchFail('Couldn\u2019t cancel: ', err); }
+        wmMineRefresh(); return;
+      }
+    });
+  })();
 
 
   // =====================================================================
@@ -29961,7 +30405,7 @@
   //   10 Time in            20 Finish service reports   30 Arrived at site
   //   35 Acknowledge (late) 40 Acknowledge              45 Waiting on crew (info)
   //   50 Report drafts      55 Material request to fix  60 Sign tool slip
-  //   61 Sign material slip 62 Return overdue tools     70 Liquidate
+  //   61 Sign material slip / accept a handover   62 Return overdue tools     70 Liquidate
   //   80 Unread messages    90 Time out
   // Things waiting on ADMIN are listed separately under "Waiting for
   // approval" — they are not the technician's job, so they never appear as
@@ -30006,19 +30450,22 @@
   // optional — a missing table (feature not set up yet) just contributes
   // nothing rather than breaking the homepage.
   async function thLoadExtras(){
-    const out = { toolSlips:0, overdueTools:0, matSlips:0, reqs:[] };
+    const out = { toolSlips:0, overdueTools:0, matSlips:0, handovers:0, reqs:[] };
     if(!db || !(await ensureCloud().catch(()=>false))) return out;
     const safe = (p)=> p.then(r=> (r && !r.error) ? (r.data||[]) : []).catch(()=> []);
-    const [tools, slips, iss, reqs] = await Promise.all([
+    const [tools, slips, iss, reqs, hnd] = await Promise.all([
       safe(db.from('tools_view').select('status, due_back').eq('holder_id', currentUser.id)),
       safe(db.from('tool_slips').select('type, to_worker_id, from_worker_id').eq('status', 'pending_signature')),
       safe(db.from('issue_slips').select('id').eq('worker_id', currentUser.id).eq('status', 'issued')),
       safe(db.from('material_requisitions').select('id, mrf_no, status, job_order, created_at, reviewed_at')
-        .eq('requested_by', currentUser.id).order('created_at', { ascending:false }).limit(30))
+        .eq('requested_by', currentUser.id).order('created_at', { ascending:false }).limit(30)),
+      // materials a co-worker handed over, waiting for this technician to accept (worker-moves.js)
+      safe(db.from('material_handovers').select('id').eq('to_worker_id', currentUser.id).eq('status', 'pending'))
     ]);
     out.toolSlips = slips.filter(x=> (x.type==='issue' && x.to_worker_id===currentUser.id) || (x.type==='return' && x.from_worker_id===currentUser.id)).length;
     out.overdueTools = tools.filter(t=> t.status==='issued' && t.due_back && t.due_back < todayISO()).length;
     out.matSlips = iss.length;
+    out.handovers = hnd.length;
     out.reqs = reqs;
     return out;
   }
@@ -30063,7 +30510,7 @@
       leaveListForUser(currentUser.id).catch(()=>[]),
       dtCountUnreadMessages().catch(()=>0),
       dtrGetDay(currentUser.id, todayISO()).catch(()=>null),
-      thLoadExtras().catch(()=> ({ toolSlips:0, overdueTools:0, matSlips:0, reqs:[] }))
+      thLoadExtras().catch(()=> ({ toolSlips:0, overdueTools:0, matSlips:0, handovers:0, reqs:[] }))
     ]);
     thLastDtr = { date: todayISO(), rec: todayDtr };
     thRenderGreeting(todayDtr);
@@ -30164,6 +30611,11 @@
       add({ rank:61, tone:'blue', ic:'edit', title:'Sign for materials',
         sub:extras.matSlips+' material slip'+(extras.matSlips===1?'':'s')+' waiting for your signature.',
         btn:'Sign slip', act:'materials' });
+    }
+    if(extras.handovers){
+      add({ rank:61, tone:'blue', ic:'package', title:'Accept materials from a co-worker',
+        sub:extras.handovers+' handover'+(extras.handovers===1?'':'s')+' waiting for you to check and sign.',
+        btn:'Open handover', act:'materials' });
     }
     if(extras.overdueTools){
       add({ rank:62, tone:'red', ic:'tools', tag:'Overdue',
@@ -34997,8 +35449,8 @@
       tl:{ p:'Magbigay ng materyales sa technician para sa job order o proyekto.',
            s:['Piliin ang warehouse, worker at job order o proyekto.', 'Idagdag ang materyales (o i-load ang naaprubahang requisition).', 'I-post — pipirma ang worker sa My Materials.'], tip:'' } },
     'p.returns': { roles:['admin','staff','tech'], module:'inv.returns', flow:'inventory', go:{ admin:'sbNavReturns', staff:'inv.returns', tech:'@purch:returns' },
-      en:{ t:'Returns', p:'Take unused materials back into stock.', s:['Choose the worker; what they hold is listed.', 'Enter what comes back and post.'], tip:'' },
-      tl:{ p:'Ibalik sa stock ang hindi nagamit na materyales.', s:['Piliin ang worker; lalabas ang hawak niya.', 'Ilagay ang ibinabalik at i-post.'], tip:'' } },
+      en:{ t:'Returns', p:'Take unused materials back into stock.', s:['At the top: return requests from workers who are bringing materials back. Open one, check what they brought (change the quantity or condition if it differs) and post it \u2014 or decline with a reason.', 'Or choose the worker yourself; what they hold is listed. Enter what comes back and post.'], tip:'Handovers between technicians are listed under Handovers between workers.' },
+      tl:{ p:'Ibalik sa stock ang hindi nagamit na materyales.', s:['Sa itaas: mga return request ng worker na nagbabalik ng materyales. Buksan, tingnan ang dala (palitan ang dami o kondisyon kung iba) at i-post \u2014 o i-decline na may dahilan.', 'O piliin mismo ang worker; lalabas ang hawak niya. Ilagay ang ibinabalik at i-post.'], tip:'Nakalista sa Handovers between workers ang pasahan ng technician.' } },
     'p.transfers': { roles:['admin','staff','tech'], module:'inv.transfers', flow:'inventory', go:{ admin:'sbNavTransfers', staff:'inv.transfers', tech:'@purch:transfers' },
       en:{ t:'Transfers', p:'Move stock from one warehouse to another.', s:['Choose the from and to warehouses, add the items, post.'], tip:'' },
       tl:{ p:'Ilipat ang stock mula sa isang warehouse papunta sa iba.', s:['Piliin ang pinanggalingan at pupuntahang warehouse, idagdag ang item, i-post.'], tip:'' } },
@@ -35063,8 +35515,12 @@
            s:['Pindutin ang New version at ilagay kung kailan ito magsisimula \u2014 magbubukas ang kopya ng kasalukuyang bersyon bilang draft.', 'Palitan ang mga numero, pindutin ang Check, saka Save Draft.', 'Ang approver ang magpa-publish, kasama ang circular o wage order. Matatapos ang lumang bersyon sa araw bago nito.'],
            tip:'Hindi na mababago ang na-publish na bersyon, kaya laging makikita ng lumang pay run ang rate na ginamit nito.' } },
     'p.myMaterials': { roles:['tech'], flow:'inventory', go:{ tech:'@purch:myMaterials' },
-      en:{ t:'My Materials', p:'Materials issued to you: sign for them and see what you still hold.', s:['Sign for new issues.', 'Return what you didn\u2019t use through the warehouse.'], tip:'' },
-      tl:{ p:'Materyales na na-issue sa iyo: pumirma at tingnan ang hawak mo pa.', s:['Pumirma sa bagong issue.', 'Ibalik sa warehouse ang hindi nagamit.'], tip:'' } },
+      en:{ t:'My Materials', p:'Materials issued to you: sign for them and see what you still hold.',
+           s:['Sign for new issues, item by item.', 'Leftovers: tap Return to warehouse, say how much and whether it is good or damaged. The storekeeper is told \u2014 bring the materials to them.', 'Need to pass materials to another technician on site? Tap Hand over to a co-worker. They accept and sign; it stays charged to the same job order.', 'A handover waiting for you shows at the top and on your home screen \u2014 check the items, then sign to accept.'],
+           tip:'You can cancel a return request or a handover until it is received or accepted.' },
+      tl:{ p:'Materyales na na-issue sa iyo: pumirma at tingnan ang hawak mo pa.',
+           s:['Pumirma sa bagong issue, bawat item.', 'Sobra? Pindutin ang Return to warehouse, ilagay kung ilan at kung maayos o sira. Aabisuhan ang storekeeper \u2014 dalhin ang materyales sa kanya.', 'Kailangang ipasa sa ibang technician sa site? Pindutin ang Hand over to a co-worker. Tatanggapin at pipirmahan niya; sa parehong job order pa rin ito sisingilin.', 'Ang handover na naghihintay sa iyo ay lalabas sa itaas at sa home screen \u2014 tingnan ang mga item, saka pumirma para tanggapin.'],
+           tip:'Maaari mong ikansela ang return request o handover hanggang matanggap ito.' } },
 
     // ------------------------------------------------ ACCOUNTING & FINANCE
     'ca.office': { roles:['admin','staff'], module:'fin.cash_advance', flow:'cash', go:{ admin:'sbNavCashAdvance', staff:'fin.cash_advance' },
