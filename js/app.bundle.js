@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v235';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v236';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -2145,6 +2145,19 @@
     $('loginTagline').textContent = sub || '';
     loginBackFn = backFn || null;
   }
+  // Keep the sign-in content inside the window: when the form is taller than the screen it is scaled down just enough to fit,
+  // so nobody scrolls (never below 70% on a computer, 82% on a phone - below that the page scrolls as a fallback).
+  function loginFit(){
+    const ov = $('loginOverlay'); if(!ov || !ov.classList.contains('open')) return;
+    const wrap = ov.querySelector('.login-wrap'); if(!wrap) return;
+    const hasZoom = 'zoom' in document.body.style;
+    wrap.style.zoom = ''; wrap.style.transform = ''; wrap.style.transformOrigin = '';
+    const avail = ov.clientHeight, need = wrap.offsetHeight;
+    if(!avail || !need || need <= avail) return;
+    const z = Math.max(window.innerWidth >= 900 ? 0.7 : 0.82, avail / need);
+    if(hasZoom) wrap.style.zoom = String(z);
+    else{ wrap.style.transform = 'scale(' + z + ')'; wrap.style.transformOrigin = 'top center'; }
+  }
   function showWelcomePage(){ $('welcomePage').classList.remove('gone'); }
   function hideWelcomePage(){
     $('welcomePage').classList.add('gone');
@@ -2845,6 +2858,16 @@
   $('welcomeStartBtn').addEventListener('click', hideWelcomePage);
   $('welcomeLoginBtn').addEventListener('click', hideWelcomePage);
   $('loginBackBtn').addEventListener('click', ()=>{ if(loginBackFn) loginBackFn(); });
+  // re-fit whenever the form changes (a new view, a notice, an error) or the window is resized
+  (function loginFitWire(){
+    let raf = 0;
+    const soon = ()=>{ cancelAnimationFrame(raf); raf = requestAnimationFrame(loginFit); };
+    try{ new MutationObserver(soon).observe($('loginList'), { childList:true, subtree:true, characterData:true }); }catch(e){}
+    window.addEventListener('resize', soon);
+    window.addEventListener('orientationchange', soon);
+    if(document.fonts && document.fonts.ready) document.fonts.ready.then(soon);
+    soon();
+  })();
 
   $('migrateBtn').addEventListener('click', async ()=>{
     if(!(await ensureCloud())){ toast('Connect to the cloud first'); return; }
