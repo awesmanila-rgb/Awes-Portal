@@ -5930,3 +5930,223 @@ body.role-tech #adminDash, body.role-customer #adminDash, body.role-tech #opsDas
 .mt-row.wm-static:hover{ border-color:var(--border); }
 .wm-det{ margin-top:14px; }
 .wm-det > summary{ cursor:pointer; font-weight:700; font-size:13.5px; color:var(--green-dark); padding:6px 0; }
+
+/* ---------- Welcome page + sign-in (light design) ----------
+   Replaces the old green sign-in card. Static chrome (back arrow, logo, title) lives in
+   .login-wrap; #loginList's content is swapped by auth.js (customer form with the Admin
+   Access button, Staff / Technician / Admin chooser, and the three staff forms). */
+.overlay.login-overlay{
+  background:linear-gradient(180deg,#F1F8FD 0%,#FBFDFF 55%,#FFFFFF 100%);
+  padding:0; align-items:stretch; justify-content:flex-start; overflow-y:auto;
+}
+.login-wrap{ position:relative; width:100%; max-width:440px; margin:0 auto; padding:calc(env(safe-area-inset-top,0px) + 24px) 26px 32px; }
+.lg-swoosh{ position:absolute; top:calc(env(safe-area-inset-top,0px) + 16px); right:0; width:220px; height:auto; pointer-events:none; }
+.lg-top{ position:relative; display:flex; justify-content:space-between; align-items:center; }
+.lg-back{
+  width:50px; height:50px; border-radius:16px; border:1px solid #E1E9F0; background:#fff; color:#0F2A3F;
+  display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 1px 3px rgba(15,42,63,.06);
+}
+.lg-back svg{ width:22px; height:22px; }
+.lg-back:active{ background:#F1F6FA; }
+.lg-logo{ width:54px; height:54px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow:0 2px 10px rgba(15,42,63,.12); }
+.lg-logo img{ width:100%; height:100%; object-fit:contain; }
+.login-heading{ color:#0F2A3F; text-align:left; margin:32px 0 0; font-size:clamp(28px,8.4vw,36px); line-height:1.1; font-weight:700; letter-spacing:-.02em; }
+.login-tagline{ color:#5B6B7A; text-align:left; font-size:16px; font-weight:400; margin:10px 0 24px; line-height:1.45; }
+.login-card{ background:transparent; box-shadow:none; padding:0; border-radius:0; }
+.login-card .field{ margin-bottom:14px; }
+.login-card .field label{ color:#5B6B7A; font-size:13px; font-weight:600; margin-bottom:6px; }
+.login-card input{
+  width:100%; height:58px; border:1.5px solid #E1E9F0; border-radius:18px; background:#fff;
+  font-size:16px; color:#0F2A3F; padding:0 18px; box-shadow:none; outline:none;
+}
+.login-card input::placeholder{ color:#8794A1; }
+.login-card input:focus{ border-color:#2D7A22; box-shadow:0 0 0 3px rgba(45,122,34,.12); }
+.login-card .login-input-wrap input{ padding-left:56px; border:1.5px solid #E1E9F0; }
+.login-card .login-input-wrap input:focus{ border-color:#2D7A22; }
+.login-card .login-input-wrap input.has-toggle{ padding-right:54px; }
+.login-input-wrap .li-icon{ left:19px; width:22px; height:22px; color:#7D8B98; }
+.login-input-wrap .li-icon svg{ width:22px; height:22px; }
+.login-input-wrap .li-toggle{ right:12px; width:36px; height:36px; color:#7D8B98; }
+.login-input-wrap .li-toggle svg{ width:22px; height:22px; }
+.login-card .btn-primary{
+  width:100%; height:58px; margin-top:4px; border:none; border-radius:18px; background:#2D7A22; color:#fff;
+  font-size:17px; font-weight:700; box-shadow:0 10px 22px rgba(45,122,34,.22);
+}
+.login-card .btn-primary:active{ background:#256A1C; }
+.login-card .btn-primary:disabled{ opacity:.7; }
+.lg-forgot{ text-align:right; margin:-2px 0 16px; }
+.lg-forgot button{ background:none; border:none; padding:4px 0; color:#2D7A22; font-size:15px; font-weight:600; cursor:pointer; }
+.lg-or{ display:flex; align-items:center; gap:14px; margin:24px 0 16px; color:#8794A1; font-size:12px; font-weight:600; letter-spacing:.14em; }
+.lg-or:before,.lg-or:after{ content:""; flex:1; height:1px; background:#DCE5EC; }
+.lg-tile{
+  display:flex; align-items:center; gap:14px; width:100%; padding:14px 16px; margin-bottom:12px; text-align:left;
+  background:#fff; border:1.5px solid #E1E9F0; border-radius:20px; cursor:pointer; color:#0F2A3F;
+}
+.lg-tile:active{ background:#F4F9F3; border-color:#2D7A22; }
+.lg-tile-ic{ width:50px; height:50px; border-radius:15px; background:#EAF1F6; display:flex; align-items:center; justify-content:center; color:#0F2A3F; flex:none; }
+.lg-tile-ic svg{ width:25px; height:25px; }
+.lg-tile-tx{ flex:1; min-width:0; }
+.lg-tile-tx b{ display:block; font-size:17px; font-weight:700; color:#0F2A3F; }
+.lg-tile-tx small{ display:block; font-size:13px; color:#5B6B7A; margin-top:2px; }
+.lg-tile-go{ color:#8794A1; display:flex; }
+.lg-tile-go svg{ width:20px; height:20px; }
+.lg-tile-admin{ border-color:#BFD9B8; background:#F4FAF2; }
+.lg-tile-admin .lg-tile-ic{ background:#DFF0DA; color:#2D7A22; }
+.lg-new{ text-align:center; color:#5B6B7A; font-size:15px; margin:28px 0 4px; }
+.lg-new button{ background:none; border:none; padding:0; color:#0F2A3F; font-size:15px; font-weight:700; cursor:pointer; }
+.login-note{ background:#EAF4FB; color:#0F2A3F; border-radius:14px; padding:12px 14px; font-size:14px; line-height:1.45; margin-bottom:16px; }
+.login-cloud-link{ color:#8794A1; font-size:12px; margin-top:10px; }
+
+.welcome-page{
+  position:fixed; inset:0; z-index:3; display:flex; flex-direction:column; overflow-y:auto;
+  background:linear-gradient(180deg,#F1F8FD 0%,#FBFDFF 55%,#FFFFFF 100%);
+  padding:calc(env(safe-area-inset-top,0px) + 26px) 30px calc(env(safe-area-inset-bottom,0px) + 22px);
+}
+.welcome-page.gone{ display:none; }
+.wl-brand,.wl-title,.wl-sub,.wl-cta,.wl-art{ width:100%; max-width:440px; margin-left:auto; margin-right:auto; }
+.wl-brand{ display:flex; align-items:center; gap:14px; }
+.wl-logo{ width:56px; height:56px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow:0 2px 10px rgba(15,42,63,.12); }
+.wl-logo img{ width:100%; height:100%; object-fit:contain; }
+.wl-name{ font-size:24px; font-weight:700; letter-spacing:.1em; color:#0F2A3F; }
+.wl-art{ margin-top:8px; }
+.wl-art svg{ width:100%; height:auto; display:block; max-height:36vh; }
+.wl-title{ margin-top:10px; margin-bottom:0; font-size:clamp(32px,9.4vw,44px); line-height:1.08; font-weight:700; color:#0F2A3F; letter-spacing:-.02em; }
+.wl-title span{ color:#2D7A22; }
+.wl-sub{ margin-top:14px; margin-bottom:0; font-size:clamp(16px,4.6vw,19px); line-height:1.5; color:#5B6B7A; }
+.wl-spacer{ flex:1; min-height:18px; }
+.wl-cta{
+  height:62px; border-radius:22px; border:none; background:#2D7A22; color:#fff; font-size:20px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; gap:12px; cursor:pointer; box-shadow:0 12px 26px rgba(45,122,34,.26);
+}
+.wl-cta:active{ background:#256A1C; }
+.wl-cta svg{ width:24px; height:24px; }
+.wl-login{ text-align:center; color:#5B6B7A; font-size:16px; margin:20px 0 8px; }
+.wl-login button{ background:none; border:none; padding:0; color:#0F2A3F; font-size:16px; font-weight:700; cursor:pointer; }
+.wl-copy{ text-align:center; color:#9AA6B2; font-size:13px; margin:4px 0 0; }
+/* keep the decorative swoosh behind the title and form */
+.lg-swoosh{ z-index:0; }
+.lg-top,.login-heading,.login-tagline,.login-card{ position:relative; z-index:1; }
+
+/* ---------- Desktop (>= 900px): split-screen welcome and sign-in ----------
+   Phones/tablets keep the single-column layout above. On a wide window the Welcome page is
+   two columns (text and buttons left, illustration right) and sign-in is a split screen:
+   a brand panel on the left (.lg-aside) and the form, centred, on the right. */
+.lg-aside{ display:none; }
+@media (min-width:900px){
+  .welcome-page{
+    display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    grid-template-rows:auto 1fr auto auto auto auto 1fr auto; column-gap:72px;
+    padding:44px max(64px, calc((100vw - 1240px) / 2)) 30px;
+  }
+  .welcome-page .wl-brand{ grid-column:1; grid-row:1; margin:0; max-width:none; }
+  .welcome-page .wl-art{ grid-column:2; grid-row:1 / -1; align-self:center; max-width:640px; margin:0 auto; }
+  .welcome-page .wl-art svg{ max-height:72vh; }
+  .welcome-page .wl-title{ grid-column:1; grid-row:3; margin:0; max-width:none; font-size:clamp(48px,4.6vw,68px); }
+  .welcome-page .wl-sub{ grid-column:1; grid-row:4; margin:18px 0 0; max-width:520px; font-size:20px; }
+  .welcome-page .wl-spacer{ display:none; }
+  .welcome-page .wl-cta{ grid-column:1; grid-row:5; margin:38px 0 0; max-width:380px; }
+  .welcome-page .wl-login{ grid-column:1; grid-row:6; text-align:left; margin:22px 0 0; }
+  .welcome-page .wl-copy{ grid-column:1; grid-row:8; text-align:left; margin:0; }
+
+  .overlay.login-overlay{ flex-direction:row; align-items:stretch; }
+  .lg-aside{
+    display:flex; flex-direction:column; justify-content:space-between; flex:0 0 46%; max-width:760px;
+    background:#E7F2FA; padding:44px 56px 30px;
+  }
+  .lg-aside .wl-brand{ margin:0; max-width:none; }
+  .lg-aside-mid svg{ width:100%; max-width:480px; height:auto; display:block; margin:0 0 8px; }
+  .lg-aside .wl-title{ margin:0; max-width:none; font-size:clamp(36px,3.4vw,50px); }
+  .lg-aside .wl-sub{ margin:14px 0 0; max-width:440px; font-size:18px; }
+  .lg-aside .wl-copy{ text-align:left; margin:0; }
+  .login-wrap{ flex:1; margin:auto; max-width:560px; padding:48px 56px; }
+  .lg-top .lg-logo, .lg-swoosh{ display:none; }
+}
+.po-suggest .po-suggest-empty{ padding:12px 12px; font-size:13px; color:var(--text-muted); line-height:1.4; }
+
+
+/* ---------- Messenger home redesign ---------- */
+.msgr-head .msgr-chip{ margin-top:10px; }
+.msgr-sum{ gap:8px; }
+.msgr-sum-line{ justify-content:space-between; align-items:baseline; }
+.msgr-sum-sub{ font-size:16px; }
+.msgr-row.dim{ opacity:.6; }
+.msgr-act{ display:flex; gap:10px; align-items:stretch; }
+.msgr-act .msgr-big{ flex:1; width:auto; min-width:0; }
+.msgr-sq{
+  flex:none; width:78px; margin:4px 0 6px; border-radius:20px; border:2px solid #CFDAD3; background:#fff; color:#0F5A40; text-decoration:none;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:13px; font-weight:800;
+}
+.msgr-sq:active{ background:#E3EFE6; }
+.msgr-needs{ display:flex; flex-direction:column; gap:10px; }
+.msgr-needs-top{ display:flex; align-items:center; justify-content:space-between; }
+.msgr-seeall{ margin:0; padding:6px 0; font-size:15px; font-weight:800; color:#0F5A40; }
+.msgr-row.need{ border-color:#F0D2CC; }
+.msgr-row.need.late{ border-color:#E7A99F; }
+.msgr-circ.need{ border:0; background:#FBE9E6; color:#B3402D; display:flex; align-items:center; justify-content:center; }
+
+/* ---------- Messenger: Today / Requests / Profile (adopts the Perplexity redesign direction, with AWES's own greens) ---------- */
+.msgr-card{ border-radius:20px; }
+.msgr-card.cur{ border:2px solid #0F5A40; border-left-width:7px; }
+.msgr-tag{ text-transform:none; letter-spacing:.02em; font-size:13.5px; padding:4px 10px; }
+.msgr-att{ background:#fff; border:1.5px solid #CFE3D8; border-radius:18px; padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+.msgr-att .msgr-big{ margin:0; }
+.msgr-att-row{ display:flex; align-items:center; gap:12px; }
+.msgr-dot{ width:14px; height:14px; border-radius:50%; background:#17714F; flex:none; box-shadow:0 0 0 4px #E3EFE6; }
+.msgr-dot.off{ background:#9AA5AD; box-shadow:0 0 0 4px #EEF1F2; }
+.msgr-att-t{ flex:1; min-width:0; }
+.msgr-att-t b{ display:block; font-size:19px; font-weight:800; line-height:1.2; }
+.msgr-att-t small{ display:block; font-size:15px; font-weight:600; color:#58695F; margin-top:2px; }
+.msgr-outbtn{
+  min-height:46px; padding:0 16px; border-radius:14px; border:2px solid #CFDAD3; background:#fff; color:#6B7A72; font:inherit; font-size:16px; font-weight:800;
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer; flex:none;
+}
+.msgr-outbtn.ready{ border-color:#0F5A40; background:#0F5A40; color:#fff; }
+.msgr-outbtn:disabled{ cursor:not-allowed; }
+.msgr-att-foot{ display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:14px; font-weight:600; color:#58695F; }
+.msgr-att-note{ text-align:center; font-size:14px; font-weight:600; color:#58695F; }
+.msgr-link{ margin:0; padding:6px 0; font-size:15px; font-weight:800; color:#0F5A40; white-space:nowrap; }
+.msgr-dueat{ display:flex; align-items:center; gap:8px; font-size:16px; font-weight:700; color:#33443B; }
+.msgr-dueat.soon{ color:#7A4B00; } .msgr-dueat.late{ color:#B3402D; }
+.msgr-stepbar{ display:flex; gap:6px; }
+.msgr-stepbar i{ flex:1; height:8px; border-radius:4px; background:#D5DFD8; }
+.msgr-stepbar i.d{ background:#17714F; } .msgr-stepbar i.c{ background:#17714F; opacity:.4; }
+.msgr-two{ display:flex; gap:10px; }
+.msgr-sbtn{
+  flex:1; min-height:52px; padding:0 10px; border-radius:16px; border:2px solid #CFDAD3; background:#fff; color:#0B4531; font:inherit; font-size:16px; font-weight:800;
+  display:flex; align-items:center; justify-content:center; gap:8px; text-decoration:none; cursor:pointer; text-align:center; line-height:1.15;
+}
+.msgr-sbtn.warn{ color:#8A3A0B; }
+.msgr-sbtn:active{ background:#E3EFE6; }
+.msgr-sh{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.msgr-sh-t{ font-size:20px; font-weight:800; line-height:1.2; }
+.msgr-sh-r{ font-size:15px; font-weight:700; color:#58695F; }
+.msgr-prog{ height:8px; border-radius:4px; background:#D5DFD8; overflow:hidden; margin-top:-6px; }
+.msgr-prog i{ display:block; height:100%; background:#17714F; border-radius:4px; }
+.msgr-tl{ display:flex; flex-direction:column; margin-top:-2px; }
+.msgr-ti{ display:flex; align-items:flex-start; gap:14px; width:100%; background:none; border:0; padding:0 0 16px; text-align:left; font:inherit; color:inherit; cursor:pointer; position:relative; min-height:48px; }
+.msgr-ti:not(:last-child):before{ content:""; position:absolute; left:15px; top:34px; bottom:0; width:2px; background:#CFDAD3; }
+.msgr-mk{ width:32px; height:32px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:800; border:2.5px solid #B8C6C0; background:#fff; color:#58695F; }
+.msgr-mk.cur{ background:#17714F; border-color:#17714F; color:#fff; }
+.msgr-mk.done{ background:#E3EFE6; border-color:#17714F; color:#17714F; }
+.msgr-mk.fail{ background:#FBE9E6; border-color:#B3402D; color:#B3402D; }
+.msgr-ti-main{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.msgr-ti-t{ font-size:18px; font-weight:800; line-height:1.2; }
+.msgr-ti-s{ font-size:15px; font-weight:600; color:#58695F; }
+.msgr-ti-r{ flex:none; font-size:14px; font-weight:800; color:#33443B; text-align:right; padding-top:3px; }
+.msgr-ti-r.late{ color:#B3402D; }
+.msgr-ti.done .msgr-ti-t{ color:#58695F; }
+.msgr-ti.dim{ opacity:.6; }
+.msgr-pl{ flex:none; font-size:12.5px; font-weight:800; padding:4px 9px; border-radius:10px; white-space:nowrap; }
+.msgr-pl.red{ background:#FFF1F1; color:#C53030; } .msgr-pl.amb{ background:#FFF7E6; color:#B7791F; }
+.msgr-circ.need.red{ background:#FFF1F1; color:#C53030; }
+.msgr-needs{ display:flex; flex-direction:column; gap:10px; }
+.msgr-qa{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:-4px; }
+.msgr-q{ position:relative; display:flex; align-items:center; gap:12px; min-height:64px; padding:10px 12px; background:#fff; border:1.5px solid #DCE8E0; border-radius:18px; font:inherit; text-align:left; cursor:pointer; color:#12221A; }
+.msgr-q:active{ background:#F4F9F3; border-color:#0F5A40; }
+.msgr-q-ic{ width:42px; height:42px; border-radius:13px; background:#E3EFE6; color:#0F5A40; display:flex; align-items:center; justify-content:center; flex:none; }
+.msgr-q-l{ font-size:16px; font-weight:800; line-height:1.2; }
+.msgr-q .msgr-count{ position:absolute; top:-6px; right:-4px; }
+.msgr-tab-ic{ position:relative; }
+.msgr-tab-n{ position:absolute; top:-5px; right:4px; min-width:20px; height:20px; padding:0 5px; box-sizing:border-box; border-radius:10px; background:#C53030; color:#fff; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+
+.msgr-row-main > .msgr-pl{ align-self:flex-start; margin-top:5px; }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta name="awes-index-version" content="225">
+<meta name="awes-index-version" content="228">
 <meta charset="UTF-8">
 <!-- Pinch-to-zoom disabled per explicit request (was deliberately left
      enabled before — see git history — because maximum-scale=1/
@@ -1337,12 +1337,12 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
 
 <!-- Messenger / liaison bottom bar — persistent on every screen for accounts with My Errands.
      Shown/hidden by msgrApply() (messenger.js); replaces the sidebar and hamburger for that
-     role only (body.role-messenger). Tabs: Home · Errands · Cash · Menu. -->
+     role only (body.role-messenger). Tabs: Today · Errands · Requests · Profile (internal ids home · errands · cash · menu). -->
 <nav id="msgrNav" class="msgr-nav" style="display:none;" aria-label="Main">
-  <button type="button" class="msgr-tab active" data-msgr-tab="home" aria-current="page"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-6h4v6"/></svg></span><span>Home</span></button>
-  <button type="button" class="msgr-tab" data-msgr-tab="errands"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg></span><span>Errands</span></button>
-  <button type="button" class="msgr-tab" data-msgr-tab="cash"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M3 10h18M16 15h2"/></svg></span><span>Cash</span></button>
-  <button type="button" class="msgr-tab" data-msgr-tab="menu"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span><span>Menu</span></button>
+  <button type="button" class="msgr-tab active" data-msgr-tab="home" aria-current="page"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg></span><span>Today</span></button>
+  <button type="button" class="msgr-tab" data-msgr-tab="errands"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h8"/></svg></span><span>Errands</span></button>
+  <button type="button" class="msgr-tab" data-msgr-tab="cash"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></svg><span class="msgr-tab-n" style="display:none;"></span></span><span>Requests</span></button>
+  <button type="button" class="msgr-tab" data-msgr-tab="menu"><span class="msgr-tab-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><span>Profile</span></button>
 </nav>
 
 <!-- Customer Portal — Request Service (new + history), reached via
@@ -4596,47 +4596,60 @@ if(document.readyState==='complete')hide();else window.addEventListener('load',h
 <!-- Login gate (blocking). Open by default so it covers the page instantly on
      load/reopen, before any JS/network work finishes — prevents a flash of the
      underlying form. checkLoginGate() closes it once a saved session is verified.
-     The "Staff Access" link top-right and the quick-link chips at the bottom
-     are static chrome that stay put across every loginList view (customer
-     form, staff role chooser, technician form, admin form); only loginList's
-     own content is swapped by JS. -->
+     Layout: the Welcome page (#welcomePage) sits on top of the sign-in screen and is
+     dismissed by Get Started / Log In (once per app launch). Under it, the header
+     (back arrow + logo + title) is static chrome; only #loginList is swapped by JS —
+     the customer form (with the Admin access button), the Staff / Technician / Admin
+     chooser, and the three staff sign-in forms. -->
 <div class="overlay open login-overlay" id="loginOverlay" style="z-index:80;">
-  <div class="login-wrap">
-    <div class="login-logo"><img src="assets/img/logo.png" alt="AWES"></div>
-    <h3 class="login-heading">Sign In</h3>
-    <p class="login-tagline">Track your service history and Schedules</p>
-    <div class="login-card" id="loginList"></div>
-    <div class="login-quicklinks">
-      <span class="login-qlink">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12h6"></path><path d="M9 16h3"></path><path d="M9 3h6a1 1 0 0 1 1 1v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1V4a1 1 0 0 1 1-1Z"></path></svg>
-        Request a Service
-      </span>
-      <span class="login-qlink">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 3"></path></svg>
-        View History
-      </span>
-      <span class="login-qlink">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-        Manage Equipment
-      </span>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><symbol id="awesArt" viewBox="0 0 300 250">
+        <circle cx="150" cy="128" r="104" fill="#E3F0FA"/>
+        <circle cx="236" cy="66" r="26" fill="#F9E8B4" opacity=".7"/><circle cx="236" cy="66" r="19" fill="#F6C85A"/>
+        <path d="M44 84c0-12 10-19 20-16 4-10 20-11 25-1 12-1 17 9 14 17z" fill="#fff"/>
+        <rect x="76" y="76" width="148" height="70" rx="22" fill="#fff" stroke="#D3E1EC" stroke-width="3"/>
+        <rect x="92" y="88" width="116" height="4" rx="2" fill="#DBE6EF"/>
+        <circle cx="106" cy="114" r="12" fill="#2D8A1F"/><path d="M99 110c4-2 9-2 14 0M99 114c4-2 9-2 14 0M100 118c4-2 8-2 12 0" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+        <circle cx="196" cy="114" r="4" fill="#2D7A22"/>
+        <path d="M88 138h124l-8 8H96z" fill="#CFE0EC"/>
+        <path class="wl-flow wl-f1" d="M104 160c-6 18 6 30 0 46" stroke="#8CC4EA" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="wl-flow wl-f2" d="M150 160c-6 18 6 32 0 52" stroke="#7FB58A" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="wl-flow wl-f3" d="M196 160c-6 18 6 30 0 46" stroke="#8CC4EA" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <circle cx="80" cy="176" r="4" fill="#8CC4EA"/><circle cx="118" cy="194" r="3.5" fill="#8CC4EA"/><circle cx="214" cy="190" r="3.5" fill="#8CC4EA"/>
+        <ellipse cx="150" cy="226" rx="112" ry="8" fill="#D9E6F0"/>
+        <path d="M50 214v-26M50 198c-12-3-15-12-12-19 10 0 15 9 12 19zM50 198c12-3 15-12 12-19-10 0-15 9-12 19z" fill="#4AA63A" stroke="#4AA63A" stroke-width="2"/>
+        <path d="M240 216l-4 12h28l-4-12z" fill="#F1D89B"/><path d="M250 216v-22M250 204c-13-2-17-13-13-21 12 0 17 10 13 21zM250 204c13-2 17-13 13-21-12 0-17 10-13 21z" fill="#2F9A2A" stroke="#2F9A2A" stroke-width="2"/>
+      </symbol></svg>
+  <aside class="lg-aside" aria-hidden="true">
+    <div class="wl-brand"><span class="wl-logo"><img src="assets/img/logo.png" alt=""></span><span class="wl-name">AWES</span></div>
+    <div class="lg-aside-mid">
+      <svg viewBox="0 0 300 250"><use href="#awesArt"></use></svg>
+      <h2 class="wl-title">Better air,<br><span>simply managed.</span></h2>
+      <p class="wl-sub">Book service, track your technician and keep your HVAC records in one place.</p>
     </div>
+    <p class="wl-copy">&copy; 2026 AWES Inc. All rights reserved.</p>
+  </aside>
+  <div class="login-wrap">
+    <svg class="lg-swoosh" viewBox="0 0 220 120" aria-hidden="true"><path d="M10 52C80 20 150 14 220 24" stroke="#E3EEF8" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M50 82C110 58 170 52 220 58" stroke="#EAF2FA" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M96 108C140 94 180 90 220 92" stroke="#F0F6FB" stroke-width="7" fill="none" stroke-linecap="round"/></svg>
+    <div class="lg-top">
+      <button type="button" class="lg-back" id="loginBackBtn" aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg></button>
+      <div class="lg-logo"><img src="assets/img/logo.png" alt="AWES"></div>
+    </div>
+    <h3 class="login-heading" id="loginHeading">Welcome back</h3>
+    <p class="login-tagline" id="loginTagline">Sign in to your customer account.</p>
+    <div class="login-card" id="loginList"></div>
   </div>
-  <!-- Single combined entry point for both staff roles. Pinned to the very
-       bottom of the login screen itself (margin-top:auto pushes it to the
-       end of the overlay's flex column), separate from .login-wrap so it
-       stays put at the bottom of the page rather than tucked right under
-       the quick-links. Used to be two separate links here — Technician
-       Access (which listed every active technician's username as a
-       tappable button, exposing the whole roster to anyone who opened the
-       login screen) and Admin Panel. Now both go through one role chooser
-       (see renderStaffRoleChooser in auth.js), and the technician path asks
-       for a username directly instead of showing the list. -->
-  <div class="login-topbar">
-    <button type="button" class="login-toplink" id="loginStaffTopBtn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"></circle><path d="M5.5 21a6.5 6.5 0 0 1 13 0"></path></svg>
-      Staff Access
-    </button>
+
+  <div class="welcome-page" id="welcomePage">
+    <div class="wl-brand"><span class="wl-logo"><img src="assets/img/logo.png" alt=""></span><span class="wl-name">AWES</span></div>
+    <div class="wl-art"><svg viewBox="0 0 300 250" aria-hidden="true"><use href="#awesArt"></use></svg></div>
+    <h2 class="wl-title">Better air,<br><span>simply managed.</span></h2>
+    <p class="wl-sub">Book service, track your technician and keep your HVAC records in one place.</p>
+    <div class="wl-spacer"></div>
+    <button type="button" class="wl-cta" id="welcomeStartBtn">Get Started <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg></button>
+    <p class="wl-login">Already have an account? <button type="button" id="welcomeLoginBtn">Log In</button></p>
+    <p class="wl-copy">&copy; 2026 AWES Inc. All rights reserved.</p>
   </div>
+  <script>try{ if(sessionStorage.getItem('awes-welcome-seen')) document.getElementById('welcomePage').classList.add('gone'); }catch(e){}</script>
 </div>
 
 <!-- Manage Users sheet (admin only) -->

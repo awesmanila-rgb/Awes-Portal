@@ -2,7 +2,7 @@
   "use strict";
 
   (function(){
-    var NEED = 225;
+    var NEED = 228;
     function show(msg){
       try{
         var d = document.createElement('div');
@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v229';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v235';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -2101,9 +2101,11 @@
   function loginFieldWithIcon({label, id, type, placeholder, iconHtml, toggleable}){
     const field = document.createElement('div');
     field.className = 'field';
-    const labelEl = document.createElement('label');
-    labelEl.textContent = label;
-    field.appendChild(labelEl);
+    if(label){
+      const labelEl = document.createElement('label');
+      labelEl.textContent = label;
+      field.appendChild(labelEl);
+    }
     const wrap = document.createElement('div');
     wrap.className = 'login-input-wrap';
     const icon = document.createElement('span');
@@ -2112,6 +2114,7 @@
     wrap.appendChild(icon);
     const input = document.createElement('input');
     input.type = type; input.id = id; input.placeholder = placeholder;
+    if(!label) input.setAttribute('aria-label', placeholder);
     if(toggleable) input.classList.add('has-toggle');
     wrap.appendChild(input);
     if(toggleable){
@@ -2131,6 +2134,45 @@
     return {field, input};
   }
 
+  // ---- Welcome page + sign-in header ---------------------------------------
+  // The Welcome page (#welcomePage) sits on top of the login overlay at launch;
+  // Get Started / Log In dismiss it (remembered for this app launch). The header
+  // under it (back arrow, logo, title) is static; each view below sets the title,
+  // sub-title and where the back arrow goes with loginSetHead().
+  let loginBackFn = null;
+  function loginSetHead(title, sub, backFn){
+    $('loginHeading').textContent = title;
+    $('loginTagline').textContent = sub || '';
+    loginBackFn = backFn || null;
+  }
+  function showWelcomePage(){ $('welcomePage').classList.remove('gone'); }
+  function hideWelcomePage(){
+    $('welcomePage').classList.add('gone');
+    try{ sessionStorage.setItem('awes-welcome-seen', '1'); }catch(e){}
+  }
+  // A quiet in-card notice (not an error) — used where there is nothing to wire up yet.
+  function loginNote(msg){
+    const c = $('loginList');
+    const old = c.querySelector('.login-note'); if(old) old.remove();
+    const n = document.createElement('div');
+    n.className = 'login-note'; n.textContent = msg;
+    c.insertBefore(n, c.firstChild);
+  }
+  const LOGIN_ICON_BRIEFCASE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>';
+  const LOGIN_ICON_WRENCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
+  const LOGIN_ICON_SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg>';
+  const LOGIN_ICON_CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>';
+  // Large tappable row: icon tile, title, small sub-title, chevron.
+  function loginTile(iconHtml, title, sub, onClick, extraClass){
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'lg-tile' + (extraClass ? ' ' + extraClass : '');
+    b.innerHTML = '<span class="lg-tile-ic">' + iconHtml + '</span><span class="lg-tile-tx"><b></b><small></small></span><span class="lg-tile-go">' + LOGIN_ICON_CHEVRON + '</span>';
+    b.querySelector('b').textContent = title;
+    b.querySelector('small').textContent = sub;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
   // The login gate's default screen. Customer sign-in is the primary path —
   // its form renders directly here, front and center. Technician access and
   // Admin panel are one tap away via the static top-bar "Staff Access" link
@@ -2140,6 +2182,7 @@
   function showRoleChooser(message){
     const container = $('loginList');
     container.innerHTML = '';
+    loginSetHead('Welcome back', 'Sign in to your customer account.', showWelcomePage);
 
     if(message){
       const m = document.createElement('div');
@@ -2149,20 +2192,27 @@
     }
 
     const { field: emailField, input: emailInput } = loginFieldWithIcon({
-      label:'Email', id:'loginCustEmail', type:'email', placeholder:'you@example.com', iconHtml: LOGIN_ICON_MAIL
+      label:'', id:'loginCustEmail', type:'email', placeholder:'Email address', iconHtml: LOGIN_ICON_MAIL
     });
     container.appendChild(emailField);
 
     const { field: pwField, input: pwInput } = loginFieldWithIcon({
-      label:'Password', id:'loginCustPw', type:'password', placeholder:'Enter your password',
+      label:'', id:'loginCustPw', type:'password', placeholder:'Password',
       iconHtml: LOGIN_ICON_LOCK, toggleable:true
     });
     container.appendChild(pwField);
 
+    const forgotRow = document.createElement('div');
+    forgotRow.className = 'lg-forgot';
+    const forgotBtn = document.createElement('button');
+    forgotBtn.type = 'button'; forgotBtn.textContent = 'Forgot password?';
+    forgotBtn.addEventListener('click', ()=> loginNote('To reset your password, ask your service provider — they can set a new one for you.'));
+    forgotRow.appendChild(forgotBtn);
+    container.appendChild(forgotRow);
+
     const submit = document.createElement('button');
-    submit.type = 'button'; submit.className = 'btn btn-primary';
-    submit.style.cssText = 'width:100%; margin-bottom:16px;';
-    submit.textContent = 'Sign In to Portal';
+    submit.type = 'button'; submit.className = 'btn btn-primary lg-submit';
+    submit.textContent = 'Sign In';
     const doSubmit = async ()=>{
       const email = (emailInput.value||'').trim();
       const pw = pwInput.value;
@@ -2212,6 +2262,18 @@
     pwInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSubmit(); });
     container.appendChild(submit);
 
+    // Staff, Technician and Admin sign-ins live behind one Admin Access button.
+    const orRow = document.createElement('div');
+    orRow.className = 'lg-or'; orRow.innerHTML = '<span>OR</span>';
+    container.appendChild(orRow);
+    container.appendChild(loginTile(LOGIN_ICON_SHIELD, 'Admin Access', 'Staff, technician and admin', ()=> renderStaffRoleChooser(), 'lg-tile-admin'));
+
+    const newCust = document.createElement('p');
+    newCust.className = 'lg-new';
+    newCust.innerHTML = 'New customer? <button type="button">Create an account</button>';
+    newCust.querySelector('button').addEventListener('click', ()=> loginNote('Customer accounts are set up by your service provider. Ask them to create your login, then sign in here.'));
+    container.appendChild(newCust);
+
     const cloudLink = document.createElement('button');
     cloudLink.type='button';
     cloudLink.className = 'login-cloud-link';
@@ -2227,19 +2289,10 @@
     setTimeout(()=> emailInput.focus(), 50);
   }
 
-  function loginBackButton(){
-    const back = document.createElement('button');
-    back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
-    back.textContent = '← Back';
-    back.addEventListener('click', ()=> showRoleChooser());
-    return back;
-  }
-
   function renderAdminLoginForm(message){
     const container = $('loginList');
     container.innerHTML = '';
-    container.appendChild(loginStaffBackButton());
+    loginSetHead('Admin sign in', 'Enter the admin password.', ()=> renderStaffRoleChooser());
     if(message){
       const m = document.createElement('div');
       m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
@@ -2281,18 +2334,6 @@
     setTimeout(()=> input.focus(), 50);
   }
 
-  // Back button for the two staff forms (Technician / Admin) — returns to the
-  // role chooser rather than all the way out to the customer sign-in card,
-  // since that's the screen the technician/admin actually came from.
-  function loginStaffBackButton(){
-    const back = document.createElement('button');
-    back.type='button'; back.className='login-user-btn';
-    back.style.cssText = 'background:#EEF1ED; color:var(--text);';
-    back.textContent = '← Back';
-    back.addEventListener('click', ()=> renderStaffRoleChooser());
-    return back;
-  }
-
   // Staff sign-in used to be two separate top-bar links: "Technician Access"
   // (which fetched and displayed EVERY active technician's username as a
   // tappable button before asking for a password) and "Admin Panel". Both
@@ -2302,34 +2343,18 @@
   function renderStaffRoleChooser(message){
     const container = $('loginList');
     container.innerHTML = '';
-    container.appendChild(loginBackButton());
+    loginSetHead('Admin Access', 'Choose the account you sign in with.', ()=> showRoleChooser());
     if(message){
       const m = document.createElement('div');
       m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
       m.textContent = message;
       container.appendChild(m);
     }
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-size:13px; font-weight:700; color:var(--text-muted); margin-bottom:8px; text-align:center;';
-    heading.textContent = 'Sign in as';
-    container.appendChild(heading);
-    const techBtn = document.createElement('button');
-    techBtn.type='button'; techBtn.className='login-user-btn';
-    techBtn.innerHTML = icon('people')+' Technician';
-    techBtn.addEventListener('click', ()=> renderTechnicianLoginForm());
-    container.appendChild(techBtn);
-    const adminBtn = document.createElement('button');
-    adminBtn.type='button'; adminBtn.className='login-user-btn';
-    adminBtn.innerHTML = icon('key')+' Admin';
-    adminBtn.addEventListener('click', ()=> renderAdminLoginForm());
-    container.appendChild(adminBtn);
-    // Department staff (Purchasing, Finance, HR, Administration,
-    // Operations) — username + password, see renderStaffLoginForm in staff.js.
-    const staffBtn = document.createElement('button');
-    staffBtn.type='button'; staffBtn.className='login-user-btn';
-    staffBtn.innerHTML = icon('people')+' Office Staff';
-    staffBtn.addEventListener('click', ()=> renderStaffLoginForm());
-    container.appendChild(staffBtn);
+    // Department staff (Purchasing, Finance, HR, Administration, Operations) —
+    // username + password, see renderStaffLoginForm in staff.js.
+    container.appendChild(loginTile(LOGIN_ICON_BRIEFCASE, 'Staff', 'Office and warehouse team', ()=> renderStaffLoginForm()));
+    container.appendChild(loginTile(LOGIN_ICON_WRENCH, 'Technician', 'Field service team', ()=> renderTechnicianLoginForm()));
+    container.appendChild(loginTile(LOGIN_ICON_SHIELD, 'Admin', 'Full system access', ()=> renderAdminLoginForm()));
   }
 
   // Technician sign-in: username + password in a single step. The username is
@@ -2344,7 +2369,7 @@
   function renderTechnicianLoginForm(message, prefillUsername){
     const container = $('loginList');
     container.innerHTML = '';
-    container.appendChild(loginStaffBackButton());
+    loginSetHead('Technician sign in', 'Use your username and password.', ()=> renderStaffRoleChooser());
     if(message){
       const m = document.createElement('div');
       m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
@@ -2815,11 +2840,11 @@
     $('cfgSupabaseUrl').value = ''; $('cfgSupabaseKey').value = '';
     toast('Disconnected — this device will use local storage only');
   });
-  // Static top-bar staff-access link on the login screen (always visible,
-  // regardless of which loginList view is currently showing). Used to be two
-  // separate links (Technician / Admin); now it's one combined entry point —
-  // see renderStaffRoleChooser.
-  $('loginStaffTopBtn').addEventListener('click', ()=> renderStaffRoleChooser());
+  // Welcome page buttons and the sign-in back arrow (the staff / technician / admin
+  // entry is the Admin Access button inside the customer form — see showRoleChooser).
+  $('welcomeStartBtn').addEventListener('click', hideWelcomePage);
+  $('welcomeLoginBtn').addEventListener('click', hideWelcomePage);
+  $('loginBackBtn').addEventListener('click', ()=>{ if(loginBackFn) loginBackFn(); });
 
   $('migrateBtn').addEventListener('click', async ()=>{
     if(!(await ensureCloud())){ toast('Connect to the cloud first'); return; }
@@ -20627,7 +20652,9 @@
     mrCatalog = (data || []).map(r=> ({ id:r.id, code:r.code, name:r.name, family:r.family || '', unit:r.unit, brand:r.brand || '', specs:r.specs || {}, category:r.category }));
   }
   // Shared item-name autocomplete (technician form)
-  function mrSuggest(input, onPick){
+  // opts (optional): info(m) -> right-hand text instead of the unit; emptyMsg -> shown when nothing matches
+  function mrSuggest(input, onPick, opts){
+    opts = opts || {};
     const host = input.closest('.po-item-desc');
     let box = host.querySelector('.po-suggest');
     const words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -20636,9 +20663,16 @@
       const hay = [m.code, m.name, m.family, m.brand, mtSpecText(m.specs)].join(' ').toLowerCase();
       return words.every(w=> hay.includes(w));
     }).slice(0, 12);
-    if(!hits.length){ if(box) box.remove(); return; }
+    if(!hits.length){
+      if(opts.emptyMsg){
+        if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; host.appendChild(box); }
+        box.innerHTML = '<div class="po-suggest-empty">' + escapeHtml(opts.emptyMsg) + '</div>';
+        box.onclick = null;
+      }else if(box) box.remove();
+      return;
+    }
     if(!box){ box = document.createElement('div'); box.className = 'po-suggest'; host.appendChild(box); }
-    box.innerHTML = hits.map((m, i)=> mtSuggestBtn(m, i, escapeHtml(m.unit || ''))).join('');
+    box.innerHTML = hits.map((m, i)=> mtSuggestBtn(m, i, escapeHtml(opts.info ? opts.info(m) : (m.unit || '')))).join('');
     box.onclick = (e)=>{ const b = e.target.closest('[data-pick]'); if(b) onPick(b.dataset.pick); };
   }
 
@@ -22633,22 +22667,51 @@
           (l.locked ? '<span></span>' : '<button type="button" class="po-rm" data-rm="1" title="Remove">&minus;</button>') + '</div>';
       }).join('');
   }
+  // short code of the warehouse chosen in a line editor's warehouse select ("WH-03")
+  function invWhCode(selId){
+    const o = $(selId) && $(selId).selectedOptions && $(selId).selectedOptions[0];
+    return o ? String(o.textContent).split(/\s+[\u00B7\-\u2014]\s+/)[0].trim() || 'this warehouse' : 'this warehouse';
+  }
+  // The warehouse changed: drop picked items that the new warehouse doesn't have in stock.
+  function invLEPrune(id){
+    const st = invLE[id]; if(!st || !st.avail || !st.wh) return;
+    const wh = $(st.wh).value; if(!wh) return;
+    const gone = [];
+    st.lines = st.lines.filter(l=>{
+      if(!l.material_id || l.locked || invAvail(wh, l.material_id) > 0) return true;
+      gone.push(invX.catById.get(l.material_id)); return false;
+    });
+    if(!st.lines.length) st.lines.push(invLEBlank());
+    invLERender(id);
+    if(gone.length) toast(gone.length === 1 ? (gone[0] ? gone[0].code : 'An item') + ' isn\u2019t in ' + invWhCode(st.wh) + ' \u2014 removed from the list'
+      : gone.length + ' items aren\u2019t in ' + invWhCode(st.wh) + ' \u2014 removed from the list');
+  }
   function invLEBind(id, host, opts){
     invLE[id] = Object.assign({ host, lines:[invLEBlank()] }, opts);
     const el = $(host);
+    if(opts && opts.avail && opts.wh && $(opts.wh) && !$(opts.wh).dataset.leBound){
+      $(opts.wh).dataset.leBound = '1';
+      $(opts.wh).addEventListener('change', ()=> invLEPrune(id));
+    }
     const lineOf = (t)=>{ const r = t.closest('.inv-ln'); return r ? invLE[id].lines.find(x=> String(x.key) === r.dataset.key) : null; };
     el.addEventListener('input', (e)=>{
       const l = lineOf(e.target), f = e.target.dataset.f; if(!l || !f) return;
       if(f === 'text'){
         l.text = e.target.value; l.material_id = null;
         e.target.closest('.inv-ln').querySelector('.po-item-code').textContent = '';
-        mrCatalog = invX.cat;
+        // Issue and Transfer take stock OUT of a warehouse, so the search only offers items that are
+        // actually in stock in the warehouse chosen in step 1 (and says how many); Receive offers everything.
+        const stk = invLE[id], whv = stk.avail && stk.wh ? $(stk.wh).value : '';
+        mrCatalog = whv ? invX.cat.filter(m=> invAvail(whv, m.id) > 0) : invX.cat;
         mrSuggest(e.target, (mid)=>{
           if(invLE[id].lines.some(x=> x !== l && x.material_id === mid)){ toast('That item is already on the list'); return; }
           l.material_id = mid; l.text = '';
           invLERender(id);
           const q = el.querySelector('.inv-ln[data-key="' + l.key + '"] [data-f="qty"]'); if(q) q.focus();
-        });
+        }, whv ? {
+          info: (m)=> invQty(invAvail(whv, m.id)) + ' ' + (m.unit || '') + ' in stock',
+          emptyMsg: 'No match in ' + invWhCode(stk.wh) + ' \u2014 only items in stock there can be picked.'
+        } : null);
       }else{
         l[f] = e.target.value.trim();
         if(f === 'qty' && invLE[id].avail) invLEAvailCell(id, l);
@@ -25910,9 +25973,12 @@
     try{
       const [t, s, wk] = await Promise.all([db.from('tools_view').select('*').eq('holder_id', currentUser.id).order('asset_tag'),
         db.from('tool_slips').select('*').eq('status', 'pending_signature').order('created_at', { ascending:false }),
-        db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name')]);
+        // technicians can't read other people's profiles (row-level security), so the list of people to hand over to
+        // comes from the names-only function; the profiles query is the fallback for older databases
+        db.rpc('worker_names').then(r=> r.error ? db.from('profiles').select('id, name').eq('role', 'technician').eq('active', true).order('name') : r)]);
       if(t.error) throw t.error;
-      tl.tools = t.data || []; tl.workers = wk.data || [];
+      tl.tools = t.data || [];
+      tl.workers = (wk.data || []).filter(w=> !w.role || w.role === 'technician');
       tlMinePend = (s.data || []).filter(x=> (x.type === 'issue' && x.to_worker_id === currentUser.id) || (x.type === 'return' && x.from_worker_id === currentUser.id));
       $('tlMinePending').innerHTML = tlMinePend.length ? tlMinePend.map(x=> '<button type="button" class="mt-row" data-id="' + escapeHtml(x.id) + '"><div class="mt-row-main"><div class="mt-row-title"><span class="mt-code">' + escapeHtml(x.slip_no) + '</span>' +
         escapeHtml(TL_SLIP[x.type].label) + ' <span class="po-status returned">sign now</span></div><div class="sp-row-sub">' + escapeHtml(mrWhen(x.created_at) + ' · by ' + x.keeper_name) + '</div></div></button>').join('')
@@ -32003,17 +32069,13 @@
   function renderStaffLoginForm(message, prefill){
     const container = $('loginList');
     container.innerHTML = '';
-    container.appendChild(loginStaffBackButton());
+    loginSetHead('Staff sign in', 'Use the username and password from your office.', ()=> renderStaffRoleChooser());
     if(message){
       const m = document.createElement('div');
       m.style.cssText = 'font-size:13px; color:var(--danger); margin-bottom:10px; text-align:center;';
       m.textContent = message;
       container.appendChild(m);
     }
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-size:13px; font-weight:700; color:var(--text-muted); margin-bottom:8px; text-align:center;';
-    heading.textContent = 'Office Staff sign-in';
-    container.appendChild(heading);
 
     const userField = document.createElement('div');
     userField.className = 'field';
@@ -32081,10 +32143,10 @@
     tracker:  { nav:'',                 title:'Live Tracker',     sub:'Where technicians are right now' },
     templates:{ nav:'',                 title:'Role Templates',   sub:'Saved sets of departments & page levels' },
     inbox:    { nav:'',                 title:'Inbox',            sub:'Work waiting on you, oldest first' },
-    msgrMenu:    { nav:'', title:'Menu',       sub:'' },
+    msgrMenu:    { nav:'', title:'Profile',    sub:'' },
     msgrAccount: { nav:'', title:'My account', sub:'' },
     msgrAlerts:  { nav:'', title:'Alerts',     sub:'' },
-    msgrCash:    { nav:'', title:'Cash',       sub:'' }
+    msgrCash:    { nav:'', title:'Requests',   sub:'' }
   };
   let staffViewHiding = false;
 
@@ -33871,7 +33933,7 @@
   // =====================================================================
 
   const msgr = { tab:'home', cash:{ toLiq:0, pending:0 }, openErrands:0 };
-  const MSGR_OWN_HEADER = ['Home', 'Menu', 'My account', 'Alerts', 'Cash', 'My Errands'];   // screens that draw their own heading
+  const MSGR_OWN_HEADER = ['Home', 'Menu', 'Profile', 'My account', 'Alerts', 'Cash', 'Requests', 'My Errands'];   // screens that draw their own heading
 
   // A messenger is office staff whose job IS errands. A manager who merely HOLDS the My Errands page (a department Head, someone
   // who sets errands for others, or anyone who can approve something) keeps the normal office layout — My Errands is simply one
@@ -33973,8 +34035,12 @@
     const items = (typeof stfInbox !== 'undefined' && stfInbox && stfInbox.items) ? stfInbox.items : [];
     const out = items.map(x=> ({ src:'inbox', x, state:x.state || 'waiting', title:x.label || 'Waiting for you',
       sub:[x.ref_label, x.title].filter(Boolean).join(' \u00B7 '), age:x.age_hours, module:x.module }));
-    if(msgr.cash.toLiq > 0) out.push({ src:'liq', state:'waiting', title:'Send in your receipts',
-      sub:'My liquidation \u00B7 ' + msgr.cash.toLiq + ' cash advance' + (msgr.cash.toLiq === 1 ? '' : 's') + ' to close', module:'fin.liquidation' });
+    if(msgr.cash.toLiq > 0) out.push({ src:'liq', state:'waiting', title:'Submit receipts',
+      sub:'Cash advance to liquidate \u00B7 ' + msgr.cash.toLiq + ' to close', module:'fin.liquidation' });
+    // an action label ("Upload stamped copy") instead of the office's name for the item
+    out.forEach(a=>{
+      if(a.src === 'inbox' && /stamped|acknowledg/i.test(a.title + ' ' + a.sub)){ a.sub = [a.title, a.sub].filter(Boolean).join(' \u00B7 '); a.title = 'Upload stamped copy'; }
+    });
     return out.sort((a, b)=> (MSGR_RANK[a.state] != null ? MSGR_RANK[a.state] : 2) - (MSGR_RANK[b.state] != null ? MSGR_RANK[b.state] : 2));
   }
   const msgrNeedsYou = msgrAlertList;
@@ -34049,29 +34115,107 @@
     if(kind === 'prog') return '<span class="msgr-circ prog"></span>';
     return '<span class="msgr-circ">' + (n || '') + '</span>';
   }
-  function msgrRow(e, n, kind){
+  function msgrRow(e, n, kind, cls){
     const late = kind !== 'done' && typeof erOverdue === 'function' && erOverdue(e);
     const when = kind === 'done' ? (e.completed_at || e.closed_at ? new Date(e.completed_at || e.closed_at).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }) : '')
       : kind === 'failed' ? 'Not finished' : msgrDue(e.due_at);
-    return '<button type="button" class="msgr-row" data-msgr-errand="' + msgrEsc(e.id) + '">' + msgrCircle(kind === 'failed' ? 'todo' : kind, n) +
+    return '<button type="button" class="msgr-row' + (cls ? ' ' + cls : '') + '" data-msgr-errand="' + msgrEsc(e.id) + '">' + msgrCircle(kind === 'failed' ? 'todo' : kind, n) +
       '<span class="msgr-row-main"><span class="msgr-row-title">' + msgrEsc(e.title) + '</span>' +
       (msgrPlace(e) ? '<span class="msgr-row-sub">' + msgrEsc(msgrPlace(e)) + '</span>' : '') + '</span>' +
       '<span class="msgr-row-time' + (late ? ' late' : '') + (kind === 'done' ? ' ok' : '') + '">' + (late ? 'Late · ' : '') + msgrEsc(when) + '</span></button>';
   }
-  function msgrSummary(total, done, inProg, segs){
-    const bar = segs.map(s=> '<span class="msgr-seg ' + s + '"></span>').join('');
-    const left = Math.max(0, total - done);
-    const sub = !total ? 'Nothing assigned yet' : (inProg ? inProg + ' in progress · ' + (left - inProg) + ' to go' : done + ' done · ' + left + ' to go');
-    return '<div class="msgr-sum"><div class="msgr-label green">TODAY\u2019S TASKS</div>' +
-      '<div class="msgr-sum-line"><span class="msgr-sum-big">' + total + ' errand' + (total === 1 ? '' : 's') + '</span><span class="msgr-sum-sub">' + sub + '</span></div>' +
-      (total ? '<div class="msgr-segs">' + bar + '</div>' : '') + '</div>';
+  // "Due in 42 min" / "Overdue by 1h 10m" — urgency in words, with the clock time after it.
+  function msgrDueIn(ts){
+    if(!ts) return null;
+    const m = Math.round((new Date(ts).getTime() - Date.now()) / 60000);
+    if(isNaN(m)) return null;
+    const fmt = (n)=> n >= 2880 ? Math.floor(n / 1440) + ' days' : n >= 60 ? Math.floor(n / 60) + 'h' + (n % 60 ? ' ' + String(n % 60).padStart(2, '0') + 'm' : '') : n + ' min';
+    return m >= 0 ? { late:false, soon:m <= 60, text:'Due in ' + fmt(m) } : { late:true, soon:true, text:'Overdue by ' + fmt(-m) };
+  }
+  // How long since time in ("3h 14m"); used on the attendance card.
+  function msgrSpan(from, to){
+    const m = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000));
+    return isNaN(m) ? '' : (m >= 60 ? Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm' : m + 'm');
+  }
+  function msgrMapUrl(place){ return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(place); }
+  function msgrStepBar(ck){
+    if(!ck.length) return '';
+    const cur = ck.findIndex(x=> !x.done);
+    return '<div class="msgr-stepbar" aria-hidden="true">' + ck.map((x, i)=> '<i class="' + (x.done ? 'd' : i === cur ? 'c' : '') + '"></i>').join('') + '</div>';
+  }
+  // The two actions under the current task: Navigate (opens the place in Maps) and Report a problem (the existing "what went wrong" screen).
+  function msgrTaskActions(e){
+    const place = msgrPlace(e);
+    return '<div class="msgr-two">' +
+      (place ? '<a class="msgr-sbtn" href="' + msgrEsc(msgrMapUrl(place)) + '" target="_blank" rel="noopener">' + msgrIc('pin', 22, 2.2) + '<span>Navigate</span></a>' : '') +
+      '<button type="button" class="msgr-sbtn warn" data-msgr="problem" data-id="' + msgrEsc(e.id) + '">' + msgrIc('bell', 22, 2.2) + '<span>Report a problem</span></button></div>';
   }
   function msgrNextBox(title, text){
-    return '<div class="msgr-next"><span class="msgr-next-ic">' + msgrIc('play', 22, 1.5) + '</span><div><span class="msgr-tag">NEXT STEP</span>' +
+    return '<div class="msgr-next"><span class="msgr-next-ic">' + msgrIc('play', 22, 1.5) + '</span><div><span class="msgr-tag">Next step</span>' +
       '<div class="msgr-next-t">' + msgrEsc(title) + '</div><div class="msgr-next-s">' + msgrEsc(text) + '</div></div></div>';
   }
   const msgrBtn = (act, label, icon, id)=> '<button type="button" class="msgr-big" data-msgr="' + act + '"' + (id ? ' data-id="' + msgrEsc(id) + '"' : '') + '>' + msgrIc(icon, 30) + '<span>' + label + '</span></button>';
   const msgrTap = (txt)=> '<div class="msgr-tap">' + msgrIc('arrow', 20, 2.6) + '<div><b>When you tap:</b> ' + txt + '</div></div>';
+
+  // One persistent attendance card whose content follows his state (not timed in / on duty / timed out).
+  function msgrAttCard(tIn, tOut, openCount){
+    const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(e){ return ''; } };
+    if(!tIn) return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot off"></span><div class="msgr-att-t"><b>Not timed in</b><small>Time in to start your first errand</small></div></div>' +
+      msgrBtn('timein', 'Time in', 'clock') + '<div class="msgr-att-note">Saves your time and location</div></div>';
+    const spent = msgrSpan(tIn, tOut || Date.now());
+    if(tOut) return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot off"></span><div class="msgr-att-t"><b>Timed out</b><small>' + msgrEsc(fmt(tIn) + ' to ' + fmt(tOut) + (spent ? ' \u00B7 ' + spent : '')) + '</small></div></div>' +
+      '<div class="msgr-att-foot"><button type="button" class="msgr-textbtn msgr-link" data-msgr-go="dtr">View attendance</button></div></div>';
+    const ready = !openCount;
+    return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot"></span><div class="msgr-att-t"><b>On duty</b><small>' + msgrEsc('Timed in ' + fmt(tIn) + (spent ? ' \u00B7 ' + spent : '')) + '</small></div>' +
+      '<button type="button" class="msgr-outbtn' + (ready ? ' ready' : '') + '" data-msgr="timeout"' + (ready ? '' : ' disabled') + '>' + msgrIc('clock', 20, 2.2) + 'Time out</button></div>' +
+      '<div class="msgr-att-foot"><span>' + (ready ? 'All errands done \u2014 you can time out' : 'Time out opens after your last errand') + '</span>' +
+      '<button type="button" class="msgr-textbtn msgr-link" data-msgr-go="dtr">View attendance</button></div></div>';
+  }
+  // Today's errands as one connected timeline: where he is now, what is next, what is finished.
+  function msgrTimeline(open, done, failed, tIn, tOut){
+    const waiting = !tIn && !tOut;
+    const li = (e, kind, n, right, late)=>
+      '<button type="button" class="msgr-ti ' + kind + (waiting && kind === 'todo' ? ' dim' : '') + '" data-msgr-errand="' + msgrEsc(e.id) + '">' +
+      '<span class="msgr-mk ' + kind + '">' + (kind === 'cur' ? msgrIc('play', 12, 1.5) : kind === 'done' ? msgrIc('check', 14, 3.4) : kind === 'fail' ? msgrIc('bell', 13, 2.6) : n) + '</span>' +
+      '<span class="msgr-ti-main"><span class="msgr-ti-t">' + msgrEsc(e.title) + '</span>' + (msgrPlace(e) ? '<span class="msgr-ti-s">' + msgrEsc(msgrPlace(e)) + '</span>' : '') + '</span>' +
+      '<span class="msgr-ti-r' + (late ? ' late' : '') + '">' + msgrEsc(right) + '</span></button>';
+    const t = (x)=>{ try{ return x ? new Date(x).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }) : ''; }catch(err){ return ''; } };
+    const rows = [];
+    open.forEach((e, i)=>{
+      const prog = e.status === 'in_progress';
+      const late = !prog && typeof erOverdue === 'function' && erOverdue(e);
+      const right = prog ? 'In progress' : (e.due_at ? (late ? 'Late \u00B7 ' : 'Due ') + msgrDue(e.due_at) : '');
+      rows.push(li(e, prog || (i === 0 && tIn && !tOut) ? 'cur' : 'todo', i + 1, right, late));
+    });
+    done.forEach(e=> rows.push(li(e, 'done', 0, 'Done ' + t(e.completed_at || e.closed_at), false)));
+    failed.forEach(e=> rows.push(li(e, 'fail', 0, 'Not finished', true)));
+    return '<div class="msgr-tl">' + rows.join('') + '</div>';
+  }
+  // "Needs your response": the top items waiting on him, each with an action label and how urgent it is.
+  function msgrNeedRow(a, i){
+    const bad = a.state === 'escalated' || a.state === 'overdue';
+    return '<button type="button" class="msgr-row need' + (bad ? ' late' : '') + '" data-msgr-alert="' + i + '"><span class="msgr-circ need' + (bad ? ' red' : '') + '">' + msgrIc(MSGR_ALERT_ICON[String(a.module || '').split('.')[0]] || 'bell', 20, 2.3) + '</span>' +
+      '<span class="msgr-row-main"><span class="msgr-row-title">' + msgrEsc(a.title) + '</span>' + (a.sub ? '<span class="msgr-row-sub">' + msgrEsc(a.sub) + '</span>' : '') +
+      '<span class="msgr-pl ' + (bad ? 'red' : 'amb') + '">' + (bad ? 'Overdue' : 'Action required') + '</span></span><span class="msgr-chev">' + msgrIc('chev', 20, 2.4) + '</span></button>';
+  }
+  function msgrNeedsHtml(limit){
+    const list = msgr.alerts = msgrNeedsYou();
+    if(!list.length) return '';
+    const shown = limit ? list.slice(0, limit) : list;
+    return '<div class="msgr-needs"><div class="msgr-sh"><span class="msgr-sh-t">Needs your response \u00B7 ' + list.length + '</span>' +
+      (limit && list.length > limit ? '<button type="button" class="msgr-textbtn msgr-link" data-msgr="alerts">See all ' + list.length + '</button>' : '') + '</div>' +
+      '<div class="msgr-list">' + shown.map((a, i)=> msgrNeedRow(a, i)).join('') + '</div></div>';
+  }
+  // Quick actions: four everyday shortcuts. Everything else lives under Requests and Profile.
+  function msgrQuickHtml(){
+    const q = (go, ic, label, n)=> '<button type="button" class="msgr-q" data-msgr-go="' + go + '"><span class="msgr-q-ic">' + msgrIc(ic, 24, 2) + '</span><span class="msgr-q-l">' + label + '</span>' + (n ? '<span class="msgr-count">' + n + '</span>' : '') + '</button>';
+    return '<div class="msgr-sh"><span class="msgr-sh-t">Quick actions</span></div><div class="msgr-qa">' +
+      q('leave', 'leave', 'File a leave') + q('payslips', 'slip', 'My payslips') + q('cashNew', 'cash', 'Cash advance', msgr.cash.pending || '') + q('reimb', 'refund', 'Reimbursement') + '</div>';
+  }
+  function msgrSetReqBadge(){
+    const n = msgrNeedsYou().length;
+    document.querySelectorAll('#msgrNav [data-msgr-tab="cash"] .msgr-tab-n').forEach(b=>{ b.textContent = n > 99 ? '99+' : String(n); b.style.display = n ? '' : 'none'; });
+  }
 
   async function msgrRenderHome(target, quiet){
     if(!quiet) target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
@@ -34079,7 +34223,7 @@
     if(!data.ok){
       if(quiet) return;   // a background refresh never replaces a good screen with an error
       target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-hello">' + msgrGreeting() + '</div><div class="msgr-name">' + msgrEsc(msgrFirstName()) + '</div></div>' + msgrBellHtml() + '</div>' +
-        '<div class="msgr-card"><div class="msgr-card-t">Can\u2019t load your errands</div><p class="msgr-p">Check your connection, then try again.</p>' + msgrBtn('retry', 'TRY AGAIN', 'refund') + '</div></div>';
+        '<div class="msgr-card"><div class="msgr-card-t">Can\u2019t load your errands</div><p class="msgr-p">Check your connection, then try again.</p>' + msgrBtn('retry', 'Try again', 'refund') + '</div></div>';
       return;
     }
     const tIn = data.dtr && data.dtr.timeIn, tOut = data.dtr && data.dtr.timeOut;
@@ -34088,61 +34232,40 @@
     msgrNoticeNew(open, quiet);
     const total = open.length + done.length + failed.length;
     const featured = open[0] || null;
-    const inProg = open.filter(e=> e.status === 'in_progress').length;
-    const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(e){ return ''; } };
 
-    const segs = [];
-    done.forEach(()=> segs.push('g'));
-    failed.forEach(()=> segs.push('n'));
-    open.forEach((e, i)=> segs.push(e.status === 'in_progress' ? 'a' : (i === 0 && tIn && !tOut ? 'b' : 'n')));
-
-    let chip = tOut ? '<span class="msgr-chip ok">' + msgrIc('check', 18, 2.6) + 'Timed out ' + msgrEsc(fmt(tOut)) + '</span>'
-      : tIn ? '<span class="msgr-chip ok">' + msgrIc('check', 18, 2.6) + 'Timed in ' + msgrEsc(fmt(tIn)) + '</span>'
-      : '<span class="msgr-chip warn">' + msgrIc('clock', 18) + 'Not timed in yet</span>';
-
-    let card = '', listTitle = 'RECOMMENDED ORDER', listRows = '';
-    const rest = featured ? open.slice(1) : [];
-    if(!tIn){
-      card = '<div class="msgr-card blue">' + msgrNextBox('Time in', 'Tap the green button to begin your day.') + msgrBtn('timein', 'TIME IN', 'clock') +
-        msgrTap('your time and location are saved.' + (open.length ? ' Then you can start errand 1.' : '')) + '</div>';
-      listRows = open.map((e, i)=> msgrRow(e, i + 1, 'todo')).join('');
-    }else if(tOut){
+    // the main card answers "what do I do next?"
+    let card = '';
+    if(tOut){
       card = '<div class="msgr-card"><div class="msgr-done-line">' + msgrCircle('done') + '<div><div class="msgr-card-t">You\u2019re done for today</div><p class="msgr-p">See you tomorrow, ' + msgrEsc(msgrFirstName()) + '.</p></div></div></div>';
-      listTitle = 'TODAY\u2019S ERRANDS';
-      listRows = done.map(e=> msgrRow(e, 0, 'done')).join('') + failed.map(e=> msgrRow(e, 0, 'failed')).join('');
-    }else if(featured && featured.status === 'in_progress'){
+    }else if(tIn && featured){
+      const prog = featured.status === 'in_progress';
       const ck = Array.isArray(featured.checklist) ? featured.checklist : [];
-      const nextStep = ck.find(s=> !s.done);
-      card = '<div class="msgr-card amber"><div class="msgr-card-top"><span class="msgr-tag amber">IN PROGRESS</span>' + (ck.length ? '<span class="msgr-pill">' + ck.filter(s=> s.done).length + ' of ' + ck.length + ' steps</span>' : '') + '</div>' +
+      const nextStep = ck.find(x=> !x.done);
+      const di = msgrDueIn(featured.due_at);
+      card = '<div class="msgr-card cur"><div class="msgr-card-top"><span class="msgr-label green">Current task</span>' +
+        (prog ? '<span class="msgr-pill">In progress' + (ck.length ? ' \u00B7 ' + ck.filter(x=> x.done).length + ' of ' + ck.length + ' steps' : '') + '</span>' : '<span class="msgr-pill">Up next</span>') + '</div>' +
         '<div class="msgr-card-t">' + msgrEsc(featured.title) + '</div>' +
         (msgrPlace(featured) ? '<div class="msgr-card-sub">' + msgrEsc(msgrPlace(featured)) + '</div>' : '') +
-        msgrNextBox(nextStep ? nextStep.text : 'Finish the errand', nextStep ? 'This is the next thing to do.' : 'Tap the green button to see what is left.') +
-        msgrBtn('open', 'CONTINUE ERRAND', 'play', featured.id) + msgrTap('you see this errand\u2019s steps. Your place is saved as you go.') + '</div>';
-      listRows = rest.map((e, i)=> msgrRow(e, i + 2, 'todo')).join('');
-    }else if(featured){
-      card = '<div class="msgr-card blue"><div class="msgr-card-top"><span class="msgr-num">1</span><span class="msgr-tag">UP NEXT</span></div>' +
-        '<div class="msgr-card-t">' + msgrEsc(featured.title) + '</div>' +
-        (msgrPlace(featured) ? '<div class="msgr-card-sub">' + msgrEsc(msgrPlace(featured)) + '</div>' : '') +
-        (featured.due_at ? '<div class="msgr-due">' + msgrIc('clock', 20) + 'Due ' + msgrEsc(msgrDue(featured.due_at)) + '</div>' : '') +
-        msgrBtn('start', 'START ERRAND 1', 'play', featured.id) + msgrTap('your time and location are saved. Then you see the steps.') + '</div>';
-      listRows = rest.map((e, i)=> msgrRow(e, i + 2, 'todo')).join('');
-    }else{
+        (di ? '<div class="msgr-dueat' + (di.late ? ' late' : di.soon ? ' soon' : '') + '">' + msgrIc('clock', 18, 2.4) + '<span>' + msgrEsc(di.text) + ' \u00B7 ' + msgrEsc(msgrDue(featured.due_at)) + '</span></div>' : '') +
+        msgrStepBar(ck) +
+        (prog ? msgrNextBox(nextStep ? nextStep.text : 'Finish the errand', nextStep ? 'This is the next thing to do.' : 'Open the task to see what is left.') : '') +
+        msgrBtn(prog ? 'open' : 'start', prog ? 'Open task' : 'Start errand', 'play', featured.id) +
+        msgrTaskActions(featured) + '</div>';
+    }else if(tIn){
       card = '<div class="msgr-card"><div class="msgr-done-line">' + msgrCircle('done') + '<div><div class="msgr-card-t">' + (total ? 'All errands done' : 'No errands right now') + '</div>' +
-        '<p class="msgr-p">' + (total ? 'Great work, ' + msgrEsc(msgrFirstName()) + '.' : 'The office will tell you when one is ready.') + '</p></div></div>' +
-        (total ? msgrNextBox('Time out', 'Tap the green button to end your day.') : '') +
-        msgrBtn('timeout', 'TIME OUT', 'clock') + msgrTap('your time and location are saved. The office then reviews today\u2019s errands.') + '</div>';
-      listTitle = 'TODAY\u2019S ERRANDS';
-      listRows = done.map(e=> msgrRow(e, 0, 'done')).join('') + failed.map(e=> msgrRow(e, 0, 'failed')).join('');
+        '<p class="msgr-p">' + (total ? 'Great work, ' + msgrEsc(msgrFirstName()) + '. You can time out now.' : 'The office will tell you when one is ready.') + '</p></div></div></div>';
     }
-    // finished errands stay visible under the open ones
-    const finishedRows = (open.length && tIn && !tOut) ? done.map(e=> msgrRow(e, 0, 'done')).join('') + failed.map(e=> msgrRow(e, 0, 'failed')).join('') : '';
 
+    const timeline = total ? '<div class="msgr-sh"><span class="msgr-sh-t">' + (tIn || tOut ? 'Today' : 'Waiting for you today') + '</span><span class="msgr-sh-r">' +
+      (tIn || tOut ? done.length + ' of ' + total + ' complete' : total + ' errand' + (total === 1 ? '' : 's')) + '</span></div>' +
+      ((tIn || tOut) ? '<div class="msgr-prog"><i style="width:' + Math.round(done.length / total * 100) + '%"></i></div>' : '') +
+      msgrTimeline(open, done, failed, tIn, tOut) : '';
+
+    msgrSetReqBadge();
     target.innerHTML = '<div class="msgr-page">' +
       '<div class="msgr-head"><div><div class="msgr-hello">' + msgrGreeting() + '</div><div class="msgr-name">' + msgrEsc(msgrFirstName()) + '</div></div>' + msgrBellHtml() + '</div>' +
-      msgrPushHtml() + chip + '<div class="th-sec"><h2 class="th-sec-title">Need to do now</h2></div>' + msgrSummary(total, done.length, inProg, segs) + card +
-      (listRows ? '<div class="msgr-label">' + listTitle + '</div><div class="msgr-list">' + listRows + '</div>' : '') +
-      (finishedRows ? '<div class="msgr-label">DONE TODAY</div><div class="msgr-list">' + finishedRows + '</div>' : '') +
-      (await msgrWaitingHtml()) + msgrTilesHtml() + '</div>';
+      msgrPushHtml() + msgrAttCard(tIn, tOut, open.length) + card + timeline +
+      msgrNeedsHtml(2) + (await msgrWaitingHtml()) + msgrQuickHtml() + '</div>';
   }
 
   // "Waiting for approval" / "Approved — what happens next" for the messenger's own requests (same rows as the technician home)
@@ -34161,20 +34284,6 @@
       return (wait.length ? '<div class="msgr-wait"><div class="th-sec"><h2 class="th-sec-title">Waiting for approval</h2><span class="th-sec-count">Admin is reviewing</span></div><div class="th-box">' + conv(wait.join('')) + '</div></div>' : '') +
         (appr.length ? '<div class="msgr-wait" id="msgrApprovedWrap"><div class="th-sec"><h2 class="th-sec-title">Approved</h2><span class="th-sec-count">What happens next</span></div><div class="th-box" id="msgrApprovedList">' + conv(appr.join('')) + '</div></div>' : '');
     }catch(e){ return ''; }
-  }
-
-  // The same "What do you need?" shortcut grid the technician home has: grouped, big icon, short label, no sub-label.
-  // Every tile opens a page the Menu already opens (data-msgr-go).
-  function msgrTilesHtml(){
-    const tile = (go, ic, tone, label, n)=> '<button type="button" class="th-tile th-' + tone + '" data-msgr-go="' + go + '"><span class="th-tile-ic">' + msgrIc(ic, 30, 2) + '</span>' +
-      '<span class="th-tile-label">' + msgrEsc(label) + '</span>' + (n ? '<span class="th-tile-badge">' + n + '</span>' : '') + '</button>';
-    const group = (title, tiles)=> '<div class="th-group"><h3 class="th-group-title">' + title + '</h3><div class="th-grid">' + tiles.join('') + '</div></div>';
-    return '<div class="msgr-tiles"><div class="th-sec"><h2 class="th-sec-title">What do you need?</h2></div>' +
-      group('My work', [tile('errands', 'list', 'orange', 'My errands', msgr.openErrands || ''), tile('dtr', 'clock', 'green', 'Attendance')]) +
-      group('Time and pay', [tile('leave', 'leave', 'violet', 'File a leave'), tile('payslips', 'slip', 'purple', 'My payslips')]) +
-      group('Money', [tile('cashNew', 'cash', 'green', 'Cash advance', msgr.cash.pending || ''), tile('liq', 'liq', 'green', 'Liquidation', msgr.cash.toLiq || ''), tile('reimb', 'refund', 'green', 'Reimbursement')]) +
-      group('Ask the office', [tile('errandReq', 'plus', 'teal', 'Errand request'), tile('requestMaterials', 'box', 'brown', 'Request materials'), tile('myDeliveries', 'truck', 'brown', 'My deliveries')]) +
-      '</div>';
   }
 
   async function msgrShowHome(){
@@ -34220,6 +34329,7 @@
     }
     else if(act === 'start') msgrStartErrand(id, b);
     else if(act === 'open') msgrOpenErrand(id);
+    else if(act === 'problem'){ msgr.gProblem = id; msgrOpenErrand(id); }
   });
 
   // ---------- Menu ----------
@@ -34279,7 +34389,7 @@
         }).join('');
     }
     const initial = (currentUser.name || '?').trim().charAt(0).toUpperCase();
-    target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div class="msgr-title">Menu</div>' + msgrBellHtml() + '</div>' +
+    target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div class="msgr-title">Profile</div>' + msgrBellHtml() + '</div>' +
       '<button type="button" class="msgr-acct" data-msgr-go="account"><span class="msgr-avatar">' + msgrEsc(initial) + '</span><span class="msgr-mrow-main"><span class="msgr-mrow-t">' + msgrEsc(currentUser.name || '') + '</span><span class="msgr-acct-s">My account</span></span><span class="msgr-chev">' + msgrIc('chev', 22, 3) + '</span></button>' +
       '<div class="msgr-label">MY WORK</div>' + msgrMenuRow('list', 'My errands', 'Today and past', 'data-msgr-go="errands"', msgr.openErrands || '') + more +
       '<div class="msgr-label">MY TIME AND PAY</div>' +
@@ -34599,8 +34709,8 @@
         '<button type="button" class="msgr-open" data-msgr-alert="' + i + '"><span>Open</span>' + msgrIc('arrow', 22, 2.8) + '</button></div>';
     };
     target.innerHTML = '<div class="msgr-page"><button type="button" class="msgr-backbtn" data-msgr-go="home">' + msgrIc('back', 22, 2.8) + 'Back</button>' +
-      '<div><div class="msgr-title">Alerts</div><div class="msgr-g-sub">' + (list.length ? list.length + ' thing' + (list.length === 1 ? '' : 's') + ' need' + (list.length === 1 ? 's' : '') + ' you' : 'You\u2019re all caught up') + '</div></div>' +
-      (list.length ? '<div class="msgr-label amber">NEEDS YOU</div>' + list.map(card).join('') + msgrTap('you go straight to the page that needs you. Done items leave this list.')
+      '<div><div class="msgr-title">Needs your response</div><div class="msgr-g-sub">' + (list.length ? list.length + ' thing' + (list.length === 1 ? '' : 's') + ' need' + (list.length === 1 ? 's' : '') + ' you' : 'You\u2019re all caught up') + '</div></div>' +
+      (list.length ? '<div class="msgr-sh"><span class="msgr-sh-t">Action required</span></div>' + list.map(card).join('') + msgrTap('you go straight to the page that needs you. Done items leave this list.')
         : '<div class="msgr-g-center">' + msgrCircle('done').replace('msgr-circ done', 'msgr-circ done huge') + '<div class="msgr-g-sub">Nothing is waiting for you right now.</div></div>' +
           '<button type="button" class="msgr-big" data-msgr-go="home">' + msgrIc('home', 30) + '<span>BACK TO HOME</span></button>') + '</div>';
   }
@@ -34653,20 +34763,24 @@
   // =====================================================================
   // Cash tab — three plain choices, each opening the page that already exists
   // =====================================================================
+  // Requests tab (it was "Cash"): what needs his response, what is waiting for approval, and everything he can ask the office for.
   async function msgrShowCash(){
     msgrSetTab('cash');
     showStaffView('msgrCash');
     const target = $('staffPanel_msgrCash');
     target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
     await Promise.all([msgrLoad(), (typeof staffLoadInbox === 'function' ? staffLoadInbox() : null)]);
-    const card = (go, icon, t, s, hint, n)=> '<button type="button" class="msgr-choice small" data-msgr-go="' + go + '"><span class="msgr-mic big">' + msgrIc(icon, 30, 2.2) + '</span>' +
-      '<span class="msgr-mrow-main"><span class="msgr-choice-t">' + t + '</span><span class="msgr-mrow-s">' + s + '</span>' + (hint ? '<span class="msgr-choice-h">' + hint + '</span>' : '') + '</span>' +
-      (n ? '<span class="msgr-count">' + n + '</span>' : '') + '<span class="msgr-chev">' + msgrIc('chev', 24, 3) + '</span></button>';
-    target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-title">Cash</div><div class="msgr-g-sub" style="margin-top:4px;">Money for your errands</div></div>' + msgrBellHtml() + '</div>' +
-      (msgr.cash.toLiq ? '<div class="msgr-banner">' + msgrIc('liq', 22) + '<span><b>' + msgr.cash.toLiq + ' to close.</b> Send in your receipts for the cash you received.</span></div>' : '') +
-      card('cashNew', 'cash', 'Ask for cash', 'Cash advance', 'Need money for an errand? Ask here first.', msgr.cash.pending) +
-      card('liq', 'liq', 'Send in your receipts', 'Liquidation', 'Show how you used the cash.', msgr.cash.toLiq) +
-      card('reimb', 'refund', 'Money I paid first', 'Reimbursement', 'Paid with your own money? Ask to get it back.', 0) + '</div>';
+    const row = (go, icon, t, sub, n)=> msgrMenuRow(icon, t, sub, 'data-msgr-go="' + go + '"', n);
+    msgrSetReqBadge();
+    const needs = msgrNeedsHtml();
+    target.innerHTML = '<div class="msgr-page"><div class="msgr-head"><div><div class="msgr-title">Requests</div><div class="msgr-g-sub" style="margin-top:4px;">What needs you, and what you can ask the office</div></div>' + msgrBellHtml() + '</div>' +
+      (needs || '<div class="msgr-card"><div class="msgr-done-line">' + msgrCircle('done') + '<div><div class="msgr-card-t">Nothing needs your response</div><p class="msgr-p">You\u2019re all caught up.</p></div></div></div>') +
+      (await msgrWaitingHtml()) +
+      '<div class="msgr-sh"><span class="msgr-sh-t">Ask the office</span></div>' +
+      row('errandReq', 'plus', 'Errand request', 'Ask for a messenger') + row('requestMaterials', 'box', 'Request materials', 'Ask for what you need') + row('myDeliveries', 'truck', 'My deliveries', 'Receive at a site, with photos') +
+      '<div class="msgr-sh"><span class="msgr-sh-t">Money</span></div>' +
+      row('cashNew', 'cash', 'Cash advance', 'Money for an errand', msgr.cash.pending || '') + row('liq', 'liq', 'Liquidation', 'Submit receipts for cash you received', msgr.cash.toLiq || '') +
+      row('reimb', 'refund', 'Reimbursement', 'Paid with your own money? Ask to get it back') + '</div>';
   }
 
   // =====================================================================
