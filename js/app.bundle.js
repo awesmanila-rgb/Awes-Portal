@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v236';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v237';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -34890,8 +34890,8 @@
   //   Dispatch board, Job order progress,
   //   Technicians status,
   //   Schedule calendar .... Dispatch (View)
-  //   Live tracker (+ list)  Live Tracker (View) — with both, Job order progress sits beside the map
-  //                          and the Technicians status table runs full-width below
+  //   Live tracker (+ list)  Live Tracker (View) — the map, then the full-width Technicians status table,
+  //                          then Job order progress tracking below it
   //   Time-in / time-out ... only with Technician Attendance (View)
   //   Everything else on the admin dashboard (finance, leave, purchasing,
   //   activity log, charts) is hidden — those stay in Inbox / their own pages.

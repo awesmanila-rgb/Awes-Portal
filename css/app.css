@@ -5546,23 +5546,22 @@ body.has-ops-dash #staffPanel_home > .card{ margin:0; }
    Layout depends on what the person may see (classes set by ops-dashboard.js):
      ops-map  = Live Tracker (the map)
      ops-disp = Dispatch (board, Job order progress, Technicians status, calendar)
-   With both, Job order progress sits BESIDE the map and Technicians status (the wide table)
-   runs full-width below them. */
+   Technicians status (the wide table) is one full-width card and Job order progress tracking sits BELOW it,
+   also full width (they used to share a row, which squeezed the table and cut off names and job orders). */
 body.role-admin #opsDash #adminDash.adm-v2{
   grid-template-columns:minmax(0,1fr) !important;
-  grid-template-areas:"prio" "board" "track" "prog" "ptech" "cal" !important;
+  grid-template-areas:"prio" "board" "track" "ptech" "prog" "cal" !important;
 }
 @media (min-width:1100px){
   body.role-admin #opsDash #adminDash.adm-v2{
-    grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr) !important;
-    grid-template-areas:"prio prio" "board board" "prog ptech" "cal cal" !important;       /* Dispatch only: the table gets the wider column */
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-areas:"prio" "board" "ptech" "prog" "cal" !important;                      /* Dispatch only */
   }
   body.role-admin #opsDash #adminDash.adm-v2.ops-map{
-    grid-template-areas:"prio prio" "track track" !important;                                /* Live Tracker only */
+    grid-template-areas:"prio" "track" !important;                                           /* Live Tracker only */
   }
   body.role-admin #opsDash #adminDash.adm-v2.ops-map.ops-disp{
-    grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
-    grid-template-areas:"prio prio" "board board" "track prog" "ptech ptech" "cal cal" !important;   /* map | Job order progress, then the full-width table */
+    grid-template-areas:"prio" "board" "track" "ptech" "prog" "cal" !important;              /* map, then the table, then Job order progress */
   }
 }
 body.role-admin #opsDash #prioCard{ grid-area:prio !important; }
@@ -5573,11 +5572,7 @@ body.role-admin #opsDash #homeScheduleCalendarCard{ grid-area:cal !important; }
 body.role-admin #opsDash #dashTwoCol{ display:contents; }                      /* its two cards join the grid directly */
 body.role-admin #opsDash #homeTrackerCard{ grid-area:track !important; }
 /* (#homeTechListCard stays hidden, as on the Super Admin dashboard: the Technicians status table replaces it) */
-@media (min-width:1100px){
-  /* beside the map, Job order progress reads as its pair: same top, same height */
-  body.role-admin #opsDash #adminDash.ops-map.ops-disp #homeTrackerCard,
-  body.role-admin #opsDash #adminDash.ops-map.ops-disp #prioProgressCard{ align-self:stretch; }
-}
+body.role-admin #opsDash #prioProgressCard{ align-self:start; }   /* keeps its own height, not stretched into an empty box */
 }
 /* ---------- Admin Equipment / Customers pages: equipment totals ---------- */
 .eq-total-bar{ display:flex; align-items:center; gap:14px; background:var(--green-light, #E3EFE6); border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin:0 0 14px; }
