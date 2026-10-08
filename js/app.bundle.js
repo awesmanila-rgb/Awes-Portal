@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v241';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v242';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -7855,7 +7855,7 @@
     }
   }
   function dtrLocationRequired(){
-    return !!(currentUser && currentUser.role === 'staff' && typeof can === 'function' && can('adm.my_errands', 'view'));
+    return !!(currentUser && currentUser.role === 'staff' && typeof can === 'function' && (can('adm.my_errands', 'view') || can('adm.my_trips', 'view')));   // messengers and drivers: Time in / out saves where they are
   }
   function dtrGetLocation(){
     return new Promise((resolve)=>{
