@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v238';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v239';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -28974,14 +28974,29 @@
     }
   }
 
+  // A request that never answers (weak signal) must not leave a section blank: give up after 20 s and say so.
+  const admRace = (p)=> Promise.race([p, new Promise((_, rej)=> setTimeout(()=> rej(new Error('Took too long \u2014 check your connection')), 20000))]);
+  const admRetryHtml = (what, msg)=> '<div class="pay-banner warn">Couldn\u2019t load ' + what + (msg ? ': ' + admEsc(msg) : '') + ' <button type="button" class="btn btn-secondary pay-sm" data-retry="1">Try again</button></div>';
+
   // ---- files ------------------------------------------------------------------
   async function admFiles(entity, id, edit){
     const box = $('admFiles'); if(!box) return;
-    const { data } = await db.from('adm_files').select('*').eq('entity', entity).eq('entity_id', id).order('uploaded_at');
-    const files = data || [];
+    // the button shows at once; the list fills in when it arrives (or says why it couldn't)
+    const addBtn = edit ? '<button type="button" class="btn btn-secondary pay-sm" data-up="1" style="margin-top:8px;">+ Add file</button>' : '';
+    box.innerHTML = '<div class="pay-hint">Loading files\u2026</div>' + addBtn;
+    let files = [];
+    try{
+      const { data, error } = await admRace(db.from('adm_files').select('*').eq('entity', entity).eq('entity_id', id).order('uploaded_at'));
+      if(error) throw error;
+      files = data || [];
+    }catch(e){
+      box.innerHTML = admRetryHtml('the files', describeCloudError(e)) + addBtn;
+      box.onclick = (ev)=>{ if(ev.target.closest('[data-retry]')) admFiles(entity, id, edit); else if(ev.target.closest('[data-up]')) admUploadFile(entity, id, edit); };
+      return;
+    }
     box.innerHTML = (files.length ? files.map(f=> '<div class="pay-audit" data-f="' + admEsc(f.id) + '"><button type="button" class="pay-link" data-open-f="' + admEsc(f.path) + '">\uD83D\uDCCE ' + admEsc(f.name || f.path.split('/').pop()) + '</button>' +
         (edit ? ' <button type="button" class="pay-rm" data-del-f="' + admEsc(f.id) + '" aria-label="Remove">\u00D7</button>' : '') + '</div>').join('') : '<div class="pay-hint">No files yet.</div>') +
-      (edit ? '<button type="button" class="btn btn-secondary pay-sm" data-up="1" style="margin-top:8px;">+ Add file</button>' : '');
+      addBtn;
     box.onclick = async (e)=>{
       const o = e.target.closest('[data-open-f]');
       if(o){ const { data } = await db.storage.from('admin-docs').createSignedUrl(o.dataset.openF, 600); if(data && data.signedUrl) window.open(data.signedUrl, '_blank', 'noopener'); return; }
@@ -28993,35 +29008,56 @@
         await db.from('adm_files').delete().eq('id', f.id);
         admFiles(entity, id, edit); return;
       }
-      if(e.target.closest('[data-up]')){
-        const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*,application/pdf';
-        inp.onchange = async ()=>{
-          const file = inp.files && inp.files[0]; if(!file) return;
-          if(file.size > 15 * 1024 * 1024){ toast('Files up to 15 MB'); return; }
-          let blob = file;
-          if(/^image\//.test(file.type)){ try{ blob = await compressImageForUpload(file, { targetBytes:400 * 1024, maxDim:2000 }); }catch(err){} }
-          const safe = file.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-60);
-          const path = entity + '/' + id + '/' + Date.now() + '-' + safe;
-          toast('Uploading\u2026');
-          const up = await db.storage.from('admin-docs').upload(path, blob, { contentType: blob.type || file.type });
-          if(up.error){ toast('Couldn\u2019t upload: ' + up.error.message); return; }
-          const { error } = await db.from('adm_files').insert({ entity, entity_id:id, path, name:file.name });
-          if(error){ toast('Couldn\u2019t save the file: ' + error.message); return; }
-          toast('File added'); admFiles(entity, id, edit);
-        };
-        inp.click();
-      }
+      if(e.target.closest('[data-up]')) admUploadFile(entity, id, edit);
     };
+  }
+  let admUploading = false;
+  function admUploadFile(entity, id, edit){
+    if(admUploading){ toast('Still uploading\u2026'); return; }
+    // the file picker is attached to the page (some phones ignore a picker that is not), and removed afterwards
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*,application/pdf'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    const cleanup = ()=>{ try{ inp.remove(); }catch(e){} };
+    inp.addEventListener('cancel', cleanup);
+    inp.onchange = async ()=>{
+      const file = inp.files && inp.files[0]; cleanup(); if(!file) return;
+      if(file.size > 15 * 1024 * 1024){ toast('Files up to 15 MB'); return; }
+      if(file.type && !/^image\//.test(file.type) && file.type !== 'application/pdf'){ toast('Add a photo or a PDF'); return; }
+      admUploading = true;
+      try{
+        let blob = file;
+        if(/^image\//.test(file.type)){ try{ blob = await compressImageForUpload(file, { targetBytes:400 * 1024, maxDim:2000 }); }catch(err){} }
+        const safe = file.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-60);
+        const path = entity + '/' + id + '/' + Date.now() + '-' + safe;
+        toast('Uploading\u2026');
+        const up = await admRace(db.storage.from('admin-docs').upload(path, blob, { contentType: blob.type || file.type }));
+        if(up.error){ toast('Couldn\u2019t upload: ' + up.error.message); return; }
+        const { error } = await db.from('adm_files').insert({ entity, entity_id:id, path, name:file.name });
+        if(error){ toast('Couldn\u2019t save the file: ' + error.message); return; }
+        toast('File added'); admFiles(entity, id, edit);
+      }catch(err){ toast('Couldn\u2019t upload: ' + describeCloudError(err)); }
+      finally{ admUploading = false; }
+    };
+    inp.click();
   }
 
   // ---- vehicles: trips, fuel, service ---------------------------------------------
   async function admVehicleExtra(v, edit){
     const box = $('admVehExtra'); if(!box) return;
-    const [t, f, s] = await Promise.all([
-      db.from('adm_vehicle_trips').select('*').eq('vehicle_id', v.id).order('out_at', { ascending:false }).limit(30),
-      db.from('adm_vehicle_fuel').select('*').eq('vehicle_id', v.id).order('filled_on', { ascending:false }).limit(20),
-      db.from('adm_vehicle_service').select('*').eq('vehicle_id', v.id).order('serviced_on', { ascending:false }).limit(20)
-    ]);
+    box.innerHTML = '<div class="po-sec"><div class="po-sec-title">Trip tickets, fuel and service</div><div class="pay-hint">Loading\u2026</div></div>';
+    let t, f, s;
+    try{
+      [t, f, s] = await admRace(Promise.all([
+        db.from('adm_vehicle_trips').select('*').eq('vehicle_id', v.id).order('out_at', { ascending:false }).limit(30),
+        db.from('adm_vehicle_fuel').select('*').eq('vehicle_id', v.id).order('filled_on', { ascending:false }).limit(20),
+        db.from('adm_vehicle_service').select('*').eq('vehicle_id', v.id).order('serviced_on', { ascending:false }).limit(20)
+      ]));
+      const bad = [t, f, s].find(x=> x && x.error); if(bad) throw bad.error;
+    }catch(e){
+      box.innerHTML = '<div class="po-sec"><div class="po-sec-title">Trip tickets, fuel and service</div>' + admRetryHtml('trips, fuel and service', describeCloudError(e)) + '</div>';
+      box.onclick = (ev)=>{ if(ev.target.closest('[data-retry]')) admVehicleExtra(v, edit); };
+      return;
+    }
     const trips = t.data || [], fuel = f.data || [], svc = s.data || [];
     const open = trips.find(x=> x.status === 'out');
     const when = (ts)=> ts ? new Date(ts).toLocaleString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }) : '';

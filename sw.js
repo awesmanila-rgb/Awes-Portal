@@ -1157,7 +1157,7 @@
 // 2 x 3 quick actions, reordered sections, bottom bar).
 // Bumped to v192 — admin dashboard v2 (css "Admin dashboard v2" block, adm-v2 classes,
 // dispatch board + status line in admin-priority.js).
-const CACHE_NAME = 'awes-sr-v238';
+const CACHE_NAME = 'awes-sr-v239';
 
 // Split into two lists on purpose.
 //
