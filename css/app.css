@@ -6185,3 +6185,123 @@ body:has(#loginOverlay.open){ overflow:hidden; }
 /* every pop-up sits above the messenger's bottom bar; the "?" help button steps aside while one is open */
 body.role-messenger .overlay{ z-index:70; }
 body:has(.overlay.open:not(.login-overlay)) .gd-help-fab{ display:none; }
+
+/* ---------- Driver account (driver.js) ---------- */
+.drv-veh{ margin-top:10px; }
+.drv-kv{ display:flex; gap:10px; flex-wrap:wrap; }
+.drv-kv > div{ flex:1 1 90px; font-size:13px; font-weight:600; color:#58695F; }
+.drv-kv b{ display:block; font-size:19px; font-weight:800; color:#12221A; }
+.drv-sum{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:-4px; }
+.drv-sum > div{ background:#fff; border:1.5px solid #DCE8E0; border-radius:14px; padding:10px 6px; text-align:center; font-size:13px; font-weight:600; color:#58695F; }
+.drv-sum b{ display:block; font-size:19px; font-weight:800; color:#12221A; }
+.drv-trip{ background:#fff; border:1.5px solid #DCE8E0; border-radius:18px; padding:12px 14px; }
+.drv-trip-top{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.drv-trip-t{ font-size:17px; font-weight:800; line-height:1.25; }
+.drv-trip-s{ font-size:13.5px; font-weight:600; color:#58695F; margin-top:2px; }
+.drv-legs{ margin:10px 0 2px; padding-left:4px; }
+.drv-leg{ display:flex; gap:12px; align-items:flex-start; font-size:15px; padding:0 0 10px; position:relative; }
+.drv-leg:not(:last-child):before{ content:""; position:absolute; left:6px; top:16px; bottom:0; width:2px; background:#CFDAD3; }
+.drv-dot{ width:14px; height:14px; border-radius:50%; background:#17714F; border:2.5px solid #17714F; flex:none; margin-top:3px; }
+.drv-leg.o .drv-dot{ background:#fff; }
+.drv-leg b{ font-weight:800; color:#12221A; }
+.drv-x{ color:#58695F; font-weight:600; }
+.drv-keep{ display:flex; gap:10px; align-items:center; font-size:14px; font-weight:600; color:#33443B; padding:6px 0; }
+.drv-keep input{ width:22px; height:22px; flex:none; }
+.drv-chips{ display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; }
+.drv-chips button{ min-height:44px; padding:0 14px; border-radius:22px; border:2px solid #CFDAD3; background:#fff; font:inherit; font-size:15px; font-weight:700; color:#33443B; cursor:pointer; }
+.drv-chips button.on{ border-color:#0F5A40; background:#E3EFE6; color:#0B4531; }
+.drv-note{ font-size:13px; color:#58695F; text-align:center; margin-top:8px; }
+.drv-daynav{ display:flex; align-items:center; justify-content:space-between; background:#fff; border:1.5px solid #DCE8E0; border-radius:16px; padding:6px; }
+.drv-daynav b{ font-size:18px; }
+.drv-daynav button{ width:48px; height:48px; border-radius:12px; border:0; background:#E3EFE6; color:#0F5A40; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.drv-daynav button:disabled{ opacity:.35; }
+.drv-sheet .field{ margin-bottom:12px; }
+.drv-sheet input, .drv-sheet select{ width:100%; min-height:50px; font-size:16px; border-radius:14px; }
+
+/* ---------- Trip Tickets (office page) ---------- */
+.trp-bar{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.trp-day, .trp-filters{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.trp-day input[type=date]{ min-height:38px; }
+.trp-tiles{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:12px; }
+.trp-tiles > div{ background:var(--surface-2, #F1F6F3); border-radius:10px; padding:10px 12px; }
+.trp-tiles small{ display:block; font-size:12px; color:var(--text-muted); }
+.trp-tiles b{ font-size:22px; font-weight:700; }
+.trp{ border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#fff; }
+.trp-top{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+.trp-no{ font-size:12px; font-weight:700; color:var(--text-muted); margin-right:6px; }
+.trp-meta{ display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--text-muted); margin:4px 0 8px; }
+.trp-times{ display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-bottom:6px; }
+.trp-times small{ display:block; font-size:11px; color:var(--text-muted); }
+.trp-times b{ font-size:15px; }
+.trp-detail{ border-top:1px solid var(--border); margin-top:8px; padding-top:8px; }
+.trp-stop{ font-size:13px; padding:4px 0; }
+.trp-stop b{ display:block; }
+.trp-stop span{ color:var(--text-muted); }
+.adm-trip-modal{ max-width:640px !important; }
+@media (max-width:640px){ .trp-tiles{ grid-template-columns:repeat(2,1fr); } .trp-times{ grid-template-columns:repeat(3,1fr); } }
+
+.trp-day > *, .trp-filters > *{ width:auto; flex:0 0 auto; margin:0; }
+.trp-day .btn{ min-width:44px; min-height:40px; }
+.trp-filters select{ min-height:40px; max-width:200px; }
+.trp-bar > .btn{ width:auto; min-height:40px; }
+.trp .pay-muted{ font-size:13px; font-weight:400; }
+.trp-top b{ font-size:16px; }
+.trp-day{ flex-wrap:nowrap; }
+.trp-day input[type=date]{ width:158px; min-width:158px; }
+.trp-bar{ align-items:flex-start; }
+
+/* ---------- Driver plan: jobs, carrying, hand-over ---------- */
+.drv-carry{ border-left:6px solid #B7791F; background:#FFFAF0; }
+.drv-it{ display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid #F1E6CE; font-size:16px; font-weight:600; }
+.drv-it:last-of-type{ border-bottom:0; } .drv-it b{ font-weight:800; }
+.drv-job{ background:#fff; border:1.5px solid #DCE8E0; border-radius:18px; padding:12px 14px; }
+.drv-job.cur{ border-color:#0F5A40; border-left-width:6px; }
+.drv-job.done{ opacity:.6; } .drv-job.skip{ opacity:.7; background:#F8F8F6; }
+.drv-job-top{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.drv-job-t{ font-size:17px; font-weight:800; line-height:1.25; }
+.drv-job-s{ font-size:14px; font-weight:600; color:#58695F; margin-top:3px; }
+.drv-jacts{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.drv-jacts button{ flex:1 1 90px; min-height:46px; border-radius:14px; border:2px solid #CFDAD3; background:#fff; color:#0B4531; font:inherit; font-size:15px; font-weight:800; cursor:pointer; }
+.drv-jacts button.p{ background:#0F5A40; border-color:#0F5A40; color:#fff; }
+.drv-jacts button.warn{ color:#8A3A0B; }
+.drv-jobpanel{ background:#F4FAF2; border-radius:14px; padding:10px 12px; margin:8px 0; display:flex; flex-direction:column; gap:6px; }
+.drv-onboard{ font-size:14px; font-weight:700; color:#33443B; background:#EEF4F0; border-radius:12px; padding:8px 10px; }
+.drv-pick{ display:flex; flex-direction:column; gap:6px; }
+.drv-pickrow{ display:flex; gap:10px; align-items:center; border:2px solid #DCE8E0; border-radius:14px; padding:10px 12px; font-size:15px; background:#fff; }
+.drv-pickrow input{ width:24px; height:24px; flex:none; }
+.drv-pickrow b{ display:block; } .drv-pickrow small{ display:block; color:#58695F; font-weight:600; }
+.drv-pickbtn{ display:block; width:100%; text-align:left; border:2px solid #CFDAD3; background:#fff; border-radius:14px; padding:12px 14px; margin-bottom:8px; font:inherit; font-size:16px; cursor:pointer; }
+.drv-pickbtn:active{ background:#E3EFE6; } .drv-pickbtn small{ display:block; font-size:13px; color:#58695F; margin-top:2px; }
+.drv-drop-row{ display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #EEF2F0; }
+.drv-drop-n{ flex:1; min-width:0; } .drv-drop-n b{ display:block; font-size:15px; } .drv-drop-n small{ display:block; font-size:12.5px; color:#58695F; }
+.drv-sheet .drv-drop-q{ width:84px; text-align:right; min-height:46px; } .drv-drop-u{ font-size:13px; color:#58695F; min-width:26px; }
+.drv-seg{ display:flex; border:2px solid #CFDAD3; border-radius:14px; overflow:hidden; }
+.drv-seg button{ flex:1; min-height:46px; border:0; background:#fff; font:inherit; font-size:14px; font-weight:700; color:#33443B; cursor:pointer; }
+.drv-seg button.on{ background:#E3EFE6; color:#0B4531; }
+.drv-danger{ background:#8A3A0B !important; border-color:#8A3A0B !important; }
+
+/* ---------- Trip Tickets > Plan the day ---------- */
+.trp-modes{ display:inline-flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:12px; }
+.trp-modes button{ border:0; background:#fff; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; }
+.trp-modes button.on{ background:var(--green, #0F5A40); color:#fff; }
+.pln-grid{ display:grid; grid-template-columns:1.25fr 1fr; gap:12px; align-items:start; }
+.pln-box{ border:1px solid var(--border); border-radius:12px; padding:12px 14px; background:#fff; }
+.pln-h{ font-weight:700; margin-bottom:6px; }
+.pln{ display:grid; grid-template-columns:26px 1fr auto; gap:8px; align-items:center; padding:9px 0; border-top:1px solid var(--border); }
+.pln:first-of-type{ border-top:0; } .pln.off{ opacity:.5; }
+.pln-mv{ display:flex; flex-direction:column; gap:2px; }
+.pln-mv button{ border:0; background:#E3EFE6; color:#0F5A40; border-radius:5px; font-size:9px; line-height:1; height:15px; cursor:pointer; padding:0; }
+.pln-mv button:disabled{ opacity:.3; cursor:default; }
+.pln-r{ text-align:right; font-size:12px; }
+.pln-ev{ display:flex; gap:8px; align-items:baseline; font-size:13px; padding:4px 0; }
+.tag.k1{ background:#E1F5EE; color:#085041; } .tag.k2{ background:#E6F1FB; color:#0C447C; } .tag.k3{ background:#FAEEDA; color:#633806; } .tag.k4{ background:#EEEDFE; color:#3C3489; }
+@media (max-width:760px){ .pln-grid{ grid-template-columns:1fr; } }
+.tag{ font-size:11px; padding:2px 8px; border-radius:10px; display:inline-block; white-space:nowrap; background:#EEF0F1; color:#5F5E5A; }
+
+/* driver bottom bar has five tabs; job tick-list inside the start sheet */
+#drvNav{ grid-template-columns:repeat(5, minmax(0, 1fr)); }
+#drvNav .msgr-tab span:last-child{ font-size:13px; }
+.drv-sheet .field label.drv-pickrow{ display:flex; flex-direction:row; align-items:center; gap:12px; text-transform:none; letter-spacing:0; font-size:15px; font-weight:600; color:#12221A; margin:0; }
+.drv-sheet .field label.drv-pickrow small{ display:block; text-transform:none; font-size:13px; font-weight:600; color:#58695F; margin-top:2px; }
+.drv-sheet .field label.drv-pickrow b{ display:block; font-size:16px; font-weight:800; }
+.drv-sheet .drv-pickrow input[type=checkbox]{ width:24px; height:24px; min-height:0; flex:none; }

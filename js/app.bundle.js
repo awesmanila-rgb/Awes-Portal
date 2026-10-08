@@ -2,7 +2,7 @@
   "use strict";
 
   (function(){
-    var NEED = 228;
+    var NEED = 230;
     function show(msg){
       try{
         var d = document.createElement('div');
@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v239';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v241';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -16563,7 +16563,7 @@
     if(key === 'paySetup' || key === 'payRules'){ if(currentUser && purchStaffAllowed(key)) payOnShow(key); return; }
     if(key === 'myPayslips'){ if(currentUser) prMyPayslipsShow(); return; }
     if(key === 'errandRequests'){ if(currentUser) erOnShow(key); return; }
-    if(/^adm(Permits|Vehicles|Contracts|Bills|Assets)$/.test(key)){ if(currentUser && purchStaffAllowed(key)) admOnShow(key.slice(3).toLowerCase()); return; }
+    if(/^adm(Permits|Vehicles|Trips|Contracts|Bills|Assets)$/.test(key)){ if(currentUser && purchStaffAllowed(key)) admOnShow(key.slice(3).toLowerCase()); return; }
     if(key === 'errands' || key === 'myErrands'){ if(currentUser && purchStaffAllowed(key)) erOnShow(key); return; }
     if(key === 'payRuns'){ if(currentUser && purchStaffAllowed(key)) prOnShow(); return; }
     if(key === 'payTimesheets'){ if(currentUser && purchStaffAllowed(key)) tsOnShow(); return; }
@@ -23673,10 +23673,10 @@
   async function wmOpenHandover(){
     if(!wm.avail.length){ toast('You are not holding anything to hand over'); return; }
     try{
-      const { data, error } = await db.rpc('worker_names');
-      if(error) throw error;
-      const people = (data || []).filter(w=> w.role === 'technician' && w.id !== currentUser.id);
-      if(!people.length){ toast('There is no other technician to hand over to'); return; }
+      let r = await db.rpc('field_holders');   // technicians and drivers (20261103_01); older databases only know technicians
+      if(r.error){ r = await db.rpc('worker_names'); if(r.error) throw r.error; r.data = (r.data || []).filter(x=> x.role === 'technician'); }
+      const people = (r.data || []).filter(x=> x.id !== currentUser.id);
+      if(!people.length){ toast('There is nobody else to hand over to'); return; }
       $('wmHoTo').innerHTML = '<option value="">Choose a technician\u2026</option>' + people.map(w=> '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.name) + '</option>').join('');
     }catch(e){ purchFail('Couldn\u2019t load the technicians: ', e); return; }
     wm.pickHo = wm.avail.map(r=> ({ row:r, qty:'' }));
@@ -28863,7 +28863,7 @@
         sub:[ADM_ASSET_CATS[r.category] || r.category, r.brand_model, r.serial_no ? 'S/N ' + r.serial_no : ''].filter(Boolean).join(' \u00B7 ') }) }
   };
   const adm = { key:null, rows:[], people:[], messengers:[], q:'', showAll:false };
-  const admCanEdit = (key)=> can((key === 'bills' ? { module:'adm.bills' } : ADM[key]).module, 'edit');
+  const admCanEdit = (key)=> can(key === 'bills' ? 'adm.bills' : key === 'trips' ? 'adm.trips' : ADM[key].module, 'edit');
 
   async function admOnShow(key){
     $('purchasingView').classList.add('po-wide');
@@ -28876,6 +28876,7 @@
       adm.people = (pp.data || []).filter(p=> p.active !== false);
     }catch(e){ adm.people = []; }
     if(key === 'bills') return admBillsShow();
+    if(key === 'trips') return admTripsShow();
     admList(key);
   }
 
@@ -29041,14 +29042,16 @@
     inp.click();
   }
 
-  // ---- vehicles: trips, fuel, service ---------------------------------------------
+  const admCanSeeTrips = ()=> !!(currentUser && (currentUser.role === 'admin' || (typeof can === 'function' && can('adm.trips', 'view'))));
+  // ---- vehicles: fuel, service (trips have their own page: Trip Tickets) -------------
+
   async function admVehicleExtra(v, edit){
     const box = $('admVehExtra'); if(!box) return;
     box.innerHTML = '<div class="po-sec"><div class="po-sec-title">Trip tickets, fuel and service</div><div class="pay-hint">Loading\u2026</div></div>';
     let t, f, s;
     try{
       [t, f, s] = await admRace(Promise.all([
-        db.from('adm_vehicle_trips').select('*').eq('vehicle_id', v.id).order('out_at', { ascending:false }).limit(30),
+        db.from('adm_vehicle_trips').select('*').eq('vehicle_id', v.id).order('out_at', { ascending:false }).limit(2),
         db.from('adm_vehicle_fuel').select('*').eq('vehicle_id', v.id).order('filled_on', { ascending:false }).limit(20),
         db.from('adm_vehicle_service').select('*').eq('vehicle_id', v.id).order('serviced_on', { ascending:false }).limit(20)
       ]));
@@ -29062,18 +29065,11 @@
     const open = trips.find(x=> x.status === 'out');
     const when = (ts)=> ts ? new Date(ts).toLocaleString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }) : '';
     box.innerHTML =
-      '<div class="po-sec"><div class="po-sec-title">Trip tickets</div>' +
-        (open ? '<div class="pay-banner warn">Out since ' + admEsc(when(open.out_at)) + ' \u2014 ' + admEsc(open.driver_name) + ' to ' + admEsc(open.destination || '\u2014') + ' (' + admEsc(open.trip_no) + ')' +
-            (edit ? ' <button type="button" class="btn btn-primary pay-sm" data-trip-in="' + admEsc(open.id) + '">Close trip\u2026</button>' : '') + '</div>'
-          : (edit ? '<div class="po-grid">' +
-              '<div class="field po-c3"><label>Driver</label><select id="admT_driver">' + adm.people.map(p=> '<option value="' + admEsc(p.id) + '"' + (p.id === v.assigned_to ? ' selected' : '') + '>' + admEsc(p.name) + '</option>').join('') + '</select></div>' +
-              '<div class="field po-c3"><label>Destination</label><input type="text" id="admT_dest"></div>' +
-              '<div class="field po-c3"><label>Purpose / JO / errand no.</label><input type="text" id="admT_ref"></div>' +
-              '<div class="field po-c3"><label>Odometer out (km)</label><input type="text" inputmode="numeric" id="admT_km" value="' + admEsc(v.odometer_km || 0) + '"></div>' +
-              '<div class="po-c12"><button type="button" class="btn btn-primary pay-sm" data-trip-out="1">Start trip ticket</button></div></div>' : '')) +
-        (trips.length ? '<div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Trip</th><th>Driver</th><th>Destination</th><th>Out</th><th>In</th><th class="num">km</th></tr></thead><tbody>' +
-          trips.map(x=> '<tr><td>' + admEsc(x.trip_no) + '</td><td>' + admEsc(x.driver_name) + '</td><td>' + admEsc(x.destination) + (x.reference ? '<div class="pay-muted">' + admEsc(x.reference) + '</div>' : '') + '</td><td>' + admEsc(when(x.out_at)) + '</td><td>' + admEsc(x.status === 'out' ? 'still out' : when(x.in_at)) + '</td><td class="num">' + (x.km_in != null ? (x.km_in - x.km_out).toLocaleString('en-PH') : '\u2013') + '</td></tr>').join('') +
-          '</tbody></table></div>' : '<div class="pay-hint">No trips yet.</div>') + '</div>' +
+      '<div class="po-sec"><div class="po-sec-title">Trips</div>' +
+        (open ? '<div class="pay-banner warn">Out since ' + admEsc(when(open.out_at)) + ' \u2014 ' + admEsc(open.driver_name) + ' to ' + admEsc(open.destination || '\u2014') + ' (' + admEsc(open.trip_no) + ')</div>'
+          : trips[0] ? '<div class="pay-hint">Last trip: ' + admEsc(when(trips[0].out_at)) + ' \u00B7 ' + admEsc(trips[0].driver_name) + ' to ' + admEsc(trips[0].destination || '\u2014') + ' (' + admEsc(trips[0].trip_no) + ')</div>' : '<div class="pay-hint">No trips yet.</div>') +
+        (admCanSeeTrips() ? '<button type="button" class="btn btn-secondary pay-sm" data-trips-for="1" style="margin-top:6px;">See this vehicle\u2019s trips \u203A</button>' : '') +
+        '<div class="pay-hint">Drivers record trips on their phones; they live in <b>Trip Tickets</b>, not in the vehicle.</div></div>' +
       '<div class="po-sec"><div class="po-sec-title">Fuel</div>' +
         (edit ? '<div class="po-grid"><div class="field po-c3"><label>Date</label><input type="date" id="admF2_date" value="' + admToday() + '"></div><div class="field po-c3"><label>Amount (\u20B1)</label><input type="text" inputmode="decimal" id="admF2_amt"></div>' +
           '<div class="field po-c3"><label>Liters</label><input type="text" inputmode="decimal" id="admF2_l"></div><div class="field po-c3"><label>Odometer (km)</label><input type="text" inputmode="numeric" id="admF2_km"></div>' +
@@ -29086,27 +29082,11 @@
           '<div class="po-c3" style="align-self:end;"><button type="button" class="btn btn-secondary pay-sm" data-svc="1">+ Add service</button></div></div>' +
           '<div class="pay-hint">The next PMS km is set automatically: odometer + \u201CPMS every (km)\u201D.</div>' : '') +
         (svc.length ? svc.map(x=> '<div class="pay-audit"><span class="pay-audit-when">' + admEsc(admDate(x.serviced_on)) + '</span> ' + admEsc(x.work) + (x.odometer_km ? ' \u00B7 ' + Number(x.odometer_km).toLocaleString('en-PH') + ' km' : '') + (x.cost ? ' \u00B7 ' + admPeso(x.cost) : '') + (x.shop ? ' \u00B7 ' + admEsc(x.shop) : '') + '</div>').join('') : '<div class="pay-hint">No service records yet.</div>') + '</div>';
-    if(!edit) return;
+    const openTrips = ()=>{ adm.tripVehicle = v.id; showPurchasingView('admTrips'); };
+    if(!edit){ box.onclick = (e)=>{ if(e.target.closest('[data-trips-for]')) openTrips(); }; return; }
     const reload = async ()=>{ const r = await db.from('adm_vehicles').select('*').eq('id', v.id).maybeSingle(); admEdit('vehicles', r.data || v); };
     box.onclick = async (e)=>{
-      if(e.target.closest('[data-trip-out]')){
-        const km = Number($('admT_km').value), drv = $('admT_driver');
-        if(!(km >= 0)){ toast('Enter the odometer reading'); return; }
-        const { error } = await db.from('adm_vehicle_trips').insert({ vehicle_id:v.id, driver_id:drv.value || null, driver_name:drv.options[drv.selectedIndex] ? drv.options[drv.selectedIndex].text : '',
-          destination:$('admT_dest').value.trim(), reference:$('admT_ref').value.trim(), km_out:km });
-        if(error){ toast('Couldn\u2019t start: ' + error.message); return; }
-        toast('Trip ticket started'); reload();
-      }
-      const ti = e.target.closest('[data-trip-in]');
-      if(ti){
-        const kmIn = await uiPrompt('Close the trip\n\nOdometer reading now (km)?', '', { ok:'Close trip', multiline:false });
-        if(kmIn == null) return;
-        const n = Number(String(kmIn).replace(/,/g, ''));
-        if(!(n >= 0)){ toast('Enter the odometer reading'); return; }
-        const { error } = await db.from('adm_vehicle_trips').update({ status:'returned', km_in:n, in_at:new Date().toISOString() }).eq('id', ti.dataset.tripIn);
-        if(error){ toast(/check/i.test(error.message) ? 'That\u2019s lower than the km when it left' : 'Couldn\u2019t close: ' + error.message); return; }
-        toast('Trip closed'); reload();
-      }
+      if(e.target.closest('[data-trips-for]')) return openTrips();
       if(e.target.closest('[data-fuel]')){
         const amt = Number($('admF2_amt').value.replace(/,/g, ''));
         if(!(amt > 0)){ toast('Enter the amount'); return; }
@@ -29126,6 +29106,306 @@
         toast('Service recorded'); reload();
       }
     };
+  }
+
+  // =====================================================================
+  // Trip Tickets (adm.trips) — every trip of a day: who, which vehicle, where, left / arrived / back, stops, km.
+  // Trips are recorded by drivers on their phones (driver.js, drv_* functions); the office can log one by hand
+  // ("+ Log a trip") and correct a time or km, always with a reason (adm_trip_correct keeps an audit line).
+  // =====================================================================
+  const admTT = { day:null, veh:'', drv:'', openOnly:false, trips:[], stops:{}, vehicles:[], audit:{}, expanded:{}, mode:'trips' };
+  const admPlan = { driver:'', drivers:[], jobs:[], trips:[], stops:{} };
+  const admModesHtml = ()=> '<div class="trp-modes"><button type="button" data-mode="trips" class="' + (admTT.mode === 'plan' ? '' : 'on') + '">Trips</button><button type="button" data-mode="plan" class="' + (admTT.mode === 'plan' ? 'on' : '') + '">Plan the day</button></div>';
+  const admTm = (ts)=>{ try{ return ts ? new Date(ts).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }) : ''; }catch(e){ return ''; } };
+  const admDayOf = (ms)=> new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);
+  const admLocal = (ts)=> ts ? new Date(new Date(ts).getTime() + 8 * 3600e3).toISOString().slice(0, 16) : '';
+  const admFromLocal = (v)=> v ? new Date(v + ':00+08:00').toISOString() : null;
+  const admMins = (ms)=>{ const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm' : m + ' min'; };
+  const admTripKm = (t)=> t.source === 'driver' ? Number(t.gps_km || 0) : (t.km_in != null && t.km_out != null ? t.km_in - t.km_out : 0);
+  const admKmFmt = (n)=> (Math.round(Number(n || 0) * 10) / 10).toLocaleString('en-PH', { maximumFractionDigits:1 });
+  function admModal(html){
+    const ov = document.createElement('div'); ov.className = 'overlay open'; ov.innerHTML = '<div class="modal adm-trip-modal">' + html + '</div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', (e)=>{ if(e.target === ov || e.target.closest('[data-m-close]')) ov.remove(); });
+    return ov;
+  }
+  async function admTripsLoad(){
+    const day = admTT.day, from = new Date(day + 'T00:00:00+08:00').toISOString(), to = new Date(new Date(day + 'T00:00:00+08:00').getTime() + 864e5).toISOString();
+    const [a, b, v] = await Promise.all([
+      db.from('adm_vehicle_trips').select('*').gte('out_at', from).lt('out_at', to).order('out_at', { ascending:false }),
+      db.from('adm_vehicle_trips').select('*').eq('status', 'out').order('out_at', { ascending:false }),
+      db.from('adm_vehicles').select('id, plate_no, make_model').order('plate_no')
+    ]);
+    if(a.error) throw a.error; if(b.error) throw b.error;
+    const map = new Map(); (a.data || []).concat(b.data || []).forEach(t=> map.set(t.id, t));
+    admTT.trips = Array.from(map.values()).sort((x, y)=> new Date(y.out_at) - new Date(x.out_at));
+    admTT.vehicles = v.data || [];
+    admTT.stops = {};
+    if(admTT.trips.length){
+      const st = await db.from('adm_trip_stops').select('*').in('trip_id', admTT.trips.map(t=> t.id)).order('stop_no', { ascending:true });
+      if(st.error) throw st.error;
+      (st.data || []).forEach(x=> (admTT.stops[x.trip_id] = admTT.stops[x.trip_id] || []).push(x));
+    }
+  }
+  const admPlateOf = (id)=>{ const v = admTT.vehicles.find(x=> x.id === id); return v ? v.plate_no + (v.make_model ? ' \u00B7 ' + v.make_model : '') : ''; };
+  async function admTripsShow(){
+    const box = $('admBody_trips');
+    admTT.day = admTT.day || admToday();
+    if(adm.tripVehicle){ admTT.veh = adm.tripVehicle; adm.tripVehicle = null; }
+    box.innerHTML = '<div class="empty-state">Loading\u2026</div>';
+    if(admTT.mode === 'plan') return admPlanShow();
+    try{ await admRace(admTripsLoad()); }
+    catch(e){ box.innerHTML = '<div class="empty-state">' + (admMissing(e) ? ADM_MIGRATION_MSG.replace('20261014_01_admin_office.sql', '20261102_01_driver_trips.sql') : admEsc('Couldn\u2019t load: ' + describeCloudError(e))) + ' <button type="button" class="btn btn-secondary pay-sm" data-retry="1">Try again</button></div>'; box.onclick = (ev)=>{ if(ev.target.closest('[data-retry]')) admTripsShow(); }; return; }
+    admTripsDraw();
+  }
+  function admTripsDraw(){
+    const box = $('admBody_trips'), edit = admCanEdit('trips');
+    const drivers = Array.from(new Set(admTT.trips.map(t=> t.driver_name).filter(Boolean))).sort();
+    const inDay = (t)=> admDayOf(new Date(t.out_at).getTime()) === admTT.day;
+    let rows = admTT.trips.filter(t=> (inDay(t) || t.status === 'out'));
+    if(admTT.veh) rows = rows.filter(t=> t.vehicle_id === admTT.veh);
+    if(admTT.drv) rows = rows.filter(t=> t.driver_name === admTT.drv);
+    if(admTT.openOnly) rows = rows.filter(t=> t.status === 'out');
+    const dayRows = rows.filter(inDay), onRoad = rows.filter(t=> t.status === 'out');
+    const km = dayRows.reduce((a, t)=> a + admTripKm(t), 0);
+    const ms = dayRows.reduce((a, t)=> a + (t.status === 'returned' && t.in_at ? new Date(t.in_at) - new Date(t.out_at) : t.status === 'out' ? Date.now() - new Date(t.out_at) : 0), 0);
+    const shift = (n)=> admDayOf(new Date(admTT.day + 'T12:00:00+08:00').getTime() + n * 864e5);
+    const stopsOf = (t)=> admTT.stops[t.id] || [];
+    const card = (t)=>{
+      const st = stopsOf(t), first = st[0], open = t.status === 'out', kmv = admTripKm(t), x = !!admTT.expanded[t.id];
+      return '<div class="trp" data-trip="' + admEsc(t.id) + '"><div class="trp-top"><div><span class="trp-no">' + admEsc(t.trip_no || '') + '</span> <b>' + admEsc(t.destination || '\u2014') + '</b>' +
+        (t.reference || t.purpose ? '<div class="pay-muted">' + admEsc([t.purpose, t.reference].filter(Boolean).join(' \u00B7 ')) + '</div>' : '') + '</div>' +
+        '<span class="sp-tag ' + (open ? 'warn' : t.status === 'cancelled' ? 'muted' : 'ok') + '">' + (open ? (st.some(s=> !s.departed_at) ? 'At a stop' : 'On the road') : t.status === 'cancelled' ? 'Cancelled' : 'Returned') + '</span></div>' +
+        '<div class="trp-meta"><span>' + admEsc(t.driver_name || '\u2014') + '</span><span>' + admEsc(admPlateOf(t.vehicle_id)) + '</span></div>' +
+        '<div class="trp-times"><div><small>Left</small><b>' + admTm(t.out_at) + '</b></div><div><small>Arrived</small><b>' + (first ? admTm(first.arrived_at) : '\u2014') + '</b></div><div><small>Back</small><b>' + (t.in_at ? admTm(t.in_at) : '\u2014') + '</b></div>' +
+        '<div><small>km' + (t.km_estimated ? ' (est.)' : '') + '</small><b>' + (open && t.source !== 'driver' ? '\u2014' : admKmFmt(kmv)) + '</b></div>' +
+        '<div><small>Time</small><b>' + admMins((t.in_at ? new Date(t.in_at) : Date.now()) - new Date(t.out_at)) + '</b></div></div>' +
+        '<button type="button" class="pay-link" data-tx="' + admEsc(t.id) + '">' + (x ? 'Hide' : 'Show') + ' stops & history</button>' + (x ? admTripDetail(t) : '') + '</div>';
+    };
+    box.innerHTML = admModesHtml() + '<div class="trp-bar"><div class="trp-day"><button type="button" class="btn btn-secondary pay-sm" data-day="' + shift(-1) + '" aria-label="Previous day">\u2039</button>' +
+      '<input type="date" id="trpDay" value="' + admTT.day + '"><button type="button" class="btn btn-secondary pay-sm" data-day="' + shift(1) + '" aria-label="Next day">\u203A</button>' +
+      '<button type="button" class="btn btn-secondary pay-sm" data-day="' + admToday() + '">Today</button></div>' +
+      '<div class="trp-filters"><select id="trpDrv"><option value="">All drivers</option>' + drivers.map(d=> '<option' + (admTT.drv === d ? ' selected' : '') + '>' + admEsc(d) + '</option>').join('') + '</select>' +
+      '<select id="trpVeh"><option value="">All vehicles</option>' + admTT.vehicles.map(v=> '<option value="' + admEsc(v.id) + '"' + (admTT.veh === v.id ? ' selected' : '') + '>' + admEsc(v.plate_no) + '</option>').join('') + '</select>' +
+      '<label class="sp-check"><input type="checkbox" id="trpOpen"' + (admTT.openOnly ? ' checked' : '') + '> Only on the road</label></div>' +
+      (edit ? '<button type="button" class="btn btn-primary" data-log="1">+ Log a trip</button>' : '') + '</div>' +
+      '<div class="trp-tiles"><div><small>Trips</small><b>' + dayRows.length + '</b></div><div><small>On the road now</small><b>' + onRoad.length + '</b></div><div><small>km</small><b>' + admKmFmt(km) + '</b></div><div><small>Time on the road</small><b>' + (ms ? admMins(ms) : '0 min') + '</b></div></div>' +
+      (rows.length ? rows.map(card).join('') : '<div class="empty-state">' + (admTT.openOnly ? 'Nothing is on the road.' : 'No trips on this day.') + '</div>') +
+      '<div class="pay-hint">Drivers record these on their phones with the time and GPS location; km is counted from GPS. You can correct a time or km (a reason is required and kept).</div>';
+    box.onchange = (e)=>{
+      if(e.target.id === 'trpDay' && e.target.value){ admTT.day = e.target.value; admTripsShow(); }
+      else if(e.target.id === 'trpDrv'){ admTT.drv = e.target.value; admTripsDraw(); }
+      else if(e.target.id === 'trpVeh'){ admTT.veh = e.target.value; admTripsDraw(); }
+      else if(e.target.id === 'trpOpen'){ admTT.openOnly = e.target.checked; admTripsDraw(); }
+    };
+    box.onclick = async (e)=>{
+      const md = e.target.closest('[data-mode]'); if(md){ admTT.mode = md.dataset.mode; admTripsShow(); return; }
+      const d = e.target.closest('[data-day]'); if(d){ admTT.day = d.dataset.day; admTripsShow(); return; }
+      if(e.target.closest('[data-log]')){ admTripLogSheet(); return; }
+      const x = e.target.closest('[data-tx]');
+      if(x){
+        const id = x.dataset.tx; admTT.expanded[id] = !admTT.expanded[id];
+        if(admTT.expanded[id] && !admTT.audit[id]){ try{ const r = await db.from('adm_trip_audit').select('*').eq('trip_id', id).order('at', { ascending:true }); admTT.audit[id] = r.data || []; }catch(err){ admTT.audit[id] = []; } }
+        admTripsDraw(); return;
+      }
+      const c = e.target.closest('[data-correct]'); if(c){ admTripCorrectSheet(admTT.trips.find(t=> t.id === c.dataset.correct)); return; }
+    };
+  }
+  function admTripDetail(t){
+    const st = admTT.stops[t.id] || [], au = admTT.audit[t.id] || [];
+    const rowS = (s)=> '<div class="trp-stop"><b>Stop ' + s.stop_no + ': ' + admEsc(s.place || '') + '</b><span>arrived ' + admTm(s.arrived_at) + (s.departed_at ? ' \u00B7 left ' + admTm(s.departed_at) + ' \u00B7 stayed ' + admMins(new Date(s.departed_at) - new Date(s.arrived_at)) : ' \u00B7 still there') +
+      (s.note ? ' \u00B7 ' + admEsc(s.note) : '') + '</span></div>';
+    return '<div class="trp-detail">' + (st.length ? st.map(rowS).join('') : '<div class="pay-hint">No stops recorded.</div>') +
+      '<div class="trp-stop"><b>Distance</b><span>' + (t.source === 'driver' ? 'GPS ' + admKmFmt(t.gps_km) + ' km' + (t.km_estimated ? ' (part of the route had no GPS \u2014 estimated)' : '') + ' \u00B7 ' + Number(t.gps_points || 0) + ' GPS points \u00B7 ' : 'Entered by the office \u00B7 ') +
+      'odometer ' + (t.km_out != null ? Number(t.km_out).toLocaleString('en-PH') : '\u2014') + ' \u2192 ' + (t.km_in != null ? Number(t.km_in).toLocaleString('en-PH') : '\u2014') + '</span></div>' +
+      (t.notes ? '<div class="trp-stop"><b>Notes</b><span>' + admEsc(t.notes) + '</span></div>' : '') +
+      (au.length ? '<div class="trp-stop"><b>Corrections</b><span>' + au.map(a=> admEsc(a.field + ': ' + (a.old_value || '\u2014') + ' \u2192 ' + (a.new_value || '\u2014') + ' by ' + (a.by_name || '?') + ' \u2014 ' + a.reason)).join('<br>') + '</span></div>' : '') +
+      (admCanEdit('trips') ? '<button type="button" class="btn btn-secondary pay-sm" data-correct="' + admEsc(t.id) + '">Correct this trip\u2026</button>' : '') + '</div>';
+  }
+  function admTripCorrectSheet(t){
+    if(!t) return;
+    const st = admTT.stops[t.id] || [];
+    const ov = admModal('<h3>Correct ' + admEsc(t.trip_no || 'trip') + '</h3><p class="pay-hint">Change only what is wrong. Your name, the old value and the reason are kept.</p><div class="po-grid">' +
+      '<div class="field po-c6"><label>Left</label><input type="datetime-local" id="tcOut" value="' + admLocal(t.out_at) + '"></div>' +
+      '<div class="field po-c6"><label>Back</label><input type="datetime-local" id="tcIn" value="' + admLocal(t.in_at) + '"' + (t.status === 'out' ? ' disabled' : '') + '></div>' +
+      '<div class="field po-c6"><label>Odometer out (km)</label><input type="text" inputmode="numeric" id="tcKo" value="' + admEsc(t.km_out == null ? '' : t.km_out) + '"></div>' +
+      '<div class="field po-c6"><label>Odometer in (km)</label><input type="text" inputmode="numeric" id="tcKi" value="' + admEsc(t.km_in == null ? '' : t.km_in) + '"></div>' +
+      '<div class="field po-c6"><label>Destination</label><input type="text" id="tcDest" value="' + admEsc(t.destination || '') + '"></div>' +
+      '<div class="field po-c6"><label>Purpose</label><input type="text" id="tcPurp" value="' + admEsc(t.purpose || '') + '"></div>' +
+      st.map(s=> '<div class="field po-c6"><label>Stop ' + s.stop_no + ' arrived \u00B7 ' + admEsc(s.place || '') + '</label><input type="datetime-local" data-sa="' + admEsc(s.id) + '" value="' + admLocal(s.arrived_at) + '"></div>' +
+        '<div class="field po-c6"><label>Stop ' + s.stop_no + ' left</label><input type="datetime-local" data-sd="' + admEsc(s.id) + '" value="' + admLocal(s.departed_at) + '"></div>').join('') +
+      '<div class="field po-c12"><label>Reason <span class="req">*</span></label><input type="text" id="tcWhy" maxlength="300" placeholder="e.g. Driver forgot to tap Arrived; odometer photo checked"></div></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-m-close="1">Cancel</button><button type="button" class="btn btn-primary" data-m-save="1">Save correction</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      if(!e.target.closest('[data-m-save]')) return;
+      const why = $('tcWhy').value.trim(); if(!why){ toast('Give the reason'); return; }
+      const num = (id)=>{ const v = $(id).value.trim().replace(/,/g, ''); return v === '' ? null : Number(v); };
+      const p = { trip_id:t.id, reason:why };
+      // the boxes show minutes only: an untouched box must not count as a change (the stored time has seconds)
+      if($('tcOut').value && $('tcOut').value !== admLocal(t.out_at)) p.out_at = admFromLocal($('tcOut').value);
+      if(t.status !== 'out' && $('tcIn').value !== admLocal(t.in_at)) p.in_at = admFromLocal($('tcIn').value);
+      const ko = num('tcKo'), ki = num('tcKi');
+      if(ko !== t.km_out) p.km_out = ko; if(ki !== t.km_in) p.km_in = ki;
+      if($('tcDest').value.trim() !== (t.destination || '')) p.destination = $('tcDest').value.trim();
+      if($('tcPurp').value.trim() !== (t.purpose || '')) p.purpose = $('tcPurp').value.trim();
+      const stp = [];
+      st.forEach(s=>{
+        const av = ov.querySelector('[data-sa="' + s.id + '"]').value, dv = ov.querySelector('[data-sd="' + s.id + '"]').value;
+        const o = { id:s.id };
+        if(av && av !== admLocal(s.arrived_at)) o.arrived_at = admFromLocal(av);
+        if(dv !== admLocal(s.departed_at)) o.departed_at = admFromLocal(dv);
+        if(Object.keys(o).length > 1) stp.push(o);
+      });
+      if(stp.length) p.stops = stp;
+      if(Object.keys(p).length === 2){ toast('Nothing was changed'); return; }
+      try{
+        const { error } = await db.rpc('adm_trip_correct', { p });
+        if(error) throw error;
+        ov.remove(); toast('Correction saved');
+        try{ const r = await db.from('adm_trip_audit').select('*').eq('trip_id', t.id).order('at', { ascending:true }); admTT.audit[t.id] = r.data || []; }catch(e2){ delete admTT.audit[t.id]; }
+        admTripsShow();
+      }catch(err){ toast('Couldn\u2019t save: ' + ((err && err.message) || describeCloudError(err))); }
+    });
+  }
+  function admTripLogSheet(){
+    const now = Date.now();
+    const ov = admModal('<h3>Log a trip</h3><p class="pay-hint">For a trip nobody recorded on a phone. The odometer readings give the km.</p><div class="po-grid">' +
+      '<div class="field po-c6"><label>Vehicle <span class="req">*</span></label><select id="tlVeh">' + admTT.vehicles.map(v=> '<option value="' + admEsc(v.id) + '"' + (v.id === admTT.veh ? ' selected' : '') + '>' + admEsc(v.plate_no + (v.make_model ? ' \u00B7 ' + v.make_model : '')) + '</option>').join('') + '</select></div>' +
+      '<div class="field po-c6"><label>Driver <span class="req">*</span></label><select id="tlDrv">' + adm.people.map(p=> '<option value="' + admEsc(p.id) + '">' + admEsc(p.name) + '</option>').join('') + '</select></div>' +
+      '<div class="field po-c6"><label>Destination <span class="req">*</span></label><input type="text" id="tlDest"></div>' +
+      '<div class="field po-c6"><label>Purpose / JO / errand no.</label><input type="text" id="tlRef"></div>' +
+      '<div class="field po-c6"><label>Left</label><input type="datetime-local" id="tlOut" value="' + admLocal(new Date(now - 3600e3).toISOString()) + '"></div>' +
+      '<div class="field po-c6"><label>Back</label><input type="datetime-local" id="tlIn" value="' + admLocal(new Date(now).toISOString()) + '"></div>' +
+      '<div class="field po-c6"><label>Odometer out (km) <span class="req">*</span></label><input type="text" inputmode="numeric" id="tlKo"></div>' +
+      '<div class="field po-c6"><label>Odometer in (km) <span class="req">*</span></label><input type="text" inputmode="numeric" id="tlKi"></div></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-m-close="1">Cancel</button><button type="button" class="btn btn-primary" data-m-save="1">Save trip</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      if(!e.target.closest('[data-m-save]')) return;
+      const dest = $('tlDest').value.trim(), ko = Number($('tlKo').value.replace(/,/g, '')), ki = Number($('tlKi').value.replace(/,/g, ''));
+      if(!dest){ toast('Enter the destination'); return; }
+      if(!(ko >= 0) || !(ki >= ko)){ toast('Odometer in must be at least odometer out'); return; }
+      const out = admFromLocal($('tlOut').value), inn = admFromLocal($('tlIn').value);
+      if(!out || !inn || new Date(inn) < new Date(out)){ toast('Back can\u2019t be before left'); return; }
+      const sel = $('tlDrv');
+      const { error } = await db.from('adm_vehicle_trips').insert({ vehicle_id:$('tlVeh').value, driver_id:sel.value || null, driver_name:sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '',
+        destination:dest, reference:$('tlRef').value.trim(), out_at:out, in_at:inn, km_out:ko, km_in:ki, status:'returned', source:'office', created_by:currentUser.id });
+      if(error){ toast('Couldn\u2019t save: ' + error.message); return; }
+      ov.remove(); toast('Trip logged'); admTripsShow();
+    });
+  }
+
+  // ---- Trip Tickets > Plan the day: jobs for a driver, in any order he likes -------------------------
+  const ADM_KINDS = { deliver:'Deliver', pickup:'Pick up', transfer:'Transfer', errand:'Errand', other:'Other' };
+  async function admPlanLoad(){
+    const day = admTT.day, from = new Date(day + 'T00:00:00+08:00').toISOString(), to = new Date(new Date(day + 'T00:00:00+08:00').getTime() + 864e5).toISOString();
+    const h = await db.rpc('field_holders'); if(h.error) throw h.error;
+    admPlan.drivers = (h.data || []).filter(x=> x.kind === 'driver');
+    if(!admPlan.drivers.some(x=> x.id === admPlan.driver)) admPlan.driver = admPlan.drivers[0] ? admPlan.drivers[0].id : '';
+    admPlan.jobs = []; admPlan.trips = []; admPlan.stops = {};
+    if(!admPlan.driver) return;
+    const [j, t] = await Promise.all([
+      db.from('adm_trip_jobs').select('*').eq('driver_id', admPlan.driver).eq('plan_date', day).order('seq', { ascending:true }).order('created_at', { ascending:true }),
+      db.from('adm_vehicle_trips').select('*').eq('driver_id', admPlan.driver).gte('out_at', from).lt('out_at', to).order('out_at', { ascending:true })
+    ]);
+    if(j.error) throw j.error; if(t.error) throw t.error;
+    admPlan.jobs = j.data || []; admPlan.trips = t.data || [];
+    if(admPlan.trips.length){
+      const st = await db.from('adm_trip_stops').select('*').in('trip_id', admPlan.trips.map(x=> x.id)).order('stop_no', { ascending:true });
+      (st.data || []).forEach(x=> (admPlan.stops[x.trip_id] = admPlan.stops[x.trip_id] || []).push(x));
+    }
+  }
+  async function admPlanShow(){
+    const box = $('admBody_trips');
+    try{ await admRace(admPlanLoad()); }
+    catch(e){ box.innerHTML = admModesHtml() + '<div class="empty-state">' + (/field_holders|adm_trip_jobs|42883|42P01|PGRST/.test(String((e && e.message) || e)) ? 'Run 20261103_01_driver_jobs.sql in Supabase to turn on planning.' : admEsc('Couldn\u2019t load: ' + describeCloudError(e))) + '</div>'; box.onclick = (ev)=>{ const md = ev.target.closest('[data-mode]'); if(md){ admTT.mode = md.dataset.mode; admTripsShow(); } }; return; }
+    admPlanDraw();
+  }
+  function admPlanEvents(){
+    const ev = [], jobs = admPlan.jobs;
+    jobs.forEach(j=>{
+      if(j.added_by_driver) ev.push({ t:j.created_at, c:'k3', x:'Added by the driver: ' + j.place });
+      if(j.status === 'done') ev.push({ t:j.done_at, c:'k1', x:'Finished ' + j.place + (j.done_note ? ' \u2014 ' + j.done_note : '') });
+      if(j.status === 'skipped') ev.push({ t:j.skipped_at, c:'k4', x:'Skipped ' + j.place + ' \u2014 ' + (j.skip_reason || 'no reason') });
+      if(j.status === 'cancelled') ev.push({ t:j.updated_at, c:'k4', x:'Cancelled by the office: ' + j.place });
+    });
+    admPlan.trips.forEach(t=>{
+      const on = jobs.filter(j=> j.trip_id === t.id);
+      ev.push({ t:t.out_at, c:'k2', x:t.trip_no + ' left' + (on.length > 1 ? ' with ' + on.length + ' jobs together (one trip, several stops)' : on.length === 1 ? ' for ' + on[0].place : '') });
+      (admPlan.stops[t.id] || []).forEach(s=> ev.push({ t:s.arrived_at, c:'', x:'Arrived ' + s.place + (s.departed_at ? ', left ' + admTm(s.departed_at) : '') }));
+      if(t.in_at) ev.push({ t:t.in_at, c:'k2', x:t.trip_no + ' back at the office' });
+    });
+    const done = jobs.filter(j=> j.status === 'done' && j.done_at).sort((a, b)=> new Date(a.done_at) - new Date(b.done_at));
+    const planned = done.slice().sort((a, b)=> a.seq - b.seq);
+    if(done.length > 1 && done.some((j, i)=> j.id !== planned[i].id)) ev.push({ t:done[done.length - 1].done_at, c:'k3', x:'Jobs were done in a different order than planned' });
+    return ev.filter(e=> e.t).sort((a, b)=> new Date(a.t) - new Date(b.t));
+  }
+  function admPlanDraw(){
+    const box = $('admBody_trips'), edit = admCanEdit('trips'), jobs = admPlan.jobs;
+    const shift = (n)=> admDayOf(new Date(admTT.day + 'T12:00:00+08:00').getTime() + n * 864e5);
+    const live = jobs.filter(j=> j.status !== 'cancelled');
+    const statusTag = (j)=> j.status === 'done' ? '<span class="tag k1">Done ' + admTm(j.done_at) + '</span>' : j.status === 'skipped' ? '<span class="tag k4">Skipped</span>' : j.status === 'in_trip' ? '<span class="tag k2">On a trip</span>' : j.status === 'cancelled' ? '<span class="tag k4">Cancelled</span>' : '<span class="tag k3">Planned</span>';
+    const row = (j)=>{
+      const i = live.indexOf(j), meta = [j.due_at ? 'due ' + admTm(j.due_at) : '', j.job_order_id || j.reference || '', j.contact || '', j.note || ''].filter(Boolean).join(' \u00B7 ');
+      return '<div class="pln' + (j.status === 'cancelled' ? ' off' : '') + '"><span class="pln-mv">' + (edit && j.status !== 'cancelled' ? '<button type="button" data-mv="-1" data-id="' + admEsc(j.id) + '"' + (i <= 0 ? ' disabled' : '') + ' aria-label="Move up">\u25B2</button><button type="button" data-mv="1" data-id="' + admEsc(j.id) + '"' + (i < 0 || i >= live.length - 1 ? ' disabled' : '') + ' aria-label="Move down">\u25BC</button>' : '') + '</span>' +
+        '<div class="pln-main"><b>' + (j.status === 'cancelled' ? '\u2013' : (i + 1)) + ' \u00B7 ' + admEsc(j.place) + '</b> <span class="tag k2">' + ADM_KINDS[j.kind] + '</span>' + (j.added_by_driver ? ' <span class="tag k3">Added by driver</span>' : '') + '<div class="pay-muted">' + admEsc(meta) + (j.status === 'skipped' && j.skip_reason ? '<br>' + admEsc(j.skip_reason) : '') + '</div></div>' +
+        '<div class="pln-r">' + statusTag(j) + (edit && j.status === 'planned' ? '<div><button type="button" class="pay-link" data-edit="' + admEsc(j.id) + '">Edit</button> \u00B7 <button type="button" class="pay-link" data-cancel="' + admEsc(j.id) + '">Cancel</button></div>' : '') + '</div></div>';
+    };
+    const ev = admPlanEvents();
+    box.innerHTML = admModesHtml() + '<div class="trp-bar"><div class="trp-day"><button type="button" class="btn btn-secondary pay-sm" data-day="' + shift(-1) + '" aria-label="Previous day">\u2039</button><input type="date" id="trpDay" value="' + admTT.day + '"><button type="button" class="btn btn-secondary pay-sm" data-day="' + shift(1) + '" aria-label="Next day">\u203A</button><button type="button" class="btn btn-secondary pay-sm" data-day="' + admToday() + '">Today</button></div>' +
+      '<div class="trp-filters"><select id="plnDrv">' + (admPlan.drivers.length ? admPlan.drivers.map(d=> '<option value="' + admEsc(d.id) + '"' + (d.id === admPlan.driver ? ' selected' : '') + '>' + admEsc(d.name) + '</option>').join('') : '<option value="">No driver yet</option>') + '</select></div>' +
+      (edit && admPlan.driver ? '<button type="button" class="btn btn-primary" data-addjob="1">+ Add job</button>' : '') + '</div>' +
+      (!admPlan.drivers.length ? '<div class="empty-state">No driver yet. In Staff Access, give a staff login the page <b>My Trips (Driver)</b> at Edit level.</div>' :
+      '<div class="pln-grid"><div class="pln-box"><div class="pln-h">Planned order</div>' + (jobs.length ? jobs.map(row).join('') : '<div class="empty-state" style="padding:10px">Nothing planned for this day.</div>') +
+      '<div class="pay-hint">The driver can start any job, take several together, put one first or skip one (with a reason). The order here is a suggestion.</div></div>' +
+      '<div class="pln-box"><div class="pln-h">What actually happened</div>' + (ev.length ? ev.map(e=> '<div class="pln-ev"><span class="tag ' + e.c + '">' + admTm(e.t) + '</span><span>' + admEsc(e.x) + '</span></div>').join('') : '<div class="pay-hint">Nothing yet.</div>') + '</div></div>');
+    box.onchange = (e)=>{
+      if(e.target.id === 'trpDay' && e.target.value){ admTT.day = e.target.value; admTripsShow(); }
+      else if(e.target.id === 'plnDrv'){ admPlan.driver = e.target.value; admTripsShow(); }
+    };
+    box.onclick = async (e)=>{
+      const md = e.target.closest('[data-mode]'); if(md){ admTT.mode = md.dataset.mode; admTripsShow(); return; }
+      const d = e.target.closest('[data-day]'); if(d){ admTT.day = d.dataset.day; admTripsShow(); return; }
+      if(e.target.closest('[data-addjob]')){ admJobSheet(null); return; }
+      const ed = e.target.closest('[data-edit]'); if(ed){ admJobSheet(admPlan.jobs.find(j=> j.id === ed.dataset.edit)); return; }
+      const mv = e.target.closest('[data-mv]');
+      if(mv){ try{ const { error } = await db.rpc('adm_job_move', { p_id:mv.dataset.id, p_dir:Number(mv.dataset.mv) }); if(error) throw error; }catch(err){ toast('Couldn\u2019t move it: ' + describeCloudError(err)); } admTripsShow(); return; }
+      const cn = e.target.closest('[data-cancel]');
+      if(cn){
+        const j = admPlan.jobs.find(x=> x.id === cn.dataset.cancel);
+        const why = await uiPrompt('Cancel \u201C' + (j ? j.place : 'this job') + '\u201D?\n\nWhy? The driver sees this.', '', { ok:'Cancel job', danger:true, multiline:false });
+        if(why == null) return;
+        try{ const { error } = await db.rpc('adm_job_cancel', { p_id:cn.dataset.cancel, p_reason:String(why).trim() }); if(error) throw error; toast('Job cancelled'); if(j) admNotifyDriver('Job cancelled', 'The office cancelled \u201C' + j.place + '\u201D' + (String(why).trim() ? ': ' + String(why).trim() : ''), 'job-x-' + j.id); }
+        catch(err){ toast('Couldn\u2019t cancel: ' + describeCloudError(err)); }
+        admTripsShow();
+      }
+    };
+  }
+  const admNotifyDriver = (title, msg, tag)=>{ try{ if(admPlan.driver && typeof notifyUser === 'function') notifyUser(admPlan.driver, title, msg, tag); }catch(e){} };
+  function admJobSheet(job){
+    const dueVal = job && job.due_at ? admLocal(job.due_at).slice(11, 16) : '';
+    const ov = admModal('<h3>' + (job ? 'Edit job' : 'Add a job') + '</h3><div class="po-grid">' +
+      '<div class="field po-c6"><label>Kind</label><select id="jbKind">' + Object.keys(ADM_KINDS).map(k=> '<option value="' + k + '"' + ((job ? job.kind : 'deliver') === k ? ' selected' : '') + '>' + ADM_KINDS[k] + '</option>').join('') + '</select></div>' +
+      '<div class="field po-c6"><label>Due time (optional)</label><input type="time" id="jbDue" value="' + dueVal + '"></div>' +
+      '<div class="field po-c12"><label>Place <span class="req">*</span></label><input type="text" id="jbPlace" maxlength="200" value="' + admEsc(job ? job.place : '') + '" placeholder="e.g. Tiaong warehouse site"></div>' +
+      '<div class="field po-c6"><label>Contact on site</label><input type="text" id="jbContact" maxlength="120" value="' + admEsc(job ? job.contact : '') + '"></div>' +
+      '<div class="field po-c6"><label>Job order no.</label><input type="text" id="jbJo" maxlength="80" value="' + admEsc(job ? (job.job_order_id || '') : '') + '" placeholder="e.g. JO-20261007-001"></div>' +
+      '<div class="field po-c12"><label>What to do</label><input type="text" id="jbNote" maxlength="300" value="' + admEsc(job ? job.note : '') + '" placeholder="e.g. Deliver the pipes and insulation issued to him"></div></div>' +
+      '<div class="pay-hint">For deliveries, issue the items to the driver first (Issue to Worker). He signs for them and hands them over at the site.</div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-m-close="1">Cancel</button><button type="button" class="btn btn-primary" data-m-save="1">' + (job ? 'Save' : 'Add job') + '</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      if(!e.target.closest('[data-m-save]')) return;
+      const place = $('jbPlace').value.trim(); if(!place){ toast('Enter the place'); return; }
+      const t = $('jbDue').value;
+      const p = { driver_id:admPlan.driver, plan_date:admTT.day, kind:$('jbKind').value, place, contact:$('jbContact').value.trim(), note:$('jbNote').value.trim(), job_order_id:$('jbJo').value.trim(), due_at:t ? new Date(admTT.day + 'T' + t + ':00+08:00').toISOString() : null };
+      if(job) p.id = job.id;
+      try{
+        const { error } = await db.rpc('adm_job_save', { p });
+        if(error) throw error;
+        ov.remove(); toast(job ? 'Job saved' : 'Job added');
+        admNotifyDriver(job ? 'Job changed' : 'New job for you', (ADM_KINDS[p.kind]) + ': ' + place + (t ? ' (due ' + t + ')' : ''), 'job-' + Date.now());
+        admTripsShow();
+      }catch(err){ toast('Couldn\u2019t save: ' + ((err && err.message) || describeCloudError(err))); }
+    });
   }
 
   // ---- assets: history --------------------------------------------------------------
@@ -30062,7 +30342,7 @@
     'hr.staff_attendance':'sbNavTechnicians', 'hr.tech_profiles':'sbNavTechnicians', 'ops.technicians':'sbNavTechnicians',
     'tools.register':'sbNavTlRegister', 'tools.issue':'sbNavTlIssue', 'tools.return':'sbNavTlReturn', 'tools.handover':'sbNavTlHandover',
     'tools.defects':'sbNavTlDefects', 'tools.maintenance':'sbNavTlMaint',
-    'adm.errands':'sbNavErrands', 'adm.permits':'sbNavAdmPermits', 'adm.vehicles':'sbNavAdmVehicles', 'adm.contracts':'sbNavAdmContracts',
+    'adm.errands':'sbNavErrands', 'adm.permits':'sbNavAdmPermits', 'adm.vehicles':'sbNavAdmVehicles', 'adm.trips':'sbNavAdmTrips', 'adm.contracts':'sbNavAdmContracts',
     'adm.bills':'sbNavAdmBills', 'adm.assets':'sbNavAdmAssets', 'adm.announcements':'menuManageAnnouncements',
     'adm.customers':'menuManageCustomers', 'adm.equipment':'menuManageEquipment',
     'ops.dispatch':'sbNavDispatch', 'ops.service_reports':'menuManageReports'
@@ -31302,7 +31582,8 @@
     purchasedItems: { nav:'sbNavPurchasedItems', title:'Purchased Items',      sub:'Every item bought, by the date received' },
     paySetup:       { nav:'sbNavPaySetup',       title:'Payroll Setup',        sub:'Rates, schedules, government IDs & holidays' },
     admPermits:     { nav:'sbNavAdmPermits',     title:'Permits & Licenses',   sub:'Registrations, licenses & expiry alerts' },
-    admVehicles:    { nav:'sbNavAdmVehicles',    title:'Vehicles',             sub:'Trip tickets, fuel, PMS, OR/CR & insurance' },
+    admVehicles:    { nav:'sbNavAdmVehicles',    title:'Vehicles',             sub:'Fuel, PMS, OR/CR & insurance' },
+    admTrips:       { nav:'sbNavAdmTrips',       title:'Trip Tickets',         sub:'Every trip: departure, arrival, stops & km' },
     admContracts:   { nav:'sbNavAdmContracts',   title:'Contracts',            sub:'Customer, supplier & lease contracts' },
     admBills:       { nav:'sbNavAdmBills',       title:'Bills & Utilities',    sub:'Monthly bills & payments' },
     admAssets:      { nav:'sbNavAdmAssets',      title:'Office Assets',        sub:'Equipment issued to staff' },
@@ -31987,6 +32268,8 @@
     'adm.errands', 'adm.my_errands',
     // Administration — 20261014_01
     'adm.permits', 'adm.vehicles', 'adm.contracts', 'adm.bills', 'adm.assets',
+    // Driver account / Trip tickets — 20261102_01
+    'adm.trips', 'adm.my_trips',
     // Administration — 20260926_06_administration_staff_access.sql
     'adm.customers', 'adm.equipment', 'adm.announcements', 'adm.dropdowns',
     // Operations (part 1) — 20260926_07_operations_staff_access.sql
@@ -32205,7 +32488,10 @@
     msgrMenu:    { nav:'', title:'Profile',    sub:'' },
     msgrAccount: { nav:'', title:'My account', sub:'' },
     msgrAlerts:  { nav:'', title:'Alerts',     sub:'' },
-    msgrCash:    { nav:'', title:'Requests',   sub:'' }
+    msgrCash:    { nav:'', title:'Requests',   sub:'' },
+    drvTrips:    { nav:'', title:'Trips',      sub:'' },
+    drvFuel:     { nav:'', title:'Fuel',       sub:'' },
+    drvMenu:     { nav:'', title:'Profile',    sub:'' }
   };
   let staffViewHiding = false;
 
@@ -32394,6 +32680,7 @@
     // Messenger / liaison accounts get the simple mission home (messenger.js)
     try{ msgrApply(); }catch(e){}
     if(typeof isMessengerUser === 'function' && isMessengerUser()){ msgrSetTab('home'); await msgrRenderHome(target); return; }
+    if(typeof isDriverUser === 'function' && isDriverUser()){ drvSetTab('home'); await drvRenderHome(target); return; }   // driver.js
     await staffRenderHome(target, currentUser.access || {});
     if(typeof opsRenderDashboard === 'function') opsRenderDashboard(target);   // Operations staff: permission-gated dashboard
   }
@@ -33719,7 +34006,7 @@
     return { ops:'Operations', pur:'Purchasing', inv:'Inventory', tools:'Tools', hr:'Human Resources', fin:'Finance', adm:'Administration' }[pre] || 'Operations';
   }
   // Shorter sidebar names (the access catalog keeps its full labels)
-  const STAFF_NAV_LABELS = { 'ops.dispatch':'Dispatch', 'adm.equipment':'Equipment', 'pur.materials':'Materials', 'pur.suppliers':'Suppliers',
+  const STAFF_NAV_LABELS = { 'adm.trips':'Trip Tickets', 'adm.my_trips':'My Trips', 'ops.dispatch':'Dispatch', 'adm.equipment':'Equipment', 'pur.materials':'Materials', 'pur.suppliers':'Suppliers',
     'pur.requisitions':'Material Requisitions', 'pur.purchased_items':'Purchased Items', 'hr.staff_attendance':'Office Staff Attendance', 'adm.my_errands':'My Errands', 'adm.announcements':'Memos & Announcements' };
   function staffNavId(key){ if(STAFF_TECH_HUB.includes(key)) key = 'tech.hub'; return 'staffNavMod_' + String(key).replace(/[^a-z0-9]/gi, '_'); }
   const STAFF_MODULE_OPENERS = {
@@ -33760,6 +34047,8 @@
     'adm.errands':         ()=> showPurchasingView('errands'),
     'adm.permits':         ()=> showPurchasingView('admPermits'),
     'adm.vehicles':        ()=> showPurchasingView('admVehicles'),
+    'adm.trips':           ()=> showPurchasingView('admTrips'),
+    'adm.my_trips':        ()=> drvShowTrips(),
     'adm.contracts':       ()=> showPurchasingView('admContracts'),
     'adm.bills':           ()=> showPurchasingView('admBills'),
     'adm.assets':          ()=> showPurchasingView('admAssets'),
@@ -33898,7 +34187,7 @@
     stock:'inv.stock', myStock:'inv.stock', warehouses:'inv.warehouses', projects:'ops.projects', receive:'inv.receive', issue:'inv.issue',
     returns:'inv.returns', transfers:'inv.transfers', slips:'inv.slips', invReports:'inv.reports',
     paySetup:'hr.payroll_setup', payRules:'fin.payroll_rules', payTimesheets:'hr.timesheets', payRuns:'hr.payroll_runs', errands:'adm.errands', myErrands:'adm.my_errands',
-    admPermits:'adm.permits', admVehicles:'adm.vehicles', admContracts:'adm.contracts', admBills:'adm.bills', admAssets:'adm.assets' };
+    admPermits:'adm.permits', admVehicles:'adm.vehicles', admTrips:'adm.trips', admContracts:'adm.contracts', admBills:'adm.bills', admAssets:'adm.assets' };
   // May this user open purchasing page `key`? (Super Admin: always)
   function purchStaffAllowed(key){
     if(currentUser && currentUser.role === 'admin') return true;
@@ -33992,7 +34281,7 @@
   // =====================================================================
 
   const msgr = { tab:'home', cash:{ toLiq:0, pending:0 }, openErrands:0 };
-  const MSGR_OWN_HEADER = ['Home', 'Menu', 'Profile', 'My account', 'Alerts', 'Cash', 'Requests', 'My Errands'];   // screens that draw their own heading
+  const MSGR_OWN_HEADER = ['Home', 'Menu', 'Profile', 'My account', 'Alerts', 'Cash', 'Requests', 'My Errands', 'Trips', 'Fuel'];   // screens that draw their own heading
 
   // A messenger is office staff whose job IS errands. A manager who merely HOLDS the My Errands page (a department Head, someone
   // who sets errands for others, or anyone who can approve something) keeps the normal office layout — My Errands is simply one
@@ -34013,15 +34302,17 @@
   // Called whenever the signed-in user or their access may have changed.
   function msgrApply(){
     const on = isMessengerUser();
-    document.body.classList.toggle('role-messenger', on);
+    const drvOn = typeof drvApply === 'function' ? drvApply() : false;   // driver.js: Today · Trips · Fuel · Profile bar
+    document.body.classList.toggle('role-messenger', on || drvOn);
+    document.body.classList.toggle('role-driver', drvOn);
     const nav = $('msgrNav');
     if(nav) nav.style.display = on ? '' : 'none';
-    if(!on) document.body.classList.remove('msgr-own-head');
+    if(!on && !drvOn) document.body.classList.remove('msgr-own-head');
     if(on){ msgrLiveStart(); msgrRealtimeStart(); } else msgrRealtimeTeardown();
   }
   // Header: messenger screens that draw their own heading hide the top bar.
   function msgrOnHeader(title){
-    document.body.classList.toggle('msgr-own-head', isMessengerUser() && MSGR_OWN_HEADER.includes(title));
+    document.body.classList.toggle('msgr-own-head', (isMessengerUser() || (typeof isDriverUser === 'function' && isDriverUser())) && MSGR_OWN_HEADER.includes(title));
   }
   function msgrSetTab(tab){
     msgr.tab = tab;
@@ -34217,9 +34508,10 @@
   const msgrTap = (txt)=> '<div class="msgr-tap">' + msgrIc('arrow', 20, 2.6) + '<div><b>When you tap:</b> ' + txt + '</div></div>';
 
   // One persistent attendance card whose content follows his state (not timed in / on duty / timed out).
-  function msgrAttCard(tIn, tOut, openCount){
+  function msgrAttCard(tIn, tOut, openCount, what){
+    what = what || 'errand';
     const fmt = (t)=>{ try{ return new Date(t).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }); }catch(e){ return ''; } };
-    if(!tIn) return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot off"></span><div class="msgr-att-t"><b>Not timed in</b><small>Time in to start your first errand</small></div></div>' +
+    if(!tIn) return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot off"></span><div class="msgr-att-t"><b>Not timed in</b><small>Time in to start your first ' + what + '</small></div></div>' +
       msgrBtn('timein', 'Time in', 'clock') + '<div class="msgr-att-note">Saves your time and location</div></div>';
     const spent = msgrSpan(tIn, tOut || Date.now());
     if(tOut) return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot off"></span><div class="msgr-att-t"><b>Timed out</b><small>' + msgrEsc(fmt(tIn) + ' to ' + fmt(tOut) + (spent ? ' \u00B7 ' + spent : '')) + '</small></div></div>' +
@@ -34227,7 +34519,7 @@
     const ready = !openCount;
     return '<div class="msgr-att"><div class="msgr-att-row"><span class="msgr-dot"></span><div class="msgr-att-t"><b>On duty</b><small>' + msgrEsc('Timed in ' + fmt(tIn) + (spent ? ' \u00B7 ' + spent : '')) + '</small></div>' +
       '<button type="button" class="msgr-outbtn' + (ready ? ' ready' : '') + '" data-msgr="timeout"' + (ready ? '' : ' disabled') + '>' + msgrIc('clock', 20, 2.2) + 'Time out</button></div>' +
-      '<div class="msgr-att-foot"><span>' + (ready ? 'All errands done \u2014 you can time out' : 'Time out opens after your last errand') + '</span>' +
+      '<div class="msgr-att-foot"><span>' + (ready ? (what === 'trip' ? 'No trip open \u2014 time out when you are done for the day' : 'All ' + what + 's done \u2014 you can time out') : 'Time out opens after your last ' + what) + '</span>' +
       '<button type="button" class="msgr-textbtn msgr-link" data-msgr-go="dtr">View attendance</button></div></div>';
   }
   // Today's errands as one connected timeline: where he is now, what is next, what is finished.
@@ -34909,6 +35201,695 @@
     const old = msgrRt; msgrRt = null; msgrRtUid = null; msgrRtTries = 0;
     if(old){ try{ db.removeChannel(old); }catch(_){} }
   }
+
+
+  // =====================================================================
+  // Driver account  (migration 20261102_01_driver_trips.sql)
+  //
+  // A driver is office staff with the My Trips page (adm.my_trips, Edit level) who is not a messenger, a Head, an approver
+  // or the office's Trip Tickets manager. For them (body.role-messenger + role-driver, the same chrome as the messenger):
+  //   * a bottom bar (#drvNav: Today · Trips · Fuel · Profile) replaces the sidebar,
+  //   * Today (staffPanel_home): the same Time in / Time out card as the messenger, then ONE big action for the trip:
+  //       Start a trip  ->  I've arrived  ->  Leave for next stop / Return to office  ->  (trip closed),
+  //     and every trip of the day with each departure and arrival,
+  //   * every tap is stamped by the database with its own clock and the phone's GPS position,
+  //   * while a trip is open and the app is open, GPS points are collected and sent in batches; the DATABASE works out the
+  //     km (ignores bad fixes and drift; a gap of 10+ minutes counts as straight line x 1.3 and is flagged "estimated").
+  // All writes go through the drv_* functions; the driver can only touch his own open trip.
+  // =====================================================================
+  Object.assign(MSGR_ICONS, {
+    wheel:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M3.5 10.5L9.5 12M20.5 10.5L14.5 12M12 14.5V21"/>',
+    route:'<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h8"/>',
+    fuelpump:'<path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M4 21h12M15 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3"/><path d="M8 7h4"/>',
+    user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    navi:'<path d="M3 11l18-8-8 18-2-8z"/>',
+    package:'<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'
+  });
+  const drv = { tab:'home', vehicles:[], today:[], stops:{}, open:null, openStop:null, buf:[], timer:null, watchId:null, wake:null, busy:false, lastKm:null, flushing:false, day:null,
+                jobs:[], hold:[], mats:new Map(), needSign:{ hand:0, slips:0 } };
+  const drvEsc = (v)=> msgrEsc(v);
+  const DRV_KEEP_ON = 'awes-drv-keep-screen-on';
+
+  function isDriverUser(){ return drvWhy().on; }
+  function drvWhy(){
+    if(!(typeof isStaffUser === 'function' && isStaffUser())) return { on:false, why:'not an office staff account' };
+    if(!can('adm.my_trips', 'view')) return { on:false, why:'does not hold the My Trips page' };
+    if(typeof isMessengerUser === 'function' && isMessengerUser()) return { on:false, why:'is a messenger' };
+    if(can('adm.office_layout', 'view')) return { on:false, why:'the Super Admin switched on the full office layout for this account' };
+    const acc = (currentUser && currentUser.access) || {};
+    if((typeof staffIsHead === 'function' && staffIsHead()) || acc.is_head || (acc.departments || []).some(d=> d && d.is_head)) return { on:false, why:'is a department Head' };
+    if(can('adm.trips', 'edit')) return { on:false, why:'manages Trip Tickets for the office' };
+    const ap = Object.keys(acc.access || {}).filter(k=> can(k, 'approve'));
+    if(ap.length) return { on:false, why:'can approve ' + ap[0] };
+    return { on:true, why:'holds My Trips and is not a messenger, Head, approver or Trip Tickets manager' };
+  }
+
+  // ---------- small helpers ----------
+  const drvT = (ts)=>{ try{ return ts ? new Date(ts).toLocaleTimeString('en-PH', { timeZone:'Asia/Manila', hour:'numeric', minute:'2-digit' }) : ''; }catch(e){ return ''; } };
+  const drvDay = (ms)=> new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);
+  const drvDur = (ms)=>{ const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm' : m + ' min'; };
+  const drvKm = (n)=> (Math.round(Number(n || 0) * 10) / 10).toLocaleString('en-PH', { minimumFractionDigits:0, maximumFractionDigits:1 });
+  const drvBounds = (iso)=> [new Date(iso + 'T00:00:00+08:00').toISOString(), new Date(new Date(iso + 'T00:00:00+08:00').getTime() + 864e5).toISOString()];
+  function drvPlate(vid){ const v = drv.vehicles.find(x=> x.id === vid); return v ? v.plate_no + (v.make_model ? ' \u00B7 ' + v.make_model : '') : ''; }
+
+  // ---------- GPS ----------
+  function drvGetPos(){
+    return new Promise((resolve)=>{
+      if(!navigator.geolocation) return resolve(null);
+      let done = false; const fin = (v)=>{ if(!done){ done = true; resolve(v); } };
+      setTimeout(()=> fin(null), 12000);
+      try{
+        navigator.geolocation.getCurrentPosition(
+          (p)=> fin({ lat:p.coords.latitude, lng:p.coords.longitude, acc:p.coords.accuracy }),
+          ()=> fin(null), { enableHighAccuracy:true, timeout:11000, maximumAge:8000 });
+      }catch(e){ fin(null); }
+    });
+  }
+  const drvBufKey = (id)=> 'awes-drv-buf-' + id;
+  function drvBufLoad(id){ try{ return JSON.parse(localStorage.getItem(drvBufKey(id)) || '[]'); }catch(e){ return []; } }
+  function drvBufSave(id){ try{ localStorage.setItem(drvBufKey(id), JSON.stringify(drv.buf.slice(-600))); }catch(e){} }
+  function drvTrackStart(trip){
+    if(!trip || drv.watchId != null || !navigator.geolocation) return;
+    drv.buf = drvBufLoad(trip.id);
+    let last = null;
+    drv.watchId = navigator.geolocation.watchPosition((p)=>{
+      const pt = { at:new Date(p.timestamp || Date.now()).toISOString(), lat:p.coords.latitude, lng:p.coords.longitude, acc:Math.round(p.coords.accuracy || 0) };
+      // keep it light: a point only when he has moved ~25 m or 30 s have passed
+      if(last){
+        const dKm = drvHav(last.lat, last.lng, pt.lat, pt.lng), secs = (new Date(pt.at) - new Date(last.at)) / 1000;
+        if(dKm < 0.025 && secs < 30) return;
+      }
+      last = pt; drv.buf.push(pt); drvBufSave(trip.id);
+    }, ()=>{}, { enableHighAccuracy:true, maximumAge:5000, timeout:30000 });
+    drv.timer = setInterval(()=> drvFlush(), 45000);
+    drvWakeStart();
+  }
+  function drvTrackStop(){
+    if(drv.watchId != null){ try{ navigator.geolocation.clearWatch(drv.watchId); }catch(e){} drv.watchId = null; }
+    if(drv.timer){ clearInterval(drv.timer); drv.timer = null; }
+    drvWakeStop();
+  }
+  function drvHav(aLat, aLng, bLat, bLng){
+    const r = Math.PI / 180, dLat = (bLat - aLat) * r, dLng = (bLng - aLng) * r;
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLng / 2) ** 2;
+    return 2 * 6371.0088 * Math.asin(Math.min(1, Math.sqrt(x)));
+  }
+  // send what has been collected; the database returns the km so far
+  async function drvFlush(){
+    const t = drv.open; if(!t || drv.flushing || !drv.buf.length) return;
+    drv.flushing = true;
+    const batch = drv.buf.slice(0, 200);
+    try{
+      const { data, error } = await db.rpc('drv_trip_points', { p_trip:t.id, p_points:batch });
+      if(error) throw error;
+      drv.buf = drv.buf.slice(batch.length); drvBufSave(t.id);
+      drv.lastKm = data;
+      const el = document.getElementById('drvKmNow'); if(el && data) el.textContent = drvKm(data.gps_km) + ' km' + (data.estimated ? ' (estimated)' : '');
+    }catch(e){ /* stays in the buffer; sent next time */ }
+    finally{ drv.flushing = false; }
+  }
+  async function drvWakeStart(){
+    try{
+      if(localStorage.getItem(DRV_KEEP_ON) === '0') return;
+      if('wakeLock' in navigator && !drv.wake){ drv.wake = await navigator.wakeLock.request('screen'); drv.wake.addEventListener('release', ()=>{ drv.wake = null; }); }
+    }catch(e){}
+  }
+  function drvWakeStop(){ try{ if(drv.wake) drv.wake.release(); }catch(e){} drv.wake = null; }
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'hidden') drvFlush();
+    else if(drv.open) drvWakeStart();
+  });
+  window.addEventListener('online', ()=>{ drvFlush(); });
+
+  // ---------- loading ----------
+  async function drvLoad(dayISO){
+    const uid = currentUser.id, [from, to] = drvBounds(dayISO || todayISO());
+    const out = { ok:true, dtr:null, trips:[], open:null, stops:{}, err:null };
+    try{
+      const [d, tr, op, veh] = await Promise.all([
+        dtrGetDay(uid, todayISO()).catch(()=> null),
+        db.from('adm_vehicle_trips').select('*').eq('driver_id', uid).gte('out_at', from).lt('out_at', to).order('out_at', { ascending:true }),
+        db.from('adm_vehicle_trips').select('*').eq('driver_id', uid).eq('status', 'out').order('out_at', { ascending:false }).limit(1),
+        db.from('adm_vehicles').select('id, plate_no, make_model, odometer_km, active').eq('active', true).order('plate_no')
+      ]);
+      if(tr.error) throw tr.error;
+      if(op.error) throw op.error;
+      out.dtr = d || null; out.trips = tr.data || []; out.open = (op.data || [])[0] || null; drv.vehicles = veh.data || [];
+      const ids = out.trips.map(t=> t.id); if(out.open && !ids.includes(out.open.id)) ids.push(out.open.id);
+      if(ids.length){
+        const st = await db.from('adm_trip_stops').select('*').in('trip_id', ids).order('stop_no', { ascending:true });
+        if(st.error) throw st.error;
+        (st.data || []).forEach(s=> (out.stops[s.trip_id] = out.stops[s.trip_id] || []).push(s));
+      }
+    }catch(e){ out.ok = false; out.err = e; }
+    if(out.ok && (dayISO || todayISO()) === todayISO()){
+      try{
+        const [jb, av, ct, hs, sl] = await Promise.all([
+          db.from('adm_trip_jobs').select('*').eq('driver_id', uid).eq('plan_date', todayISO()).order('seq', { ascending:true }).order('created_at', { ascending:true }),
+          db.rpc('inv_my_available'),
+          db.from('materials').select('id, code, name, unit'),
+          db.from('material_handovers').select('id').eq('to_worker_id', uid).eq('status', 'pending'),
+          db.from('issue_slips').select('id').eq('worker_id', uid).eq('status', 'issued')
+        ]);
+        drv.jobs = jb.error ? [] : (jb.data || []);
+        drv.hold = av.error ? [] : (av.data || []).filter(h=> Number(h.holding) > 0);
+        if(!ct.error) drv.mats = new Map((ct.data || []).map(m=> [m.id, m]));
+        drv.needSign = { hand:hs.error ? 0 : (hs.data || []).length, slips:sl.error ? 0 : (sl.data || []).length };
+        drvSetLoadBadge();
+      }catch(e){ /* the trip screens still work without the plan */ }
+    }
+    if(out.ok){
+      drv.open = out.open; drv.stops = out.stops;
+      drv.openStop = out.open ? (out.stops[out.open.id] || []).find(s=> !s.departed_at) || null : null;
+      if(out.open) drvTrackStart(out.open); else drvTrackStop();
+    }
+    return out;
+  }
+
+  // ---------- pieces of the screens ----------
+  function drvLegs(t, stops){
+    const row = (kind, label, time, extra)=> '<div class="drv-leg ' + kind + '"><span class="drv-dot"></span><div><b>' + label + '</b> <span class="drv-x">' + time + (extra ? ' \u00B7 ' + extra : '') + '</span></div></div>';
+    let h = row('o', 'Left the office', drvT(t.out_at), '');
+    (stops || []).forEach(s=>{
+      h += row('', 'Arrived ' + drvEsc(s.place || 'stop'), drvT(s.arrived_at), '');
+      if(s.departed_at) h += row('o', 'Left ' + drvEsc(s.place || 'stop'), drvT(s.departed_at), 'stayed ' + drvDur(new Date(s.departed_at) - new Date(s.arrived_at)));
+    });
+    if(t.status === 'returned' && t.in_at) h += row('', 'Back at the office', drvT(t.in_at), drvKm(t.gps_km || (t.km_in - t.km_out)) + ' km' + (t.km_estimated ? ' (estimated)' : ''));
+    return '<div class="drv-legs">' + h + '</div>';
+  }
+  function drvTripCard(t, stops, n, compact){
+    const open = t.status === 'out';
+    const place = (stops && stops.length ? stops[0].place : '') || t.destination;
+    return '<div class="drv-trip"><div class="drv-trip-top"><span class="drv-trip-t">Trip ' + n + ' \u00B7 ' + drvEsc(place) + '</span>' +
+      '<span class="msgr-pill' + (open ? ' amber' : '') + '">' + (open ? 'On the road' : t.status === 'cancelled' ? 'Cancelled' : 'Done') + '</span></div>' +
+      '<div class="drv-trip-s">' + drvEsc(t.trip_no || '') + (t.reference ? ' \u00B7 ' + drvEsc(t.reference) : '') + (t.purpose ? ' \u00B7 ' + drvEsc(t.purpose) : '') + '</div>' + (compact && open ? '' : drvLegs(t, stops)) + '</div>';
+  }
+  function drvSummary(trips, stops){
+    const done = trips.filter(t=> t.status === 'returned' || t.status === 'out');
+    const km = trips.reduce((a, t)=> a + Number(t.gps_km || 0), 0);
+    const ms = trips.reduce((a, t)=> a + (t.status === 'returned' && t.in_at ? new Date(t.in_at) - new Date(t.out_at) : t.status === 'out' ? Date.now() - new Date(t.out_at) : 0), 0);
+    return '<div class="drv-sum"><div><b>' + done.length + '</b>trip' + (done.length === 1 ? '' : 's') + '</div><div><b>' + drvKm(km) + ' km</b>by GPS</div><div><b>' + (ms ? drvDur(ms) : '0 min') + '</b>on the road</div></div>';
+  }
+  function drvHead(sub){
+    return '<div class="msgr-head"><div><div class="msgr-hello">' + msgrGreeting() + '</div><div class="msgr-name">' + drvEsc(msgrFirstName()) + '</div>' + (sub || '') + '</div></div>';
+  }
+  const drvBtn = (act, label, icon, cls)=> '<button type="button" class="msgr-big' + (cls ? ' ' + cls : '') + '" data-drv="' + act + '">' + msgrIc(icon, 30) + '<span>' + label + '</span></button>';
+  const drvSBtn = (act, label, icon, cls)=> '<button type="button" class="msgr-sbtn' + (cls ? ' ' + cls : '') + '" data-drv="' + act + '">' + msgrIc(icon, 22, 2.2) + '<span>' + label + '</span></button>';
+
+  // ---------- planned jobs, what he carries ----------
+  const DRV_KINDS = { deliver:['Deliver', 'package'], pickup:['Pick up', 'box'], transfer:['Transfer', 'refund'], errand:['Errand', 'list'], other:['Other', 'info'] };
+  const drvMat = (id)=> drv.mats.get(id) || { id, code:'?', name:'(item)', unit:'' };
+  const drvJobDue = (j)=> j.due_at ? drvT(j.due_at) : '';
+  function drvSetLoadBadge(){
+    const n = drv.needSign.hand + drv.needSign.slips;
+    document.querySelectorAll('#drvNav [data-drv-tab="load"] .msgr-tab-n').forEach(b=>{ b.textContent = String(n); b.style.display = n ? '' : 'none'; });
+  }
+  const drvPush = (uid, title, msg, tag)=>{ try{ if(uid && typeof notifyUser === 'function') notifyUser(uid, title, msg, tag); }catch(e){} };
+  async function drvTellOffice(title, msg, tag){
+    try{ const t = await db.rpc('adm_trip_notify_targets'); (t.data || []).forEach(x=> drvPush(x.user_id, title, msg, tag + '-' + x.user_id)); }catch(e){}
+    try{ if(typeof notifyAdmins === 'function') notifyAdmins(title, msg, tag); }catch(e){}
+  }
+  function drvCarryCard(){
+    if(!drv.hold.length) return '';
+    const rows = drv.hold.slice(0, 6).map(h=>{ const m = drvMat(h.material_id); return '<div class="drv-it"><span>' + drvEsc(m.name) + '</span><b>' + Number(h.holding) + ' ' + drvEsc(m.unit) + '</b></div>'; }).join('');
+    return '<div class="msgr-card drv-carry"><div class="msgr-card-top"><span class="msgr-label amber">You are carrying</span><span class="msgr-pill amber">' + drv.hold.length + ' item' + (drv.hold.length === 1 ? '' : 's') + '</span></div>' + rows +
+      (drv.hold.length > 6 ? '<div class="drv-note">+ ' + (drv.hold.length - 6) + ' more \u2014 see Load</div>' : '') + '</div>';
+  }
+  function drvSignCard(){
+    const n = drv.needSign.hand + drv.needSign.slips; if(!n) return '';
+    return '<button type="button" class="msgr-row need" data-drv-tab-go="load"><span class="msgr-circ need">' + msgrIc('pen', 20, 2.3) + '</span><span class="msgr-row-main"><span class="msgr-row-title">' + n + ' waiting for your signature</span>' +
+      '<span class="msgr-row-sub">' + [drv.needSign.slips ? drv.needSign.slips + ' issued to you' : '', drv.needSign.hand ? drv.needSign.hand + ' handed over to you' : ''].filter(Boolean).join(' \u00B7 ') + '</span></span><span class="msgr-chev">' + msgrIc('chev', 20, 2.4) + '</span></button>';
+  }
+  // the day's plan: any job can be started in any order; skip and "do this first" are always there
+  function drvPlanHtml(){
+    const jobs = drv.jobs.filter(j=> j.status !== 'cancelled');
+    if(!jobs.length) return '<div class="msgr-sh"><span class="msgr-sh-t">Today\u2019s plan</span></div><div class="msgr-card"><p class="msgr-p">Nothing planned for you yet. Start a trip below, or add a job.</p>' + drvSBtn('job-add', 'Add a job', 'plus') + '</div>';
+    const open = jobs.filter(j=> j.status === 'planned' || j.status === 'in_trip'), doneN = jobs.filter(j=> j.status === 'done').length;
+    const firstPlanned = open.find(j=> j.status === 'planned');
+    const card = (j, n)=>{
+      const k = DRV_KINDS[j.kind] || DRV_KINDS.other, meta = [drvJobDue(j) ? 'due ' + drvJobDue(j) : '', j.job_order_id || j.reference || '', j.contact || ''].filter(Boolean).join(' \u00B7 ');
+      const tag = j.added_by_driver ? ' <span class="msgr-pill amber">Added by you</span>' : '';
+      let right = '<span class="msgr-pill">' + k[0] + '</span>', btns = '', cls = '';
+      if(j.status === 'done'){ cls = ' done'; right = '<span class="msgr-pill">Done ' + drvT(j.done_at) + '</span>'; }
+      else if(j.status === 'skipped'){ cls = ' skip'; right = '<span class="msgr-pill amber">Skipped</span>'; }
+      else if(j.status === 'in_trip'){ cls = ' cur'; right = '<span class="msgr-pill">On this trip</span>'; btns = '<div class="drv-jacts">' + drvJBtn('job-skip', 'Skip', j.id, 'warn') + '</div>'; }
+      else{
+        btns = '<div class="drv-jacts">' + (!drv.open ? drvJBtn('job-start', 'Start trip', j.id, 'p') : '') + (j !== firstPlanned ? drvJBtn('job-first', 'Do this first', j.id) : '') + drvJBtn('job-skip', 'Skip', j.id, 'warn') + '</div>';
+        if(j === firstPlanned && !drv.open) cls = ' cur';
+      }
+      return '<div class="drv-job' + cls + '"><div class="drv-job-top"><span class="drv-job-t">' + n + ' \u00B7 ' + drvEsc(j.place) + tag + '</span>' + right + '</div>' +
+        '<div class="drv-job-s">' + drvEsc(meta) + (j.note ? (meta ? ' \u00B7 ' : '') + drvEsc(j.note) : '') + (j.status === 'skipped' && j.skip_reason ? '<br>' + drvEsc(j.skip_reason) : '') + '</div>' + btns + '</div>';
+    };
+    return '<div class="msgr-sh"><span class="msgr-sh-t">Today\u2019s plan</span><span class="msgr-sh-r">' + jobs.length + ' job' + (jobs.length === 1 ? '' : 's') + ' \u00B7 ' + doneN + ' done</span></div>' +
+      jobs.map((j, i)=> card(j, i + 1)).join('') +
+      '<div class="drv-note">Start any job \u2014 order is only a suggestion. Taking several together makes one trip with several stops.</div>' + drvSBtn('job-add', 'Add a job', 'plus');
+  }
+  const drvJBtn = (act, label, id, cls)=> '<button type="button" class="' + (cls || '') + '" data-drv="' + act + '" data-id="' + drvEsc(id) + '">' + label + '</button>';
+
+  // ---------- Today ----------
+  async function drvRenderHome(target, quiet){
+    if(!quiet) target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    const data = await drvLoad(todayISO());
+    if(!data.ok){
+      if(quiet) return;
+      target.innerHTML = '<div class="msgr-page">' + drvHead('') + '<div class="msgr-card"><div class="msgr-card-t">Can\u2019t load your trips</div><p class="msgr-p">Check your connection, then try again.</p>' + drvBtn('retry', 'Try again', 'refund') + '</div></div>';
+      return;
+    }
+    const tIn = data.dtr && data.dtr.timeIn, tOut = data.dtr && data.dtr.timeOut;
+    const t = data.open, stop = drv.openStop;
+    const curVeh = t ? drvPlate(t.vehicle_id) : (data.trips.length ? drvPlate(data.trips[data.trips.length - 1].vehicle_id) : '');
+    const chip = curVeh ? '<span class="msgr-chip ok drv-veh">' + msgrIc('truck', 18, 2.2) + drvEsc(curVeh) + '</span>' : '';
+    let card = '';
+    const stopJob = stop && stop.job_id ? drv.jobs.find(j=> j.id === stop.job_id) : null;
+    if(t && stop){
+      const jobPanel = stopJob && stopJob.status === 'in_trip'
+        ? '<div class="drv-jobpanel"><div class="msgr-label">' + (DRV_KINDS[stopJob.kind] || DRV_KINDS.other)[0].toUpperCase() + ' \u00B7 THIS STOP</div><div class="drv-job-s" style="margin:2px 0 8px">' + drvEsc([stopJob.note, stopJob.contact].filter(Boolean).join(' \u00B7 ') || stopJob.place) + '</div>' +
+          (stopJob.kind === 'deliver' || stopJob.kind === 'transfer' ? drvBtn('drop', 'Hand over items', 'package') + '<div class="msgr-two">' + drvSBtn('job-done', 'Finish job (nothing to hand over)', 'check') + '</div>'
+            : stopJob.kind === 'pickup' ? '<div class="drv-note" style="text-align:left">Ask the person to hand the items to you in the app (Hand over \u203A your name). Then sign for them under Load.</div>' + drvBtn('job-done', 'Finish job', 'check')
+            : drvBtn('job-done', 'Finish job', 'check')) + '</div>' : '';
+      card = '<div class="msgr-card cur"><div class="msgr-card-top"><span class="msgr-label green">Current trip</span><span class="msgr-pill amber">At a stop</span></div>' +
+        '<div class="msgr-card-t">At ' + drvEsc(stop.place || t.destination) + '</div>' +
+        '<div class="msgr-card-sub">' + drvEsc(t.trip_no) + ' \u00B7 arrived ' + drvT(stop.arrived_at) + ' \u00B7 here ' + drvDur(Date.now() - new Date(stop.arrived_at)) + '</div>' +
+        drvLegs(t, drv.stops[t.id] || []) + jobPanel + drvBtn('leave', 'Leave for next stop', 'arrow') +
+        '<div class="msgr-two">' + drvSBtn('end', 'Return to office', 'home') + '</div>' +
+        '<div class="msgr-tap">' + msgrIc('arrow', 20, 2.6) + '<div><b>When you tap:</b> the time and your location are saved.</div></div></div>';
+    }else if(t){
+      const km = drv.lastKm && drv.lastKm.gps_km != null ? Number(drv.lastKm.gps_km) : Number(t.gps_km || 0);
+      card = '<div class="msgr-card cur"><div class="msgr-card-top"><span class="msgr-label green">Current trip</span><span class="msgr-pill">On the road</span></div>' +
+        '<div class="msgr-card-t">To ' + drvEsc(t.destination) + '</div>' +
+        '<div class="msgr-card-sub">' + drvEsc(t.trip_no) + (t.reference ? ' \u00B7 ' + drvEsc(t.reference) : '') + '</div>' +
+        '<div class="drv-kv"><div><b>' + drvT(t.out_at) + '</b>left the office</div><div><b>' + drvDur(Date.now() - new Date(t.out_at)) + '</b>on the road</div><div><b id="drvKmNow">' + drvKm(km) + ' km' + (t.km_estimated ? ' (estimated)' : '') + '</b>by GPS</div></div>' +
+        drvLegs(t, drv.stops[t.id] || []) + drvBtn('arrive', 'I\u2019ve arrived', 'flag') +
+        (drv.jobs.some(j=> j.trip_id === t.id && j.status === 'in_trip') ? '<div class="drv-onboard">On this trip: ' + drv.jobs.filter(j=> j.trip_id === t.id && j.status === 'in_trip').map(j=> drvEsc(j.place)).join(' \u00B7 ') + '</div>' : '') +
+        '<div class="msgr-two"><a class="msgr-sbtn" href="' + drvEsc(msgrMapUrl(t.destination)) + '" target="_blank" rel="noopener">' + msgrIc('navi', 22, 2.2) + '<span>Navigate</span></a>' + drvSBtn('end', 'Return to office', 'home') + '</div>' +
+        '<label class="drv-keep"><input type="checkbox" data-drv-keep="1"' + (localStorage.getItem(DRV_KEEP_ON) === '0' ? '' : ' checked') + '> Keep the screen on so GPS keeps recording</label>' +
+        '<div class="msgr-tap">' + msgrIc('arrow', 20, 2.6) + '<div><b>When you tap:</b> the time and your location are saved. km is counted from GPS while this app is open.</div></div></div>';
+    }else if(tOut){
+      card = '<div class="msgr-card"><div class="msgr-done-line">' + msgrCircle('done') + '<div><div class="msgr-card-t">You\u2019re done for today</div><p class="msgr-p">See you tomorrow, ' + drvEsc(msgrFirstName()) + '.</p></div></div></div>';
+    }else if(tIn){
+      const nPlan = drv.jobs.filter(j=> j.status === 'planned').length;
+      card = '<div class="msgr-card cur"><div class="msgr-card-top"><span class="msgr-label green">Ready to go</span></div><div class="msgr-card-t">No trip right now</div><p class="msgr-p">' + (nPlan ? nPlan + ' job' + (nPlan === 1 ? '' : 's') + ' planned for you \u2014 pick one below, or start any trip.' : 'Start a trip when you leave the office.') + '</p>' + drvBtn('start', 'Start a trip', 'play') + '</div>';
+    }else{
+      card = '<div class="msgr-card"><div class="msgr-card-t">Time in first</div><p class="msgr-p">Tap Time in above, then you can start your first trip.</p></div>';
+    }
+    const trips = data.trips.slice();
+    if(t && !trips.some(x=> x.id === t.id)) trips.push(t);
+    const list = trips.length ? '<div class="msgr-sh"><span class="msgr-sh-t">Today\u2019s trips</span><span class="msgr-sh-r">' + trips.length + '</span></div>' + drvSummary(trips) +
+      trips.slice().reverse().map((x, i)=> drvTripCard(x, drv.stops[x.id] || [], trips.length - i, true)).join('') : '';
+    target.innerHTML = '<div class="msgr-page">' + drvHead(chip) + msgrAttCard(tIn, tOut, t ? 1 : 0, 'trip') + drvSignCard() + card + (tIn ? drvPlanHtml() : '') + drvCarryCard() + list + '</div>';
+  }
+
+  // ---------- sheets (in-page pop-ups) ----------
+  function drvSheet(html){
+    const ov = document.createElement('div');
+    ov.className = 'overlay open drv-ov';
+    ov.innerHTML = '<div class="modal drv-sheet">' + html + '</div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', (e)=>{ if(e.target === ov || e.target.closest('[data-sheet-close]')) ov.remove(); });
+    return ov;
+  }
+  function drvBusy(on){ drv.busy = on; document.querySelectorAll('.drv-ov button[data-sheet-go], #staffPanel_home [data-drv]').forEach(b=>{ b.disabled = on; }); }
+  const drvFail = (prefix, e)=> toast(prefix + ((e && e.message) || describeCloudError(e)));
+
+  // Start a trip: the planned jobs going on it (any order, several together), or just a destination
+  async function drvStartSheet(preJobId){
+    const d = await drvLoad(todayISO());
+    if(!d.ok){ toast('Can\u2019t load: ' + describeCloudError(d.err)); return; }
+    if(d.open){ toast('You still have a trip open'); return drvRenderHome($('staffPanel_home'), true); }
+    if(!drv.vehicles.length){ toast('No vehicle is set up yet \u2014 ask the office'); return; }
+    const lastVeh = d.trips.length ? d.trips[d.trips.length - 1].vehicle_id : null;
+    const recent = []; d.trips.slice().reverse().forEach(t=>{ if(t.destination && !recent.includes(t.destination)) recent.push(t.destination); });
+    const planned = drv.jobs.filter(j=> j.status === 'planned');
+    const pre = new Set(preJobId ? [preJobId] : (planned[0] ? [planned[0].id] : []));
+    const firstPlace = ()=>{ const c = planned.filter(j=> ov && ov.querySelector('[data-jobsel="' + j.id + '"]') && ov.querySelector('[data-jobsel="' + j.id + '"]').checked)[0]; return c ? c.place : ''; };
+    let ov = null;
+    const jobsHtml = planned.length ? '<div class="field"><label>Jobs on this trip</label><div class="drv-pick">' + planned.map(j=> '<label class="drv-pickrow"><input type="checkbox" data-jobsel="' + drvEsc(j.id) + '"' + (pre.has(j.id) ? ' checked' : '') + '><span><b>' + drvEsc(j.place) + '</b><small>' +
+      drvEsc((DRV_KINDS[j.kind] || DRV_KINDS.other)[0] + (drvJobDue(j) ? ' \u00B7 due ' + drvJobDue(j) : '') + (j.job_order_id ? ' \u00B7 ' + j.job_order_id : '')) + '</small></span></label>').join('') + '</div><div class="drv-note" style="text-align:left">Tick the jobs you are taking now. You can arrive at them in any order.</div></div>' : '';
+    ov = drvSheet('<h3>Start a trip</h3>' +
+      '<div class="field"><label>Vehicle</label><select id="drvVeh">' + drv.vehicles.map(v=> '<option value="' + drvEsc(v.id) + '"' + (v.id === lastVeh ? ' selected' : '') + '>' + drvEsc(v.plate_no + (v.make_model ? ' \u00B7 ' + v.make_model : '')) + '</option>').join('') + '</select></div>' + jobsHtml +
+      '<div class="field"><label>Where to?' + (planned.length ? '' : ' <span class="req">*</span>') + '</label><input type="text" id="drvDest" maxlength="200" placeholder="' + (planned.length ? 'Filled in from the first job' : 'e.g. BDO Lipa branch') + '" autocomplete="off"></div>' +
+      (recent.length ? '<div class="drv-chips">' + recent.slice(0, 4).map(r=> '<button type="button" data-chip="' + drvEsc(r) + '">' + drvEsc(r) + '</button>').join('') + '</div>' : '') +
+      '<div class="field"><label>What for?</label><div class="drv-chips" id="drvPurp">' + ['Deliver', 'Pick up', 'Client visit', 'Other'].map((pp, i)=> '<button type="button" data-purp="' + pp + '"' + (i === 0 ? ' class="on"' : '') + '>' + pp + '</button>').join('') + '</div></div>' +
+      '<div class="field"><label>Errand or job order no. (optional)</label><input type="text" id="drvRef" maxlength="80" placeholder="e.g. ER-0415"></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Cancel</button><button type="button" class="btn btn-primary" data-sheet-go="start">Start trip</button></div>' +
+      '<div class="drv-note">The time and your location are saved when you tap.</div>');
+    let typed = false;
+    $('drvDest').addEventListener('input', ()=>{ typed = true; });
+    const fill = ()=>{ if(!typed){ const fp = firstPlace(); $('drvDest').value = fp; } };
+    fill();
+    ov.addEventListener('change', (e)=>{ if(e.target.closest('[data-jobsel]')) fill(); });
+    ov.addEventListener('click', async (e)=>{
+      const chip = e.target.closest('[data-chip]'); if(chip){ typed = true; $('drvDest').value = chip.dataset.chip; return; }
+      const pp = e.target.closest('[data-purp]'); if(pp){ ov.querySelectorAll('[data-purp]').forEach(x=> x.classList.toggle('on', x === pp)); return; }
+      if(!e.target.closest('[data-sheet-go="start"]')) return;
+      const jobIds = Array.from(ov.querySelectorAll('[data-jobsel]')).filter(c=> c.checked).map(c=> c.dataset.jobsel);
+      const dest = $('drvDest').value.trim(); if(!dest && !jobIds.length){ toast('Where are you going?'); return; }
+      drvBusy(true);
+      try{
+        const pos = await drvGetPos(); if(!pos) toast('No GPS signal \u2014 the time is saved without a location');
+        const { data, error } = await db.rpc('drv_start_trip', { p:{ vehicle_id:$('drvVeh').value, destination:dest, job_ids:jobIds, purpose:(ov.querySelector('[data-purp].on') || {}).dataset ? ov.querySelector('[data-purp].on').dataset.purp : '',
+          reference:$('drvRef').value.trim(), lat:pos ? pos.lat : null, lng:pos ? pos.lng : null, acc:pos ? pos.acc : null } });
+        if(error) throw error;
+        ov.remove(); toast('Trip ' + (data.trip_no || '') + ' started');
+      }catch(err){ drvFail('Couldn\u2019t start: ', err); }
+      finally{ drvBusy(false); drvRenderHome($('staffPanel_home'), true); }
+    });
+  }
+
+  // I've arrived  /  Leave for next stop  /  Return to office
+  async function drvStamp(fn, payload, okMsg){
+    drvBusy(true);
+    try{
+      await drvFlush();
+      const pos = await drvGetPos(); if(!pos) toast('No GPS signal \u2014 the time is saved without a location');
+      const { data, error } = await db.rpc(fn, { p:Object.assign({ trip_id:drv.open.id, lat:pos ? pos.lat : null, lng:pos ? pos.lng : null, acc:pos ? pos.acc : null }, payload || {}) });
+      if(error) throw error;
+      if(okMsg) toast(okMsg);
+      return data;
+    }catch(err){ drvFail('Couldn\u2019t save: ', err); return null; }
+    finally{ drvBusy(false); }
+  }
+  async function drvArrive(){
+    if(!drv.open) return;
+    const pend = drv.jobs.filter(j=> j.trip_id === drv.open.id && j.status === 'in_trip');
+    if(pend.length > 1) return drvArriveSheet(pend);
+    const r = await drvStamp('drv_arrive', pend.length === 1 ? { job_id:pend[0].id } : {}, 'Arrival saved \u2014 ' + drvT(new Date()));
+    drvRenderHome($('staffPanel_home'), true); return r;
+  }
+  // several jobs on one trip: which place is he at? (any order)
+  function drvArriveSheet(pend){
+    const ov = drvSheet('<h3>Where did you arrive?</h3><p class="pay-hint">Pick the job \u2014 you can do them in any order.</p>' +
+      pend.map(j=> '<button type="button" class="drv-pickbtn" data-arr="' + drvEsc(j.id) + '"><b>' + drvEsc(j.place) + '</b><small>' + drvEsc((DRV_KINDS[j.kind] || DRV_KINDS.other)[0] + (drvJobDue(j) ? ' \u00B7 due ' + drvJobDue(j) : '')) + '</small></button>').join('') +
+      '<div class="field" style="margin-top:10px"><label>Somewhere else</label><input type="text" id="drvElse" maxlength="200" placeholder="Name of the place"></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Cancel</button><button type="button" class="btn btn-primary" data-sheet-go="else">Arrived here</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      const pick = e.target.closest('[data-arr]'), other = e.target.closest('[data-sheet-go="else"]');
+      if(!pick && !other) return;
+      if(other && !$('drvElse').value.trim()){ toast('Type the name of the place'); return; }
+      const r = await drvStamp('drv_arrive', pick ? { job_id:pick.dataset.arr } : { place:$('drvElse').value.trim() }, 'Arrival saved \u2014 ' + drvT(new Date()));
+      if(r) ov.remove(); drvRenderHome($('staffPanel_home'), true);
+    });
+  }
+  // ---------- jobs: do first, skip, add, finish ----------
+  async function drvJobFirst(id){
+    try{ const { error } = await db.rpc('drv_job_first', { p_job:id }); if(error) throw error; toast('Moved to the top'); }
+    catch(e){ drvFail('Couldn\u2019t move it: ', e); }
+    drvRenderHome($('staffPanel_home'), true);
+  }
+  function drvSkipSheet(id){
+    const j = drv.jobs.find(x=> x.id === id); if(!j) return;
+    const ov = drvSheet('<h3>Skip \u201C' + drvEsc(j.place) + '\u201D?</h3><p class="pay-hint">The office is told straight away, with your reason.</p>' +
+      '<div class="drv-chips" id="drvWhy">' + ['Site is closed', 'Not needed anymore', 'Items not ready', 'Moved to another day', 'Other'].map(r=> '<button type="button" data-why="' + r + '">' + r + '</button>').join('') + '</div>' +
+      '<div class="field"><label>Note (optional)</label><input type="text" id="drvSkipNote" maxlength="200"></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Keep it</button><button type="button" class="btn btn-primary drv-danger" data-sheet-go="skip">Skip this job</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      const w = e.target.closest('[data-why]'); if(w){ ov.querySelectorAll('[data-why]').forEach(x=> x.classList.toggle('on', x === w)); return; }
+      if(!e.target.closest('[data-sheet-go="skip"]')) return;
+      const why = (ov.querySelector('[data-why].on') || {}).dataset ? ov.querySelector('[data-why].on').dataset.why : '';
+      if(!why){ toast('Choose why you are skipping it'); return; }
+      drvBusy(true);
+      try{
+        const { error } = await db.rpc('drv_job_skip', { p:{ job_id:id, reason:why, note:$('drvSkipNote').value.trim() } });
+        if(error) throw error;
+        ov.remove(); toast('Job skipped');
+        drvTellOffice('Job skipped', (currentUser.name || 'A driver') + ' skipped \u201C' + j.place + '\u201D: ' + why, 'job-skip-' + id);
+      }catch(err){ drvFail('Couldn\u2019t skip: ', err); }
+      finally{ drvBusy(false); drvRenderHome($('staffPanel_home'), true); }
+    });
+  }
+  function drvAddJobSheet(){
+    const ov = drvSheet('<h3>Add a job</h3><p class="pay-hint">An urgent pickup or delivery that is not in your plan. The office is told.</p>' +
+      '<div class="drv-chips" id="drvKind">' + Object.keys(DRV_KINDS).map((k, i)=> '<button type="button" data-kind="' + k + '"' + (k === 'errand' ? ' class="on"' : '') + '>' + DRV_KINDS[k][0] + '</button>').join('') + '</div>' +
+      '<div class="field"><label>Where? <span class="req">*</span></label><input type="text" id="drvJPlace" maxlength="200" autocomplete="off"></div>' +
+      '<div class="field"><label>What is it?</label><input type="text" id="drvJNote" maxlength="300" placeholder="e.g. urgent: 2 boxes of filters"></div>' +
+      '<div class="field"><label>Job order or reference (optional)</label><input type="text" id="drvJRef" maxlength="80"></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Cancel</button><button type="button" class="btn btn-primary" data-sheet-go="addjob">Add job</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      const k = e.target.closest('[data-kind]'); if(k){ ov.querySelectorAll('[data-kind]').forEach(x=> x.classList.toggle('on', x === k)); return; }
+      if(!e.target.closest('[data-sheet-go="addjob"]')) return;
+      const place = $('drvJPlace').value.trim(); if(!place){ toast('Where is it?'); return; }
+      drvBusy(true);
+      try{
+        const { error } = await db.rpc('drv_job_add', { p:{ kind:(ov.querySelector('[data-kind].on') || {}).dataset.kind, place, note:$('drvJNote').value.trim(), job_order_id:$('drvJRef').value.trim() } });
+        if(error) throw error;
+        ov.remove(); toast('Job added');
+        drvTellOffice('Job added by a driver', (currentUser.name || 'A driver') + ' added a job: ' + place, 'job-add-' + Date.now());
+      }catch(err){ drvFail('Couldn\u2019t add: ', err); }
+      finally{ drvBusy(false); drvRenderHome($('staffPanel_home'), true); }
+    });
+  }
+  async function drvJobDone(note){
+    const j = drv.openStop && drv.jobs.find(x=> x.id === drv.openStop.job_id); if(!j) return false;
+    try{ const { error } = await db.rpc('drv_job_done', { p:{ job_id:j.id, note:note || '' } }); if(error) throw error; toast('Job finished'); return true; }
+    catch(e){ drvFail('Couldn\u2019t finish: ', e); return false; }
+  }
+
+  // ---------- hand over the items at a site ----------
+  async function drvDropSheet(){
+    const job = drv.openStop && drv.jobs.find(j=> j.id === drv.openStop.job_id); if(!job) return;
+    const hold = drv.hold.filter(h=> Number(h.available) > 0);
+    if(!hold.length){ toast('You aren\u2019t carrying anything \u2014 tap Finish job'); return; }
+    hold.sort((a, b)=> (b.job_order_id === job.job_order_id && job.job_order_id ? 1 : 0) - (a.job_order_id === job.job_order_id && job.job_order_id ? 1 : 0));
+    let people = []; try{ const r = await db.rpc('field_holders'); people = (r.data || []).filter(x=> x.id !== currentUser.id); }catch(e){}
+    const rows = hold.map((h, i)=>{ const m = drvMat(h.material_id); const pre = job.job_order_id && h.job_order_id === job.job_order_id ? String(Number(h.available)) : '';
+      return '<div class="drv-drop-row" data-i="' + i + '"><div class="drv-drop-n"><b>' + drvEsc(m.name) + '</b><small>' + drvEsc((h.job_order_id || 'no job order') + ' \u00B7 you carry ' + Number(h.available) + ' ' + m.unit) + '</small></div>' +
+        '<input type="text" inputmode="decimal" class="drv-drop-q" placeholder="0" value="' + pre + '" aria-label="Quantity"><span class="drv-drop-u">' + drvEsc(m.unit) + '</span></div>'; }).join('');
+    const ov = drvSheet('<h3>Hand over at ' + drvEsc(job.place) + '</h3><p class="pay-hint">How much are you leaving here?</p>' + rows +
+      '<div class="field" style="margin-top:12px"><label>Who receives it?</label><div class="drv-seg" id="drvWho"><button type="button" data-who="tech"' + (people.length ? ' class="on"' : '') + '>Technician or driver</button><button type="button" data-who="other"' + (people.length ? '' : ' class="on"') + '>Someone on site</button></div></div>' +
+      '<div id="drvWhoTech"' + (people.length ? '' : ' style="display:none"') + '><div class="field"><select id="drvTo"><option value="">Choose a person\u2026</option>' + people.map(x=> '<option value="' + drvEsc(x.id) + '">' + drvEsc(x.name + (x.kind === 'driver' ? ' (driver)' : '')) + '</option>').join('') + '</select></div>' +
+      '<div class="drv-note" style="text-align:left">They get it on their phone, check it and sign. It stays charged to the same job order.</div></div>' +
+      '<div id="drvWhoOther"' + (people.length ? ' style="display:none"' : '') + '><div class="field"><input type="text" id="drvRName" maxlength="120" placeholder="Name of the person who received it"></div>' +
+      '<div class="inv-sigpad"><canvas id="drvSig"></canvas></div><button type="button" class="msgr-sbtn" data-sig-clear="1" style="margin-top:6px;min-height:44px">Clear signature</button></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Cancel</button><button type="button" class="btn btn-primary" data-sheet-go="drop">Hand over &amp; finish job</button></div>');
+    let who = people.length ? 'tech' : 'other', pad = null;
+    const initPad = async ()=>{
+      if(pad) return;
+      try{
+        await loadAwesScript('signature', awesLibs.signature);
+        const c = $('drvSig'); if(!c || !c.offsetWidth) return;
+        const ratio = Math.max(window.devicePixelRatio || 1, 1); c.width = c.offsetWidth * ratio; c.height = c.offsetHeight * ratio; c.getContext('2d').scale(ratio, ratio);
+        pad = new SignaturePad(c, { penColor:'#1C2621', backgroundColor:'rgba(255,255,255,0)' });
+      }catch(e){ toast('Couldn\u2019t load the signature box'); }
+    };
+    if(who === 'other') setTimeout(initPad, 60);
+    ov.addEventListener('click', async (e)=>{
+      const w = e.target.closest('[data-who]');
+      if(w){ who = w.dataset.who; ov.querySelectorAll('[data-who]').forEach(x=> x.classList.toggle('on', x === w)); $('drvWhoTech').style.display = who === 'tech' ? '' : 'none'; $('drvWhoOther').style.display = who === 'other' ? '' : 'none'; if(who === 'other') setTimeout(initPad, 60); return; }
+      if(e.target.closest('[data-sig-clear]')){ if(pad) pad.clear(); return; }
+      if(!e.target.closest('[data-sheet-go="drop"]')) return;
+      const lines = [];
+      for(const row of ov.querySelectorAll('.drv-drop-row')){
+        const raw = row.querySelector('.drv-drop-q').value.trim(); if(!raw) continue;
+        const h = hold[Number(row.dataset.i)], m = drvMat(h.material_id), q = Number(raw.replace(/,/g, ''));
+        if(!(q > 0)){ toast(m.name + ': enter a quantity above 0'); return; }
+        if(q > Number(h.available) + 1e-9){ toast(m.name + ': you carry only ' + Number(h.available)); return; }
+        lines.push({ h, q });
+      }
+      if(!lines.length){ toast('Enter how much you are leaving \u2014 or close this and tap Finish job'); return; }
+      const groups = new Map(); lines.forEach(l=>{ const k = (l.h.project_id || '') + '|' + (l.h.job_order_id || ''); if(!groups.has(k)) groups.set(k, { project_id:l.h.project_id || null, job_order_id:l.h.job_order_id || null, lines:[] }); groups.get(k).lines.push({ material_id:l.h.material_id, qty:l.q }); });
+      let toName = '';
+      if(who === 'tech'){ if(!$('drvTo').value){ toast('Choose who receives it'); return; } toName = $('drvTo').selectedOptions[0].textContent; }
+      else{ if(!$('drvRName').value.trim()){ toast('Enter the name of the person who received it'); return; } if(!pad || pad.isEmpty()){ toast('The receiver has to sign in the box'); return; } toName = $('drvRName').value.trim(); }
+      if(!(await uiConfirm('Hand over to ' + toName + '?\n\n' + (who === 'tech' ? 'They have to accept it on their phone.' : 'This is recorded with their signature.'), { ok:'Hand over' }))) return;
+      drvBusy(true);
+      try{
+        if(typeof purchEnsureSession === 'function' && !(await purchEnsureSession())) return;
+        let done = 0;
+        if(who === 'tech'){
+          for(const g of groups.values()){
+            const { data, error } = await db.rpc('inv_ho_create', { p:{ to_worker_id:$('drvTo').value, project_id:g.project_id, job_order_id:g.job_order_id, note:'Delivered at ' + job.place, lines:g.lines } });
+            if(error) throw error; done++;
+            drvPush($('drvTo').value, 'Materials handed over to you', (currentUser.name || 'A driver') + ' handed you materials (' + data.handover_no + '). Open My Materials to accept and sign.', 'hnd-' + data.id);
+          }
+        }else{
+          const cropped = (typeof poCleanSignature === 'function' && poCleanSignature($('drvSig'))) || $('drvSig');
+          const blob = await new Promise(res=> cropped.toBlob(res, 'image/png'));
+          const path = currentUser.id + '/drop-' + Date.now() + '.png';
+          const up = await db.storage.from('inventory-signatures').upload(path, blob, { contentType:'image/png', upsert:false });
+          if(up.error) throw up.error;
+          for(const g of groups.values()){
+            const { error } = await db.rpc('inv_site_drop', { p:{ place:job.place, project_id:g.project_id, job_order_id:g.job_order_id, receiver_name:toName, signature_path:path, trip_id:drv.open ? drv.open.id : null, lines:g.lines } });
+            if(error) throw error; done++;
+          }
+        }
+        await drvJobDone(who === 'tech' ? 'Handed over to ' + toName + ' (they accept on their phone)' : 'Left with ' + toName);
+        ov.remove();
+      }catch(err){ drvFail('Couldn\u2019t hand over: ', err); }
+      finally{ drvBusy(false); drvRenderHome($('staffPanel_home'), true); }
+    });
+  }
+
+  function drvLeaveSheet(){
+    if(!drv.open) return;
+    const ov = drvSheet('<h3>Leave ' + drvEsc((drv.openStop && drv.openStop.place) || 'this stop') + '</h3><p class="pay-hint">Where are you going next? Leave it as it is if the next place is the same as before.</p>' +
+      '<div class="field"><label>Next stop</label><input type="text" id="drvNext" maxlength="200" placeholder="e.g. Hardware depot" autocomplete="off" value="' + drvEsc(drv.open.destination || '') + '"></div>' +
+      '<div class="field"><label>Note (optional)</label><input type="text" id="drvNote" maxlength="300"></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Cancel</button><button type="button" class="btn btn-primary" data-sheet-go="leave">Leave now</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      if(!e.target.closest('[data-sheet-go="leave"]')) return;
+      const r = await drvStamp('drv_depart', { next_place:$('drvNext').value.trim(), note:$('drvNote').value.trim() }, 'Departure saved \u2014 ' + drvT(new Date()));
+      if(r){ ov.remove(); } drvRenderHome($('staffPanel_home'), true);
+    });
+  }
+  function drvEndSheet(){
+    if(!drv.open) return;
+    const ov = drvSheet('<h3>Back at the office?</h3><p class="pay-hint">This closes trip ' + drvEsc(drv.open.trip_no) + '. The km are counted from your GPS.</p>' +
+      '<div class="field"><label>Note (optional)</label><input type="text" id="drvNote" maxlength="300"></div>' +
+      '<div class="pay-actions"><button type="button" class="btn btn-secondary" data-sheet-close="1">Not yet</button><button type="button" class="btn btn-primary" data-sheet-go="end">Finish trip</button></div>');
+    ov.addEventListener('click', async (e)=>{
+      if(!e.target.closest('[data-sheet-go="end"]')) return;
+      const r = await drvStamp('drv_end_trip', { note:$('drvNote').value.trim() }, '');
+      if(!r){ drvRenderHome($('staffPanel_home'), true); return; }
+      ov.remove(); drvTrackStop(); drv.open = null; drv.lastKm = null; try{ localStorage.removeItem(drvBufKey(r.id)); }catch(err){}
+      const done = drvSheet('<h3>Trip finished</h3><div class="drv-sum" style="margin:6px 0 10px"><div><b>' + drvKm(r.gps_km) + ' km</b>' + (r.km_estimated ? 'estimated' : 'by GPS') + '</div><div><b>' + drvDur(new Date(r.in_at) - new Date(r.out_at)) + '</b>on the road</div></div>' +
+        '<p class="pay-hint">Left ' + drvT(r.out_at) + ' \u00B7 back ' + drvT(r.in_at) + '.' + (r.km_estimated ? ' Part of the route had no GPS, so the office may adjust the km.' : '') + '</p><div class="pay-actions"><button type="button" class="btn btn-primary" data-sheet-close="1">OK</button></div>');
+      drvRenderHome($('staffPanel_home'), true);
+    });
+  }
+
+  // ---------- Trips (history) ----------
+  async function drvShowTrips(dayISO){
+    drvSetTab('trips'); showStaffView('drvTrips');
+    const target = $('staffPanel_drvTrips'); const day = dayISO || drv.day || todayISO(); drv.day = day;
+    target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    const d = await drvLoad(day);
+    if(!d.ok){ target.innerHTML = '<div class="msgr-page"><div class="msgr-title">Trips</div><div class="msgr-card"><div class="msgr-card-t">Can\u2019t load your trips</div>' + drvBtn('retrytrips', 'Try again', 'refund') + '</div></div>'; return; }
+    const shift = (n)=> drvDay(new Date(day + 'T12:00:00+08:00').getTime() + n * 864e5);
+    const isToday = day === todayISO();
+    const label = isToday ? 'Today' : new Date(day + 'T12:00:00+08:00').toLocaleDateString('en-PH', { timeZone:'Asia/Manila', weekday:'short', month:'short', day:'numeric' });
+    target.innerHTML = '<div class="msgr-page"><div class="msgr-title">Trips</div>' +
+      '<div class="drv-daynav"><button type="button" data-drv-day="' + shift(-1) + '" aria-label="Previous day">' + msgrIc('back', 22, 2.8) + '</button><b>' + drvEsc(label) + '</b>' +
+      '<button type="button" data-drv-day="' + shift(1) + '" aria-label="Next day"' + (isToday ? ' disabled' : '') + '><span style="display:inline-block;transform:rotate(180deg)">' + msgrIc('back', 22, 2.8) + '</span></button></div>' +
+      (d.trips.length ? drvSummary(d.trips) + d.trips.slice().reverse().map((x, i)=> drvTripCard(x, d.stops[x.id] || [], d.trips.length - i)).join('') : '<div class="msgr-card"><p class="msgr-p">No trips on this day.</p></div>') + '</div>';
+  }
+
+  // ---------- Fuel ----------
+  async function drvShowFuel(){
+    drvSetTab('fuel'); showStaffView('drvFuel');
+    const target = $('staffPanel_drvFuel');
+    target.innerHTML = '<div class="msgr-page"><div class="empty-state">Loading\u2026</div></div>';
+    const d = await drvLoad(todayISO());
+    const fu = await db.from('adm_vehicle_fuel').select('*').eq('created_by', currentUser.id).order('created_at', { ascending:false }).limit(10);
+    const cur = d.open ? d.open.vehicle_id : (d.trips.length ? d.trips[d.trips.length - 1].vehicle_id : (drv.vehicles[0] || {}).id);
+    target.innerHTML = '<div class="msgr-page"><div class="msgr-title">Fuel</div>' +
+      '<div class="msgr-card"><div class="msgr-card-t">Add fuel</div>' +
+      '<div class="field"><label>Vehicle</label><select id="drvFVeh">' + drv.vehicles.map(v=> '<option value="' + drvEsc(v.id) + '"' + (v.id === cur ? ' selected' : '') + '>' + drvEsc(v.plate_no + (v.make_model ? ' \u00B7 ' + v.make_model : '')) + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label>Amount paid (\u20B1) <span class="req">*</span></label><input type="text" inputmode="decimal" id="drvFAmt" placeholder="0.00"></div>' +
+      '<div class="field"><label>Liters</label><input type="text" inputmode="decimal" id="drvFL" placeholder="optional"></div>' +
+      '<div class="field"><label>Station</label><input type="text" id="drvFSt" maxlength="120" placeholder="e.g. Shell Lipa"></div>' +
+      '<div class="field"><label>Odometer now (km)</label><input type="text" inputmode="numeric" id="drvFKm" placeholder="optional"></div>' +
+      '<div class="field"><label>Photo of the receipt</label><button type="button" class="msgr-sbtn" data-drv="fuelphoto" id="drvFPhotoBtn">' + msgrIc('camera', 22, 2.2) + '<span>Take or choose a photo</span></button><div class="drv-note" id="drvFPhotoName"></div></div>' +
+      drvBtn('fuelsave', 'Save fuel', 'check') + '</div>' +
+      '<div class="msgr-sh"><span class="msgr-sh-t">My recent fuel</span></div>' +
+      ((fu.data || []).length ? fu.data.map(x=> '<div class="msgr-row"><span class="msgr-circ">' + msgrIc('fuelpump', 22, 2.2) + '</span><span class="msgr-row-main"><span class="msgr-row-title">\u20B1' + Number(x.amount).toLocaleString('en-PH', { minimumFractionDigits:2 }) + (x.liters ? ' \u00B7 ' + x.liters + ' L' : '') + '</span><span class="msgr-row-sub">' + drvEsc(drvPlate(x.vehicle_id)) + (x.station ? ' \u00B7 ' + drvEsc(x.station) : '') + ' \u00B7 ' + drvEsc(new Date(x.created_at).toLocaleDateString('en-PH', { timeZone:'Asia/Manila', month:'short', day:'numeric' })) + '</span></span></div>').join('') : '<div class="msgr-card"><p class="msgr-p">Nothing yet.</p></div>') + '</div>';
+    drv.fuelFile = null;
+  }
+  function drvPickPhoto(){
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none'; document.body.appendChild(inp);
+    inp.addEventListener('cancel', ()=> inp.remove());
+    inp.onchange = ()=>{ const f = inp.files && inp.files[0]; inp.remove(); if(!f) return; if(f.size > 15 * 1024 * 1024){ toast('Photos up to 15 MB'); return; } drv.fuelFile = f; const n = $('drvFPhotoName'); if(n) n.textContent = f.name; };
+    inp.click();
+  }
+  async function drvSaveFuel(btn){
+    const amt = Number(String($('drvFAmt').value).replace(/,/g, ''));
+    if(!(amt > 0)){ toast('Enter how much you paid'); return; }
+    const lit = String($('drvFL').value).trim(), km = String($('drvFKm').value).trim();
+    if(btn) btn.disabled = true;
+    try{
+      let receipt = null;
+      if(drv.fuelFile){
+        let blob = drv.fuelFile;
+        try{ blob = await compressImageForUpload(drv.fuelFile, { targetBytes:400 * 1024, maxDim:1800 }); }catch(e){}
+        const path = 'fuel/' + currentUser.id + '/' + Date.now() + '-' + drv.fuelFile.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-50);
+        const up = await db.storage.from('admin-docs').upload(path, blob, { contentType:blob.type || 'image/jpeg' });
+        if(up.error) throw up.error;
+        receipt = path;
+      }
+      const { error } = await db.rpc('drv_add_fuel', { p:{ vehicle_id:$('drvFVeh').value, amount:amt, liters:lit ? Number(lit) : null, station:$('drvFSt').value.trim(), odometer_km:km ? Number(km) : null, receipt_path:receipt } });
+      if(error) throw error;
+      toast('Fuel saved'); drvShowFuel();
+    }catch(e){ drvFail('Couldn\u2019t save: ', e); if(btn) btn.disabled = false; }
+  }
+
+  // ---------- Profile ----------
+  function drvShowMenu(){
+    drvSetTab('menu'); showStaffView('drvMenu');
+    const target = $('staffPanel_drvMenu'); const initial = (currentUser.name || '?').trim().charAt(0).toUpperCase();
+    const online = navigator.onLine !== false;
+    target.innerHTML = '<div class="msgr-page"><div class="msgr-title">Profile</div>' +
+      '<div class="msgr-profile"><span class="msgr-avatar big">' + drvEsc(initial) + '</span><div class="msgr-profile-n">' + drvEsc(currentUser.name || '') + '</div><div class="msgr-profile-r">' + drvEsc(currentUser.position || 'Driver') + '</div>' +
+      '<div class="msgr-conn ' + (online ? 'ok' : 'off') + '"><span></span>' + (online ? 'Connected' : 'No connection') + '</div></div>' +
+      '<div class="msgr-label">MY TIME AND PAY</div>' +
+      msgrMenuRow('clock', 'My attendance', 'Time in and out', 'data-msgr-go="dtr"') + msgrMenuRow('leave', 'My leave', 'Days off', 'data-msgr-go="leave"') + msgrMenuRow('slip', 'My payslips', 'Your pay', 'data-msgr-go="payslips"') +
+      '<div class="msgr-label">MY ACCOUNT</div>' +
+      msgrMenuRow('lock', 'Change password', 'Keep your account safe', 'data-msgr-go="password"') + msgrMenuRow('pulse', 'My activity', 'What you did lately', 'data-msgr-go="activity"') +
+      msgrMenuRow('refund', 'Refresh the app', 'Get the latest version', 'data-msgr-go="refresh"') +
+      '<div class="msgr-ver">AWES ' + drvEsc(typeof AWES_VERSION !== 'undefined' ? AWES_VERSION : '') + ' \u00B7 Driver home: ' + drvEsc(drvWhy().why) + '</div>' +
+      '<button type="button" class="msgr-signout" data-msgr-go="signout">' + msgrIc('out', 26) + 'Sign out</button></div>';
+  }
+
+  // ---------- navigation ----------
+  function drvSetTab(tab){
+    drv.tab = tab;
+    document.querySelectorAll('#drvNav [data-drv-tab]').forEach(b=>{
+      const on = b.getAttribute('data-drv-tab') === tab;
+      b.classList.toggle('active', on);
+      if(on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+  }
+  async function drvGo(tab){
+    document.body.classList.remove('msgr-own-head');
+    if(tab === 'home'){ drvSetTab('home'); showStaffView('home'); return drvRenderHome($('staffPanel_home')); }
+    if(tab === 'trips') return drvShowTrips();
+    if(tab === 'load'){ drvSetTab('load'); return showPurchasingView('myMaterials'); }   // the existing My Materials page: sign for issued items, hand over, return
+    if(tab === 'fuel') return drvShowFuel();
+    if(tab === 'menu') return drvShowMenu();
+  }
+  function drvApply(){
+    const on = isDriverUser();
+    const nav = $('drvNav'); if(nav) nav.style.display = on ? '' : 'none';
+    if(!on){ drvTrackStop(); drv.open = null; }
+    return on;
+  }
+  (function drvWire(){
+    const nav = $('drvNav');
+    if(nav) nav.addEventListener('click', (ev)=>{ const b = ev.target.closest('[data-drv-tab]'); if(b) drvGo(b.getAttribute('data-drv-tab')); });
+    ['staffPanel_home', 'staffPanel_drvTrips', 'staffPanel_drvFuel', 'staffPanel_drvMenu'].forEach(id=>{
+      const el = $(id); if(!el) return;
+      el.addEventListener('change', (ev)=>{ const k = ev.target.closest('[data-drv-keep]'); if(k && isDriverUser()){ try{ localStorage.setItem(DRV_KEEP_ON, k.checked ? '1' : '0'); }catch(e){} if(k.checked) drvWakeStart(); else drvWakeStop(); } });
+      el.addEventListener('click', async (ev)=>{
+        if(!isDriverUser()) return;
+        const go = ev.target.closest('[data-msgr-go]');
+        if(go){ const w = go.getAttribute('data-msgr-go'); if(w === 'home') drvGo('home'); else msgrGo(w); return; }
+        const dayBtn = ev.target.closest('[data-drv-day]'); if(dayBtn){ if(!dayBtn.disabled) drvShowTrips(dayBtn.dataset.drvDay); return; }
+        const tg = ev.target.closest('[data-drv-tab-go]'); if(tg){ drvGo(tg.getAttribute('data-drv-tab-go')); return; }
+        const b = ev.target.closest('[data-drv], [data-msgr]'); if(!b) return;   // data-msgr: the shared Time in / Time out card
+        const act = b.getAttribute('data-drv') || b.getAttribute('data-msgr');
+        if(act === 'timein'){ b.disabled = true; try{ await dtrDoTimeIn(); }finally{ b.disabled = false; } drvRenderHome($('staffPanel_home')); }
+        else if(act === 'timeout'){
+          if(!(await uiConfirm('Time out for today?', { ok:'Time out', cancel:'Not yet' }))) return;
+          b.disabled = true; try{ await dtrDoTimeOut(); }finally{ b.disabled = false; } drvRenderHome($('staffPanel_home'));
+        }
+        else if(act === 'start') drvStartSheet();
+        else if(act === 'job-start') drvStartSheet(b.getAttribute('data-id'));
+        else if(act === 'job-first') drvJobFirst(b.getAttribute('data-id'));
+        else if(act === 'job-skip') drvSkipSheet(b.getAttribute('data-id'));
+        else if(act === 'job-add') drvAddJobSheet();
+        else if(act === 'job-done'){ b.disabled = true; try{ await drvJobDone(''); }finally{ b.disabled = false; } drvRenderHome($('staffPanel_home'), true); }
+        else if(act === 'drop') drvDropSheet();
+        else if(act === 'arrive') drvArrive();
+        else if(act === 'leave') drvLeaveSheet();
+        else if(act === 'end') drvEndSheet();
+        else if(act === 'retry') drvRenderHome($('staffPanel_home'));
+        else if(act === 'retrytrips') drvShowTrips();
+        else if(act === 'fuelphoto') drvPickPhoto();
+        else if(act === 'fuelsave') drvSaveFuel(b);
+      });
+    });
+    // a trip that is still open when the app starts (reload, reopened after a call, …) keeps recording
+    window.addEventListener('pageshow', ()=>{ if(drv.open) drvFlush(); });
+  })();
 
 
   // =====================================================================
