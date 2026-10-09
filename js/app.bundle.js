@@ -17,7 +17,7 @@
     if(!(have >= NEED)) show('The app files are out of date: upload the latest index.html together with the rest, then reload the page (clear the site data if it still looks the same).');
   })();
 
-  const AWES_VERSION = 'v245';   // from sw.js, shown in the app so you can tell which release is running
+  const AWES_VERSION = 'v246';   // from sw.js, shown in the app so you can tell which release is running
 
   // ---------- Icons ----------
   // Inline SVG only (no emoji) across the whole system — sidebar nav, admin
@@ -34947,10 +34947,10 @@
       const b = ev.target.closest('[data-msgr-tab]'); if(!b) return;
       msgrGo(b.getAttribute('data-msgr-tab'));
     });
-    // the shortcut tiles on the Home screen (its other buttons have their own handlers)
+    // every shortcut on the Home screen: View attendance, the four Quick actions, the waiting-for-approval rows (its other buttons have their own handlers)
     const home = $('staffPanel_home');
     if(home) home.addEventListener('click', (ev)=>{
-      const go = ev.target.closest && ev.target.closest('.msgr-tiles [data-msgr-go], .msgr-wait [data-msgr-go]');
+      const go = ev.target.closest && ev.target.closest('[data-msgr-go]');
       if(go && isMessengerUser()) msgrGo(go.getAttribute('data-msgr-go'));
     });
     ['staffPanel_msgrMenu', 'staffPanel_msgrAccount', 'staffPanel_msgrAlerts', 'staffPanel_msgrCash'].forEach(id=>{
